@@ -230,7 +230,16 @@
 
             <Border Grid.Row="1" Background="{StaticResource TopBar2}" Padding="14,4,14,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                    <Button Content="主页" Style="{StaticResource MenuButton}" />
+                    <Button Style="{StaticResource MenuButton}">
+                        <StackPanel Orientation="Horizontal">
+                            <Image Width="20"
+                                   Height="20"
+                                   Margin="0,0,8,0"
+                                   Source="/Assets/Icons/TopMenu/home.png"
+                                   Stretch="Uniform" />
+                            <TextBlock Text="主页" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                     <Button Content="运动控制" Style="{StaticResource ActiveMenuButton}" />
                     <Button Content="I/O监控" Style="{StaticResource MenuButton}" />
                     <Button Content="参数设置" Style="{StaticResource MenuButton}" />
@@ -263,6 +272,7 @@
                                   RowHeight="34"
                                   Loaded="AxisDataGrid_LayoutChanged"
                                   SizeChanged="AxisDataGrid_LayoutChanged"
+                                  LostKeyboardFocus="AxisDataGrid_LostKeyboardFocus"
                                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                   ScrollViewer.VerticalScrollBarVisibility="Disabled">
                             <DataGrid.Columns>
@@ -414,13 +424,76 @@
                             <ColumnDefinition Width="590" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,10,0">
-                            <Button Content="▶ 启动" Background="#00A619" Style="{StaticResource ActionButton}" />
-                            <Button Content="■ 停止" Background="#BC100B" Style="{StaticResource ActionButton}" Click="Stop_Click" />
-                            <Button Content="↻ 复位" Background="#1F5F9F" Style="{StaticResource ActionButton}" />
-                            <Button Content="◎ 回原点" Background="#E97906" Style="{StaticResource ActionButton}" Click="Home_Click" />
-                            <Button Content="↻ 自动运行" Background="#1F5F9F" Style="{StaticResource ActionButton}" />
-                            <Button Content="手动模式" Background="#1F5F9F" Style="{StaticResource ActionButton}" />
-                            <Button Content="报警清除" Background="#1F5F9F" Style="{StaticResource ActionButton}" />
+                            <Button Background="#00A619" Style="{StaticResource ActionButton}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/start.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="启动" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Background="#BC100B" Style="{StaticResource ActionButton}" Click="Stop_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/stop.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="停止" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Background="#1F5F9F" Style="{StaticResource ActionButton}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/reset.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="复位" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Background="#E97906" Style="{StaticResource ActionButton}" Click="Home_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/home.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="回原点" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Background="#1F5F9F" Style="{StaticResource ActionButton}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/auto-mode.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="自动运行" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Background="#1F5F9F" Style="{StaticResource ActionButton}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/manual-mode.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="手动模式" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Background="#1F5F9F" Style="{StaticResource ActionButton}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Width="24"
+                                           Height="24"
+                                           Margin="0,0,8,0"
+                                           Source="/Assets/Icons/ControlPanel/clear-alarm.png"
+                                           Stretch="Uniform" />
+                                    <TextBlock Text="报警清除" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                         <UniformGrid Grid.Column="1" Columns="5" Margin="0,0,4,0">
                             <Border Background="#F8FAFC" BorderBrush="#D0D6DE" BorderThickness="1" Margin="0,0,10,0">

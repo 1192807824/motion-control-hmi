@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using ControlHub.Models;
 using ControlHub.Services;
@@ -218,6 +219,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void AxisDataGrid_LayoutChanged(object sender, SizeChangedEventArgs e)
     {
         ResizeAxisRows();
+    }
+
+    private void AxisDataGrid_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (AxisDataGrid.IsKeyboardFocusWithin)
+        {
+            return;
+        }
+
+        AxisDataGrid.SelectedItem = null;
+        AxisDataGrid.CurrentCell = new DataGridCellInfo();
+        SelectedAxis = null;
     }
 
     private AxisStatus? GetAxisFromSender(object sender)
