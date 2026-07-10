@@ -1,0 +1,277 @@
+<UserControl x:Class="ControlHub.Views.Pages.MachineVisionPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="1280"
+             d:DesignHeight="680"
+             Unloaded="MachineVisionPage_Unloaded">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="PanelBorder" Color="#B9C1CB" />
+        <SolidColorBrush x:Key="PanelTitle" Color="#003B73" />
+        <SolidColorBrush x:Key="DarkText" Color="#101827" />
+
+        <Style x:Key="Panel" TargetType="Border">
+            <Setter Property="Background" Value="#F3F6FA" />
+            <Setter Property="BorderBrush" Value="{StaticResource PanelBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8" />
+        </Style>
+
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource PanelTitle}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <Style x:Key="VisionButton" TargetType="Button">
+            <Setter Property="Width" Value="96" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="2,0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Background" Value="#1F5F9F" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#174E83" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="0.92" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Opacity" Value="0.82" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#1F2937" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+
+        <Style x:Key="VisionInput" TargetType="TextBox">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="BorderBrush" Value="#B9C1CB" />
+            <Setter Property="Background" Value="#FFFFFF" />
+        </Style>
+
+        <Style x:Key="CenteredDataGridText" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="LeftDataGridText" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Left" />
+            <Setter Property="Padding" Value="6,0,2,0" />
+        </Style>
+
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="#F8FAFC" />
+            <Setter Property="Foreground" Value="{StaticResource DarkText}" />
+            <Setter Property="BorderBrush" Value="#CBD2DA" />
+            <Setter Property="GridLinesVisibility" Value="All" />
+            <Setter Property="HorizontalGridLinesBrush" Value="#CDD3DA" />
+            <Setter Property="VerticalGridLinesBrush" Value="#CDD3DA" />
+            <Setter Property="RowBackground" Value="#F8FAFC" />
+            <Setter Property="AlternatingRowBackground" Value="#F8FAFC" />
+            <Setter Property="HeadersVisibility" Value="Column" />
+            <Setter Property="CanUserAddRows" Value="False" />
+            <Setter Property="CanUserDeleteRows" Value="False" />
+            <Setter Property="CanUserResizeRows" Value="False" />
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="AutoGenerateColumns" Value="False" />
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#EEF2F6" />
+            <Setter Property="Foreground" Value="#111827" />
+            <Setter Property="BorderBrush" Value="#CBD2DA" />
+            <Setter Property="BorderThickness" Value="0,1,1,1" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="2,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="410" />
+            <ColumnDefinition Width="10" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Style="{StaticResource Panel}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="28" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="170" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="■ VisionMaster / 海康配置" Style="{StaticResource SectionTitle}" />
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="0,2,8,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="96" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="82" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="46" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Text="SDK目录" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.SdkDirectory, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="1" Text="方案路径" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="VisionSolutionPathTextBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.SolutionPath, UpdateSourceTrigger=PropertyChanged}" />
+                        <Button Grid.Row="1" Grid.Column="2" Content="选择" Style="{StaticResource VisionButton}" Width="74" Click="BrowseVisionSolution_Click" />
+
+                        <TextBlock Grid.Row="2" Text="流程名称" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.ProcedureName, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="3" Text="输入图像" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.InputImageName, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="4" Text="输出图像" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.OutputImageName, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="5" Text="连续间隔" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.ContinuousRunIntervalMs, UpdateSourceTrigger=LostFocus}" />
+
+                        <Border Grid.Row="6" Grid.ColumnSpan="3" Height="1" Background="#CCD5DF" Margin="0,10,0,8" />
+
+                        <TextBlock Grid.Row="7" Text="相机名称" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.CameraName, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="8" Text="相机IP" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.CameraIp, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="9" Text="曝光(us)" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.ExposureTimeUs, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" />
+
+                        <TextBlock Grid.Row="10" Text="增益" Style="{StaticResource FieldLabel}" />
+                        <TextBox Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource VisionInput}" Text="{Binding VisionSettings.Gain, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" />
+
+                        <TextBlock Grid.Row="11" Text="触发模式" Style="{StaticResource FieldLabel}" />
+                        <ComboBox Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="2" Height="28" SelectedValuePath="Content" SelectedValue="{Binding VisionSettings.TriggerMode, UpdateSourceTrigger=PropertyChanged}">
+                            <ComboBoxItem Content="Software" />
+                            <ComboBoxItem Content="Line0" />
+                            <ComboBoxItem Content="Continuous" />
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="12" Text="像素格式" Style="{StaticResource FieldLabel}" />
+                        <ComboBox Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2" Height="28" SelectedValuePath="Content" SelectedValue="{Binding VisionSettings.PixelFormat, UpdateSourceTrigger=PropertyChanged}">
+                            <ComboBoxItem Content="Mono8" />
+                            <ComboBoxItem Content="BayerRG8" />
+                            <ComboBoxItem Content="RGB8" />
+                        </ComboBox>
+                    </Grid>
+                </ScrollViewer>
+
+                <Border Grid.Row="2" BorderBrush="#CBD2DA" BorderThickness="1,1,0,0" Padding="0,10,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="34" />
+                            <RowDefinition Height="34" />
+                            <RowDefinition Height="34" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="加载方案" Style="{StaticResource VisionButton}" Click="LoadVisionSolution_Click" />
+                            <Button Content="执行一次" Style="{StaticResource VisionButton}" Click="RunVisionOnce_Click" />
+                            <Button Content="连续运行" Style="{StaticResource VisionButton}" Click="StartVisionContinuous_Click" />
+                            <Button Content="停止" Style="{StaticResource VisionButton}" Width="74" Background="#BC100B" Click="StopVisionContinuous_Click" />
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Text="{Binding VisionStatusText}" Foreground="#0F5132" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Row="2" Text="{Binding VisionRunTimeText, StringFormat=运行耗时：{0}}" Foreground="#1F2937" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <ItemsControl Grid.Row="3" ItemsSource="{Binding VisionLogs}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" FontSize="12" Foreground="#4B5563" TextTrimming="CharacterEllipsis" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="160" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Style="{StaticResource Panel}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="■ 图像显示" Style="{StaticResource SectionTitle}" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1" Style="{StaticResource Panel}" Margin="0,8,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="■ 流程输出" Style="{StaticResource SectionTitle}" />
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding VisionOutputs}" RowHeight="28" FontSize="13">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="1.2*" ElementStyle="{StaticResource LeftDataGridText}" />
+                            <DataGridTextColumn Header="类型" Binding="{Binding Type}" Width="0.6*" ElementStyle="{StaticResource CenteredDataGridText}" />
+                            <DataGridTextColumn Header="值" Binding="{Binding Value}" Width="2.2*" ElementStyle="{StaticResource LeftDataGridText}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,452 @@
+namespace ControlHub.Services.Motion;
+
+public sealed class SimulatedMotionCard : IMotionCard
+{
+    private readonly object _sync = new();
+    private readonly MotionCardOptions _options;
+    private readonly List<SimulatedAxis> _axes;
+    private readonly double[] _analogInputs;
+    private readonly double[] _analogOutputs;
+    private uint _digitalOutputs;
+
+    public SimulatedMotionCard(MotionCardOptions options)
+    {
+        _options = options;
+        _axes = Enumerable.Range(0, options.AxisCount).Select(_ => new SimulatedAxis()).ToList();
+        _analogInputs = new double[options.SimulationAnalogInputCount];
+        _analogOutputs = new double[options.SimulationAnalogOutputCount];
+    }
+
+    public bool IsOpen { get; private set; }
+
+    public int AxisCount => _axes.Count;
+
+    public int DigitalInputCount => _options.SimulationDigitalInputCount;
+
+    public int DigitalOutputCount => _options.SimulationDigitalOutputCount;
+
+    public int AnalogInputCount => _analogInputs.Length;
+
+    public int AnalogOutputCount => _analogOutputs.Length;
+
+    public MotionCardConnectionInfo Open()
+    {
+        lock (_sync)
+        {
+            IsOpen = true;
+            return new MotionCardConnectionInfo(
+                _options.CardNo ?? 0,
+                1,
+                AxisCount,
+                DigitalInputCount,
+                DigitalOutputCount,
+                AnalogInputCount,
+                AnalogOutputCount,
+                true);
+        }
+    }
+
+    public void Close()
+    {
+        lock (_sync)
+        {
+            IsOpen = false;
+        }
+    }
+
+    public ushort ReadBusErrorCode()
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            return 0;
+        }
+    }
+
+    public MotionAxisSnapshot ReadAxis(int hardwareAxisNo)
+    {
+        lock (_sync)
+        {
+            var axis = GetAxis(hardwareAxisNo);
+            axis.Update();
+            return new MotionAxisSnapshot(
+                hardwareAxisNo,
+                axis.Position,
+                axis.Position,
+                axis.Target,
+                axis.Speed,
+                axis.IsMoving,
+                axis.ServoEnabled,
+                axis.Homed,
+                axis.Alarm,
+                axis.PositiveLimit,
+                axis.NegativeLimit,
+                false,
+                Math.Abs(axis.Position) < 0.0001,
+                axis.Alarm ? (ushort)7 : axis.ServoEnabled ? (ushort)4 : (ushort)1,
+                axis.RunMode,
+                axis.Alarm ? (ushort)1 : (ushort)0,
+                axis.StopReason);
+        }
+    }
+
+    public uint ReadDigitalInputs(int portNo)
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            return 0;
+        }
+    }
+
+    public uint ReadDigitalOutputs(int portNo)
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            return _digitalOutputs;
+        }
+    }
+
+    public void WriteDigitalOutput(int bitNo, bool enabled)
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            if (bitNo < 0 || bitNo >= Math.Min(DigitalOutputCount, 32))
+            {
+                throw new ArgumentOutOfRangeException(nameof(bitNo));
+            }
+
+            if (enabled)
+            {
+                _digitalOutputs |= 1u << bitNo;
+            }
+            else
+            {
+                _digitalOutputs &= ~(1u << bitNo);
+            }
+        }
+    }
+
+    public double ReadAnalogInput(int channel)
+    {
+        lock (_sync)
+        {
+            EnsureAnalogChannel(channel, _analogInputs.Length);
+            return _analogInputs[channel];
+        }
+    }
+
+    public double ReadAnalogOutput(int channel)
+    {
+        lock (_sync)
+        {
+            EnsureAnalogChannel(channel, _analogOutputs.Length);
+            return _analogOutputs[channel];
+        }
+    }
+
+    public void WriteAnalogOutput(int channel, double value)
+    {
+        lock (_sync)
+        {
+            EnsureAnalogChannel(channel, _analogOutputs.Length);
+            if (!double.IsFinite(value) || value < _options.AnalogOutputMinimum || value > _options.AnalogOutputMaximum)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            _analogOutputs[channel] = value;
+        }
+    }
+
+    public void ServoOn(int hardwareAxisNo, bool enabled)
+    {
+        lock (_sync)
+        {
+            var axis = GetAxis(hardwareAxisNo);
+            if (!enabled)
+            {
+                axis.Stop(0);
+            }
+
+            axis.ServoEnabled = enabled;
+        }
+    }
+
+    public void SetAllServos(bool enabled)
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            foreach (var axis in _axes)
+            {
+                if (!enabled)
+                {
+                    axis.Stop(0);
+                }
+
+                axis.ServoEnabled = enabled;
+            }
+        }
+    }
+
+    public void Home(int hardwareAxisNo)
+    {
+        lock (_sync)
+        {
+            var axis = GetReadyAxis(hardwareAxisNo);
+            var profile = _options.GetHomeProfile(hardwareAxisNo);
+            profile.Validate(requireEnabled: true);
+            axis.Homed = false;
+            axis.StartMove(0, Math.Max(profile.HighVelocity, profile.LowVelocity), runMode: 3, markHomedOnCompletion: true);
+        }
+    }
+
+    public void Jog(int hardwareAxisNo, double velocity)
+    {
+        lock (_sync)
+        {
+            var axis = GetReadyAxis(hardwareAxisNo);
+            if (!double.IsFinite(velocity) || velocity == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(velocity));
+            }
+
+            axis.StartContinuous(velocity);
+        }
+    }
+
+    public void MoveRelative(int hardwareAxisNo, double distance, double velocity)
+    {
+        lock (_sync)
+        {
+            var axis = GetReadyAxis(hardwareAxisNo);
+            if (!double.IsFinite(distance) || distance == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(distance));
+            }
+
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(velocity));
+            }
+
+            if (distance > 0 && axis.PositiveLimit)
+            {
+                throw new MotionCardException("仿真轴正限位已触发，禁止继续正向运动。");
+            }
+
+            if (distance < 0 && axis.NegativeLimit)
+            {
+                throw new MotionCardException("仿真轴负限位已触发，禁止继续负向运动。");
+            }
+
+            axis.Update();
+            axis.StartMove(axis.Position + distance, velocity, runMode: 1, markHomedOnCompletion: false);
+        }
+    }
+
+    public void Stop(int hardwareAxisNo, bool emergency = false)
+    {
+        lock (_sync)
+        {
+            GetAxis(hardwareAxisNo).Stop(emergency ? 1 : 0);
+        }
+    }
+
+    public void EmergencyStop()
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            foreach (var axis in _axes)
+            {
+                axis.Stop(1);
+            }
+        }
+    }
+
+    public void ClearAlarms(IEnumerable<int> hardwareAxisNumbers)
+    {
+        lock (_sync)
+        {
+            EnsureOpen();
+            foreach (var hardwareAxisNo in hardwareAxisNumbers.Distinct())
+            {
+                var axis = GetAxis(hardwareAxisNo);
+                axis.Alarm = false;
+                axis.StopReason = 0;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        Close();
+    }
+
+    private SimulatedAxis GetReadyAxis(int hardwareAxisNo)
+    {
+        var axis = GetAxis(hardwareAxisNo);
+        if (!axis.ServoEnabled)
+        {
+            throw new MotionCardException($"仿真硬件轴 {hardwareAxisNo} 尚未使能。");
+        }
+
+        if (axis.Alarm)
+        {
+            throw new MotionCardException($"仿真硬件轴 {hardwareAxisNo} 存在报警。");
+        }
+
+        return axis;
+    }
+
+    private SimulatedAxis GetAxis(int hardwareAxisNo)
+    {
+        EnsureOpen();
+        if (hardwareAxisNo < 0 || hardwareAxisNo >= AxisCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        return _axes[hardwareAxisNo];
+    }
+
+    private void EnsureOpen()
+    {
+        if (!IsOpen)
+        {
+            throw new InvalidOperationException("仿真运动控制卡尚未打开。");
+        }
+    }
+
+    private void EnsureAnalogChannel(int channel, int count)
+    {
+        EnsureOpen();
+        if (channel < 0 || channel >= count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(channel));
+        }
+    }
+
+    private sealed class SimulatedAxis
+    {
+        private DateTime _lastUpdate = DateTime.UtcNow;
+        private DateTime? _moveStarted;
+        private DateTime? _moveEnds;
+        private double _moveStartPosition;
+        private bool _continuous;
+        private bool _markHomedOnCompletion;
+
+        public double Position { get; private set; }
+
+        public double Target { get; private set; }
+
+        public double Speed { get; private set; }
+
+        public bool IsMoving { get; private set; }
+
+        public bool ServoEnabled { get; set; }
+
+        public bool Homed { get; set; }
+
+        public bool Alarm { get; set; }
+
+        public bool PositiveLimit { get; set; }
+
+        public bool NegativeLimit { get; set; }
+
+        public ushort RunMode { get; private set; }
+
+        public int StopReason { get; set; }
+
+        public void StartMove(double target, double velocity, ushort runMode, bool markHomedOnCompletion)
+        {
+            Update();
+            _continuous = false;
+            _moveStartPosition = Position;
+            Target = target;
+            var durationSeconds = Math.Max(Math.Abs(Target - Position) / Math.Abs(velocity), 0.05);
+            _moveStarted = DateTime.UtcNow;
+            _moveEnds = _moveStarted.Value.AddSeconds(durationSeconds);
+            _markHomedOnCompletion = markHomedOnCompletion;
+            Speed = Math.Sign(Target - Position) * Math.Abs(velocity);
+            IsMoving = Math.Abs(Target - Position) > 0.000001;
+            RunMode = IsMoving ? runMode : (ushort)0;
+            StopReason = 0;
+            if (!IsMoving && markHomedOnCompletion)
+            {
+                Homed = true;
+            }
+        }
+
+        public void StartContinuous(double velocity)
+        {
+            Update();
+            _continuous = true;
+            _moveStarted = null;
+            _moveEnds = null;
+            _lastUpdate = DateTime.UtcNow;
+            Speed = velocity;
+            Target = Position;
+            IsMoving = true;
+            RunMode = 2;
+            StopReason = 0;
+        }
+
+        public void Stop(int reason)
+        {
+            Update();
+            Target = Position;
+            Speed = 0;
+            IsMoving = false;
+            RunMode = 0;
+            StopReason = reason;
+            _continuous = false;
+            _moveStarted = null;
+            _moveEnds = null;
+            _markHomedOnCompletion = false;
+        }
+
+        public void Update()
+        {
+            var now = DateTime.UtcNow;
+            if (!IsMoving)
+            {
+                _lastUpdate = now;
+                return;
+            }
+
+            if (_continuous)
+            {
+                Position += Speed * (now - _lastUpdate).TotalSeconds;
+                Target = Position;
+                _lastUpdate = now;
+                return;
+            }
+
+            if (_moveStarted is null || _moveEnds is null || now >= _moveEnds)
+            {
+                Position = Target;
+                Speed = 0;
+                IsMoving = false;
+                RunMode = 0;
+                if (_markHomedOnCompletion)
+                {
+                    Homed = true;
+                }
+
+                _markHomedOnCompletion = false;
+                _lastUpdate = now;
+                return;
+            }
+
+            var total = (_moveEnds.Value - _moveStarted.Value).TotalSeconds;
+            var elapsed = (now - _moveStarted.Value).TotalSeconds;
+            Position = _moveStartPosition + (Target - _moveStartPosition) * Math.Clamp(elapsed / total, 0, 1);
+            _lastUpdate = now;
+        }
+    }
+}

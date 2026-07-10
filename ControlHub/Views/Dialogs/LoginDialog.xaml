@@ -1,0 +1,239 @@
+<Window x:Class="ControlHub.Views.Dialogs.LoginDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="权限登录"
+        Width="520"
+        Height="430"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        FontFamily="Microsoft YaHei UI">
+    <Window.Resources>
+        <SolidColorBrush x:Key="DialogText" Color="#162333" />
+
+        <Style x:Key="InputBorder" TargetType="Border">
+            <Setter Property="Height" Value="48" />
+            <Setter Property="Background" Value="#F8FAFD" />
+            <Setter Property="BorderBrush" Value="#AEBACA" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource DialogText}" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="PasswordBox">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource DialogText}" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource DialogText}" />
+            <Setter Property="Background" Value="#F8FAFD" />
+            <Setter Property="BorderBrush" Value="#AEBACA" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="DialogButton" TargetType="Button">
+            <Setter Property="Width" Value="142" />
+            <Setter Property="Height" Value="54" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="0.92" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Opacity" Value="0.84" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#EEF2F7"
+            BorderBrush="#718096"
+            BorderThickness="1"
+            CornerRadius="4">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="20" ShadowDepth="5" Opacity="0.34" Color="#18283A" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="66" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="80" />
+            </Grid.RowDefinitions>
+
+            <Border Background="#10283F"
+                    BorderBrush="#1E5C9A"
+                    BorderThickness="0,0,0,2"
+                    CornerRadius="4,4,0,0">
+                <Grid Margin="22,0,16,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Image Width="30"
+                           Height="36"
+                           Margin="0,0,14,0"
+                           VerticalAlignment="Center"
+                           Source="/Assets/Icons/LoginDialog/permission-login.png"
+                           Stretch="Uniform" />
+                    <TextBlock Grid.Column="1"
+                               Text="权限登录"
+                               Foreground="#F7FBFF"
+                               FontSize="24"
+                               FontWeight="Bold"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="2"
+                            Width="32"
+                            Height="32"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Foreground="#F7FBFF"
+                            FontSize="28"
+                            Content="x"
+                            Cursor="Hand"
+                            Click="Close_Click" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="30,20,24,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="140" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="56" />
+                    <RowDefinition Height="56" />
+                    <RowDefinition Height="56" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Width="24"
+                           Height="28"
+                           Margin="0,0,18,0"
+                           VerticalAlignment="Center"
+                           Source="/Assets/Icons/LoginDialog/user-name.png"
+                           Stretch="Uniform" />
+                    <TextBlock Text="用户名" Foreground="{StaticResource DialogText}" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
+                </StackPanel>
+                <Border Grid.Column="1" Style="{StaticResource InputBorder}" VerticalAlignment="Center">
+                    <Grid>
+                        <TextBox x:Name="UserNameTextBox" TextChanged="UserNameTextBox_TextChanged" KeyDown="LoginInput_KeyDown" />
+                        <TextBlock x:Name="UserNamePlaceholder"
+                                   Text="请输入用户名"
+                                   Foreground="#748396"
+                                   FontSize="18"
+                                   Margin="12,0"
+                                   IsHitTestVisible="False"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Width="24"
+                           Height="28"
+                           Margin="0,0,18,0"
+                           VerticalAlignment="Center"
+                           Source="/Assets/Icons/LoginDialog/password.png"
+                           Stretch="Uniform" />
+                    <TextBlock Text="密码" Foreground="{StaticResource DialogText}" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
+                </StackPanel>
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource InputBorder}" VerticalAlignment="Center">
+                    <Grid>
+                        <PasswordBox x:Name="PasswordInput" PasswordChanged="PasswordInput_PasswordChanged" KeyDown="LoginInput_KeyDown" />
+                        <TextBlock x:Name="PasswordPlaceholder"
+                                   Text="请输入密码"
+                                   Foreground="#748396"
+                                   FontSize="18"
+                                   Margin="12,0"
+                                   IsHitTestVisible="False"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Width="26"
+                           Height="28"
+                           Margin="0,0,16,0"
+                           VerticalAlignment="Center"
+                           Source="/Assets/Icons/LoginDialog/level.png"
+                           Stretch="Uniform" />
+                    <TextBlock Text="权限级别" Foreground="{StaticResource DialogText}" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" />
+                </StackPanel>
+                <ComboBox x:Name="RoleComboBox"
+                          Grid.Row="2"
+                          Grid.Column="1"
+                          Height="48"
+                          VerticalAlignment="Center"
+                          SelectedIndex="0"
+                          SelectionChanged="RoleComboBox_SelectionChanged">
+                    <ComboBoxItem Content="操作员" />
+                    <ComboBoxItem Content="工程师" />
+                    <ComboBoxItem Content="管理员" />
+                </ComboBox>
+
+                <TextBlock x:Name="LoginErrorText"
+                           Grid.Row="3"
+                           Grid.Column="1"
+                           Foreground="#B42318"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed" />
+            </Grid>
+
+            <Border Grid.Row="2" BorderBrush="#C4CDD8" BorderThickness="0,1,0,0" Padding="0,13,0,13">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="取消"
+                            Style="{StaticResource DialogButton}"
+                            Foreground="#1A2635"
+                            Background="#E1E7EE"
+                            BorderBrush="#9DAABC"
+                            Margin="0,0,26,0"
+                            Click="Cancel_Click" />
+                    <Button Content="登录"
+                            Style="{StaticResource DialogButton}"
+                            Foreground="White"
+                            Background="#1D5FA8"
+                            BorderBrush="#3C7BC2"
+                            IsDefault="True"
+                            Click="Login_Click" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

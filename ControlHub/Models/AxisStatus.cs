@@ -8,22 +8,36 @@ public sealed class AxisStatus : INotifyPropertyChanged
 {
     private double _position;
     private double _target;
-    private int _speed;
+    private double _jogSpeed = 25;
+    private double _jogDistance = 10;
+    private double _speed;
     private bool _servoOn;
     private bool _homed;
     private bool _alarm;
     private bool _positiveLimit;
     private bool _negativeLimit;
-    private string _state = "待机";
+    private bool _isAvailable;
+    private bool _isMoving;
+    private string _name = "";
+    private string _state = "未连接";
 
     public int AxisNo { get; init; }
-    public string Name { get; init; } = "";
+    public int HardwareAxisNo => AxisNo - 1;
+    public string Name
+    {
+        get => _name;
+        set => SetField(ref _name, NormalizeName(value));
+    }
     public string Unit { get; init; } = "mm";
-    public string DisplayPosition => Unit == "deg" ? $"{Position:0.000}°" : $"{Position:0.000}";
-    public string DisplayTarget => Unit == "deg" ? $"{Target:0.000}°" : $"{Target:0.000}";
+    public string DisplayPosition => $"{Position:0.000}";
+    public string DisplayTarget => $"{Target:0.000}";
     public string DisplaySpeed => $"{Speed:0.000}";
-    public string ServoText => ServoOn ? "使能" : "未使能";
+    public string ServoText => !IsAvailable ? "未连接" : ServoOn ? "已使能" : "未使能";
     public string AlarmText => Alarm ? "报警" : "无";
+    public bool CanServoOn => IsAvailable && !ServoOn;
+    public bool CanServoOff => IsAvailable && ServoOn;
+    public bool CanMove => IsAvailable && ServoOn && !Alarm;
+    public bool CanStop => IsAvailable && IsMoving;
     public Brush ServoBrush => ServoOn ? Brushes.LimeGreen : Brushes.Gray;
     public Brush AlarmBrush => Alarm ? Brushes.Red : Brushes.LimeGreen;
     public Brush PositiveLimitBrush => PositiveLimit ? Brushes.Red : Brushes.LightGray;
@@ -53,7 +67,19 @@ public sealed class AxisStatus : INotifyPropertyChanged
         }
     }
 
-    public int Speed
+    public double JogSpeed
+    {
+        get => _jogSpeed;
+        set => SetField(ref _jogSpeed, Math.Max(0, value));
+    }
+
+    public double JogDistance
+    {
+        get => _jogDistance;
+        set => SetField(ref _jogDistance, Math.Max(0, value));
+    }
+
+    public double Speed
     {
         get => _speed;
         set
@@ -73,6 +99,9 @@ public sealed class AxisStatus : INotifyPropertyChanged
             if (SetField(ref _servoOn, value))
             {
                 OnPropertyChanged(nameof(ServoText));
+                OnPropertyChanged(nameof(CanServoOn));
+                OnPropertyChanged(nameof(CanServoOff));
+                OnPropertyChanged(nameof(CanMove));
                 OnPropertyChanged(nameof(ServoBrush));
             }
         }
@@ -93,6 +122,35 @@ public sealed class AxisStatus : INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(AlarmText));
                 OnPropertyChanged(nameof(AlarmBrush));
+                OnPropertyChanged(nameof(CanMove));
+            }
+        }
+    }
+
+    public bool IsAvailable
+    {
+        get => _isAvailable;
+        set
+        {
+            if (SetField(ref _isAvailable, value))
+            {
+                OnPropertyChanged(nameof(ServoText));
+                OnPropertyChanged(nameof(CanServoOn));
+                OnPropertyChanged(nameof(CanServoOff));
+                OnPropertyChanged(nameof(CanMove));
+                OnPropertyChanged(nameof(CanStop));
+            }
+        }
+    }
+
+    public bool IsMoving
+    {
+        get => _isMoving;
+        set
+        {
+            if (SetField(ref _isMoving, value))
+            {
+                OnPropertyChanged(nameof(CanStop));
             }
         }
     }
@@ -144,5 +202,10 @@ public sealed class AxisStatus : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static string NormalizeName(string? name)
+    {
+        return name?.Trim() ?? "";
     }
 }
