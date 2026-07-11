@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StartupObject>MotionQaHarness.Program</StartupObject>
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ControlHub\ControlHub.csproj" />
+    <None Update="motion-settings.json" CopyToOutputDirectory="Always" />
+    <Resource Include="..\..\ControlHub\Assets\Icons\**\*.png"
+              Link="Assets\Icons\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

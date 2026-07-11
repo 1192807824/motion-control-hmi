@@ -1,0 +1,70 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/xhtml;charset=gb2312"/>
+<meta http-equiv="X-UA-Compatible" content="IE=9"/>
+<link href="doxygen.css" rel="stylesheet" type="text/css"/>
+<link href="tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom-style.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="dynsections.js"></script>
+</head>
+<body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+	<div style="overflow: hidden;">
+		<div style="height: 57px;min-width: 1039px;background-size: auto 100%;background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABwgAAAABCAYAAADKO/rAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAABRSURBVFhH7dUxCoBADEXB5LK5/w1iIaLIrsgWNs50Sf/4WVUd8HOZGd1nCqMbGNMPrNMPrJv1cvz0A3OjfuwPvDPrxf7A7t7IlX7gmX74VsQGguw4S6+UnSYAAAAASUVORK5CYII=');">
+			<img src="titleleft.png" style="float: left;"/>
+			<img src="titleright.png" alt="" style="float: right;" />
+		</div>
+	</div>
+<!-- 制作者 Doxygen 1.8.15 -->
+  <div id="navrow1" class="tabs">
+    <ul class="tablist">
+      <li><a href="index.html"><span>首页</span></a></li>
+      <li><a href="_xE5_x8F_x91_xE7_x89_x88_xE8_xAF_xB4_xE6_x98_x8E.html"><span>发版说明</span></a></li>
+      <li><a href="_xE8_xBD_xAF_xE4_xBB_xB6_xE8_xAE_xB8_xE5_x8F_xAF.html"><span>软件许可</span></a></li>
+      <li><a href="_xE8_xBF_x90_xE8_xA1_x8C_xE7_x8E_xAF_xE5_xA2_x83.html"><span>运行环境</span></a></li>
+      <li><a href="_xE7_x89_x88_xE6_x9C_xAC_xE5_x88_x87_xE6_x8D_xA2_xE5_x92_x8C_xE5_x8D_x87_xE7_xBA_xA7.html"><span>版本切换和升级</span></a></li>
+      <li><a href="usergroup0.html"><span>编程引导</span></a></li>
+      <li><a href="modules.html"><span>接口函数</span></a></li>
+      <li><a href="usergroup3.html"><span>示例程序介绍</span></a></li>
+      <li><a href="usergroup6.html"><span>状态码</span></a></li>
+      <li><a href="usergroup8.html"><span>工具</span></a></li>
+      <li><a href="usergroup9.html"><span>常见问题</span></a></li>
+      <li><a href="_xE6_xB3_x95_xE5_xBE_x8B_xE5_xA3_xB0_xE6_x98_x8E.html"><span>法律声明</span></a></li>
+    </ul>
+  </div>
+</div><!-- top -->
+<div class="PageDoc"><div class="contents">
+<div class="textblock"><div class="header" style="margin-left:-12px;margin-top:-10px;margin-right:-8px;"> <div class="headertitle"> <div class="title">模块操作：设置输入图像、参数和ROI区域的方法</div> </div> </div> <div style="margin: 0 0 0 0px;"> <h2>问题描述 </h2>
+</div><div style="margin: 0 0 0 0px;"> <b>环境：</b>VM4.2及以上 + VS2013及以上<br />
+ <b>问题：</b>如何设置模块的输入图像、模块参数及ROI区域？<br />
+ <h2>解决方法 </h2>
+</div><div style="margin: 0 0 0 0px;"> </div><div style="margin: 0 0 0 0px;">VM模块的输入主要包含两部分：基本参数（图像输入、ROI区域）、运行参数，以圆查找为例。除了图像源模块以及无输入图像的模块。</div><div style="margin: 0 0 0 0px;"><br />
+ </div><div style="margin: 0 0 0 0px;"><img src="11.3.1.png" width="250" height="278" alt="" class="inline"/>
+<img src="11.3.2.png" width="250" height="278" alt="" class="inline"/>
+</div><div style="margin: 0 0 0 0px;"><br />
+ </div><div style="margin: 0 0 0 0px;">通过SDK二次开发时，可通过代码修改模块的输入参数。以下内容以圆查找模块为例进行介绍。</div><div style="margin: 0 0 0 0px;"> <ol>
+<li>
+设置模块输入图像，添加相应的命名空间 <a class="el" href="namespace_i_m_v_s_circle_find_modu_cs.html">IMVSCircleFindModuCs</a> 。 <div class="fragment"><div class="line">Mat matImagee = Cv2.ImRead(<span class="stringliteral">&quot;D:\\3.ProjectCode\\VM4.3\\1.bmp&quot;</span>, ImreadModes.Grayscale);</div><div class="line">IMVSCircleFindModuTool circleFindModuTool = VmSolution.Instance[<span class="stringliteral">&quot;流程3.圆查找1&quot;</span>] as IMVSCircleFindModuTool;  <span class="comment">//实例化指定的模块工具</span></div><div class="line"><a class="code" href="class_image_base_data.html">ImageBaseData</a> StImgbase = <span class="keyword">new</span> <a class="code" href="class_image_base_data.html">ImageBaseData</a>(matImagee.Data, (uint)(matImagee.Width * matImagee.Height), matImagee.Width, matImagee.Height, <a class="code" href="group___xE6_xA8_xA1_xE5_x9D_x97_xE7_xBB_x93_xE6_x9E_x9C_xE5_x9F_xBA_xE7_xB1_xBB.html#gace1a291dd6e5f3b1be5289e716ed08ad">VMPixelFormat</a>.VM_PIXEL_MONO_08);</div><div class="line">circleFindModuTool.ModuParams.InputImage = StImgbase; </div></div><!-- fragment --> </li>
+<li>
+通过调用对象中 ModuParams 的属性设置模块运行参数。 <div class="fragment"><div class="line">IMVSCircleFindModuTool circleFindModuTool = VmSolution.Instance[<span class="stringliteral">&quot;流程1.圆查找1&quot;</span>] as IMVSCircleFindModuTool;  <span class="comment">//实例化指定的模块工具</span></div><div class="line">circleFindModuTool.ModuParams.EdgeThresh = 30;  <span class="comment">//设置边缘阈值为30</span></div></div><!-- fragment --> </li>
+<li>
+设置指定模块的ROI区域。 <div class="fragment"><div class="line">IMVSCircleFindModuTool tool = (IMVSCircleFindModuTool)VmSolution.Instance[<span class="stringliteral">&quot;流程1.圆查找1&quot;</span>];</div><div class="line"><a class="code" href="class_rect_box.html">RectBox</a> rectBox = <span class="keyword">new</span> <a class="code" href="class_rect_box.html">RectBox</a>(<span class="keyword">new</span> <a class="code" href="namespace_v_m.html">VM</a>.<a class="code" href="namespace_v_m_1_1_platform_s_d_k_c_s.html">PlatformSDKCS</a>.PointF(1000, 1000), 500, 500, 0);</div><div class="line">tool.ModuParams.ModuRoiManager.RoiRectangle = rectBox;      <span class="comment">//代码设置ROI</span></div></div><!-- fragment --> </li>
+</ol>
+<dl class="section attention"><dt>注意</dt><dd><ul>
+<li>
+设置【基本参数】，参数配置窗口界面不会显示所设置的参数。此时若模块运行，则参数永久有效；若流程运行，则参数一次有效。 </li>
+<li>
+设置【运行参数】，参数配置窗口界面会显示所设置的参数。此时模块和流程运行，参数均永久有效。 </li>
+</ul>
+</dd></dl>
+</div></div></div><!-- PageDoc -->
+</div><!-- contents -->
+<!-- start footer part -->
+<div class="footer" style="text-align: right;">
+	<hr/>
+	<small></small>
+</div>
+</body>
+</html>

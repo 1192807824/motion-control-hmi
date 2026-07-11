@@ -1,0 +1,87 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/xhtml;charset=gb2312"/>
+<meta http-equiv="X-UA-Compatible" content="IE=9"/>
+<link href="doxygen.css" rel="stylesheet" type="text/css"/>
+<link href="tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom-style.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="dynsections.js"></script>
+</head>
+<body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+	<div style="overflow: hidden;">
+		<div style="height: 57px;min-width: 1039px;background-size: auto 100%;background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABwgAAAABCAYAAADKO/rAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAABRSURBVFhH7dUxCoBADEXB5LK5/w1iIaLIrsgWNs50Sf/4WVUd8HOZGd1nCqMbGNMPrNMPrJv1cvz0A3OjfuwPvDPrxf7A7t7IlX7gmX74VsQGguw4S6+UnSYAAAAASUVORK5CYII=');">
+			<img src="titleleft.png" style="float: left;"/>
+			<img src="titleright.png" alt="" style="float: right;" />
+		</div>
+	</div>
+<!-- 制作者 Doxygen 1.8.15 -->
+  <div id="navrow1" class="tabs">
+    <ul class="tablist">
+      <li><a href="index.html"><span>首页</span></a></li>
+      <li><a href="_xE5_x8F_x91_xE7_x89_x88_xE8_xAF_xB4_xE6_x98_x8E.html"><span>发版说明</span></a></li>
+      <li><a href="_xE8_xBD_xAF_xE4_xBB_xB6_xE8_xAE_xB8_xE5_x8F_xAF.html"><span>软件许可</span></a></li>
+      <li><a href="_xE8_xBF_x90_xE8_xA1_x8C_xE7_x8E_xAF_xE5_xA2_x83.html"><span>运行环境</span></a></li>
+      <li><a href="_xE7_x89_x88_xE6_x9C_xAC_xE5_x88_x87_xE6_x8D_xA2_xE5_x92_x8C_xE5_x8D_x87_xE7_xBA_xA7.html"><span>版本切换和升级</span></a></li>
+      <li><a href="usergroup0.html"><span>编程引导</span></a></li>
+      <li><a href="modules.html"><span>接口函数</span></a></li>
+      <li><a href="usergroup3.html"><span>示例程序介绍</span></a></li>
+      <li><a href="usergroup6.html"><span>状态码</span></a></li>
+      <li><a href="usergroup8.html"><span>工具</span></a></li>
+      <li><a href="usergroup9.html"><span>常见问题</span></a></li>
+      <li><a href="_xE6_xB3_x95_xE5_xBE_x8B_xE5_xA3_xB0_xE6_x98_x8E.html"><span>法律声明</span></a></li>
+    </ul>
+  </div>
+</div><!-- top -->
+<div class="PageDoc"><div class="contents">
+<div class="textblock"><div class="header" style="margin-left:-12px;margin-top:-10px;margin-right:-8px;"> <div class="headertitle"> <div class="title">环境检测工具</div> </div> </div> <div id="hikvision"> <br />
+ </div><div id="hikvision">VisionMaster软件安装完成后，在二次开发的过程可能遇到一些典型性问题，例如：由于环境变量未生效导致未找到iMVS-6000PlatformSDK.dll，或者找到错误版本的iMVS-6000PlatformSDK.dll。 <br />
+为了解决以上问题，建议使用环境检测工具，工具名称为：<b>VMCollector.exe</b>，所在路径为：..\Applications\Tools\VMCollector。</div><div id="hikvision"> </div><div id="hikvision">环境检测工具主要检测如下内容：</div><div id="hikvision"> <ul>
+<li>
+<b>VisionMaster检测</b> <ol>
+<li>
+<p class="startli">获取当前默认的VisionMaster版本： </p>
+<p class="interli">通过获取注册表SOFTWARE\WOW6432Node\Microsoft.NETFramework\v4.0.30319\AssemblyFoldersEx\VisionMaster的数值所包含的版本信息。该版本的语言类型通过LanguageSet.cfg文件读取获得。</p>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">获取当前运行的VisionMaster版本： </p>
+<p class="interli">通过获取进程中的VisionMaster程序，得到程序启动路径，然后将路径和所有版本中的信息进行对比得到当前运行版本号。该版本的语言类型通过LanguageSet.cfg文件读取获得。</p>
+<dl class="section attention"><dt>注意</dt><dd>VisionMaster软件名称可通过中性包工具进行修改，为了获取该软件的实际名称，需要从配置文件读取软件名称。由于中性包工具没有修改注册表名称，因此不能从注册表直接获取软件名称。 </dd></dl>
+</li>
+<li>
+<p class="startli">判断VisionMaster系统环境变量设置是否正确： </p>
+<p class="interli">检测系统环境变量Path是否保存当前版本VisionMaster的路径。例如：4.2版本为当前默认版本，则需添加如下环境变量：</p>
+<p class="endli">D:\Program Files\VisionMaster4.2.0\Applications\PublicFile\x64<br />
+ D:\Program Files\VisionMaster4.2.0\Applications\PublicFile\x86<br />
+ </p><dl class="section attention"><dt>注意</dt><dd>若将以上路径添加在Path的末尾，则一些同名库的使用，会被Path列表中靠前的路径指错目录，导致运行异常。因此，需要将以上路径添加到Path的最前面。 </dd></dl>
+</li>
+</ol>
+</li>
+<li>
+<b>二次开发依赖DLL检测</b> <ol>
+<li>
+<p class="startli">加载当前系统环境变量中的iMVS-6000PlatformSDK.dll： </p>
+<p class="interli">尝试加载iMVS-6000PlatformSDK.dll，判断加载是否成功。若不成功，则提示错误信息。</p>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">使用iMVS-6000PlatformSDK.dll创建句柄： </p>
+<p class="interli">尝试进行初始化，判断过程是否成功。若不成功，则抛出对应错误码。如：加密狗未检测到或检测异常，可以通过检查加密狗是否插好来排查故障。</p>
+<p class="interli"></p>
+<p class="endli"></p>
+</li>
+</ol>
+</li>
+</ul>
+</div> </div></div><!-- PageDoc -->
+</div><!-- contents -->
+<!-- start footer part -->
+<div class="footer" style="text-align: right;">
+	<hr/>
+	<small></small>
+</div>
+</body>
+</html>

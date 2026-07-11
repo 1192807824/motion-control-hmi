@@ -1,0 +1,66 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/xhtml;charset=gb2312"/>
+<meta http-equiv="X-UA-Compatible" content="IE=9"/>
+<link href="doxygen.css" rel="stylesheet" type="text/css"/>
+<link href="tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom-style.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="dynsections.js"></script>
+</head>
+<body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+	<div style="overflow: hidden;">
+		<div style="height: 57px;min-width: 1039px;background-size: auto 100%;background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABwgAAAABCAYAAADKO/rAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAABRSURBVFhH7dUxCoBADEXB5LK5/w1iIaLIrsgWNs50Sf/4WVUd8HOZGd1nCqMbGNMPrNMPrJv1cvz0A3OjfuwPvDPrxf7A7t7IlX7gmX74VsQGguw4S6+UnSYAAAAASUVORK5CYII=');">
+			<img src="titleleft.png" style="float: left;"/>
+			<img src="titleright.png" alt="" style="float: right;" />
+		</div>
+	</div>
+<!-- 制作者 Doxygen 1.8.15 -->
+  <div id="navrow1" class="tabs">
+    <ul class="tablist">
+      <li><a href="index.html"><span>首页</span></a></li>
+      <li><a href="_xE5_x8F_x91_xE7_x89_x88_xE8_xAF_xB4_xE6_x98_x8E.html"><span>发版说明</span></a></li>
+      <li><a href="_xE8_xBD_xAF_xE4_xBB_xB6_xE8_xAE_xB8_xE5_x8F_xAF.html"><span>软件许可</span></a></li>
+      <li><a href="_xE8_xBF_x90_xE8_xA1_x8C_xE7_x8E_xAF_xE5_xA2_x83.html"><span>运行环境</span></a></li>
+      <li><a href="_xE7_x89_x88_xE6_x9C_xAC_xE5_x88_x87_xE6_x8D_xA2_xE5_x92_x8C_xE5_x8D_x87_xE7_xBA_xA7.html"><span>版本切换和升级</span></a></li>
+      <li><a href="usergroup0.html"><span>编程引导</span></a></li>
+      <li><a href="modules.html"><span>接口函数</span></a></li>
+      <li><a href="usergroup3.html"><span>示例程序介绍</span></a></li>
+      <li><a href="usergroup6.html"><span>状态码</span></a></li>
+      <li><a href="usergroup8.html"><span>工具</span></a></li>
+      <li><a href="usergroup9.html"><span>常见问题</span></a></li>
+      <li><a href="_xE6_xB3_x95_xE5_xBE_x8B_xE5_xA3_xB0_xE6_x98_x8E.html"><span>法律声明</span></a></li>
+    </ul>
+  </div>
+</div><!-- top -->
+<div class="PageDoc"><div class="contents">
+<div class="textblock"><div class="header" style="margin-left:-12px;margin-top:-10px;margin-right:-8px;"> <div class="headertitle"> <div class="title">环境配置：程序启动后报错的排查方法</div> </div> </div> <div style="margin: 0 0 0 0px;"> <h2>问题描述 </h2>
+</div><div style="margin: 0 0 0 0px;"> <b>环境：</b>VM4.2及以上 + VS2013及以上<br />
+ <b>问题：</b>VM4.3 SDK程序启动后，出现 Vm.Core.Solution 或 <a class="el" href="namespace_v_m_1_1_platform_s_d_k_c_s.html">VM.PlatformSDKCS</a> 等相关内容，如下图所示。<br />
+<br />
+ </div><div style="margin: 0 0 0 0px;"><img src="11.2.1.png" width="790" height="334" alt="" class="inline"/>
+</div><div style="margin: 0 0 0 0px;"> </div><div style="margin: 0 0 0 0px;"><img src="11.2.2.png" width="790" height="530" alt="" class="inline"/>
+</div><div style="margin: 0 0 0 0px;"> <h2>解决方法 </h2>
+</div><div style="margin: 0 0 0 0px;"> <ol>
+<li>
+确保VM软件能正常运行，且能打开和运行方案。 </li>
+<li>
+确认环境已完成配置。主要为：是否插好加密狗，是否以管理员身份运行VS再打开项目，框架是否选择.NET Framework4.6.1且取消勾选【首选32位】，二次开发程序启动前是否已关闭VM软件。 </li>
+<li>
+（可选步骤）若VM版本为4.0或4.1，SDK开发时需重新拷贝。 </li>
+<li>
+若PC存在多个版本的VM，请确认方案和程序升级后，是否适配当前的VM版本。 </li>
+<li>
+如以上操作仍无法解决，可使用try{ }catch(VmException ex){ }捕获异常码，并在手册中查找异常码对应的内容。 </li>
+</ol>
+</div> </div></div><!-- PageDoc -->
+</div><!-- contents -->
+<!-- start footer part -->
+<div class="footer" style="text-align: right;">
+	<hr/>
+	<small></small>
+</div>
+</body>
+</html>

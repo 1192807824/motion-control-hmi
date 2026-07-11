@@ -338,7 +338,7 @@ public partial class MotionControlPage : UserControl
             _axisSelectionFeedbackCancellation?.Cancel();
             feedbackCancellation = new CancellationTokenSource();
             _axisSelectionFeedbackCancellation = feedbackCancellation;
-            AxisSwitchProgressBar.Visibility = Visibility.Visible;
+            AxisSwitchOverlay.Visibility = Visibility.Visible;
         }
 
         if (previousAxis is not null)
@@ -397,7 +397,7 @@ public partial class MotionControlPage : UserControl
         {
             if (ReferenceEquals(_axisSelectionFeedbackCancellation, feedbackCancellation))
             {
-                AxisSwitchProgressBar.Visibility = Visibility.Collapsed;
+                AxisSwitchOverlay.Visibility = Visibility.Collapsed;
                 _axisSelectionFeedbackCancellation = null;
             }
 
@@ -441,6 +441,29 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    private void AxisName_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (ContainsChineseCharacters(e.Text))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void AxisName_Pasting(object sender, DataObjectPastingEventArgs e)
+    {
+        if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+        {
+            e.CancelCommand();
+            return;
+        }
+
+        var pastedText = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string;
+        if (ContainsChineseCharacters(pastedText))
+        {
+            e.CancelCommand();
+        }
+    }
+
     private void AxisName_LostFocus(object sender, RoutedEventArgs e)
     {
         if (sender is not TextBox { DataContext: AxisStatus axis } editor || editor.IsReadOnly)
@@ -457,6 +480,14 @@ public partial class MotionControlPage : UserControl
         editor.IsReadOnly = true;
         editor.Tag = null;
         SaveAxisSettings();
+    }
+
+    private static bool ContainsChineseCharacters(string? text)
+    {
+        return !string.IsNullOrEmpty(text) && text.Any(character =>
+            character is >= '\u3400' and <= '\u4DBF' or
+                         >= '\u4E00' and <= '\u9FFF' or
+                         >= '\uF900' and <= '\uFAFF');
     }
 
     private void ModeTab_Click(object sender, RoutedEventArgs e)
@@ -1189,18 +1220,6 @@ public partial class MotionControlPage : UserControl
         {
             PollMotionState();
         }
-    }
-
-    private void SpeedPreset_Click(object sender, RoutedEventArgs e)
-    {
-        if (SelectedAxis is not { } axis || sender is not FrameworkElement { Tag: string speedText } ||
-            !double.TryParse(speedText, out var speed))
-        {
-            return;
-        }
-
-        axis.JogSpeed = speed;
-        SaveAxisSettings();
     }
 
     private void ResetProfile_Click(object sender, RoutedEventArgs e)
@@ -2828,7 +2847,7 @@ public partial class MotionControlPage : UserControl
     {
         axis.HomeConfigured = profile.Enabled;
         axis.HomeConfigurationSummary = profile.Enabled
-            ? $"模式 {profile.Mode}｜低速 {profile.LowVelocity:0.###}｜高速 {profile.HighVelocity:0.###}｜偏移 {profile.OffsetPosition:0.###} {axis.Unit}"
+            ? $"模式 {profile.Mode}｜低速 {profile.LowVelocity:0.###} units（脉冲）/s｜高速 {profile.HighVelocity:0.###} units（脉冲）/s｜偏移 {profile.OffsetPosition:0.###} {axis.Unit}"
             : "当前轴未启用回零";
     }
 

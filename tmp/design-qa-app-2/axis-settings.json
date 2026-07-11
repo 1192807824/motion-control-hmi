@@ -1,0 +1,82 @@
+{
+  "1": {
+    "Name": "X1",
+    "JogSpeed": 5,
+    "JogDistance": 10
+  },
+  "2": {
+    "Name": "Y1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "3": {
+    "Name": "Z1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "4": {
+    "Name": "R1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "5": {
+    "Name": "X2",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "6": {
+    "Name": "Y2",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "7": {
+    "Name": "Z2",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "8": {
+    "Name": "R2",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "9": {
+    "Name": "A1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "10": {
+    "Name": "B1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "11": {
+    "Name": "C1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "12": {
+    "Name": "U1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "13": {
+    "Name": "V1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "14": {
+    "Name": "W1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "15": {
+    "Name": "T1",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  },
+  "16": {
+    "Name": "T2",
+    "JogSpeed": 25,
+    "JogDistance": 10
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "Host": "192.168.1.100",
+  "Port": 4001,
+  "ConnectTimeoutMs": 3000,
+  "NewLine": "\\r\\n",
+  "WriteTimeoutMs": 500,
+  "SendFormat": "ASCII",
+  "ReceiveFormat": "ASCII",
+  "ManualSendText": "",
+  "AppendNewLine": true
+}

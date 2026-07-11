@@ -1,0 +1,150 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/xhtml;charset=gb2312"/>
+<meta http-equiv="X-UA-Compatible" content="IE=9"/>
+<link href="doxygen.css" rel="stylesheet" type="text/css"/>
+<link href="tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom-style.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="dynsections.js"></script>
+</head>
+<body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+	<div style="overflow: hidden;">
+		<div style="height: 57px;min-width: 1039px;background-size: auto 100%;background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABwgAAAABCAYAAADKO/rAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAABRSURBVFhH7dUxCoBADEXB5LK5/w1iIaLIrsgWNs50Sf/4WVUd8HOZGd1nCqMbGNMPrNMPrJv1cvz0A3OjfuwPvDPrxf7A7t7IlX7gmX74VsQGguw4S6+UnSYAAAAASUVORK5CYII=');">
+			<img src="titleleft.png" style="float: left;"/>
+			<img src="titleright.png" alt="" style="float: right;" />
+		</div>
+	</div>
+<!-- 制作者 Doxygen 1.8.15 -->
+  <div id="navrow1" class="tabs">
+    <ul class="tablist">
+      <li><a href="index.html"><span>首页</span></a></li>
+      <li><a href="_xE5_x8F_x91_xE7_x89_x88_xE8_xAF_xB4_xE6_x98_x8E.html"><span>发版说明</span></a></li>
+      <li><a href="_xE8_xBD_xAF_xE4_xBB_xB6_xE8_xAE_xB8_xE5_x8F_xAF.html"><span>软件许可</span></a></li>
+      <li><a href="_xE8_xBF_x90_xE8_xA1_x8C_xE7_x8E_xAF_xE5_xA2_x83.html"><span>运行环境</span></a></li>
+      <li><a href="_xE7_x89_x88_xE6_x9C_xAC_xE5_x88_x87_xE6_x8D_xA2_xE5_x92_x8C_xE5_x8D_x87_xE7_xBA_xA7.html"><span>版本切换和升级</span></a></li>
+      <li><a href="usergroup0.html"><span>编程引导</span></a></li>
+      <li><a href="modules.html"><span>接口函数</span></a></li>
+      <li><a href="usergroup3.html"><span>示例程序介绍</span></a></li>
+      <li><a href="usergroup6.html"><span>状态码</span></a></li>
+      <li><a href="usergroup8.html"><span>工具</span></a></li>
+      <li><a href="usergroup9.html"><span>常见问题</span></a></li>
+      <li><a href="_xE6_xB3_x95_xE5_xBE_x8B_xE5_xA3_xB0_xE6_x98_x8E.html"><span>法律声明</span></a></li>
+    </ul>
+  </div>
+</div><!-- top -->
+<div class="PageDoc"><div class="contents">
+<div class="textblock"><div class="header" style="margin-left:-12px;margin-top:-10px;margin-right:-8px;"> <div class="headertitle"> <div class="title">定位引导案例</div> </div> </div><div class="mainparams"> <h2>一、应用场景 </h2>
+</div><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div><div class="subparamswhite" id="hikvision">本案例作为VM二次开发的定位引导案例，适用场景为单相机拍照，引导机械手抓取产品的情形。</div><div class="subparamswhite" id="hikvision"> </div><div class="subparamswhite" id="hikvision">典型场景包括：</div><div class="subparamswhite" id="hikvision"> <ul>
+<li>
+相机固定安装，拍照时相机固定不动。 </li>
+<li>
+<p class="startli">机械手旋转时旋转中心不在抓取点上，而是绕某个轴的中心旋转。如下图所示，机械手的旋转轴中心线如图中红线所示，和抓取中心并不重合。 </p>
+<img src="8.2.13.png" width="303" height="255" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+</ul>
+<dl class="section note"><dt>注解</dt><dd>本案例演示重点为如何使用VM模块去实现定位抓取，并未考虑图像透视和畸变带来的抓取精度问题，因此若实际项目中照搬案例中的方法去引导机械手抓取，被抓产品可能越靠近视野边缘抓取误差越大，越靠近视野中心区域误差越小，此为正常现象。<br />
+ </dd></dl>
+<div class="mainparams"> <h2>二、搭建方案 </h2>
+</div></div><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">示例方案路径：./PlatformSDKSampleCS/LocateDemoCs/LocateDemoCs.sol</div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <div class="mainparams"> <h3>方案思路 </h3>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">本演示案例为应用案例，软件和具体方案是强相关的。可加载设计好的方案，该演示方案为Demo文件夹下的LocateDemo.sol方案。若导入其他案例提供的方案，则需进行相关配置方可运行出正确结果。</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">本方案包含一个标定流程和生产流程，流程的整体框架如下图所示。</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <ul>
+<li>
+标定流程使用标定板，通过查找标定物中两条边缘直线的交点作为标定图像输入点。 </li>
+<li>
+生产流程通过旋转计算模块来计算运行图像点和示教图像点的偏差。偏差包含两部分：一部分是由纯平移（不考虑旋转）产生的平移偏差，另一部分是由机械手不共轴旋转产生的偏差。两者偏差加在一起便是示教点与运行点的坐标偏差。 </li>
+</ul>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><img src="8.2.14.png" width="824" height="729" alt="" class="inline"/>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <div class="mainparams"> <h3>耦合模块 </h3>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">方案的数据结果经过格式化模块汇总，并在流程“输出设置”中订阅，可在二次开发中通过流程输出结果，降低二次开发软件与具体模块的耦合性。</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">开发获取结果的是流程输出的“out”参数，开发渲染控件RenderControl绑定的渲染为图像源图像、DL字符定位输出矩形框、格式化文本，具体操作如下：</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <ol>
+<li>
+<p class="startli">点击流程图标旁边的“模块配置”图标进入流程配置窗口。 </p>
+<img src="8.2.15.png" width="388" height="113" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">点击【输出设置】，其中参数名称下面的“out”（区分大小写）即为开发获取的参数名，点击“订阅”按钮，选择格式化作为绑定数据，具体如下图所示。 </p>
+<img src="8.2.16.png" width="426" height="422" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">点击【显示设置】，点击“加号”可增加需要的渲染，点击“订阅”按钮可绑定渲染内容，配置方式如下图所示。 </p>
+<img src="8.2.17.png" width="418" height="419" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">配置格式化模块内容。 </p>
+<p class="interli">格式化模块必须配置正确。若使用时修改了案例自带的方案，特别是修改格式化模块订阅的数据，则必须参照案例自带的方案进行格式化模块配置，格式为：[条件检测结果INT],[数据项1],[数据项2],[数据项3]</p>
+<ul>
+<li>
+<p class="startli">[ ]内的数据订阅流程中的模块结果输出，各个条目用英文逗号分隔，标定流程的格式化配置如下图所示。 </p>
+<img src="8.2.18.png" width="930" height="600" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+<li>
+生产流程的格式化模块的配置类似，由条件检测结果、数据项组成，各条目用英文逗号分隔，在此不再赘述，请参照生产流程的格式化模块配置。 </li>
+</ul>
+</li>
+</ol>
+</div> </div></div><div class="subparamswhite" id="hikvision"><div class="mainparams"> <h2>三、二次开发 </h2>
+</div></div><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> <div class="mainparams"> <h3>运行逻辑 </h3>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">在Visual Studio直接调试，或者在bin目录下双击LocateDemoCs.exe运行。LocateDemo界面如下图所示。</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <b>操作逻辑：</b> <ol>
+<li>
+弹出软件运行界面后，在方案操作区域点击【选择方案】，选择完成后点击【加载方案】。 </li>
+<li>
+在流程操作区域选择需要执行的流程名，点击【运行一次】或【连续运行】即可执行流程。 </li>
+</ol>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><img src="8.2.19.png" width="970" height="600" alt="" class="inline"/>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <div class="mainparams"> <h3>主要函数 </h3>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">本案例主要函数包括：方案加载、单次执行、连续执行、注册工作结束回调、结果获取、方案保存和渲染界面绑定。</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <ul>
+<li>
+<p class="startli">方案加载 </p><div class="fragment"><div class="line">VmSolution.Load(currentSolutionPath);</div><div class="line">例如：</div><div class="line">     VmSolution.Load(“D:\\Test\\Test.sol”,“abc123”);</div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+<p class="startli">单次执行 </p><div class="fragment"><div class="line">procedure.Run();</div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+<p class="startli">连续运行 </p><div class="fragment"><div class="line">procedure.ContinuousRunEnable = <span class="keyword">true</span>;       <span class="comment">//开启连续执行</span></div><div class="line">procedure.ContinuousRunEnable = <span class="keyword">false</span>;      <span class="comment">//停止连续执行</span></div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+<p class="startli">注册工作结束回调：注册回调是基于使用事件模型，使用户获取流程运行的结果 </p><div class="fragment"><div class="line"><span class="keywordflow">foreach</span> (var vmProcedure <span class="keywordflow">in</span> processList)</div><div class="line">{</div><div class="line">     vmProcedure.OnWorkEndStatusCallBack += VmProcedure_OnWorkEndStatusCallBack;</div><div class="line">}</div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+<p class="startli">结果获取 </p><div class="fragment"><div class="line"><span class="keyword">private</span> <span class="keywordtype">void</span> VmProcedure_OnWorkEndStatusCallBack(<span class="keywordtype">object</span> sender, EventArgs e)</div><div class="line">{</div><div class="line">     <span class="keywordflow">try</span></div><div class="line">     {</div><div class="line">         VmProcedure procedure = sender as VmProcedure;</div><div class="line">         <span class="keywordflow">if</span> (procedure != <span class="keyword">null</span>)</div><div class="line">        {</div><div class="line">             <span class="comment">//此处添加获取结果代码</span></div><div class="line">         }</div><div class="line">     }</div><div class="line">     <span class="keywordflow">catch</span> (<a class="code" href="namespace_exception.html">Exception</a> ex)</div><div class="line">     {</div><div class="line">       AppendLog(ex.Message);</div><div class="line">     }</div><div class="line">}</div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+<p class="startli">方案保存 </p><div class="fragment"><div class="line">VmSolution.Save();</div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+渲染界面绑定 <div class="fragment"><div class="line">renderControl.ModuleSource = (VmProcedure)VmSolution.Instance[“流程1”];</div></div><!-- fragment --> </li>
+</ul>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <div class="mainparams"> <h3>控件说明 </h3>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="mainparams"> </div> <div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision">本案例涉及3个控件，分别为VmRenderControl控件、VmMainViewConfigControl控件和VmGlobalToolControl控件。</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> </div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><img src="8.2.20.png" width="216" height="157" alt="" class="inline"/>
+</div></div></div><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"><div class="subparamswhite" id="hikvision"> <ul>
+<li>
+<p class="startli">VmRenderControl控件：用于渲染图像数据。 </p>
+<img src="8.2.21.png" width="954" height="522" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">VmMainViewConfigControl控件：用于显示流程配置。 </p>
+<img src="8.2.22.png" width="954" height="522" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+<li>
+<p class="startli">VmGlobalToolControl控件：用于显示全局配置工具。 </p>
+<img src="8.2.23.png" width="954" height="522" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+</ul>
+</div> </div> </div></div></div><!-- PageDoc -->
+</div><!-- contents -->
+<!-- start footer part -->
+<div class="footer" style="text-align: right;">
+	<hr/>
+	<small></small>
+</div>
+</body>
+</html>

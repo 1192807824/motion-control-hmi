@@ -1,0 +1,87 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/xhtml;charset=gb2312"/>
+<meta http-equiv="X-UA-Compatible" content="IE=9"/>
+<link href="doxygen.css" rel="stylesheet" type="text/css"/>
+<link href="tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom-style.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="dynsections.js"></script>
+</head>
+<body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+	<div style="overflow: hidden;">
+		<div style="height: 57px;min-width: 1039px;background-size: auto 100%;background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABwgAAAABCAYAAADKO/rAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAABRSURBVFhH7dUxCoBADEXB5LK5/w1iIaLIrsgWNs50Sf/4WVUd8HOZGd1nCqMbGNMPrNMPrJv1cvz0A3OjfuwPvDPrxf7A7t7IlX7gmX74VsQGguw4S6+UnSYAAAAASUVORK5CYII=');">
+			<img src="titleleft.png" style="float: left;"/>
+			<img src="titleright.png" alt="" style="float: right;" />
+		</div>
+	</div>
+<!-- 制作者 Doxygen 1.8.15 -->
+  <div id="navrow1" class="tabs">
+    <ul class="tablist">
+      <li><a href="index.html"><span>首页</span></a></li>
+      <li><a href="_xE5_x8F_x91_xE7_x89_x88_xE8_xAF_xB4_xE6_x98_x8E.html"><span>发版说明</span></a></li>
+      <li><a href="_xE8_xBD_xAF_xE4_xBB_xB6_xE8_xAE_xB8_xE5_x8F_xAF.html"><span>软件许可</span></a></li>
+      <li><a href="_xE8_xBF_x90_xE8_xA1_x8C_xE7_x8E_xAF_xE5_xA2_x83.html"><span>运行环境</span></a></li>
+      <li><a href="_xE7_x89_x88_xE6_x9C_xAC_xE5_x88_x87_xE6_x8D_xA2_xE5_x92_x8C_xE5_x8D_x87_xE7_xBA_xA7.html"><span>版本切换和升级</span></a></li>
+      <li><a href="usergroup0.html"><span>编程引导</span></a></li>
+      <li><a href="modules.html"><span>接口函数</span></a></li>
+      <li><a href="usergroup3.html"><span>示例程序介绍</span></a></li>
+      <li><a href="usergroup6.html"><span>状态码</span></a></li>
+      <li><a href="usergroup8.html"><span>工具</span></a></li>
+      <li><a href="usergroup9.html"><span>常见问题</span></a></li>
+      <li><a href="_xE6_xB3_x95_xE5_xBE_x8B_xE5_xA3_xB0_xE6_x98_x8E.html"><span>法律声明</span></a></li>
+    </ul>
+  </div>
+</div><!-- top -->
+<div class="PageDoc"><div class="contents">
+<div class="textblock"><div class="header" style="margin-left:-12px;margin-top:-10px;margin-right:-8px;"> <div class="headertitle"> <div class="title">图像源：通过接口设置图像输入的方法</div> </div> </div> <div style="margin: 0 0 0 0px;"> <h2>问题描述 </h2>
+</div><div style="margin: 0 0 0 0px;"> <b>环境：</b>VM4.2及以上 + VS2013及以上<br />
+ <b>问题：</b>如何通过图像源模块接口设置输入图像？<br />
+ <h2>知识点 </h2>
+</div><div style="margin: 0 0 0 0px;"> </div><div style="margin: 0 0 0 0px;">图像源模块的图像分为8位灰度图和24位彩色图，可输出两层图像，分别为【图像源.图像】和【图像源.灰度图像】。其他模块基本只能处理8位图。</div><div style="margin: 0 0 0 0px;"> <ul>
+<li>
+图像源类型为SDK且接口传入的图像为灰度图时： <ul>
+<li>
+若未开启输出Mono8使能，图像源的【图像源.图像】有图像数据且为灰度图，【图像源.灰度图像】无图像数据； </li>
+<li>
+<p class="startli">若开启输出Mono8使能，则图像源的【图像源.图像】和【图像源.灰度图像】都有图像数据，且均为灰度图。</p>
+<p class="interli"></p>
+<img src="11.4.1.png" width="874" height="473" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+</ul>
+</li>
+<li>
+图像源类型为SDK且接口传入的图像为彩色图时： <ul>
+<li>
+若未开启输出Mono8使能，图像源的【图像源.图像】有图像数据且为彩色图，【图像源.灰度图像】无图像数据； </li>
+<li>
+<p class="startli">若开启输出Mono8使能，则图像源的【图像源.图像】和【图像源.灰度图像】都有图像数据，前者是彩色图，后者是灰度图。</p>
+<p class="interli"></p>
+<img src="11.4.2.png" width="874" height="473" alt="" class="inline"/>
+<p class="endli"></p>
+</li>
+</ul>
+</li>
+</ul>
+</div><div style="margin: 0 0 0 0px;">图像源后续连接模块的图像输入源默认为【图像源.图像】。若【图像源.图像】为灰度图，则无需调整，可直接使用；若【图像源.图像】为彩色图，则需将输入源设为【图像源.灰度图像】，否则后续模块将运行失败。</div><div style="margin: 0 0 0 0px;"> <h2>解决方法 </h2>
+</div><div style="margin: 0 0 0 0px;"> </div><div style="margin: 0 0 0 0px;">图像源选择不同的类型，操作方法有所差别。</div><div style="margin: 0 0 0 0px;"> <ul>
+<li>
+图像源选择SDK时，使用<b>SetImagePath接口</b>或<b>SetImageData接口</b>。其中SetImageData接口的参数图像类型为ImageBaseData，像素格式Pixelformat使用枚举类VMPixelFormat。 <div class="fragment"><div class="line">imageSourcTool.ModuParams.ImageSourceType = ImageSourceParam.ImageSourceTypeEnum.SDK;</div><div class="line">imageSourcTool.SetImagePath(<span class="stringliteral">&quot;E:\\VSVM4.0\\1.bmp&quot;</span>);</div><div class="line">imageSourcTool.SetImageData(imageBaseData);             <span class="comment">//参数类型为ImageBaseData</span></div></div><!-- fragment --> </li>
+<li>
+<p class="startli">图像源选择本地（LocalImage）时，此功能可实现添加单个图像。若需要添加图像文件夹，则使用<b>SetParamValue接口</b>遍历文件夹中所有图像。 </p>
+<img src="11.4.3.png" width="681" height="234" alt="" class="inline"/>
+<p class="endli"><br />
+ </p><div class="fragment"><div class="line">ImageSourceModuleTool imageSourcTool = (ImageSourceModuleTool)VmSolution.Instance[<span class="stringliteral">&quot;流程1.图像源1&quot;</span>];</div><div class="line">imageSourcTool.ModuParams.ImageSourceType = ImageSourceParam.ImageSourceTypeEnum.LocalImage;</div><div class="line"></div><div class="line"><span class="comment">//添加图片，添加同路径下的图片无效，添加效果查看：保存方案或切换流程Tab页</span></div><div class="line">imageSourceTool.AddInputImageByPath(<span class="stringliteral">&quot;D:\\3.ProjectCode\\VM4.3\\1.bmp&quot;</span>); </div><div class="line"></div><div class="line"><span class="comment">//删除图片</span></div><div class="line">imageSourceTool.DeleteInputImageByPath(<span class="stringliteral">&quot;D:\\1.bmp&quot;</span>);</div><div class="line"></div><div class="line"><span class="comment">//清空图片 </span></div><div class="line">imageSourceTool.ClearAllInputImage();</div><div class="line"></div><div class="line"><span class="comment">//加载文件夹中所有图片</span></div><div class="line">DirectoryInfo dir = <span class="keyword">new</span> DirectoryInfo(<span class="stringliteral">&quot;E:\\VSVM4.2\\图像\\新建文件夹&quot;</span>);</div><div class="line">FileInfo[] dirinfo = dir.GetFiles();</div><div class="line"><span class="keywordflow">for</span> (<span class="keywordtype">int</span> i = 0; i &lt; dirinfo.Length; i++)</div><div class="line">{</div><div class="line">     <span class="keywordtype">string</span> str = dirinfo[i].FullName;</div><div class="line">     imageSourceTool.AddInputImageByPath(str);</div><div class="line">}</div></div><!-- fragment --> </li>
+</ul>
+</div> </div></div><!-- PageDoc -->
+</div><!-- contents -->
+<!-- start footer part -->
+<div class="footer" style="text-align: right;">
+	<hr/>
+	<small></small>
+</div>
+</body>
+</html>

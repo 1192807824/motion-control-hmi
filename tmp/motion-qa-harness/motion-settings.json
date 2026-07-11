@@ -1,0 +1,40 @@
+{
+  "SimulationMode": true,
+  "CardNo": null,
+  "AxisCount": 16,
+  "PollIntervalMilliseconds": 50,
+  "DigitalInputPort": 0,
+  "DigitalOutputPort": 0,
+  "SimulationDigitalInputCount": 20,
+  "SimulationDigitalOutputCount": 20,
+  "SimulationAnalogInputCount": 8,
+  "SimulationAnalogOutputCount": 2,
+  "AnalogOutputMinimum": -10.0,
+  "AnalogOutputMaximum": 10.0,
+  "ServoEnableTimeoutMilliseconds": 1500,
+  "StopConfirmationTimeoutMilliseconds": 1000,
+  "HomeTimeoutSeconds": 5,
+  "MoveProfile": {
+    "StartVelocity": 0.0,
+    "StopVelocity": 0.0,
+    "AccelerationSeconds": 0.1,
+    "DecelerationSeconds": 0.1,
+    "STimeSeconds": 0.0,
+    "DecelerationStopSeconds": 0.1,
+    "WaitForCompletion": true,
+    "CompletionTimeoutMilliseconds": 5000,
+    "CompletionTolerance": 0.01,
+    "AbsolutePositionMode": false
+  },
+  "HomeProfile": {
+    "Enabled": true,
+    "Mode": 33,
+    "LowVelocity": 5.0,
+    "HighVelocity": 25.0,
+    "AccelerationSeconds": 0.1,
+    "DecelerationSeconds": 0.1,
+    "OffsetPosition": 0.0
+  },
+  "AxisHomeProfiles": {},
+  "HomeSequence": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+}

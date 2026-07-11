@@ -1,0 +1,74 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/xhtml;charset=gb2312"/>
+<meta http-equiv="X-UA-Compatible" content="IE=9"/>
+<link href="doxygen.css" rel="stylesheet" type="text/css"/>
+<link href="tabs.css" rel="stylesheet" type="text/css"/>
+<link href="custom-style.css" rel="stylesheet" type="text/css"/>
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="dynsections.js"></script>
+</head>
+<body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+	<div style="overflow: hidden;">
+		<div style="height: 57px;min-width: 1039px;background-size: auto 100%;background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABwgAAAABCAYAAADKO/rAAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsQAAA7EAZUrDhsAAABRSURBVFhH7dUxCoBADEXB5LK5/w1iIaLIrsgWNs50Sf/4WVUd8HOZGd1nCqMbGNMPrNMPrJv1cvz0A3OjfuwPvDPrxf7A7t7IlX7gmX74VsQGguw4S6+UnSYAAAAASUVORK5CYII=');">
+			<img src="titleleft.png" style="float: left;"/>
+			<img src="titleright.png" alt="" style="float: right;" />
+		</div>
+	</div>
+<!-- 制作者 Doxygen 1.8.15 -->
+  <div id="navrow1" class="tabs">
+    <ul class="tablist">
+      <li><a href="index.html"><span>首页</span></a></li>
+      <li><a href="_xE5_x8F_x91_xE7_x89_x88_xE8_xAF_xB4_xE6_x98_x8E.html"><span>发版说明</span></a></li>
+      <li><a href="_xE8_xBD_xAF_xE4_xBB_xB6_xE8_xAE_xB8_xE5_x8F_xAF.html"><span>软件许可</span></a></li>
+      <li><a href="_xE8_xBF_x90_xE8_xA1_x8C_xE7_x8E_xAF_xE5_xA2_x83.html"><span>运行环境</span></a></li>
+      <li><a href="_xE7_x89_x88_xE6_x9C_xAC_xE5_x88_x87_xE6_x8D_xA2_xE5_x92_x8C_xE5_x8D_x87_xE7_xBA_xA7.html"><span>版本切换和升级</span></a></li>
+      <li><a href="usergroup0.html"><span>编程引导</span></a></li>
+      <li><a href="modules.html"><span>接口函数</span></a></li>
+      <li><a href="usergroup3.html"><span>示例程序介绍</span></a></li>
+      <li><a href="usergroup6.html"><span>状态码</span></a></li>
+      <li><a href="usergroup8.html"><span>工具</span></a></li>
+      <li><a href="usergroup9.html"><span>常见问题</span></a></li>
+      <li><a href="_xE6_xB3_x95_xE5_xBE_x8B_xE5_xA3_xB0_xE6_x98_x8E.html"><span>法律声明</span></a></li>
+    </ul>
+  </div>
+</div><!-- top -->
+<div class="PageDoc"><div class="contents">
+<div class="textblock"><div class="header" style="margin-left:-12px;margin-top:-10px;margin-right:-8px;"> <div class="headertitle"> <div class="title">全局相机：获取全局相机列表和设置相机参数的方法</div> </div> </div> <div style="margin: 0 0 0 0px;"> <h2>问题描述 </h2>
+</div><div style="margin: 0 0 0 0px;"> <b>环境：</b>VM4.2及以上 + VS2013及以上<br />
+ <b>问题：</b>如何获取方案中所有全局相机的连接状态，并设置全局相机的基本参数？例如：在流程运行时查看全局相机1和2的连接状态，并设置全局相机1的曝光和增益。<br />
+ </div><div style="margin: 0 0 0 0px;"><img src="11.10.1.png" width="530" height="216" alt="" class="inline"/>
+</div><div style="margin: 0 0 0 0px;"> <h2>解决方法 </h2>
+</div><div style="margin: 0 0 0 0px;"> <ol>
+<li>
+<b>获取方案中所有全局相机的连接状态：</b>V4.2.1版本新增获取相机连接状态的API，通过调用 GlobalCameraTool 类中的 bIsCameraConnect( )可获取相机的连接状态。若需查看方案中所有全局相机模块的连接状态，可参考以下的代码。 <ul>
+<li>
+<p class="startli">在程序初始化时，启动查看相机状态的线程： </p><div class="fragment"><div class="line"><span class="comment">//获取流程中所有全局相机模块</span></div><div class="line">List&lt;GlobalCameraModuleTool&gt; glCameralist = <span class="keyword">new</span> List&lt;GlobalCameraModuleTool&gt;();</div><div class="line">List&lt;VmModule&gt; vmModules = <span class="keyword">new</span> List&lt;VmModule&gt;();</div><div class="line">VmSolution.Instance.GetAllModule(vmModules);</div><div class="line"><span class="keywordflow">foreach</span>(VmModule module <span class="keywordflow">in</span> vmModules)</div><div class="line">{</div><div class="line">    <span class="keywordflow">if</span>(module.GetType()==typeof(GlobalCameraModuleTool))</div><div class="line">    {</div><div class="line">        glCameralist.Add((GlobalCameraModuleTool)module);</div><div class="line">    }</div><div class="line">}</div><div class="line"></div><div class="line"><span class="comment">//启动全局相机连接状态监控线程</span></div><div class="line">Thread watchThread = <span class="keyword">new</span> Thread(<span class="keyword">new</span> ParameterizedThreadStart(CameraConnectionWatchDog));</div><div class="line">watchThread.IsBackground = <span class="keyword">true</span>;</div><div class="line">watchThread.Start(glCameralist);</div></div><!-- fragment --><p class="endli"></p>
+</li>
+<li>
+查看相机连接状态的线程函数： <div class="fragment"><div class="line"><span class="keyword">public</span> <span class="keywordtype">void</span> CameraConnectionWatchDog(<span class="keywordtype">object</span> obj)</div><div class="line">{</div><div class="line">    List&lt;GlobalCameraModuleTool&gt; globalCameraToolList = (List&lt;GlobalCameraModuleTool&gt;)obj;</div><div class="line">    <span class="keywordtype">bool</span>[] isCameraConected = <span class="keyword">new</span> <span class="keywordtype">bool</span>[globalCameraToolList.Count];</div><div class="line">    <span class="keywordflow">while</span> (<span class="keyword">true</span>)</div><div class="line">    {</div><div class="line">        <span class="keywordflow">try</span></div><div class="line">        {</div><div class="line">            <span class="comment">//获取流程中所有已配置的连接状态</span></div><div class="line">            <span class="keywordflow">foreach</span> (var cameraTool <span class="keywordflow">in</span> globalCameraToolList)</div><div class="line">            {</div><div class="line">                <span class="keywordflow">if</span> (cameraTool.bIsCameraConnect() == <span class="keyword">false</span>)</div><div class="line">                {</div><div class="line">                    MessageBox.Show(<span class="keywordtype">string</span>.Format($<span class="stringliteral">&quot;警告: {cameraTool.Name} 已经离线！&quot;</span>));</div><div class="line">                }</div><div class="line">            }</div><div class="line">        }</div><div class="line">        <span class="keywordflow">catch</span> (VmException ex)</div><div class="line">        {</div><div class="line">            MessageBox.Show(<span class="stringliteral">&quot;发生致命错误，错误码:&quot;</span> + ex.errorCode);</div><div class="line">        }</div><div class="line">        Thread.Sleep(2000);</div><div class="line">    }</div><div class="line">}</div></div><!-- fragment --> </li>
+</ul>
+</li>
+<li>
+<b>设置全局相机的参数：</b>通过调用 GlobalCameraParam 类的方法和属性设置。以设置全局相机1的曝光和增益为例，相关代码如下： <div class="fragment"><div class="line">GlobalCameraModuleTool cameraModuleTool = VmSolution.Instance[<span class="stringliteral">&quot;全局相机1&quot;</span>] as GlobalCameraModuleTool;</div><div class="line">GlobalCameraParam globalCameraParam = cameraModuleTool.ModuParams;</div><div class="line">globalCameraParam.ExposureTime = 5000;</div><div class="line">globalCameraParam.Gain = 5.0;</div></div><!-- fragment --> </li>
+</ol>
+</div><div style="margin: 0 0 0 0px;"><dl class="section attention"><dt>注意</dt><dd>全局相机使用时若没有添加引用的工具，需进行以下操作：</dd></dl>
+<ol>
+<li>
+手动添加 GlobalCameraModuleCs.dll 引用。 </li>
+<li>
+将引用属性的“复制到本地”选项设置为False。 </li>
+<li>
+在程序代码文件中添加命名空间的引用。 <div class="fragment"><div class="line"><span class="keyword">using</span> GlobalCameraModuleCsl;</div></div><!-- fragment --> </li>
+</ol>
+</div> </div></div><!-- PageDoc -->
+</div><!-- contents -->
+<!-- start footer part -->
+<div class="footer" style="text-align: right;">
+	<hr/>
+	<small></small>
+</div>
+</body>
+</html>

@@ -126,13 +126,6 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
 
-        <Style x:Key="PresetButton" TargetType="Button" BasedOn="{StaticResource FlatButton}">
-            <Setter Property="Width" Value="62" />
-            <Setter Property="Height" Value="48" />
-            <Setter Property="Margin" Value="4,0" />
-            <Setter Property="Padding" Value="4" />
-        </Style>
-
         <Style TargetType="RadioButton">
             <Setter Property="Foreground" Value="{StaticResource LightText}" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -280,6 +273,8 @@
                                              VerticalContentAlignment="Center"
                                              ToolTip="双击修改轴名称"
                                              MouseDoubleClick="AxisName_MouseDoubleClick"
+                                             PreviewTextInput="AxisName_PreviewTextInput"
+                                             DataObject.Pasting="AxisName_Pasting"
                                              LostFocus="AxisName_LostFocus"
                                              KeyDown="AxisName_KeyDown">
                                         <TextBox.Style>
@@ -339,18 +334,6 @@
                         </Grid>
                     </Border>
 
-                    <ProgressBar x:Name="AxisSwitchProgressBar"
-                                 Grid.Row="0"
-                                 Panel.ZIndex="2"
-                                 Height="4"
-                                 VerticalAlignment="Bottom"
-                                 IsIndeterminate="True"
-                                 IsHitTestVisible="False"
-                                 Foreground="#62B5FF"
-                                 Background="Transparent"
-                                 Visibility="Collapsed"
-                                 AutomationProperties.Name="正在切换轴" />
-
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -366,11 +349,11 @@
                         <Grid x:Name="JogModePanel">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="100" />
+                                <RowDefinition Height="92" />
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="250" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
@@ -387,46 +370,38 @@
                                     PreviewKeyDown="JogHold_PreviewKeyDown"
                                     PreviewKeyUp="JogHold_PreviewKeyUp">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <Image Width="84" Height="84" Source="/Assets/Icons/Motion/jog-arrow-v2.png" Margin="0,0,14,0" RenderTransformOrigin="0.5,0.5">
+                                        <Image Width="64" Height="64" Source="/Assets/Icons/Motion/jog-arrow-v2.png" Margin="0,0,16,0" RenderTransformOrigin="0.5,0.5">
                                             <Image.RenderTransform><ScaleTransform ScaleX="-1" /></Image.RenderTransform>
                                     </Image>
-                                    <TextBlock Text="按住负向运行" FontSize="22" FontWeight="Bold" VerticalAlignment="Center" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="负向 JOG" FontSize="20" FontWeight="Bold" />
+                                        <TextBlock Text="按住运行 · 松开停止" Foreground="#BFD7E8" FontSize="11" Margin="0,4,0,0" />
+                                    </StackPanel>
                                 </StackPanel>
                             </Button>
 
-                            <StackPanel Grid.Row="0" Grid.Column="1" Margin="14,0" VerticalAlignment="Center">
-                                <TextBlock Text="JOG 速度" Foreground="#D8E4EC" FontSize="13" HorizontalAlignment="Center" />
-                                <Grid Margin="0,8,0,12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="50" />
-                                    </Grid.ColumnDefinitions>
+                            <Border Grid.Row="0" Grid.Column="1"
+                                    Margin="20,28"
+                                    Padding="16"
+                                    VerticalAlignment="Center"
+                                    Background="#1A344B"
+                                    BorderBrush="#345269"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <StackPanel>
+                                    <TextBlock Text="JOG 速度" Foreground="#D8E4EC" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
                                     <TextBox Text="{Binding SelectedAxis.JogSpeed, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}"
                                              Style="{StaticResource InputBox}"
                                              IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}"
-                                             FontSize="20"
-                                             Height="42"
+                                             FontSize="22"
+                                             Height="46"
+                                             Margin="0,10,0,8"
+                                             TextAlignment="Center"
+                                             HorizontalContentAlignment="Center"
                                              LostFocus="AxisSettingsTextBox_LostFocus" />
-                                    <TextBlock Grid.Column="1" Foreground="#AFC0CD" Margin="7,0,0,0" VerticalAlignment="Center">
-                                        <Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s" />
-                                    </TextBlock>
-                                </Grid>
-                                <TextBlock Text="速度预设" Foreground="#AFC0CD" FontSize="12" HorizontalAlignment="Center" Margin="0,0,0,6" />
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                    <Button x:Name="LowSpeedPresetButton" Tag="5" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}" Click="SpeedPreset_Click">
-                                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource PresetButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedAxis.JogSpeed}" Value="5"><Setter Property="Background" Value="#0D6EE8" /></DataTrigger></Style.Triggers></Style></Button.Style>
-                                        <TextBlock Text="低速&#x0a;5" TextAlignment="Center" />
-                                    </Button>
-                                    <Button x:Name="DebugSpeedPresetButton" Tag="25" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}" Click="SpeedPreset_Click">
-                                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource PresetButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedAxis.JogSpeed}" Value="25"><Setter Property="Background" Value="#0D6EE8" /></DataTrigger></Style.Triggers></Style></Button.Style>
-                                        <TextBlock Text="调试&#x0a;25" TextAlignment="Center" />
-                                    </Button>
-                                    <Button x:Name="HighSpeedPresetButton" Tag="100" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}" Click="SpeedPreset_Click">
-                                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource PresetButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedAxis.JogSpeed}" Value="100"><Setter Property="Background" Value="#0D6EE8" /></DataTrigger></Style.Triggers></Style></Button.Style>
-                                        <TextBlock Text="高速&#x0a;100" TextAlignment="Center" />
-                                    </Button>
+                                    <TextBlock Text="units（脉冲）/s" Foreground="#AFC0CD" FontSize="12" HorizontalAlignment="Center" />
                                 </StackPanel>
-                            </StackPanel>
+                            </Border>
 
                             <Button x:Name="JogPositiveButton" Grid.Row="0" Grid.Column="2"
                                     Tag="1"
@@ -441,50 +416,49 @@
                                     PreviewKeyDown="JogHold_PreviewKeyDown"
                                     PreviewKeyUp="JogHold_PreviewKeyUp">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                    <TextBlock Text="按住正向运行" FontSize="22" FontWeight="Bold" VerticalAlignment="Center" />
-                                        <Image Width="84" Height="84" Source="/Assets/Icons/Motion/jog-arrow-v2.png" Margin="14,0,0,0" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="正向 JOG" FontSize="20" FontWeight="Bold" HorizontalAlignment="Right" />
+                                        <TextBlock Text="按住运行 · 松开停止" Foreground="#BFD7E8" FontSize="11" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                        <Image Width="64" Height="64" Source="/Assets/Icons/Motion/jog-arrow-v2.png" Margin="16,0,0,0" />
                                 </StackPanel>
                             </Button>
 
-                            <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="132" />
-                                    <ColumnDefinition Width="10" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="10" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="10" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="10" />
-                                    <ColumnDefinition Width="132" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" VerticalAlignment="Center" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}">
-                                    <TextBlock Text="加速时间 (ms)" Style="{StaticResource MutedLabel}" HorizontalAlignment="Center" />
-                                    <TextBox Text="{Binding Tuning.AccelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" />
-                                </StackPanel>
-                                <Button Grid.Column="2" Style="{StaticResource FlatButton}" Height="58" Background="#52697B" AutomationProperties.Name="当前运动轴减速停止" Click="LocalStop_Click">
+                            <Border Grid.Row="1"
+                                    Grid.Column="0"
+                                    Grid.ColumnSpan="3"
+                                    Margin="20,8,20,0"
+                                    Padding="24,14,24,0"
+                                    BorderBrush="#345269"
+                                    BorderThickness="0,1,0,0">
+                                <Grid MaxWidth="780" HorizontalAlignment="Stretch">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0" Style="{StaticResource FlatButton}" Height="56" Background="#405A70" AutomationProperties.Name="当前运动轴减速停止" Click="LocalStop_Click">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <Image Width="36" Height="36" Source="/Assets/Icons/Motion/deceleration-stop.png" Margin="0,0,10,0" />
-                                        <TextBlock Text="单轴减速停" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                                        <Image Width="26" Height="26" Source="/Assets/Icons/Motion/deceleration-stop.png" Margin="0,0,9,0" />
+                                        <TextBlock Text="单轴减速停" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
-                                <Button x:Name="JogImmediateStopButton" Grid.Column="4" Style="{StaticResource FlatButton}" Height="58" Background="#E97906" AutomationProperties.Name="当前运动轴立即停止" Click="ImmediateStop_Click">
+                                <Button x:Name="JogImmediateStopButton" Grid.Column="2" Style="{StaticResource FlatButton}" Height="56" Background="#C86508" AutomationProperties.Name="当前运动轴立即停止" Click="ImmediateStop_Click">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <Image Width="34" Height="34" Source="/Assets/Icons/Motion/emergency-stop.png" Margin="0,0,8,0" />
-                                        <TextBlock Text="单轴立即停" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                                        <Image Width="25" Height="25" Source="/Assets/Icons/Motion/emergency-stop.png" Margin="0,0,8,0" />
+                                        <TextBlock Text="单轴立即停" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
-                                <Button Grid.Column="6" Style="{StaticResource FlatButton}" Height="58" Background="{StaticResource DangerRed}" AutomationProperties.Name="全轴急停" Click="StopAll_Click">
+                                <Button Grid.Column="4" Style="{StaticResource FlatButton}" Height="56" Background="{StaticResource DangerRed}" AutomationProperties.Name="全轴急停" Click="StopAll_Click">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <Image Width="36" Height="36" Source="/Assets/Icons/Motion/emergency-stop.png" Margin="0,0,8,0" />
-                                        <TextBlock Text="全轴急停" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                                        <Image Width="25" Height="25" Source="/Assets/Icons/Motion/emergency-stop.png" Margin="0,0,8,0" />
+                                        <TextBlock Text="全轴急停" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
-                                <StackPanel Grid.Column="8" VerticalAlignment="Center" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}">
-                                    <TextBlock Text="减速时间 (ms)" Style="{StaticResource MutedLabel}" HorizontalAlignment="Center" />
-                                    <TextBox Text="{Binding Tuning.DecelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" />
-                                </StackPanel>
-                            </Grid>
+                                </Grid>
+                            </Border>
                         </Grid>
 
                         <Grid x:Name="FixedModePanel" Visibility="Collapsed">
@@ -515,11 +489,11 @@
                                         <TextBlock Grid.Column="2" Text="{Binding SelectedAxis.Unit}" Foreground="#AFC0CD" Margin="8,0,0,0" VerticalAlignment="Center" />
                                     </Grid>
                                     <Grid Grid.Row="3">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="90" /><ColumnDefinition Width="*" /><ColumnDefinition Width="52" /></Grid.ColumnDefinitions>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="90" /><ColumnDefinition Width="*" /><ColumnDefinition Width="110" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="运行速度" Style="{StaticResource MutedLabel}" />
                                         <TextBox Grid.Column="1" Text="{Binding SelectedAxis.JogSpeed, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}" LostFocus="AxisSettingsTextBox_LostFocus" />
                                         <TextBlock Grid.Column="2" Foreground="#AFC0CD" Margin="8,0,0,0" VerticalAlignment="Center">
-                                            <Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s" />
+                                            <Run Text="units（脉冲）/s" />
                                         </TextBlock>
                                     </Grid>
                                     <Grid Grid.Row="4">
@@ -591,8 +565,8 @@
                                     </DockPanel>
                                     <UniformGrid Grid.Row="1" Columns="4" Rows="2" Height="150" VerticalAlignment="Top" Margin="-6,14,-6,0">
                                         <StackPanel Margin="6"><TextBlock Text="回零模式" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding HomeTuning.Mode, ElementName=Root, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
-                                        <StackPanel Margin="6"><TextBlock Style="{StaticResource MutedLabel}"><Run Text="低速 (" /><Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s)" /></TextBlock><TextBox Text="{Binding HomeTuning.LowVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
-                                        <StackPanel Margin="6"><TextBlock Style="{StaticResource MutedLabel}"><Run Text="高速 (" /><Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s)" /></TextBlock><TextBox Text="{Binding HomeTuning.HighVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
+                                        <StackPanel Margin="6"><TextBlock Text="低速 (units（脉冲）/s)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding HomeTuning.LowVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
+                                        <StackPanel Margin="6"><TextBlock Text="高速 (units（脉冲）/s)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding HomeTuning.HighVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
                                         <StackPanel Margin="6"><TextBlock Style="{StaticResource MutedLabel}"><Run Text="偏移 (" /><Run Text="{Binding SelectedAxis.Unit}" /><Run Text=")" /></TextBlock><TextBox Text="{Binding HomeTuning.OffsetPosition, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
                                         <StackPanel Margin="6"><TextBlock Text="加速时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding HomeTuning.AccelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
                                         <StackPanel Margin="6"><TextBlock Text="减速时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding HomeTuning.DecelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="HomeProfile_Changed" /></StackPanel>
@@ -641,7 +615,7 @@
                     <Grid Grid.Row="3">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock Text="当前速度" Style="{StaticResource StatusRowLabel}" />
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedAxis.DisplaySpeed, TargetNullValue=--}" Style="{StaticResource StatusValue}" /><TextBlock Foreground="#B9C9D5" VerticalAlignment="Bottom" Margin="5,0,0,7"><Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s" /></TextBlock></StackPanel>
+                        <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedAxis.DisplaySpeed, TargetNullValue=--}" Style="{StaticResource StatusValue}" HorizontalAlignment="Right" /><TextBlock Text="units（脉冲）/s" Foreground="#B9C9D5" FontSize="10" HorizontalAlignment="Right" Margin="0,-3,0,0" /></StackPanel>
                     </Grid>
                     <Border Grid.Row="4" Background="#345269" />
                     <StackPanel Grid.Row="5" Margin="0,8,0,0">
@@ -662,7 +636,10 @@
 
             <Expander Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" IsExpanded="True" Background="#162F45" BorderBrush="#345269" BorderThickness="1">
                 <Expander.Header>
-                    <TextBlock Text="运动参数" Foreground="#E6EEF4" FontWeight="Bold" Margin="8,5" />
+                    <TextBlock Foreground="#E6EEF4" Margin="8,5">
+                        <Run Text="运动参数" FontWeight="Bold" />
+                        <Run Text="  ·  速度单位：units（脉冲）/s" Foreground="#8FA7B8" FontSize="11" />
+                    </TextBlock>
                 </Expander.Header>
                 <Grid Margin="10,30,10,10" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}">
                     <Grid.ColumnDefinitions>
@@ -674,9 +651,9 @@
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="76" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0"><TextBlock Style="{StaticResource MutedLabel}"><Run Text="起始速度 (" /><Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s)" /></TextBlock><TextBox Text="{Binding Tuning.StartVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
-                    <StackPanel Grid.Column="2"><TextBlock Style="{StaticResource MutedLabel}"><Run Text="运行速度 (" /><Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s)" /></TextBlock><TextBox Text="{Binding SelectedAxis.JogSpeed, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="AxisSettingsTextBox_LostFocus" /></StackPanel>
-                    <StackPanel Grid.Column="4"><TextBlock Style="{StaticResource MutedLabel}"><Run Text="停止速度 (" /><Run Text="{Binding SelectedAxis.Unit}" /><Run Text="/s)" /></TextBlock><TextBox Text="{Binding Tuning.StopVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
+                    <StackPanel Grid.Column="0"><TextBlock Text="起始速度" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.StartVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
+                    <StackPanel Grid.Column="2"><TextBlock Text="运行速度" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding SelectedAxis.JogSpeed, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="AxisSettingsTextBox_LostFocus" /></StackPanel>
+                    <StackPanel Grid.Column="4"><TextBlock Text="停止速度" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.StopVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
                     <StackPanel Grid.Column="6"><TextBlock Text="加速时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.AccelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
                     <StackPanel Grid.Column="8"><TextBlock Text="减速时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.DecelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
                     <StackPanel Grid.Column="10"><TextBlock Text="S 曲线时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.STimeMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
@@ -743,5 +720,40 @@
         </Grid>
 
         <DataGrid x:Name="AxisDataGrid" Visibility="Collapsed" ItemsSource="{Binding Axes}" SelectedItem="{Binding SelectedAxis}" />
+
+        <Border x:Name="AxisSwitchOverlay"
+                Grid.RowSpan="2"
+                Panel.ZIndex="100"
+                Background="#9910263A"
+                Visibility="Collapsed"
+                AutomationProperties.Name="正在切换轴，请稍候">
+            <Border Width="340"
+                    Padding="28,24"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="#F2163047"
+                    BorderBrush="#62B5FF"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="正在切换轴"
+                               Foreground="White"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="正在载入运动参数，请稍候…"
+                               Foreground="#AFC0CD"
+                               FontSize="12"
+                               Margin="0,7,0,16"
+                               HorizontalAlignment="Center" />
+                    <ProgressBar x:Name="AxisSwitchProgressBar"
+                                 Height="6"
+                                 IsIndeterminate="True"
+                                 IsHitTestVisible="False"
+                                 Foreground="#62B5FF"
+                                 Background="#294A64" />
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </UserControl>
