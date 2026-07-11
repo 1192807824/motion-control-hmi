@@ -7,7 +7,7 @@
 
 | 功能 | 实际接口 | 关键规则 |
 | --- | --- | --- |
-| 初始化与选卡 | `dmc_board_init`, `dmc_get_CardInfList`, `dmc_get_total_axes` | 不假设卡号为 0，默认选择检测列表第一张卡 |
+| 初始化与选卡 | `dmc_board_init`, `dmc_get_CardInfList`, `nmc_get_total_axes` | EtherCAT 轴数必须使用 `nmc_get_total_axes`；`dmc_get_total_axes` 只返回本地脉冲轴数，可能为 0 |
 | EtherCAT 状态 | `nmc_get_errcode(card, 2, ...)` | 总线错误码必须为 0 才允许使能和运动 |
 | 轴使能/解除 | `nmc_set_axis_enable`, `nmc_set_axis_disable` | 使能后等待状态机变为 4（OP_ENABLE） |
 | 相对/绝对定位 | `dmc_set_profile_unit`, `dmc_set_s_profile`, `dmc_pmove_unit` | 相对位置使用 `posi_mode=0`；绝对位置使用 `posi_mode=1`，目标可为负数或零 |

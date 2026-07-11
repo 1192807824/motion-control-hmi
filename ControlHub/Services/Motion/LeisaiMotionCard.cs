@@ -84,11 +84,11 @@ public sealed class LeisaiMotionCard : IMotionCard
                 }
 
                 uint totalAxes = 0;
-                EnsureSuccess(LeisaiNative.dmc_get_total_axes(_cardNo, ref totalAxes), "dmc_get_total_axes");
+                EnsureSuccess(LeisaiNative.nmc_get_total_axes(_cardNo, ref totalAxes), "nmc_get_total_axes");
                 AxisCount = checked((int)totalAxes);
                 if (AxisCount <= 0)
                 {
-                    throw new MotionCardException($"卡号 {_cardNo} 未返回有效轴数。", "dmc_get_total_axes");
+                    throw new MotionCardException($"卡号 {_cardNo} 未返回有效 EtherCAT 轴数。", "nmc_get_total_axes");
                 }
 
                 ushort digitalInputs = 0;
@@ -367,7 +367,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             {
                 throw new MotionCardException(
                     $"控制卡返回 {AxisCount} 个硬件轴，超过逐轴接口可安全寻址的 0..{AllEtherCatAxesSentinel - 1} 范围。",
-                    "dmc_get_total_axes");
+                    "nmc_get_total_axes");
             }
 
             var configuredAxes = Enumerable.Range(0, Math.Min(AxisCount, _options.AxisCount))

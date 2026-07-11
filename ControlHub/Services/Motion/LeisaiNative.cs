@@ -22,6 +22,9 @@ internal static class LeisaiNative
     internal static extern short dmc_get_total_axes(ushort cardNo, ref uint totalAxes);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_get_total_axes(ushort cardNo, ref uint totalAxes);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_get_total_ionum(ushort cardNo, ref ushort totalInputs, ref ushort totalOutputs);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
