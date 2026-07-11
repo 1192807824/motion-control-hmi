@@ -13,7 +13,7 @@
 | 相对/绝对定位 | `dmc_set_profile_unit`, `dmc_set_s_profile`, `dmc_pmove_unit` | 相对位置使用 `posi_mode=0`；绝对位置使用 `posi_mode=1`，目标可为负数或零 |
 | 连续 JOG | `dmc_set_profile_unit`, `dmc_set_s_profile`, `dmc_vmove` | 按住正/负方向运行；松开、失焦或窗口停用立即发送单轴减速停止 |
 | 完成等待与到位 | `dmc_check_done`, `dmc_get_position_unit`, `dmc_get_encoder_unit`, `dmc_get_target_position_unit` | 停止状态为 1，并同时校验指令/反馈与目标误差；超时会进入安全停止 |
-| 总线轴回零 | `nmc_set_home_profile`, `nmc_home_move`, `dmc_get_home_result` | 不使用脉冲轴的 `dmc_home_move` |
+| 总线轴回零 | `nmc_set_home_profile`, `dmc_home_move`, `dmc_get_home_result` | 按 E3064S 现场控制台验证通过的组合配置并启动回零 |
 | 位置与速度 | `dmc_get_encoder_unit`, `dmc_get_position_unit`, `dmc_get_target_position_unit`, `dmc_read_current_speed_unit` | 界面当前位置显示编码器反馈值 |
 | 状态与联锁 | `nmc_get_axis_state_machine`, `nmc_get_axis_errcode`, `dmc_axis_io_status_ex`, `dmc_get_stop_reason` | 读取 ALM、EL+/EL-、EMG、SL+/SL- 并阻止危险方向运动 |
 | 停止 | `dmc_set_dec_stop_time`, `dmc_stop`, `dmc_emg_stop` | JOG 松开/单轴减速停使用 `dmc_stop(...,0)`；单轴立即停使用 `dmc_stop(...,1)`；全轴急停使用 `dmc_emg_stop`；停止确认超时自动升级全轴急停 |
@@ -40,7 +40,7 @@
    - `AxisCount` 只表示本程序允许操作的前 N 个轴，不会因为控制卡支持 64 轴而自动全部使能。
    - `MoveProfile` 的时间单位是秒，速度单位是配置脉冲当量后的 `unit/s`。
    - 轴名称可在轴列表中双击修改，正常失焦、回车或关闭程序后持久保存。
-   - 轴 0 已按现场读取值预置运动参数：运行速度 10000、加减速 0.1 s、S 时间 0、减速停止 0.001 s、回零模式 1、回零低/高速 100/1000。启动时不写轴参数；运动曲线只在 JOG/定位命令前下发，回零曲线只在回零命令前下发。日志中的当量、限位和 IO 映射属于控制器现有配置，程序不会在启动时覆盖。
+   - 轴 0 已按现场成功回零日志预置运动参数：运行速度 10000、加减速 0.1 s、S 时间 0、减速停止 0.001 s、回零模式 33、回零低/高速 10000/40000。启动时不写轴参数；运动曲线只在 JOG/定位命令前下发，回零曲线只在回零命令前下发。日志中的当量、限位和 IO 映射属于控制器现有配置，程序不会在启动时覆盖。
 5. 在“回原点”页按当前轴填写回零模式、低速、高速、加减速、偏移和回零次序。回零模式可直接输入控制器要求的数字；
    “全局超时”供所有轴共用。确认无误后再勾选“启用当前轴回零”。回零次序 `0` 表示不参加多轴顺序回零，`1..N`
    表示明确的执行先后。模式、速度、加减速、偏移、启用状态和顺序都会保存；正常关闭后下次打开自动恢复。

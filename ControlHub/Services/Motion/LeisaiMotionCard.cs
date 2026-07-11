@@ -470,7 +470,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                     profile.DecelerationSeconds,
                     profile.OffsetPosition),
                 "nmc_set_home_profile");
-            EnsureSuccess(LeisaiNative.nmc_home_move(_cardNo, axis), "nmc_home_move");
+            EnsureSuccess(LeisaiNative.dmc_home_move(_cardNo, axis), "dmc_home_move");
         }
     }
 

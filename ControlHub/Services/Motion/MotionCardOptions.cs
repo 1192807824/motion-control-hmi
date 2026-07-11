@@ -49,26 +49,29 @@ public sealed class MotionCardOptions
 
     public void ApplyMigrations()
     {
-        if (ConfigurationVersion >= 2)
+        if (ConfigurationVersion >= 3)
         {
             return;
         }
 
-        var previousMoveProfiles = AxisMoveProfiles.ToArray();
-        AxisMoveProfiles.Clear();
-        foreach (var item in previousMoveProfiles)
+        if (ConfigurationVersion < 2)
         {
-            AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
-        }
+            var previousMoveProfiles = AxisMoveProfiles.ToArray();
+            AxisMoveProfiles.Clear();
+            foreach (var item in previousMoveProfiles)
+            {
+                AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+            }
 
-        var previousHomeProfiles = AxisHomeProfiles.ToArray();
-        AxisHomeProfiles.Clear();
-        foreach (var item in previousHomeProfiles)
-        {
-            AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
-        }
+            var previousHomeProfiles = AxisHomeProfiles.ToArray();
+            AxisHomeProfiles.Clear();
+            foreach (var item in previousHomeProfiles)
+            {
+                AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+            }
 
-        HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
+            HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
+        }
 
         AxisMoveProfiles[0] = new MotionMoveProfile
         {
@@ -86,14 +89,14 @@ public sealed class MotionCardOptions
         AxisHomeProfiles[0] = new MotionHomeProfile
         {
             Enabled = true,
-            Mode = 1,
-            LowVelocity = 100,
-            HighVelocity = 1000,
+            Mode = 33,
+            LowVelocity = 10000,
+            HighVelocity = 40000,
             AccelerationSeconds = 0.1,
             DecelerationSeconds = 0.1,
             OffsetPosition = 0
         };
-        ConfigurationVersion = 2;
+        ConfigurationVersion = 3;
     }
 
     public MotionHomeProfile GetHomeProfile(int hardwareAxisNo)

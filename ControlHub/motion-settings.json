@@ -1,5 +1,5 @@
 {
-  "ConfigurationVersion": 2,
+  "ConfigurationVersion": 3,
   "SimulationMode": false,
   "CardNo": null,
   "AxisCount": 16,
@@ -53,9 +53,9 @@
   "AxisHomeProfiles": {
     "0": {
       "Enabled": true,
-      "Mode": 1,
-      "LowVelocity": 100.0,
-      "HighVelocity": 1000.0,
+      "Mode": 33,
+      "LowVelocity": 10000.0,
+      "HighVelocity": 40000.0,
       "AccelerationSeconds": 0.1,
       "DecelerationSeconds": 0.1,
       "OffsetPosition": 0.0

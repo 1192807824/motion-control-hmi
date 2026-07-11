@@ -63,7 +63,7 @@ internal static class LeisaiNative
         double offsetPosition);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
-    internal static extern short nmc_home_move(ushort cardNo, ushort axis);
+    internal static extern short dmc_home_move(ushort cardNo, ushort axis);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_get_home_result(ushort cardNo, ushort axis, ref ushort state);

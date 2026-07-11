@@ -148,7 +148,7 @@ When adding real device/runtime data:
 - Keep real hardware as the default and retain explicit simulation mode for local UI development.
 - UI axis numbers are 1-based; `AxisStatus.HardwareAxisNo` maps them to the card's 0-based axes.
 - EtherCAT servo state is read from `nmc_get_axis_state_machine`; do not use a UI flag as hardware truth.
-- EtherCAT homing uses `nmc_set_home_profile`, `nmc_home_move`, and `dmc_get_home_result`.
+- EtherCAT homing on the commissioned E3064S uses `nmc_set_home_profile`, `dmc_home_move`, and `dmc_get_home_result`.
 
 ## UI guidance for this project
 

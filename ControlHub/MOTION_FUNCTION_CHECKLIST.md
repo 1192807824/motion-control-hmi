@@ -14,7 +14,7 @@
 | 相对定距 | `MoveRelative` | `dmc_pmove_unit(..., posi_mode=0)` | 距离必须为非零有限值；正负号决定方向 |
 | 绝对定位 | `MoveAbsolute` | `dmc_pmove_unit(..., posi_mode=1)` | 目标允许正数、负数或零；先按当前位置判断方向和限位 |
 | 等待运动完成 | `WaitForPositionMoveAsync` / 后台跟踪 | `dmc_check_done`, `dmc_get_position_unit`, `dmc_get_encoder_unit`, `dmc_get_target_position_unit` | 可选择等待/不等待；停止后还要满足目标误差；超时进入安全停止 |
-| 当前轴回原点 | `Home` | `nmc_set_home_profile`, `nmc_home_move`, `dmc_get_home_result` | 使用每轴回零配置；完成必须同时满足已回零、轴已停止、无报警/急停 |
+| 当前轴回原点 | `Home` | `nmc_set_home_profile`, `dmc_home_move`, `dmc_get_home_result` | 使用每轴回零配置；按 E3064S 现场验证流程启动；完成必须同时满足已回零、轴已停止、无报警/急停 |
 | 按次序回原点 | `HomeAll_Click` | 同上 | 只执行界面中用非零回零次序明确加入 `HomeSequence` 的轴；空序列禁止执行，不猜测轴号顺序；逐轴预检、逐轴等待，不自动使能 |
 | 单轴减速停止 | `StopAxis(immediate:false)` | `dmc_stop(..., stop_mode=0)` | JOG 松开及灰色“单轴减速停”按钮使用；之后持续确认停止 |
 | 单轴立即停止 | `StopAxis(immediate:true)` | `dmc_stop(..., stop_mode=1)` | 橙色“单轴立即停”按钮；只停止当前活动/选中轴，之后持续确认停止 |
