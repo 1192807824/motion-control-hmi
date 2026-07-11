@@ -73,7 +73,7 @@ public sealed class AxisSettingsStore
 
         var settings = axisArray.ToDictionary(
             axis => axis.AxisNo,
-            axis => new AxisSettings(axis.Name, axis.JogSpeed, axis.JogDistance));
+            axis => new AxisSettings(axis.Name, axis.JogSpeed, axis.JogDistance, ConfigurationVersion: 2));
         var directory = Path.GetDirectoryName(_filePath);
         if (!string.IsNullOrWhiteSpace(directory))
         {
@@ -110,8 +110,16 @@ public sealed class AxisSettingsStore
 
     private static IReadOnlyDictionary<int, AxisSettings> ReadSettings(string path)
     {
-        return JsonSerializer.Deserialize<Dictionary<int, AxisSettings>>(File.ReadAllText(path))
-               ?? throw new InvalidDataException($"{Path.GetFileName(path)} 内容为空。");
+        var settings = JsonSerializer.Deserialize<Dictionary<int, AxisSettings>>(File.ReadAllText(path))
+                       ?? throw new InvalidDataException($"{Path.GetFileName(path)} 内容为空。");
+        if (settings.Count == 0 || settings.Values.All(item => item.ConfigurationVersion is >= 2))
+        {
+            return settings;
+        }
+
+        return settings.ToDictionary(
+            item => Math.Max(0, item.Key - 1),
+            item => item.Value);
     }
 
     private static bool TryReadSettings(string path, out IReadOnlyDictionary<int, AxisSettings> settings)
@@ -140,7 +148,7 @@ public sealed class AxisSettingsStore
             }
 
             settings = names.ToDictionary(
-                item => item.Key,
+                item => Math.Max(0, item.Key - 1),
                 item => new AxisSettings(item.Value, null, null));
             return true;
         }
@@ -156,4 +164,8 @@ public sealed record AxisSettingsLoadResult(
     IReadOnlyDictionary<int, AxisSettings> Settings,
     string? Warning);
 
-public sealed record AxisSettings(string? Name, double? JogSpeed, double? JogDistance);
+public sealed record AxisSettings(
+    string? Name,
+    double? JogSpeed,
+    double? JogDistance,
+    int? ConfigurationVersion = null);

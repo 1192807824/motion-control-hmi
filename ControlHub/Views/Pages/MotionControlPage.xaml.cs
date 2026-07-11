@@ -17,6 +17,7 @@ namespace ControlHub.Views.Pages;
 
 public partial class MotionControlPage : UserControl
 {
+    private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -330,7 +331,7 @@ public partial class MotionControlPage : UserControl
             catch (Exception exception) when (
                 exception is InvalidDataException or IOException or UnauthorizedAccessException)
             {
-                RecordAlarm($"AXIS-{previousAxis.AxisNo:00}-PROFILE", $"轴参数未保存：{exception.Message}");
+                RecordAlarm($"AXIS-{previousAxis.HardwareAxisNo:00}-PROFILE", $"轴参数未保存：{exception.Message}");
             }
         }
 
@@ -356,6 +357,60 @@ public partial class MotionControlPage : UserControl
         }
 
         UpdateHomeEditorState();
+    }
+
+    private void AxisName_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: AxisStatus axis } editor)
+        {
+            return;
+        }
+
+        SelectedAxis = axis;
+        editor.Tag = axis.Name;
+        editor.IsReadOnly = false;
+        editor.Focus();
+        editor.SelectAll();
+        e.Handled = true;
+    }
+
+    private void AxisName_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox editor || editor.IsReadOnly)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            editor.Text = editor.Tag as string ?? editor.Text;
+            editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+    }
+
+    private void AxisName_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: AxisStatus axis } editor || editor.IsReadOnly)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(editor.Text))
+        {
+            editor.Text = editor.Tag as string ?? $"轴 {axis.HardwareAxisNo}";
+        }
+
+        editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        editor.IsReadOnly = true;
+        editor.Tag = null;
+        SaveAxisSettings();
     }
 
     private void ModeTab_Click(object sender, RoutedEventArgs e)
@@ -408,7 +463,7 @@ public partial class MotionControlPage : UserControl
             HomeTuning.LoadFrom(
                 _motionOptions.GetHomeProfile(axis.HardwareAxisNo),
                 _motionOptions.HomeTimeoutSeconds,
-                GetHomeSequenceOrder(axis.AxisNo));
+                GetHomeSequenceOrder(axis.HardwareAxisNo));
             if (RelativeModeRadio is not null && AbsoluteModeRadio is not null)
             {
                 RelativeModeRadio.IsChecked = !Tuning.AbsolutePositionMode;
@@ -425,9 +480,9 @@ public partial class MotionControlPage : UserControl
         UpdateHomeEditorState();
     }
 
-    private int GetHomeSequenceOrder(int displayAxisNo)
+    private int GetHomeSequenceOrder(int hardwareAxisNo)
     {
-        var index = Array.IndexOf(_motionOptions.HomeSequence, displayAxisNo);
+        var index = Array.IndexOf(_motionOptions.HomeSequence, hardwareAxisNo);
         return index < 0 ? 0 : index + 1;
     }
 
@@ -508,7 +563,7 @@ public partial class MotionControlPage : UserControl
             _homeDeadlines.Count > 0 ||
             _homeSequenceCancellation is not null)
         {
-            RecordAlarm($"AXIS-{axis.AxisNo:00}-BUSY", "已有运动或减速停止尚未确认完成，不能重复下发定距命令。");
+            RecordAlarm($"AXIS-{axis.HardwareAxisNo:00}-BUSY", "已有运动或减速停止尚未确认完成，不能重复下发定距命令。");
             return;
         }
 
@@ -592,7 +647,7 @@ public partial class MotionControlPage : UserControl
         }
         catch (Exception exception)
         {
-            RecordAlarm($"AXIS-{axis.AxisNo:00}-MOVE", FormatException(exception));
+            RecordAlarm($"AXIS-{axis.HardwareAxisNo:00}-MOVE", FormatException(exception));
             if (commandIssued)
             {
                 _failedPositionAxisNo = axis.HardwareAxisNo;
@@ -802,7 +857,7 @@ public partial class MotionControlPage : UserControl
         }
         catch (Exception stopException)
         {
-            RecordAlarm($"AXIS-{hardwareAxisNo + 1:00}-{code}-STOP", FormatException(stopException));
+            RecordAlarm($"AXIS-{hardwareAxisNo:00}-{code}-STOP", FormatException(stopException));
         }
 
         try
@@ -818,7 +873,7 @@ public partial class MotionControlPage : UserControl
 
             SetCommandStage(CommandStage.Failed, "已升级全轴急停，等待确认");
             RecordAlarm(
-                $"AXIS-{hardwareAxisNo + 1:00}-{code}-ESCALATED",
+                $"AXIS-{hardwareAxisNo:00}-{code}-ESCALATED",
                 "单轴停止失败，已升级为全轴急停。");
             return true;
         }
@@ -962,10 +1017,10 @@ public partial class MotionControlPage : UserControl
             Thread.Sleep(Math.Clamp(_motionOptions.PollIntervalMilliseconds / 2, 25, 100));
         }
 
-        var axisText = string.Join(", ", pendingAxisNos.Select(axisNo => (axisNo + 1).ToString()));
+        var axisText = string.Join(", ", pendingAxisNos.Select(axisNo => axisNo.ToString()));
         var readErrorText = lastReadErrors.Count == 0
             ? ""
-            : $"；状态读取错误：{string.Join(" | ", lastReadErrors.Select(item => $"轴 {item.Key + 1}: {item.Value}"))}";
+            : $"；状态读取错误：{string.Join(" | ", lastReadErrors.Select(item => $"轴 {item.Key}: {item.Value}"))}";
         failure = $"在 {_motionOptions.StopConfirmationTimeoutMilliseconds} ms 内未确认硬件轴 [{axisText}] 停止{readErrorText}";
         return false;
     }
@@ -1043,7 +1098,7 @@ public partial class MotionControlPage : UserControl
 
         if (axis.IsMoving)
         {
-            RecordAlarm($"AXIS-{axis.AxisNo:00}-BUSY", $"{axis.Name} 正在运动，不能启动连续 JOG。");
+            RecordAlarm($"AXIS-{axis.HardwareAxisNo:00}-BUSY", $"{axis.Name} 正在运动，不能启动连续 JOG。");
             return;
         }
 
@@ -1252,17 +1307,17 @@ public partial class MotionControlPage : UserControl
         }
 
         var sequence = _motionOptions.HomeSequence
-            .Where(displayAxisNo => displayAxisNo != axis.AxisNo)
+            .Where(hardwareAxisNo => hardwareAxisNo != axis.HardwareAxisNo)
             .ToList();
         var normalizedOrder = 0;
         if (profile.Enabled && HomeTuning.SequenceOrder > 0)
         {
             var insertionIndex = Math.Min(HomeTuning.SequenceOrder - 1, sequence.Count);
-            sequence.Insert(insertionIndex, axis.AxisNo);
+            sequence.Insert(insertionIndex, axis.HardwareAxisNo);
             normalizedOrder = insertionIndex + 1;
         }
 
-        _motionOptions.AxisHomeProfiles[axis.AxisNo] = profile;
+        _motionOptions.AxisHomeProfiles[axis.HardwareAxisNo] = profile;
         _motionOptions.HomeTimeoutSeconds = HomeTuning.TimeoutSeconds;
         _motionOptions.HomeSequence = sequence.ToArray();
         UpdateAxisHomeConfiguration(axis, profile);
@@ -1289,7 +1344,7 @@ public partial class MotionControlPage : UserControl
     private void SaveMotionConfigurationOrThrow(AxisStatus? axisOverride = null)
     {
         var axis = axisOverride ?? SelectedAxis;
-        var axisKey = axis?.AxisNo ?? 0;
+        var axisKey = axis?.HardwareAxisNo ?? 0;
         MotionMoveProfile? previousMoveProfileValue = null;
         var hadMoveProfile = axis is not null &&
                              _motionOptions.AxisMoveProfiles.TryGetValue(axisKey, out previousMoveProfileValue);
@@ -1482,7 +1537,7 @@ public partial class MotionControlPage : UserControl
 
         if (!axis.HomeConfigured)
         {
-            RecordAlarm($"AXIS-{axis.AxisNo:00}-HOME-CONFIG", $"{axis.Name} 未配置回零参数，命令未下发。");
+            RecordAlarm($"AXIS-{axis.HardwareAxisNo:00}-HOME-CONFIG", $"{axis.Name} 未配置回零参数，命令未下发。");
             return;
         }
 
@@ -1493,7 +1548,7 @@ public partial class MotionControlPage : UserControl
             _homeSequenceCancellation is not null ||
             axis.IsMoving)
         {
-            RecordAlarm($"AXIS-{axis.AxisNo:00}-HOME-BUSY", "已有运动或停止确认尚未结束，不能启动回原点。");
+            RecordAlarm($"AXIS-{axis.HardwareAxisNo:00}-HOME-BUSY", "已有运动或停止确认尚未结束，不能启动回原点。");
             return;
         }
 
@@ -1758,7 +1813,7 @@ public partial class MotionControlPage : UserControl
         {
             if (!axisByHardwareNo.TryGetValue(hardwareAxisNo, out var axis) || !axis.IsAvailable)
             {
-                throw new MotionCardException($"回零序列中的界面轴 {hardwareAxisNo + 1} 不可用。");
+                throw new MotionCardException($"回零序列中的硬件轴 {hardwareAxisNo} 不可用。");
             }
 
             _motionOptions.GetHomeProfile(hardwareAxisNo).Validate(requireEnabled: true);
@@ -1866,7 +1921,7 @@ public partial class MotionControlPage : UserControl
         {
             EnforceSafetyDeadlines(DateTime.UtcNow);
             var busError = _motionCard.ReadBusErrorCode();
-            if (busError != 0)
+            if (busError != 0 && busError != RingRedundancyDisconnectedWarning)
             {
                 SetConnectionText($"运动控制：EtherCAT 总线错误 0x{busError:X4}");
                 RecordAlarmOnce(
@@ -1885,13 +1940,25 @@ public partial class MotionControlPage : UserControl
             }
 
             RemoveAlarmKeys("bus:");
-            SetConnectionText(_motionSafetyLock
-                ? "运动控制：停止安全链异常，运动锁定（需重启）"
-                : _motionOptions.SimulationMode
-                    ? $"运动控制：仿真模式（{_motionCard.AxisCount} 轴）"
-                    : _connectedCardNo is { } cardNo
-                        ? $"运动控制：EtherCAT 正常（卡 {cardNo}，{_motionCard.AxisCount} 轴）"
-                        : $"运动控制：EtherCAT 正常（{_motionCard.AxisCount} 轴）");
+            if (busError == RingRedundancyDisconnectedWarning)
+            {
+                SetConnectionText($"运动控制：环网冗余断开警告 0x{busError:X4}（运动未锁定）");
+                RecordAlarmOnce(
+                    "bus-warning:0228",
+                    "BUS-WARN-0228",
+                    "EtherCAT 环网冗余连接断开；程序继续读取轴状态并允许运动，请确认主链路正常。");
+            }
+            else
+            {
+                _activeAlarmKeys.Remove("bus-warning:0228");
+                SetConnectionText(_motionSafetyLock
+                    ? "运动控制：停止安全链异常，运动锁定（需重启）"
+                    : _motionOptions.SimulationMode
+                        ? $"运动控制：仿真模式（{_motionCard.AxisCount} 轴）"
+                        : _connectedCardNo is { } cardNo
+                            ? $"运动控制：EtherCAT 正常（卡 {cardNo}，{_motionCard.AxisCount} 轴）"
+                            : $"运动控制：EtherCAT 正常（{_motionCard.AxisCount} 轴）");
+            }
 
             foreach (var axis in Axes ?? [])
             {
@@ -1913,7 +1980,7 @@ public partial class MotionControlPage : UserControl
                     axis.StatusReadHealthy = false;
                     RecordAlarmOnce(
                         $"poll:{axis.HardwareAxisNo}",
-                        $"AXIS-{axis.AxisNo:00}-READ",
+                        $"AXIS-{axis.HardwareAxisNo:00}-READ",
                         FormatException(exception));
                     HandleAxisMonitoringFailure(axis, "轴状态读取失败");
                 }
@@ -2017,7 +2084,7 @@ public partial class MotionControlPage : UserControl
 
             RecordAlarmOnce(
                 $"position-timeout:{positionAxisNo}",
-                $"AXIS-{positionAxisNo + 1:00}-MOVE-TIMEOUT",
+                $"AXIS-{positionAxisNo:00}-MOVE-TIMEOUT",
                 $"定位运动在 {_activePositionTimeoutMilliseconds} ms 内未完成，正在执行安全停止。");
             SetCommandStage(CommandStage.Failed, "运动超时，停止确认中");
             IssueAxisStopWithEscalation(
@@ -2066,7 +2133,7 @@ public partial class MotionControlPage : UserControl
             {
                 RecordAlarmOnce(
                     $"stop-confirm-timeout:{axisNo}",
-                    $"AXIS-{axisNo + 1:00}-STOP-CONFIRM-TIMEOUT",
+                    $"AXIS-{axisNo:00}-STOP-CONFIRM-TIMEOUT",
                     $"单轴停止命令在 {_motionOptions.StopConfirmationTimeoutMilliseconds} ms 内未确认停止，正在升级全轴急停。");
             }
 
@@ -2106,7 +2173,7 @@ public partial class MotionControlPage : UserControl
 
             RecordAlarmOnce(
                 $"emergency-stop-confirm-timeout:{axisNo}",
-                $"AXIS-{axisNo + 1:00}-EMERGENCY-CONFIRM-TIMEOUT",
+                $"AXIS-{axisNo:00}-EMERGENCY-CONFIRM-TIMEOUT",
                 $"全轴急停后 {_motionOptions.StopConfirmationTimeoutMilliseconds} ms 内仍未确认该轴停止，已保持软件运动锁定。");
         }
 
@@ -2254,8 +2321,8 @@ public partial class MotionControlPage : UserControl
             {
                 RecordAlarmOnce(
                     $"hidden-stop-poll:{hardwareAxisNo}",
-                    $"AXIS-{hardwareAxisNo + 1:00}-STOP-READ",
-                    $"未显示硬件轴 {hardwareAxisNo + 1} 的停止状态读取失败：{FormatException(exception)}");
+                    $"AXIS-{hardwareAxisNo:00}-STOP-READ",
+                    $"未显示硬件轴 {hardwareAxisNo} 的停止状态读取失败：{FormatException(exception)}");
             }
         }
     }
@@ -2347,7 +2414,7 @@ public partial class MotionControlPage : UserControl
                 {
                     axis.State = "定位停止但未正常到位";
                     SetCommandStage(CommandStage.Failed, "未正常到位");
-                    RecordAlarm($"AXIS-{axis.AxisNo:00}-MOVE-CHECK", FormatException(exception));
+                    RecordAlarm($"AXIS-{axis.HardwareAxisNo:00}-MOVE-CHECK", FormatException(exception));
                     ClearPositionTracking(axis.HardwareAxisNo);
                 }
             }
@@ -2380,7 +2447,7 @@ public partial class MotionControlPage : UserControl
             {
                 RecordAlarmOnce(
                     $"home-failed:{axis.HardwareAxisNo}",
-                    $"AXIS-{axis.AxisNo:00}-HOME-FAILED",
+                    $"AXIS-{axis.HardwareAxisNo:00}-HOME-FAILED",
                     $"{axis.Name} 回零时发生报警或急停输入，错误码 0x{snapshot.AxisErrorCode:X4}。");
                 SetCommandStage(CommandStage.Failed, "回零报警，正在安全停止");
                 IssueAxisStopWithEscalation(
@@ -2400,7 +2467,7 @@ public partial class MotionControlPage : UserControl
                 SetCommandStage(CommandStage.Failed, "回零未完成");
                 RecordAlarmOnce(
                     $"home-failed:{axis.HardwareAxisNo}",
-                    $"AXIS-{axis.AxisNo:00}-HOME-FAILED",
+                    $"AXIS-{axis.HardwareAxisNo:00}-HOME-FAILED",
                     $"{axis.Name} 回零未完成即停止，停止原因 {snapshot.StopReason}。");
                 IssueAxisStopWithEscalation(
                     axis,
@@ -2419,7 +2486,7 @@ public partial class MotionControlPage : UserControl
         {
             RecordAlarmOnce(
                 faultKey,
-                $"AXIS-{axis.AxisNo:00}-{snapshot.AxisErrorCode:X4}",
+                $"AXIS-{axis.HardwareAxisNo:00}-{snapshot.AxisErrorCode:X4}",
                 $"{axis.Name}（硬件轴 {axis.HardwareAxisNo}）报警，状态机 {snapshot.StateMachine}，错误码 0x{snapshot.AxisErrorCode:X4}。");
         }
         else
@@ -2432,7 +2499,7 @@ public partial class MotionControlPage : UserControl
         {
             RecordAlarmOnce(
                 emergencyKey,
-                $"AXIS-{axis.AxisNo:00}-EMG",
+                $"AXIS-{axis.HardwareAxisNo:00}-EMG",
                 $"{axis.Name}（硬件轴 {axis.HardwareAxisNo}）急停输入有效。");
         }
         else
@@ -2445,7 +2512,7 @@ public partial class MotionControlPage : UserControl
         {
             RecordAlarmOnce(
                 stopKey,
-                $"AXIS-{axis.AxisNo:00}-STOP-{snapshot.StopReason}",
+                $"AXIS-{axis.HardwareAxisNo:00}-STOP-{snapshot.StopReason}",
                 $"{axis.Name}（硬件轴 {axis.HardwareAxisNo}）异常停止，停止原因 {snapshot.StopReason}。");
         }
         else
@@ -2556,7 +2623,7 @@ public partial class MotionControlPage : UserControl
         if (enabled && !axis.StatusReadHealthy)
         {
             RecordAlarm(
-                $"AXIS-{axis.AxisNo:00}-SERVO-ON-STATUS-INVALID",
+                $"AXIS-{axis.HardwareAxisNo:00}-SERVO-ON-STATUS-INVALID",
                 "轴状态读取异常，禁止使能。请先恢复通讯并确认实时状态。");
             return;
         }
@@ -2566,7 +2633,7 @@ public partial class MotionControlPage : UserControl
              IsAxisMotionWorkflowActive(axis.HardwareAxisNo)))
         {
             RecordAlarm(
-                $"AXIS-{axis.AxisNo:00}-SERVO-ON-BUSY",
+                $"AXIS-{axis.HardwareAxisNo:00}-SERVO-ON-BUSY",
                 "该轴正在运动、回零或等待停止确认，禁止使能。请先确认轴已停止。");
             return;
         }
@@ -2576,7 +2643,7 @@ public partial class MotionControlPage : UserControl
              IsAxisMotionWorkflowActive(axis.HardwareAxisNo)))
         {
             RecordAlarm(
-                $"AXIS-{axis.AxisNo:00}-SERVO-OFF-BUSY",
+                $"AXIS-{axis.HardwareAxisNo:00}-SERVO-OFF-BUSY",
                 "该轴正在运动、回零或等待停止确认。请先停止并确认后再解除使能。");
             return;
         }
@@ -2642,7 +2709,7 @@ public partial class MotionControlPage : UserControl
             }
 
             RecordAlarm(
-                axis is null ? code : $"AXIS-{axis.AxisNo:00}-{code}",
+                axis is null ? code : $"AXIS-{axis.HardwareAxisNo:00}-{code}",
                 FormatException(exception));
             return false;
         }

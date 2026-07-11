@@ -25,7 +25,7 @@ public sealed class AxisStatus : INotifyPropertyChanged
     private string _homeConfigurationSummary = "未配置回零参数";
 
     public int AxisNo { get; init; }
-    public int HardwareAxisNo => AxisNo - 1;
+    public int HardwareAxisNo => AxisNo;
     public string Name
     {
         get => _name;

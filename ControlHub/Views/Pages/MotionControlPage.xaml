@@ -262,12 +262,25 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="66" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding AxisNo}"
+                                    <TextBlock Text="{Binding HardwareAxisNo}"
                                                Foreground="White"
                                                FontSize="14"
                                                FontWeight="Bold"
                                                VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBox Grid.Column="1"
+                                             Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                             IsReadOnly="True"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Padding="0"
+                                             Foreground="White"
+                                             FontSize="13"
+                                             FontWeight="Bold"
+                                             VerticalContentAlignment="Center"
+                                             ToolTip="双击修改轴名称"
+                                             MouseDoubleClick="AxisName_MouseDoubleClick"
+                                             LostFocus="AxisName_LostFocus"
+                                             KeyDown="AxisName_KeyDown" />
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" ToolTip="{Binding State}">
                                         <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" Margin="0,0,5,0" />
                                         <TextBlock Text="{Binding CardStateText}" Foreground="#D8E4EC" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />

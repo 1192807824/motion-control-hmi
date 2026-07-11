@@ -5,6 +5,8 @@ namespace ControlHub.Services.Motion;
 
 public sealed class MotionCardOptions
 {
+    public int ConfigurationVersion { get; set; }
+
     public bool SimulationMode { get; init; }
 
     public ushort? CardNo { get; init; }
@@ -43,26 +45,76 @@ public sealed class MotionCardOptions
 
     public Dictionary<int, MotionHomeProfile> AxisHomeProfiles { get; init; } = [];
 
+    public Dictionary<int, MotionAxisHardwareProfile> AxisHardwareProfiles { get; init; } = [];
+
     public int[] HomeSequence { get; set; } = [];
+
+    public void ApplyMigrations()
+    {
+        if (ConfigurationVersion >= 2)
+        {
+            return;
+        }
+
+        var previousMoveProfiles = AxisMoveProfiles.ToArray();
+        AxisMoveProfiles.Clear();
+        foreach (var item in previousMoveProfiles)
+        {
+            AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+        }
+
+        var previousHomeProfiles = AxisHomeProfiles.ToArray();
+        AxisHomeProfiles.Clear();
+        foreach (var item in previousHomeProfiles)
+        {
+            AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+        }
+
+        HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
+
+        AxisMoveProfiles[0] = new MotionMoveProfile
+        {
+            StartVelocity = 0,
+            StopVelocity = 0,
+            AccelerationSeconds = 0.1,
+            DecelerationSeconds = 0.1,
+            STimeSeconds = 0,
+            DecelerationStopSeconds = 0.001,
+            WaitForCompletion = true,
+            CompletionTimeoutMilliseconds = 5000,
+            CompletionTolerance = 0.01,
+            AbsolutePositionMode = false
+        };
+        AxisHomeProfiles[0] = new MotionHomeProfile
+        {
+            Enabled = true,
+            Mode = 1,
+            LowVelocity = 100,
+            HighVelocity = 1000,
+            AccelerationSeconds = 0.1,
+            DecelerationSeconds = 0.1,
+            OffsetPosition = 0
+        };
+        AxisHardwareProfiles[0] = MotionAxisHardwareProfile.CreateAxisZeroDefaults();
+        ConfigurationVersion = 2;
+    }
 
     public MotionHomeProfile GetHomeProfile(int hardwareAxisNo)
     {
-        var displayAxisNo = hardwareAxisNo + 1;
-        return AxisHomeProfiles.GetValueOrDefault(displayAxisNo) ?? HomeProfile;
+        return AxisHomeProfiles.GetValueOrDefault(hardwareAxisNo) ?? HomeProfile;
     }
 
     public MotionMoveProfile GetMoveProfile(int hardwareAxisNo)
     {
-        return AxisMoveProfiles.GetValueOrDefault(hardwareAxisNo + 1) ?? MoveProfile;
+        return AxisMoveProfiles.GetValueOrDefault(hardwareAxisNo) ?? MoveProfile;
     }
 
     public MotionMoveProfile GetOrCreateMoveProfile(int hardwareAxisNo)
     {
-        var displayAxisNo = hardwareAxisNo + 1;
-        if (!AxisMoveProfiles.TryGetValue(displayAxisNo, out var profile))
+        if (!AxisMoveProfiles.TryGetValue(hardwareAxisNo, out var profile))
         {
             profile = MoveProfile.Clone();
-            AxisMoveProfiles[displayAxisNo] = profile;
+            AxisMoveProfiles[hardwareAxisNo] = profile;
         }
 
         return profile;
@@ -70,9 +122,7 @@ public sealed class MotionCardOptions
 
     public IReadOnlyList<int> GetHomeSequence()
     {
-        return HomeSequence
-            .Select(displayAxisNo => displayAxisNo - 1)
-            .ToArray();
+        return HomeSequence.ToArray();
     }
 
     public void Validate()
@@ -136,9 +186,9 @@ public sealed class MotionCardOptions
         MoveProfile.Validate();
         foreach (var item in AxisMoveProfiles)
         {
-            if (item.Key is < 1 or > 64)
+            if (item.Key is < 0 or > 63)
             {
-                throw new InvalidDataException($"AxisMoveProfiles 的轴号 {item.Key} 超出 1 到 64 的范围。");
+                throw new InvalidDataException($"AxisMoveProfiles 的硬件轴号 {item.Key} 超出 0 到 63 的范围。");
             }
 
             item.Value.Validate();
@@ -148,23 +198,103 @@ public sealed class MotionCardOptions
 
         foreach (var item in AxisHomeProfiles)
         {
-            if (item.Key is < 1 or > 64)
+            if (item.Key is < 0 or > 63)
             {
-                throw new InvalidDataException($"AxisHomeProfiles 的轴号 {item.Key} 超出 1 到 64 的范围。");
+                throw new InvalidDataException($"AxisHomeProfiles 的硬件轴号 {item.Key} 超出 0 到 63 的范围。");
             }
 
             item.Value.Validate(requireEnabled: false);
         }
 
-        if (HomeSequence.Any(axisNo => axisNo < 1 || axisNo > AxisCount))
+        foreach (var item in AxisHardwareProfiles)
         {
-            throw new InvalidDataException("HomeSequence 使用界面轴号，且每个轴号必须在 1 到 AxisCount 之间。");
+            if (item.Key is < 0 or > 63)
+            {
+                throw new InvalidDataException($"AxisHardwareProfiles 的硬件轴号 {item.Key} 超出 0 到 63 的范围。");
+            }
+
+            item.Value.Validate();
+        }
+
+        if (HomeSequence.Any(axisNo => axisNo < 0 || axisNo >= AxisCount))
+        {
+            throw new InvalidDataException("HomeSequence 使用硬件轴号，且每个轴号必须在 0 到 AxisCount - 1 之间。");
         }
 
         if (HomeSequence.Distinct().Count() != HomeSequence.Length)
         {
             throw new InvalidDataException("HomeSequence 不能包含重复轴号。");
         }
+    }
+}
+
+public sealed class MotionAxisHardwareProfile
+{
+    public double RunVelocity { get; init; } = 10000;
+
+    public double Equivalent { get; init; } = 1;
+
+    public bool EmergencyStopEnabled { get; init; }
+
+    public ushort EmergencyStopLogic { get; init; }
+
+    public bool LimitEnabled { get; init; } = true;
+
+    public ushort LimitLogic { get; init; }
+
+    public ushort LimitMode { get; init; }
+
+    public bool SoftLimitEnabled { get; init; }
+
+    public ushort SoftLimitSource { get; init; }
+
+    public ushort SoftLimitAction { get; init; } = 1;
+
+    public double NegativeSoftLimit { get; init; }
+
+    public double PositiveSoftLimit { get; init; } = 1000;
+
+    public bool IoDecelerationStopEnabled { get; init; }
+
+    public ushort IoDecelerationStopLogic { get; init; }
+
+    public MotionAxisIoMapping[] IoMappings { get; init; } =
+    [
+        new MotionAxisIoMapping { IoType = 3, MapIoType = 6, MapIoIndex = 0, Filter = 0 },
+        new MotionAxisIoMapping { IoType = 4, MapIoType = 6, MapIoIndex = 0, Filter = 0 }
+    ];
+
+    public static MotionAxisHardwareProfile CreateAxisZeroDefaults() => new();
+
+    public void Validate()
+    {
+        MotionMoveProfile.ValidateFinitePositive(RunVelocity, nameof(RunVelocity));
+        MotionMoveProfile.ValidateFinitePositive(Equivalent, nameof(Equivalent));
+        if (!double.IsFinite(NegativeSoftLimit) || !double.IsFinite(PositiveSoftLimit))
+        {
+            throw new InvalidDataException("软限位位置必须是有限数值。");
+        }
+
+        foreach (var mapping in IoMappings)
+        {
+            mapping.Validate();
+        }
+    }
+}
+
+public sealed class MotionAxisIoMapping
+{
+    public ushort IoType { get; init; }
+
+    public ushort MapIoType { get; init; }
+
+    public ushort MapIoIndex { get; init; }
+
+    public double Filter { get; init; }
+
+    public void Validate()
+    {
+        MotionMoveProfile.ValidateFiniteNonNegative(Filter, nameof(Filter));
     }
 }
 
@@ -299,6 +429,7 @@ public sealed class MotionCardOptionsStore
         if (!File.Exists(_filePath))
         {
             var defaults = new MotionCardOptions();
+            defaults.ApplyMigrations();
             defaults.Validate();
             return defaults;
         }
@@ -384,6 +515,7 @@ public sealed class MotionCardOptionsStore
             ReadCommentHandling = JsonCommentHandling.Skip,
             AllowTrailingCommas = true
         }) ?? throw new InvalidDataException($"{Path.GetFileName(path)} 内容为空。");
+        options.ApplyMigrations();
         options.Validate();
         return options;
     }

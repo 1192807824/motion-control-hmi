@@ -1,13 +1,13 @@
 # 运动功能与雷赛 API 核对表
 
-本文列出运动控制页面当前实际接入的功能，供上机前逐项核对。界面轴号为 1-based，传给雷赛 SDK 的硬件轴号为 0-based。
+本文列出运动控制页面当前实际接入的功能，供上机前逐项核对。界面、报警、持久化配置和雷赛 SDK 均使用 0-based 硬件轴号。
 
 ## 页面操作
 
 | 页面功能 | 关键实现 | 雷赛 API / 判定 | 当前语义 |
 | --- | --- | --- | --- |
 | 启动枚举卡 | `LeisaiMotionCard.Open` | `dmc_board_init`, `dmc_get_CardInfList` | 显示全部检测卡和当前卡；失败时清空轴列表、禁用运动并弹框 |
-| 读取轴数 | `LeisaiMotionCard.Open` | `dmc_get_total_axes` | 界面轴 1 对应硬件轴 0；全轴安全操作按控制卡实际轴数，不受界面显示上限截断 |
+| 读取轴数 | `LeisaiMotionCard.Open` | `nmc_get_total_axes` | EtherCAT 轴从 0 开始显示；全轴安全操作按控制卡实际轴数，不受界面显示上限截断 |
 | 单轴伺服使能/解除 | `ServoOn` | `nmc_set_axis_enable`, `nmc_set_axis_disable`, `nmc_get_axis_state_machine` | 使能后等待状态机 4；解除前必须确认轴停止 |
 | 全轴伺服使能/解除 | `SetAllServos` | 同上，逐硬件轴执行 | 解除使能前先对控制卡全部硬件轴做停止预检，再逐轴解除并复核 |
 | 连续 JOG | `Jog` | `dmc_set_profile_unit`, `dmc_set_s_profile`, `dmc_set_dec_stop_time`, `dmc_vmove` | 负向 `direction=0`，正向 `direction=1`；按住运行，松开、移出、失焦或窗口停用即减速停止 |
@@ -20,7 +20,7 @@
 | 单轴立即停止 | `StopAxis(immediate:true)` | `dmc_stop(..., stop_mode=1)` | 橙色“单轴立即停”按钮；只停止当前活动/选中轴，之后持续确认停止 |
 | 全轴急停 | `StopAll_Click` | `dmc_emg_stop` | 红色按钮；覆盖控制卡全部硬件轴并逐轴确认停止 |
 | 程序关闭 | `TryShutdown` | `dmc_emg_stop` + 全硬件轴状态确认 | 急停失败、状态读取失败或超时未停稳时拒绝关闭窗口，不会直接关卡 |
-| 报警/限位联锁 | `ReadAxis` / `EnsureAxisReadyForDirection` | `nmc_get_errcode`, `nmc_get_axis_errcode`, `dmc_axis_io_status_ex`, `dmc_get_stop_reason` | ALM、EMG、正负限位、总线或状态读取异常都会阻止新运动；运动中监控失败会触发停止 |
+| 报警/限位联锁 | `ReadAxis` / `EnsureAxisReadyForDirection` | `nmc_get_errcode`, `nmc_get_axis_errcode`, `dmc_axis_io_status_ex`, `dmc_get_stop_reason` | `0x0228` 仅提示环网冗余断开且继续轮询；其他总线错误、ALM、EMG、正负限位或状态读取异常仍阻止运动 |
 | 清除报警 | `ClearAlarms` | `nmc_clear_errcode`, `nmc_clear_axis_errcode`, `dmc_clear_stop_reason` | 运动、回零或停止确认期间禁止清除 |
 
 ## 运动参数

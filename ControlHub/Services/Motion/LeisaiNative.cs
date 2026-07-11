@@ -85,6 +85,42 @@ internal static class LeisaiNative
     internal static extern short dmc_set_dec_stop_time(ushort cardNo, ushort axis, double stopTimeSeconds);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_equiv(ushort cardNo, ushort axis, double equivalent);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_emg_mode(ushort cardNo, ushort axis, ushort enabled, ushort logic);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_el_mode(
+        ushort cardNo,
+        ushort axis,
+        ushort enabled,
+        ushort logic,
+        ushort mode);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_softlimit_unit(
+        ushort cardNo,
+        ushort axis,
+        ushort enabled,
+        ushort source,
+        ushort action,
+        double negativeLimit,
+        double positiveLimit);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_axis_io_map(
+        ushort cardNo,
+        ushort axis,
+        ushort ioType,
+        ushort mapIoType,
+        ushort mapIoIndex,
+        double filter);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_io_dstp_mode(ushort cardNo, ushort axis, ushort enabled, ushort logic);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_pmove_unit(ushort cardNo, ushort axis, double distance, ushort positionMode);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]

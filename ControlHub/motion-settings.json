@@ -1,4 +1,5 @@
 {
+  "ConfigurationVersion": 2,
   "SimulationMode": false,
   "CardNo": null,
   "AxisCount": 16,
@@ -26,7 +27,20 @@
     "CompletionTolerance": 0.01,
     "AbsolutePositionMode": false
   },
-  "AxisMoveProfiles": {},
+  "AxisMoveProfiles": {
+    "0": {
+      "StartVelocity": 0.0,
+      "StopVelocity": 0.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "STimeSeconds": 0.0,
+      "DecelerationStopSeconds": 0.001,
+      "WaitForCompletion": true,
+      "CompletionTimeoutMilliseconds": 5000,
+      "CompletionTolerance": 0.01,
+      "AbsolutePositionMode": false
+    }
+  },
   "HomeProfile": {
     "Enabled": false,
     "Mode": 33,
@@ -36,6 +50,48 @@
     "DecelerationSeconds": 0.1,
     "OffsetPosition": 0.0
   },
-  "AxisHomeProfiles": {},
+  "AxisHomeProfiles": {
+    "0": {
+      "Enabled": true,
+      "Mode": 1,
+      "LowVelocity": 100.0,
+      "HighVelocity": 1000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    }
+  },
+  "AxisHardwareProfiles": {
+    "0": {
+      "RunVelocity": 10000.0,
+      "Equivalent": 1.0,
+      "EmergencyStopEnabled": false,
+      "EmergencyStopLogic": 0,
+      "LimitEnabled": true,
+      "LimitLogic": 0,
+      "LimitMode": 0,
+      "SoftLimitEnabled": false,
+      "SoftLimitSource": 0,
+      "SoftLimitAction": 1,
+      "NegativeSoftLimit": 0.0,
+      "PositiveSoftLimit": 1000.0,
+      "IoDecelerationStopEnabled": false,
+      "IoDecelerationStopLogic": 0,
+      "IoMappings": [
+        {
+          "IoType": 3,
+          "MapIoType": 6,
+          "MapIoIndex": 0,
+          "Filter": 0.0
+        },
+        {
+          "IoType": 4,
+          "MapIoType": 6,
+          "MapIoIndex": 0,
+          "Filter": 0.0
+        }
+      ]
+    }
+  },
   "HomeSequence": []
 }

@@ -20,15 +20,18 @@ public static class DashboardSeedData
         var axes = new ObservableCollection<AxisStatus>();
         for (var index = 0; index < Math.Min(axisCount, names.Length); index++)
         {
-            var axisNo = index + 1;
+            var axisNo = index;
             var settings = savedSettings.GetValueOrDefault(axisNo);
             var axisName = names[index];
+            var jogSpeed = index == 0 && settings?.ConfigurationVersion is not >= 2
+                ? 10000
+                : settings?.JogSpeed ?? (index == 0 ? 10000 : 25);
 
             axes.Add(new AxisStatus
             {
                 AxisNo = axisNo,
                 Name = settings?.Name ?? axisName,
-                JogSpeed = settings?.JogSpeed ?? 25,
+                JogSpeed = jogSpeed,
                 JogDistance = settings?.JogDistance ?? 10,
                 Unit = rotaryAxes.Contains(axisName) ? "deg" : "mm",
                 State = "未连接"

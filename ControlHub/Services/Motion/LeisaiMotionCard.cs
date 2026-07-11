@@ -6,6 +6,7 @@ namespace ControlHub.Services.Motion;
 public sealed class LeisaiMotionCard : IMotionCard
 {
     private const ushort EtherCatPort = 2;
+    private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const ushort AllEtherCatAxesSentinel = 255;
     private const ushort EnabledStateMachine = 4;
 
@@ -107,6 +108,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                 AnalogInputCount = analogInputs;
                 AnalogOutputCount = analogOutputs;
 
+                ApplyConfiguredHardwareProfiles();
                 IsOpen = true;
                 return ConnectionInfo();
             }
@@ -578,6 +580,94 @@ public sealed class LeisaiMotionCard : IMotionCard
             false);
     }
 
+    private void ApplyConfiguredHardwareProfiles()
+    {
+        foreach (var item in _options.AxisHardwareProfiles.OrderBy(item => item.Key))
+        {
+            if (item.Key < 0 || item.Key >= AxisCount)
+            {
+                continue;
+            }
+
+            var axis = checked((ushort)item.Key);
+            var hardware = item.Value;
+            var move = _options.GetMoveProfile(item.Key);
+            var home = _options.GetHomeProfile(item.Key);
+
+            EnsureSuccess(LeisaiNative.dmc_set_equiv(_cardNo, axis, hardware.Equivalent), "dmc_set_equiv");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_profile_unit(
+                    _cardNo,
+                    axis,
+                    move.StartVelocity,
+                    hardware.RunVelocity,
+                    move.AccelerationSeconds,
+                    move.DecelerationSeconds,
+                    move.StopVelocity),
+                "dmc_set_profile_unit");
+            EnsureSuccess(LeisaiNative.dmc_set_s_profile(_cardNo, axis, 0, move.STimeSeconds), "dmc_set_s_profile");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_dec_stop_time(_cardNo, axis, move.DecelerationStopSeconds),
+                "dmc_set_dec_stop_time");
+            EnsureSuccess(
+                LeisaiNative.nmc_set_home_profile(
+                    _cardNo,
+                    axis,
+                    home.Mode,
+                    home.LowVelocity,
+                    home.HighVelocity,
+                    home.AccelerationSeconds,
+                    home.DecelerationSeconds,
+                    home.OffsetPosition),
+                "nmc_set_home_profile");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_emg_mode(
+                    _cardNo,
+                    axis,
+                    hardware.EmergencyStopEnabled ? (ushort)1 : (ushort)0,
+                    hardware.EmergencyStopLogic),
+                "dmc_set_emg_mode");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_el_mode(
+                    _cardNo,
+                    axis,
+                    hardware.LimitEnabled ? (ushort)1 : (ushort)0,
+                    hardware.LimitLogic,
+                    hardware.LimitMode),
+                "dmc_set_el_mode");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_softlimit_unit(
+                    _cardNo,
+                    axis,
+                    hardware.SoftLimitEnabled ? (ushort)1 : (ushort)0,
+                    hardware.SoftLimitSource,
+                    hardware.SoftLimitAction,
+                    hardware.NegativeSoftLimit,
+                    hardware.PositiveSoftLimit),
+                "dmc_set_softlimit_unit");
+            foreach (var mapping in hardware.IoMappings)
+            {
+                EnsureSuccess(
+                    LeisaiNative.dmc_set_axis_io_map(
+                        _cardNo,
+                        axis,
+                        mapping.IoType,
+                        mapping.MapIoType,
+                        mapping.MapIoIndex,
+                        mapping.Filter),
+                    "dmc_set_axis_io_map");
+            }
+
+            EnsureSuccess(
+                LeisaiNative.dmc_set_io_dstp_mode(
+                    _cardNo,
+                    axis,
+                    hardware.IoDecelerationStopEnabled ? (ushort)1 : (ushort)0,
+                    hardware.IoDecelerationStopLogic),
+                "dmc_set_io_dstp_mode");
+        }
+    }
+
     private void ConfigureMove(ushort axis, double velocity)
     {
         var profile = _options.GetMoveProfile(axis);
@@ -677,7 +767,7 @@ public sealed class LeisaiMotionCard : IMotionCard
     private void EnsureBusReady()
     {
         var busErrorCode = ReadBusErrorCode();
-        if (busErrorCode != 0)
+        if (busErrorCode != 0 && busErrorCode != RingRedundancyDisconnectedWarning)
         {
             throw new MotionCardException(
                 $"EtherCAT 总线异常 0x{busErrorCode:X4}，命令未下发。请检查 ENI 配置、从站连接与总线状态。",
