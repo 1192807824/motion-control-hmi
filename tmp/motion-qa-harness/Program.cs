@@ -230,6 +230,12 @@ internal static class Program
             selectedAxis.JogDistance = 10;
             Invoke(scope.Page, "SetPositionModeUi");
         }
+        else if (stateName?.Equals("status-long", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            selectedAxis.Position = -123456789.123;
+            selectedAxis.Target = 987654321.987;
+            selectedAxis.Speed = 12345678.901;
+        }
     }
 
     private static async Task<int> RunBehaviorChecksAsync()

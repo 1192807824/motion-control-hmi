@@ -120,10 +120,11 @@
             <Setter Property="Foreground" Value="#62B5FF" />
             <Setter Property="FontSize" Value="24" />
             <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontFamily" Value="Consolas" />
             <Setter Property="TextAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="MaxWidth" Value="132" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="TextTrimming" Value="None" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
         </Style>
 
         <Style TargetType="RadioButton">
@@ -603,19 +604,37 @@
                     </Grid.RowDefinitions>
                     <TextBlock Text="实时状态" Style="{StaticResource SectionTitle}" />
                     <Grid Grid.Row="1">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="84" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock Text="当前位置" Style="{StaticResource StatusRowLabel}" />
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedAxis.DisplayPosition, TargetNullValue=--}" Style="{StaticResource StatusValue}" /><TextBlock Foreground="#B9C9D5" VerticalAlignment="Bottom" Margin="5,0,0,7"><Run Text=" " /><Run Text="{Binding SelectedAxis.Unit}" /></TextBlock></StackPanel>
+                        <Grid Grid.Column="1" Margin="6,3,0,3">
+                            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="14" /></Grid.RowDefinitions>
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="CurrentPositionValue" Text="{Binding SelectedAxis.DisplayPosition, TargetNullValue=--}" ToolTip="{Binding SelectedAxis.DisplayPosition}" Style="{StaticResource StatusValue}" />
+                            </Viewbox>
+                            <TextBlock Grid.Row="1" Text="{Binding SelectedAxis.Unit}" Foreground="#B9C9D5" FontSize="10" HorizontalAlignment="Right" />
+                        </Grid>
                     </Grid>
                     <Grid Grid.Row="2">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="84" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock Text="目标位置" Style="{StaticResource StatusRowLabel}" />
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedAxis.DisplayTarget, TargetNullValue=--}" Style="{StaticResource StatusValue}" /><TextBlock Foreground="#B9C9D5" VerticalAlignment="Bottom" Margin="5,0,0,7"><Run Text=" " /><Run Text="{Binding SelectedAxis.Unit}" /></TextBlock></StackPanel>
+                        <Grid Grid.Column="1" Margin="6,3,0,3">
+                            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="14" /></Grid.RowDefinitions>
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="TargetPositionValue" Text="{Binding SelectedAxis.DisplayTarget, TargetNullValue=--}" ToolTip="{Binding SelectedAxis.DisplayTarget}" Style="{StaticResource StatusValue}" />
+                            </Viewbox>
+                            <TextBlock Grid.Row="1" Text="{Binding SelectedAxis.Unit}" Foreground="#B9C9D5" FontSize="10" HorizontalAlignment="Right" />
+                        </Grid>
                     </Grid>
                     <Grid Grid.Row="3">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="84" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                         <TextBlock Text="当前速度" Style="{StaticResource StatusRowLabel}" />
-                        <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedAxis.DisplaySpeed, TargetNullValue=--}" Style="{StaticResource StatusValue}" HorizontalAlignment="Right" /><TextBlock Text="units（脉冲）/s" Foreground="#B9C9D5" FontSize="10" HorizontalAlignment="Right" Margin="0,-3,0,0" /></StackPanel>
+                        <Grid Grid.Column="1" Margin="6,3,0,3">
+                            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="14" /></Grid.RowDefinitions>
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="CurrentSpeedValue" Text="{Binding SelectedAxis.DisplaySpeed, TargetNullValue=--}" ToolTip="{Binding SelectedAxis.DisplaySpeed}" Style="{StaticResource StatusValue}" />
+                            </Viewbox>
+                            <TextBlock Grid.Row="1" Text="units（脉冲）/s" Foreground="#B9C9D5" FontSize="10" HorizontalAlignment="Right" />
+                        </Grid>
                     </Grid>
                     <Border Grid.Row="4" Background="#345269" />
                     <StackPanel Grid.Row="5" Margin="0,8,0,0">
