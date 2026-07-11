@@ -152,6 +152,7 @@
         <Style x:Key="AxisCardItem" TargetType="ListBoxItem">
             <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Background" Value="#27445C" />
@@ -280,7 +281,18 @@
                                              ToolTip="双击修改轴名称"
                                              MouseDoubleClick="AxisName_MouseDoubleClick"
                                              LostFocus="AxisName_LostFocus"
-                                             KeyDown="AxisName_KeyDown" />
+                                             KeyDown="AxisName_KeyDown">
+                                        <TextBox.Style>
+                                            <Style TargetType="TextBox">
+                                                <Setter Property="Cursor" Value="Hand" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsReadOnly" Value="False">
+                                                        <Setter Property="Cursor" Value="IBeam" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBox.Style>
+                                    </TextBox>
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" ToolTip="{Binding State}">
                                         <Ellipse Width="8" Height="8" Fill="{Binding StatusBrush}" Margin="0,0,5,0" />
                                         <TextBlock Text="{Binding CardStateText}" Foreground="#D8E4EC" FontSize="10" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -326,6 +338,18 @@
                             </StackPanel>
                         </Grid>
                     </Border>
+
+                    <ProgressBar x:Name="AxisSwitchProgressBar"
+                                 Grid.Row="0"
+                                 Panel.ZIndex="2"
+                                 Height="4"
+                                 VerticalAlignment="Bottom"
+                                 IsIndeterminate="True"
+                                 IsHitTestVisible="False"
+                                 Foreground="#62B5FF"
+                                 Background="Transparent"
+                                 Visibility="Collapsed"
+                                 AutomationProperties.Name="正在切换轴" />
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>

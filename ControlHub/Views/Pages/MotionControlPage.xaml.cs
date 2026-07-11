@@ -30,6 +30,7 @@ public partial class MotionControlPage : UserControl
     private readonly string? _configurationError;
     private CancellationTokenSource? _homeSequenceCancellation;
     private CancellationTokenSource? _positionMoveCancellation;
+    private CancellationTokenSource? _axisSelectionFeedbackCancellation;
     private Stopwatch? _commandStopwatch;
     private int? _activeJogAxisNo;
     private int? _activePositionAxisNo;
@@ -116,6 +117,7 @@ public partial class MotionControlPage : UserControl
 
         _homeSequenceCancellation?.Cancel();
         _positionMoveCancellation?.Cancel();
+        _axisSelectionFeedbackCancellation?.Cancel();
 
         if (_motionCard.IsOpen)
         {
@@ -324,9 +326,22 @@ public partial class MotionControlPage : UserControl
             MessageBoxImage.Error);
     }
 
-    private void AxisSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void AxisSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (e.RemovedItems.OfType<AxisStatus>().FirstOrDefault() is { } previousAxis)
+        var previousAxis = e.RemovedItems.OfType<AxisStatus>().FirstOrDefault();
+        var nextAxis = e.AddedItems.OfType<AxisStatus>().FirstOrDefault();
+        CancellationTokenSource? feedbackCancellation = null;
+
+        if (previousAxis is not null && nextAxis is not null &&
+            previousAxis.HardwareAxisNo != nextAxis.HardwareAxisNo)
+        {
+            _axisSelectionFeedbackCancellation?.Cancel();
+            feedbackCancellation = new CancellationTokenSource();
+            _axisSelectionFeedbackCancellation = feedbackCancellation;
+            AxisSwitchProgressBar.Visibility = Visibility.Visible;
+        }
+
+        if (previousAxis is not null)
         {
             try
             {
@@ -362,6 +377,32 @@ public partial class MotionControlPage : UserControl
         }
 
         UpdateHomeEditorState();
+
+        if (feedbackCancellation is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Keep the feedback visible long enough to be perceived even when the
+            // selected axis configuration loads immediately.
+            await Task.Delay(450, feedbackCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer axis selection owns the progress indicator now.
+        }
+        finally
+        {
+            if (ReferenceEquals(_axisSelectionFeedbackCancellation, feedbackCancellation))
+            {
+                AxisSwitchProgressBar.Visibility = Visibility.Collapsed;
+                _axisSelectionFeedbackCancellation = null;
+            }
+
+            feedbackCancellation.Dispose();
+        }
     }
 
     private void AxisName_MouseDoubleClick(object sender, MouseButtonEventArgs e)
