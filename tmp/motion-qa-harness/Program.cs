@@ -254,24 +254,11 @@ internal static class Program
             "状态读取失效后仍允许启动 JOG");
         axis1.StatusReadHealthy = true;
 
-        var lowPresetButton = (Button?)page.FindName("LowSpeedPresetButton")
-            ?? throw new InvalidOperationException("找不到低速预设按钮。");
-        var debugPresetButton = (Button?)page.FindName("DebugSpeedPresetButton")
-            ?? throw new InvalidOperationException("找不到调试预设按钮。");
-        var highPresetButton = (Button?)page.FindName("HighSpeedPresetButton")
-            ?? throw new InvalidOperationException("找不到高速预设按钮。");
-        static bool IsSelectedPreset(Button button) =>
-            button.Background is SolidColorBrush { Color.R: 0x0D, Color.G: 0x6E, Color.B: 0xE8 };
-
-        axis1.JogSpeed = 25;
-        await page.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-        Require(!IsSelectedPreset(lowPresetButton) && IsSelectedPreset(debugPresetButton) && !IsSelectedPreset(highPresetButton), "25 速度预设高亮错误");
-        axis1.JogSpeed = 5;
-        await page.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-        Require(IsSelectedPreset(lowPresetButton) && !IsSelectedPreset(debugPresetButton) && !IsSelectedPreset(highPresetButton), "5 速度预设高亮错误");
-        axis1.JogSpeed = 7;
-        await page.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-        Require(!IsSelectedPreset(lowPresetButton) && !IsSelectedPreset(debugPresetButton) && !IsSelectedPreset(highPresetButton), "自定义速度不应高亮任何预设");
+        Require(
+            page.FindName("LowSpeedPresetButton") is null &&
+            page.FindName("DebugSpeedPresetButton") is null &&
+            page.FindName("HighSpeedPresetButton") is null,
+            "已移除的 JOG 速度预设仍存在于界面中");
         axis1.JogSpeed = 25;
 
         var start = axis1.Position;
@@ -287,6 +274,32 @@ internal static class Program
         Invoke(page, "PollMotionState");
         Require(axis1.Position > start, "JOG 正向运行后位置没有增加");
         Require(!axis1.IsMoving, "JOG 松开后未确认停止");
+
+        var negativeJogButton = (Button?)page.FindName("JogNegativeButton")
+            ?? throw new InvalidOperationException("找不到负向 JOG 按钮。");
+        Invoke(page, "StartContinuousJogFromInput", 1, positiveJogButton);
+        await Task.Delay(80);
+        Invoke(page, "StopActiveJog", "方向切换回归测试");
+        Invoke(page, "PollMotionState");
+        Invoke(page, "StartContinuousJogFromInput", -1, negativeJogButton);
+        Invoke(page, "StopActiveJogFromInput", positiveJogButton, "旧正向按钮失去焦点");
+        Require(
+            GetPrivateField<int?>(page, "_activeJogAxisNo") == axis1.HardwareAxisNo && axis1.IsMoving,
+            "正向停止后首次负向按下被旧正向按钮的失焦事件错误停止");
+        Invoke(page, "StopActiveJogFromInput", negativeJogButton, "负向按钮释放");
+        Invoke(page, "PollMotionState");
+
+        Invoke(page, "StartContinuousJogFromInput", -1, negativeJogButton);
+        await Task.Delay(80);
+        Invoke(page, "StopActiveJog", "反向切换回归测试");
+        Invoke(page, "PollMotionState");
+        Invoke(page, "StartContinuousJogFromInput", 1, positiveJogButton);
+        Invoke(page, "StopActiveJogFromInput", negativeJogButton, "旧负向按钮失去焦点");
+        Require(
+            GetPrivateField<int?>(page, "_activeJogAxisNo") == axis1.HardwareAxisNo && axis1.IsMoving,
+            "负向停止后首次正向按下被旧负向按钮的失焦事件错误停止");
+        Invoke(page, "StopActiveJogFromInput", positiveJogButton, "正向按钮释放");
+        Invoke(page, "PollMotionState");
 
         Require(
             page.FindName("JogImmediateStopButton") is Button &&
@@ -823,7 +836,7 @@ internal static class Program
             single_axis_immediate_stop = "passed",
             busy_clear_alarm_and_servo_off = "passed",
             home_sequence_preflight = "passed",
-            dynamic_speed_presets = "passed",
+            jog_direction_reversal = "passed",
             detected_card_list = "passed",
             stale_status_motion_lock = "passed",
             single_axis_home_failure = "passed",

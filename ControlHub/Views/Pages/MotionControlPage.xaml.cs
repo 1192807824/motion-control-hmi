@@ -33,6 +33,7 @@ public partial class MotionControlPage : UserControl
     private CancellationTokenSource? _axisSelectionFeedbackCancellation;
     private Stopwatch? _commandStopwatch;
     private int? _activeJogAxisNo;
+    private FrameworkElement? _activeJogInputOwner;
     private int? _activePositionAxisNo;
     private double? _activePositionTarget;
     private DateTime? _activePositionIssuedAtUtc;
@@ -1104,30 +1105,30 @@ public partial class MotionControlPage : UserControl
 
     private void JogHold_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        StartContinuousJog(GetDirection(sender));
+        StartContinuousJogFromInput(GetDirection(sender), sender as FrameworkElement);
     }
 
     private void JogHold_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        StopActiveJog("松开按钮");
+        StopActiveJogFromInput(sender, "松开按钮");
     }
 
     private void JogHold_MouseLeave(object sender, MouseEventArgs e)
     {
         if (e.LeftButton == MouseButtonState.Pressed)
         {
-            StopActiveJog("指针离开按钮");
+            StopActiveJogFromInput(sender, "指针离开按钮");
         }
     }
 
     private void JogHold_LostMouseCapture(object sender, MouseEventArgs e)
     {
-        StopActiveJog("按钮已释放");
+        StopActiveJogFromInput(sender, "按钮已释放");
     }
 
     private void JogHold_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
-        StopActiveJog("JOG 按钮失去键盘焦点");
+        StopActiveJogFromInput(sender, "JOG 按钮失去键盘焦点");
     }
 
     private void OwnerWindow_Deactivated(object? sender, EventArgs e)
@@ -1139,7 +1140,7 @@ public partial class MotionControlPage : UserControl
     {
         if (!e.IsRepeat && e.Key is Key.Space or Key.Enter)
         {
-            StartContinuousJog(GetDirection(sender));
+            StartContinuousJogFromInput(GetDirection(sender), sender as FrameworkElement);
             e.Handled = true;
         }
     }
@@ -1148,7 +1149,7 @@ public partial class MotionControlPage : UserControl
     {
         if (e.Key is Key.Space or Key.Enter)
         {
-            StopActiveJog("按键已释放");
+            StopActiveJogFromInput(sender, "按键已释放");
             e.Handled = true;
         }
     }
@@ -1161,6 +1162,11 @@ public partial class MotionControlPage : UserControl
     }
 
     private void StartContinuousJog(int direction)
+    {
+        StartContinuousJogFromInput(direction, inputOwner: null);
+    }
+
+    private void StartContinuousJogFromInput(int direction, FrameworkElement? inputOwner)
     {
         if (direction == 0 ||
             _activeJogAxisNo is not null ||
@@ -1195,10 +1201,21 @@ public partial class MotionControlPage : UserControl
         }
 
         _activeJogAxisNo = axis.HardwareAxisNo;
+        _activeJogInputOwner = inputOwner;
         _commandStopwatch = Stopwatch.StartNew();
         axis.IsMoving = true;
         axis.State = direction > 0 ? "连续 JOG 正向运行" : "连续 JOG 负向运行";
         SetCommandStage(CommandStage.Running, direction > 0 ? "正向 JOG 运行中" : "负向 JOG 运行中");
+    }
+
+    private void StopActiveJogFromInput(object sender, string reason)
+    {
+        if (!ReferenceEquals(sender, _activeJogInputOwner))
+        {
+            return;
+        }
+
+        StopActiveJog(reason);
     }
 
     private void StopActiveJog(string reason)
@@ -1773,6 +1790,7 @@ public partial class MotionControlPage : UserControl
 
         _homeSequenceCancellation?.Cancel();
         _activeJogAxisNo = null;
+        _activeJogInputOwner = null;
         _activePositionAxisNo = null;
         _activePositionTarget = null;
         _activePositionIssuedAtUtc = null;
@@ -2404,6 +2422,7 @@ public partial class MotionControlPage : UserControl
         if (_activeJogAxisNo == hardwareAxisNo)
         {
             _activeJogAxisNo = null;
+            _activeJogInputOwner = null;
         }
 
         if (axis is not null)
@@ -2456,6 +2475,7 @@ public partial class MotionControlPage : UserControl
         else if (_activeJogAxisNo == axis.HardwareAxisNo && !snapshot.IsMoving)
         {
             _activeJogAxisNo = null;
+            _activeJogInputOwner = null;
             axis.State = "JOG 已停止";
             SetCommandStage(CommandStage.Stopped, "JOG 已停止");
         }
@@ -2657,6 +2677,7 @@ public partial class MotionControlPage : UserControl
         {
             _homeSequenceCancellation?.Cancel();
             _activeJogAxisNo = null;
+            _activeJogInputOwner = null;
             _activePositionAxisNo = null;
             _activePositionTarget = null;
             _activePositionIssuedAtUtc = null;
