@@ -45,8 +45,6 @@ public sealed class MotionCardOptions
 
     public Dictionary<int, MotionHomeProfile> AxisHomeProfiles { get; init; } = [];
 
-    public Dictionary<int, MotionAxisHardwareProfile> AxisHardwareProfiles { get; init; } = [];
-
     public int[] HomeSequence { get; set; } = [];
 
     public void ApplyMigrations()
@@ -95,7 +93,6 @@ public sealed class MotionCardOptions
             DecelerationSeconds = 0.1,
             OffsetPosition = 0
         };
-        AxisHardwareProfiles[0] = MotionAxisHardwareProfile.CreateAxisZeroDefaults();
         ConfigurationVersion = 2;
     }
 
@@ -206,16 +203,6 @@ public sealed class MotionCardOptions
             item.Value.Validate(requireEnabled: false);
         }
 
-        foreach (var item in AxisHardwareProfiles)
-        {
-            if (item.Key is < 0 or > 63)
-            {
-                throw new InvalidDataException($"AxisHardwareProfiles 的硬件轴号 {item.Key} 超出 0 到 63 的范围。");
-            }
-
-            item.Value.Validate();
-        }
-
         if (HomeSequence.Any(axisNo => axisNo < 0 || axisNo >= AxisCount))
         {
             throw new InvalidDataException("HomeSequence 使用硬件轴号，且每个轴号必须在 0 到 AxisCount - 1 之间。");
@@ -225,76 +212,6 @@ public sealed class MotionCardOptions
         {
             throw new InvalidDataException("HomeSequence 不能包含重复轴号。");
         }
-    }
-}
-
-public sealed class MotionAxisHardwareProfile
-{
-    public double RunVelocity { get; init; } = 10000;
-
-    public double Equivalent { get; init; } = 1;
-
-    public bool EmergencyStopEnabled { get; init; }
-
-    public ushort EmergencyStopLogic { get; init; }
-
-    public bool LimitEnabled { get; init; } = true;
-
-    public ushort LimitLogic { get; init; }
-
-    public ushort LimitMode { get; init; }
-
-    public bool SoftLimitEnabled { get; init; }
-
-    public ushort SoftLimitSource { get; init; }
-
-    public ushort SoftLimitAction { get; init; } = 1;
-
-    public double NegativeSoftLimit { get; init; }
-
-    public double PositiveSoftLimit { get; init; } = 1000;
-
-    public bool IoDecelerationStopEnabled { get; init; }
-
-    public ushort IoDecelerationStopLogic { get; init; }
-
-    public MotionAxisIoMapping[] IoMappings { get; init; } =
-    [
-        new MotionAxisIoMapping { IoType = 3, MapIoType = 6, MapIoIndex = 0, Filter = 0 },
-        new MotionAxisIoMapping { IoType = 4, MapIoType = 6, MapIoIndex = 0, Filter = 0 }
-    ];
-
-    public static MotionAxisHardwareProfile CreateAxisZeroDefaults() => new();
-
-    public void Validate()
-    {
-        MotionMoveProfile.ValidateFinitePositive(RunVelocity, nameof(RunVelocity));
-        MotionMoveProfile.ValidateFinitePositive(Equivalent, nameof(Equivalent));
-        if (!double.IsFinite(NegativeSoftLimit) || !double.IsFinite(PositiveSoftLimit))
-        {
-            throw new InvalidDataException("软限位位置必须是有限数值。");
-        }
-
-        foreach (var mapping in IoMappings)
-        {
-            mapping.Validate();
-        }
-    }
-}
-
-public sealed class MotionAxisIoMapping
-{
-    public ushort IoType { get; init; }
-
-    public ushort MapIoType { get; init; }
-
-    public ushort MapIoIndex { get; init; }
-
-    public double Filter { get; init; }
-
-    public void Validate()
-    {
-        MotionMoveProfile.ValidateFiniteNonNegative(Filter, nameof(Filter));
     }
 }
 

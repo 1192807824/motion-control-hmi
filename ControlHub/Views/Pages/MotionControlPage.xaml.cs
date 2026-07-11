@@ -296,10 +296,15 @@ public partial class MotionControlPage : UserControl
         SetConnectionText(connectionText);
         RecordAlarm("MOTION-CARD-INIT", details);
 
+        var troubleshooting =
+            details.Contains("LTDMC.dll", StringComparison.OrdinalIgnoreCase) ||
+            details.Contains("位数", StringComparison.Ordinal)
+                ? "请检查 32 位雷赛运行库及 LTDMC.dll 是否与 win-x86 程序匹配，并确认 DLL 位于程序同目录。"
+                : "请先关闭其他可能占用控制卡的软件，再根据上方 SDK 操作名和返回码检查板卡、驱动及总线状态。程序启动阶段不会写入轴参数。";
         var message =
             "未能读取运动控制卡，轴列表无法加载。\n\n" +
             $"原因：{details}\n\n" +
-            "本项目已按 win-x86 构建并随程序复制 32 位 LTDMC.dll v2.4.6.9。请检查控制卡供电、雷赛驱动/运行库、DLL 是否位于程序同目录，以及现场 SDK 版本是否匹配。";
+            troubleshooting;
         var owner = Window.GetWindow(this);
         if (owner is null)
         {
@@ -1821,7 +1826,7 @@ public partial class MotionControlPage : UserControl
         }).ToArray();
 
         var busError = _motionCard.ReadBusErrorCode();
-        if (busError != 0)
+        if (busError != 0 && busError != RingRedundancyDisconnectedWarning)
         {
             throw new MotionCardException($"EtherCAT 总线错误 0x{busError:X4}。");
         }
