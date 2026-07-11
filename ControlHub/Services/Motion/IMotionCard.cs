@@ -44,6 +44,8 @@ public interface IMotionCard : IDisposable
 
     void MoveRelative(int hardwareAxisNo, double distance, double velocity);
 
+    void MoveAbsolute(int hardwareAxisNo, double position, double velocity);
+
     void Stop(int hardwareAxisNo, bool emergency = false);
 
     void EmergencyStop();

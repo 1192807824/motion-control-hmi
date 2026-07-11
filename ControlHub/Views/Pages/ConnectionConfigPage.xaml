@@ -158,7 +158,7 @@
                                FontSize="22"
                                FontWeight="Bold"
                                Foreground="#0B2238" />
-                    <TextBlock Text="RS232 / TCP / IO / PLC"
+                    <TextBlock Text="TCP / IO / PLC"
                                Margin="0,4,0,0"
                                FontSize="12"
                                FontWeight="SemiBold"
@@ -217,7 +217,7 @@
                                         Background="#1F5F9F"
                                         CornerRadius="4"
                                         VerticalAlignment="Center">
-                                    <TextBlock Text="232"
+                                    <TextBlock Text="TCP"
                                                Foreground="White"
                                                FontSize="12"
                                                FontWeight="Bold"
@@ -229,11 +229,17 @@
                                                FontSize="15"
                                                FontWeight="Bold"
                                                Foreground="#0F172A" />
-                                    <TextBlock Text="{Binding FeederSettings.PortName, StringFormat=RS232  {0}}"
-                                               Margin="0,4,0,0"
+                                    <TextBlock Margin="0,4,0,0"
                                                FontSize="12"
                                                FontWeight="SemiBold"
-                                               Foreground="#1F5F9F" />
+                                               Foreground="#1F5F9F">
+                                        <TextBlock.Text>
+                                            <MultiBinding StringFormat="TCP  {0}:{1}">
+                                                <Binding Path="FeederSettings.Host" />
+                                                <Binding Path="FeederSettings.Port" />
+                                            </MultiBinding>
+                                        </TextBlock.Text>
+                                    </TextBlock>
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -304,11 +310,11 @@
                     </StackPanel>
 
                     <Button Grid.Row="2"
-                            Content="&#x5237;&#x65B0;&#x8FDE;&#x63A5;"
+                            Content="&#x4FDD;&#x5B58; TCP &#x914D;&#x7F6E;"
                             Style="{StaticResource SecondaryButton}"
                             HorizontalAlignment="Stretch"
                             Margin="0"
-                            Click="RefreshPorts_Click" />
+                            Click="SaveSettings_Click" />
                 </Grid>
             </Border>
 
@@ -334,24 +340,16 @@
                             <TextBlock Text="&#x9707;&#x52A8;&#x76D8;" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="&#x4E32;&#x53E3;" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Text="{Binding FeederSettings.PortName}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                            <TextBlock Text="&#x8BBE;&#x5907;&#x5730;&#x5740;" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="{Binding FeederSettings.Host}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                            <TextBlock Text="&#x901A;&#x8BAF;" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Text="{Binding FeederSettings.BaudRate, StringFormat={}{0} bps}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                            <TextBlock Text="TCP &#x7AEF;&#x53E3;" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="{Binding FeederSettings.Port}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="3" VerticalAlignment="Center">
-                            <TextBlock Text="&#x5E27;&#x683C;&#x5F0F;" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Style="{StaticResource MetricValue}" Margin="0,6,0,0">
-                                <TextBlock.Text>
-                                    <MultiBinding StringFormat="{}{0}-{1}-{2}">
-                                        <Binding Path="FeederSettings.DataBits" />
-                                        <Binding Path="FeederSettings.Parity" />
-                                        <Binding Path="FeederSettings.StopBits" />
-                                    </MultiBinding>
-                                </TextBlock.Text>
-                            </TextBlock>
+                            <TextBlock Text="&#x534F;&#x8BAE;" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="TCP Client" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="4"
@@ -385,7 +383,7 @@
 
                     <Grid Grid.Column="0">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="300" />
+                            <RowDefinition Height="220" />
                             <RowDefinition Height="10" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
@@ -401,7 +399,7 @@
                                     BorderThickness="0,0,0,1"
                                     CornerRadius="6,6,0,0"
                                     Padding="14,0">
-                                <TextBlock Text="&#x4E32;&#x53E3;&#x53C2;&#x6570;" Style="{StaticResource PanelTitle}" />
+                                <TextBlock Text="TCP &#x5BA2;&#x6237;&#x7AEF;&#x53C2;&#x6570;" Style="{StaticResource PanelTitle}" />
                             </Border>
 
                             <Grid Grid.Row="1" Margin="14,12,14,12">
@@ -416,95 +414,38 @@
                                         <RowDefinition Height="42" />
                                         <RowDefinition Height="42" />
                                         <RowDefinition Height="42" />
-                                        <RowDefinition Height="42" />
-                                        <RowDefinition Height="42" />
                                     </Grid.RowDefinitions>
 
-                                    <TextBlock Grid.Row="0" Text="&#x4E32;&#x53E3;&#x53F7;" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox x:Name="PortNameComboBox"
-                                              Grid.Row="0"
-                                              Grid.Column="1"
-                                              Style="{StaticResource ConfigCombo}"
-                                              IsEditable="True"
-                                              IsTextSearchEnabled="True"
-                                              Text="{Binding FeederSettings.PortName, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Row="0" Text="&#x8BBE;&#x5907;&#x5730;&#x5740;" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Row="0"
+                                             Grid.Column="1"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding FeederSettings.Host, UpdateSourceTrigger=PropertyChanged}" />
 
-                                    <TextBlock Grid.Row="0" Grid.Column="3" Text="&#x6CE2;&#x7279;&#x7387;" Style="{StaticResource FieldLabel}" />
+                                    <TextBlock Grid.Row="0" Grid.Column="3" Text="TCP &#x7AEF;&#x53E3;" Style="{StaticResource FieldLabel}" />
                                     <TextBox Grid.Row="0"
                                              Grid.Column="4"
                                              Style="{StaticResource ConfigInput}"
-                                             Text="{Binding FeederSettings.BaudRate, UpdateSourceTrigger=LostFocus}" />
+                                             Text="{Binding FeederSettings.Port, UpdateSourceTrigger=LostFocus}" />
 
-                                    <TextBlock Grid.Row="1" Text="&#x6570;&#x636E;&#x4F4D;" Style="{StaticResource FieldLabel}" />
+                                    <TextBlock Grid.Row="1" Text="&#x8FDE;&#x63A5;&#x8D85;&#x65F6;" Style="{StaticResource FieldLabel}" />
                                     <TextBox Grid.Row="1"
                                              Grid.Column="1"
                                              Style="{StaticResource ConfigInput}"
-                                             Text="{Binding FeederSettings.DataBits, UpdateSourceTrigger=LostFocus}" />
+                                             Text="{Binding FeederSettings.ConnectTimeoutMs, UpdateSourceTrigger=LostFocus}" />
 
-                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="&#x6821;&#x9A8C;&#x4F4D;" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox Grid.Row="1"
-                                              Grid.Column="4"
-                                              Style="{StaticResource ConfigCombo}"
-                                              SelectedValuePath="Content"
-                                              SelectedValue="{Binding FeederSettings.Parity, UpdateSourceTrigger=PropertyChanged}">
-                                        <ComboBoxItem Content="None" />
-                                        <ComboBoxItem Content="Odd" />
-                                        <ComboBoxItem Content="Even" />
-                                        <ComboBoxItem Content="Mark" />
-                                        <ComboBoxItem Content="Space" />
-                                    </ComboBox>
-
-                                    <TextBlock Grid.Row="2" Text="&#x505C;&#x6B62;&#x4F4D;" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox Grid.Row="2"
-                                              Grid.Column="1"
-                                              Style="{StaticResource ConfigCombo}"
-                                              SelectedValuePath="Content"
-                                              SelectedValue="{Binding FeederSettings.StopBits, UpdateSourceTrigger=PropertyChanged}">
-                                        <ComboBoxItem Content="One" />
-                                        <ComboBoxItem Content="Two" />
-                                        <ComboBoxItem Content="OnePointFive" />
-                                    </ComboBox>
-
-                                    <TextBlock Grid.Row="2" Grid.Column="3" Text="&#x63E1;&#x624B;" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox Grid.Row="2"
-                                              Grid.Column="4"
-                                              Style="{StaticResource ConfigCombo}"
-                                              SelectedValuePath="Content"
-                                              SelectedValue="{Binding FeederSettings.Handshake, UpdateSourceTrigger=PropertyChanged}">
-                                        <ComboBoxItem Content="None" />
-                                        <ComboBoxItem Content="RequestToSend" />
-                                        <ComboBoxItem Content="XOnXOff" />
-                                        <ComboBoxItem Content="RequestToSendXOnXOff" />
-                                    </ComboBox>
-
-                                    <TextBlock Grid.Row="3" Text="&#x7F16;&#x7801;" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox Grid.Row="3"
-                                              Grid.Column="1"
-                                              Style="{StaticResource ConfigCombo}"
-                                              IsEditable="True"
-                                              Text="{Binding FeederSettings.EncodingName, UpdateSourceTrigger=PropertyChanged}">
-                                        <ComboBoxItem Content="ASCII" />
-                                        <ComboBoxItem Content="UTF-8" />
-                                        <ComboBoxItem Content="GB2312" />
-                                    </ComboBox>
-
-                                    <TextBlock Grid.Row="3" Grid.Column="3" Text="&#x7ED3;&#x675F;&#x7B26;" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Row="3"
-                                             Grid.Column="4"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding FeederSettings.NewLine, UpdateSourceTrigger=PropertyChanged}" />
-
-                                    <TextBlock Grid.Row="4" Text="&#x8BFB;&#x8D85;&#x65F6;" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Row="4"
-                                             Grid.Column="1"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding FeederSettings.ReadTimeoutMs, UpdateSourceTrigger=LostFocus}" />
-
-                                    <TextBlock Grid.Row="4" Grid.Column="3" Text="&#x5199;&#x8D85;&#x65F6;" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Row="4"
+                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="&#x5199;&#x8D85;&#x65F6;" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Row="1"
                                              Grid.Column="4"
                                              Style="{StaticResource ConfigInput}"
                                              Text="{Binding FeederSettings.WriteTimeoutMs, UpdateSourceTrigger=LostFocus}" />
+
+                                    <TextBlock Grid.Row="2" Text="&#x7ED3;&#x675F;&#x7B26;" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Row="2"
+                                             Grid.Column="1"
+                                             Grid.ColumnSpan="4"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding FeederSettings.NewLine, UpdateSourceTrigger=PropertyChanged}" />
                             </Grid>
                         </Grid>
                     </Border>

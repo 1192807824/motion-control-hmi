@@ -18,13 +18,20 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _visionRunTimeText = "--";
     private string _feederConnectionStatusText = "\u672a\u8fde\u63a5";
     private string _motionConnectionText = "运动控制：未连接";
+    private string _motionDetectedCardsText = "未检测卡";
     private string _motionAxisSummaryText = "■ 轴状态监控";
     private bool _motionControlsEnabled;
     private ImageSource? _visionPreviewImage;
 
     public MainWindowViewModel()
-        : this(new AxisSettingsStore().Load())
+        : this(new AxisSettingsStore().LoadWithDiagnostics())
     {
+    }
+
+    private MainWindowViewModel(AxisSettingsLoadResult loadResult)
+        : this(loadResult.Settings)
+    {
+        AxisSettingsLoadWarning = loadResult.Warning;
     }
 
     public MainWindowViewModel(IReadOnlyDictionary<int, AxisSettings> savedAxisSettings)
@@ -65,6 +72,7 @@ public sealed class MainWindowViewModel : ObservableObject
         AlarmRecords.Clear();
         SelectedAxis = null;
         MotionAxisSummaryText = "■ 轴状态监控";
+        MotionDetectedCardsText = "未检测卡";
         MotionControlsEnabled = false;
     }
 
@@ -89,6 +97,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public VibrationFeederSettings FeederSettings { get; }
 
     public ObservableCollection<string> FeederConnectionLogs { get; }
+
+    public string? AxisSettingsLoadWarning { get; }
 
     public AxisStatus? SelectedAxis
     {
@@ -136,6 +146,12 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _motionConnectionText;
         set => SetField(ref _motionConnectionText, value);
+    }
+
+    public string MotionDetectedCardsText
+    {
+        get => _motionDetectedCardsText;
+        set => SetField(ref _motionDetectedCardsText, value);
     }
 
     public string MotionAxisSummaryText

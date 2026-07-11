@@ -6,13 +6,14 @@ namespace ControlHub.Services.Motion;
 public sealed class LeisaiMotionCard : IMotionCard
 {
     private const ushort EtherCatPort = 2;
-    private const ushort AllEtherCatAxes = 255;
+    private const ushort AllEtherCatAxesSentinel = 255;
     private const ushort EnabledStateMachine = 4;
 
     private readonly object _sync = new();
     private readonly MotionCardOptions _options;
     private ushort _cardNo;
     private int _detectedCardCount;
+    private MotionCardDescriptor[] _detectedCards = [];
 
     public LeisaiMotionCard(MotionCardOptions options)
     {
@@ -69,6 +70,10 @@ public sealed class LeisaiMotionCard : IMotionCard
                 {
                     throw new MotionCardException("控制卡初始化成功，但没有返回可用的硬件卡号。", "dmc_get_CardInfList");
                 }
+
+                _detectedCards = Enumerable.Range(0, listedCardCount)
+                    .Select(index => new MotionCardDescriptor(cardIds[index], cardTypes[index]))
+                    .ToArray();
 
                 _cardNo = _options.CardNo ?? cardIds[0];
                 if (!cardIds.Take(listedCardCount).Contains(_cardNo))
@@ -153,6 +158,8 @@ public sealed class LeisaiMotionCard : IMotionCard
             DigitalOutputCount = 0;
             AnalogInputCount = 0;
             AnalogOutputCount = 0;
+            _detectedCardCount = 0;
+            _detectedCards = [];
             EnsureSuccess(result, "dmc_board_close");
         }
     }
@@ -336,7 +343,9 @@ public sealed class LeisaiMotionCard : IMotionCard
 
             if (!enabled && doneState == 0)
             {
-                StopCore(axis, emergency: false);
+                throw new MotionCardException(
+                    $"硬件轴 {hardwareAxisNo} 正在运动，必须先停止并确认 dmc_check_done = 1 后才能解除使能。",
+                    "dmc_check_done");
             }
 
             SetServoCommand(axis, enabled);
@@ -350,30 +359,69 @@ public sealed class LeisaiMotionCard : IMotionCard
         {
             EnsureOpen();
             EnsureBusReady();
+
+            // Axis 255 is the SDK's all-axis sentinel, not an addressable hardware axis.
+            // Refuse an impossible count before converting indexes to ushort so that a
+            // per-axis safety operation can never accidentally become a card-wide command.
+            if (AxisCount > AllEtherCatAxesSentinel)
+            {
+                throw new MotionCardException(
+                    $"控制卡返回 {AxisCount} 个硬件轴，超过逐轴接口可安全寻址的 0..{AllEtherCatAxesSentinel - 1} 范围。",
+                    "dmc_get_total_axes");
+            }
+
             var configuredAxes = Enumerable.Range(0, Math.Min(AxisCount, _options.AxisCount))
-                .Select(value => (ushort)value)
+                .Select(value => checked((ushort)value))
                 .ToArray();
             if (enabled)
             {
+                var newlyEnabledAxes = new List<ushort>(configuredAxes.Length);
                 try
                 {
                     foreach (var axis in configuredAxes)
                     {
+                        ushort stateMachine = 0;
+                        EnsureSuccess(
+                            LeisaiNative.nmc_get_axis_state_machine(_cardNo, axis, ref stateMachine),
+                            "nmc_get_axis_state_machine");
+                        if (stateMachine == EnabledStateMachine)
+                        {
+                            continue;
+                        }
+
                         SetServoCommand(axis, true);
+                        newlyEnabledAxes.Add(axis);
                     }
 
                     WaitForServoState(configuredAxes, true);
                 }
-                catch
+                catch (Exception enableFailure)
                 {
-                    try
+                    var rollbackFailures = new List<Exception>();
+                    for (var index = newlyEnabledAxes.Count - 1; index >= 0; index--)
                     {
-                        LeisaiNative.dmc_emg_stop(_cardNo);
-                        LeisaiNative.nmc_set_axis_disable(_cardNo, AllEtherCatAxes);
+                        var axis = newlyEnabledAxes[index];
+                        try
+                        {
+                            EnsureAxisStopped(axis);
+                            SetServoCommand(axis, false);
+                            WaitForServoState([axis], false);
+                        }
+                        catch (Exception rollbackFailure)
+                        {
+                            rollbackFailures.Add(
+                                new MotionCardException(
+                                    $"硬件轴 {axis} 在全轴使能失败后的回滚解除使能中失败。",
+                                    "全轴使能回滚",
+                                    innerException: rollbackFailure));
+                        }
                     }
-                    catch
+
+                    if (rollbackFailures.Count > 0)
                     {
-                        // Preserve the original enable failure.
+                        throw new AggregateException(
+                            "全轴使能失败，且一个或多个本次已下发使能命令的轴回滚失败。",
+                            [enableFailure, .. rollbackFailures]);
                     }
 
                     throw;
@@ -381,9 +429,21 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
             else
             {
-                EnsureSuccess(LeisaiNative.dmc_emg_stop(_cardNo), "dmc_emg_stop");
-                SetServoCommand(AllEtherCatAxes, false);
-                WaitForServoState(configuredAxes, false);
+                var hardwareAxes = Enumerable.Range(0, AxisCount)
+                    .Select(value => checked((ushort)value))
+                    .ToArray();
+
+                foreach (var axis in hardwareAxes)
+                {
+                    EnsureAxisStopped(axis);
+                }
+
+                foreach (var axis in hardwareAxes)
+                {
+                    SetServoCommand(axis, false);
+                }
+
+                WaitForServoState(hardwareAxes, false);
             }
         }
     }
@@ -393,7 +453,8 @@ public sealed class LeisaiMotionCard : IMotionCard
         lock (_sync)
         {
             var axis = GetAxis(hardwareAxisNo);
-            EnsureAxisReady(axis);
+            EnsureAxisReadyForDirection(axis, direction: 0);
+            EnsureAxisStopped(axis);
             var profile = _options.GetHomeProfile(hardwareAxisNo);
             profile.Validate(requireEnabled: true);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
@@ -419,7 +480,9 @@ public sealed class LeisaiMotionCard : IMotionCard
             var axis = GetAxis(hardwareAxisNo);
             ValidateVelocity(velocity, allowSigned: true);
             EnsureAxisReadyForDirection(axis, Math.Sign(velocity));
+            EnsureAxisStopped(axis);
             ConfigureMove(axis, Math.Abs(velocity));
+            EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
             EnsureSuccess(LeisaiNative.dmc_vmove(_cardNo, axis, velocity >= 0 ? (ushort)1 : (ushort)0), "dmc_vmove");
         }
     }
@@ -436,9 +499,31 @@ public sealed class LeisaiMotionCard : IMotionCard
 
             ValidateVelocity(velocity, allowSigned: false);
             EnsureAxisReadyForDirection(axis, Math.Sign(distance));
+            EnsureAxisStopped(axis);
             ConfigureMove(axis, velocity);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
             EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, distance, 0), "dmc_pmove_unit");
+        }
+    }
+
+    public void MoveAbsolute(int hardwareAxisNo, double position, double velocity)
+    {
+        lock (_sync)
+        {
+            var axis = GetAxis(hardwareAxisNo);
+            if (!double.IsFinite(position))
+            {
+                throw new ArgumentOutOfRangeException(nameof(position), "绝对目标位置必须是有限数值。");
+            }
+
+            ValidateVelocity(velocity, allowSigned: false);
+            double currentPosition = 0;
+            EnsureSuccess(LeisaiNative.dmc_get_position_unit(_cardNo, axis, ref currentPosition), "dmc_get_position_unit");
+            EnsureAxisReadyForDirection(axis, Math.Sign(position - currentPosition));
+            EnsureAxisStopped(axis);
+            ConfigureMove(axis, velocity);
+            EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, position, 1), "dmc_pmove_unit");
         }
     }
 
@@ -484,6 +569,7 @@ public sealed class LeisaiMotionCard : IMotionCard
         return new MotionCardConnectionInfo(
             _cardNo,
             _detectedCardCount,
+            _detectedCards,
             AxisCount,
             DigitalInputCount,
             DigitalOutputCount,
@@ -494,18 +580,28 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     private void ConfigureMove(ushort axis, double velocity)
     {
-        var profile = _options.MoveProfile;
-        var startVelocity = Math.Min(profile.StartVelocity, velocity);
-        var stopVelocity = Math.Min(profile.StopVelocity, velocity);
+        var profile = _options.GetMoveProfile(axis);
+        if (profile.StartVelocity > velocity)
+        {
+            throw new InvalidDataException(
+                $"硬件轴 {axis} 的启动速度 {profile.StartVelocity:0.###} 不能大于运行速度 {velocity:0.###}。");
+        }
+
+        if (profile.StopVelocity > velocity)
+        {
+            throw new InvalidDataException(
+                $"硬件轴 {axis} 的停止速度 {profile.StopVelocity:0.###} 不能大于运行速度 {velocity:0.###}。");
+        }
+
         EnsureSuccess(
             LeisaiNative.dmc_set_profile_unit(
                 _cardNo,
                 axis,
-                startVelocity,
+                profile.StartVelocity,
                 velocity,
                 profile.AccelerationSeconds,
                 profile.DecelerationSeconds,
-                stopVelocity),
+                profile.StopVelocity),
             "dmc_set_profile_unit");
         EnsureSuccess(LeisaiNative.dmc_set_s_profile(_cardNo, axis, 0, profile.STimeSeconds), "dmc_set_s_profile");
         EnsureSuccess(
@@ -550,6 +646,31 @@ public sealed class LeisaiMotionCard : IMotionCard
             throw new MotionCardException(
                 $"硬件轴 {axis} 尚未进入操作使能状态（当前状态机 {stateMachine}，要求 4）。",
                 "轴状态检查");
+        }
+
+        ushort axisError = 0;
+        EnsureSuccess(LeisaiNative.nmc_get_axis_errcode(_cardNo, axis, ref axisError), "nmc_get_axis_errcode");
+        if (axisError != 0)
+        {
+            throw new MotionCardException(
+                $"硬件轴 {axis} 存在轴错误 0x{axisError:X4}，禁止运动。",
+                "轴错误检查");
+        }
+    }
+
+    private void EnsureAxisStopped(ushort axis)
+    {
+        var doneState = LeisaiNative.dmc_check_done(_cardNo, axis);
+        if (doneState is not (0 or 1))
+        {
+            throw NativeFailure("dmc_check_done", doneState);
+        }
+
+        if (doneState == 0)
+        {
+            throw new MotionCardException(
+                $"硬件轴 {axis} 正在运动，拒绝重复下发运动命令。",
+                "轴忙检查");
         }
     }
 
@@ -656,6 +777,7 @@ public sealed class LeisaiMotionCard : IMotionCard
         AnalogInputCount = 0;
         AnalogOutputCount = 0;
         _detectedCardCount = 0;
+        _detectedCards = [];
     }
 
     private static bool IsBitSet(uint value, int bit)

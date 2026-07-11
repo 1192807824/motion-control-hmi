@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Threading;
 using ControlHub.Services.Persistence;
@@ -12,6 +13,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _clockTimer;
     private readonly MainWindowViewModel _viewModel;
     private RememberedLogin? _rememberedLogin;
+    private bool _motionShutdownPrepared;
 
     public MainWindow()
     {
@@ -86,9 +88,26 @@ public partial class MainWindow : Window
         _rememberedLogin = _rememberedLoginStore.Load();
     }
 
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_motionShutdownPrepared && !MotionPage.TryShutdown(out var failureMessage))
+        {
+            e.Cancel = true;
+            MessageBox.Show(
+                this,
+                failureMessage,
+                "无法安全关闭程序",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        _motionShutdownPrepared = true;
+        base.OnClosing(e);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
-        MotionPage.Shutdown();
         ConnectionConfigContent.Shutdown();
         _clockTimer.Stop();
         base.OnClosed(e);

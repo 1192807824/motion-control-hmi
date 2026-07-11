@@ -31,15 +31,19 @@ public sealed class MotionCardOptions
 
     public int ServoEnableTimeoutMilliseconds { get; init; } = 1500;
 
-    public int HomeTimeoutSeconds { get; init; } = 60;
+    public int StopConfirmationTimeoutMilliseconds { get; init; } = 5000;
+
+    public int HomeTimeoutSeconds { get; set; } = 60;
 
     public MotionMoveProfile MoveProfile { get; init; } = new();
+
+    public Dictionary<int, MotionMoveProfile> AxisMoveProfiles { get; init; } = [];
 
     public MotionHomeProfile HomeProfile { get; init; } = new();
 
     public Dictionary<int, MotionHomeProfile> AxisHomeProfiles { get; init; } = [];
 
-    public int[] HomeSequence { get; init; } = [];
+    public int[] HomeSequence { get; set; } = [];
 
     public MotionHomeProfile GetHomeProfile(int hardwareAxisNo)
     {
@@ -47,14 +51,26 @@ public sealed class MotionCardOptions
         return AxisHomeProfiles.GetValueOrDefault(displayAxisNo) ?? HomeProfile;
     }
 
+    public MotionMoveProfile GetMoveProfile(int hardwareAxisNo)
+    {
+        return AxisMoveProfiles.GetValueOrDefault(hardwareAxisNo + 1) ?? MoveProfile;
+    }
+
+    public MotionMoveProfile GetOrCreateMoveProfile(int hardwareAxisNo)
+    {
+        var displayAxisNo = hardwareAxisNo + 1;
+        if (!AxisMoveProfiles.TryGetValue(displayAxisNo, out var profile))
+        {
+            profile = MoveProfile.Clone();
+            AxisMoveProfiles[displayAxisNo] = profile;
+        }
+
+        return profile;
+    }
+
     public IReadOnlyList<int> GetHomeSequence()
     {
-        var sequence = HomeSequence.Length == 0
-            ? Enumerable.Range(1, AxisCount)
-            : HomeSequence;
-
-        return sequence
-            .Distinct()
+        return HomeSequence
             .Select(displayAxisNo => displayAxisNo - 1)
             .ToArray();
     }
@@ -107,12 +123,27 @@ public sealed class MotionCardOptions
             throw new InvalidDataException("ServoEnableTimeoutMilliseconds 必须在 100 到 30000 之间。");
         }
 
+        if (StopConfirmationTimeoutMilliseconds is < 500 or > 60000)
+        {
+            throw new InvalidDataException("StopConfirmationTimeoutMilliseconds 必须在 500 到 60000 ms 之间。");
+        }
+
         if (HomeTimeoutSeconds is < 1 or > 3600)
         {
             throw new InvalidDataException("HomeTimeoutSeconds 必须在 1 到 3600 之间。");
         }
 
         MoveProfile.Validate();
+        foreach (var item in AxisMoveProfiles)
+        {
+            if (item.Key is < 1 or > 64)
+            {
+                throw new InvalidDataException($"AxisMoveProfiles 的轴号 {item.Key} 超出 1 到 64 的范围。");
+            }
+
+            item.Value.Validate();
+        }
+
         HomeProfile.Validate(requireEnabled: false);
 
         foreach (var item in AxisHomeProfiles)
@@ -129,22 +160,52 @@ public sealed class MotionCardOptions
         {
             throw new InvalidDataException("HomeSequence 使用界面轴号，且每个轴号必须在 1 到 AxisCount 之间。");
         }
+
+        if (HomeSequence.Distinct().Count() != HomeSequence.Length)
+        {
+            throw new InvalidDataException("HomeSequence 不能包含重复轴号。");
+        }
     }
 }
 
 public sealed class MotionMoveProfile
 {
-    public double StartVelocity { get; init; }
+    public double StartVelocity { get; set; }
 
-    public double StopVelocity { get; init; }
+    public double StopVelocity { get; set; }
 
-    public double AccelerationSeconds { get; init; } = 0.1;
+    public double AccelerationSeconds { get; set; } = 0.1;
 
-    public double DecelerationSeconds { get; init; } = 0.1;
+    public double DecelerationSeconds { get; set; } = 0.1;
 
-    public double STimeSeconds { get; init; }
+    public double STimeSeconds { get; set; }
 
-    public double DecelerationStopSeconds { get; init; } = 0.1;
+    public double DecelerationStopSeconds { get; set; } = 0.1;
+
+    public bool WaitForCompletion { get; set; } = true;
+
+    public int CompletionTimeoutMilliseconds { get; set; } = 5000;
+
+    public double CompletionTolerance { get; set; } = 0.01;
+
+    public bool AbsolutePositionMode { get; set; }
+
+    public MotionMoveProfile Clone()
+    {
+        return new MotionMoveProfile
+        {
+            StartVelocity = StartVelocity,
+            StopVelocity = StopVelocity,
+            AccelerationSeconds = AccelerationSeconds,
+            DecelerationSeconds = DecelerationSeconds,
+            STimeSeconds = STimeSeconds,
+            DecelerationStopSeconds = DecelerationStopSeconds,
+            WaitForCompletion = WaitForCompletion,
+            CompletionTimeoutMilliseconds = CompletionTimeoutMilliseconds,
+            CompletionTolerance = CompletionTolerance,
+            AbsolutePositionMode = AbsolutePositionMode
+        };
+    }
 
     public void Validate()
     {
@@ -154,6 +215,12 @@ public sealed class MotionMoveProfile
         ValidateFinitePositive(DecelerationSeconds, nameof(DecelerationSeconds));
         ValidateFiniteNonNegative(STimeSeconds, nameof(STimeSeconds));
         ValidateFinitePositive(DecelerationStopSeconds, nameof(DecelerationStopSeconds));
+        ValidateFinitePositive(CompletionTolerance, nameof(CompletionTolerance));
+
+        if (CompletionTimeoutMilliseconds is < 100 or > 600000)
+        {
+            throw new InvalidDataException("CompletionTimeoutMilliseconds 必须在 100 到 600000 ms 之间。");
+        }
 
         if (STimeSeconds > 1)
         {
@@ -229,15 +296,94 @@ public sealed class MotionCardOptionsStore
 
     public MotionCardOptions Load()
     {
-        var options = File.Exists(_filePath)
-            ? JsonSerializer.Deserialize<MotionCardOptions>(File.ReadAllText(_filePath), new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-                ReadCommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true
-            }) ?? throw new InvalidDataException("motion-settings.json 内容为空。")
-            : new MotionCardOptions();
+        if (!File.Exists(_filePath))
+        {
+            var defaults = new MotionCardOptions();
+            defaults.Validate();
+            return defaults;
+        }
 
+        try
+        {
+            return ReadAndValidate(_filePath);
+        }
+        catch (Exception primaryException) when (
+            primaryException is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            var backupPath = _filePath + ".bak";
+            if (File.Exists(backupPath))
+            {
+                try
+                {
+                    return ReadAndValidate(backupPath);
+                }
+                catch (Exception backupException) when (
+                    backupException is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+                {
+                    // Report the primary file error below; both files are unusable.
+                }
+            }
+
+            throw new InvalidDataException(
+                $"运动配置读取失败，主文件和备份均不可用：{primaryException.Message}",
+                primaryException);
+        }
+    }
+
+    public void Save(MotionCardOptions options)
+    {
+        options.Validate();
+        var directory = Path.GetDirectoryName(_filePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var json = JsonSerializer.Serialize(options, new JsonSerializerOptions { WriteIndented = true });
+        var temporaryPath = $"{_filePath}.{Guid.NewGuid():N}.tmp";
+        var backupPath = $"{_filePath}.bak";
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(_filePath))
+            {
+                File.Replace(temporaryPath, _filePath, backupPath, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(temporaryPath, _filePath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static MotionCardOptions ReadAndValidate(string path)
+    {
+        var options = JsonSerializer.Deserialize<MotionCardOptions>(File.ReadAllText(path), new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true
+        }) ?? throw new InvalidDataException($"{Path.GetFileName(path)} 内容为空。");
         options.Validate();
         return options;
     }

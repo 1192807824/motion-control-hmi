@@ -5,16 +5,11 @@ namespace ControlHub.Services.Devices;
 
 public sealed class VibrationFeederSettings : INotifyPropertyChanged
 {
-    private string _portName = "COM1";
-    private int _baudRate = 9600;
-    private int _dataBits = 8;
-    private string _parity = "None";
-    private string _stopBits = "One";
-    private string _handshake = "None";
+    private string _host = "192.168.1.100";
+    private int _port = 4001;
+    private int _connectTimeoutMs = 3000;
     private string _newLine = "\\r\\n";
-    private int _readTimeoutMs = 500;
     private int _writeTimeoutMs = 500;
-    private string _encodingName = "ASCII";
     private string _sendFormat = "ASCII";
     private string _receiveFormat = "ASCII";
     private string _manualSendText = "";
@@ -22,40 +17,22 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public string PortName
+    public string Host
     {
-        get => _portName;
-        set => SetField(ref _portName, value);
+        get => _host;
+        set => SetField(ref _host, value);
     }
 
-    public int BaudRate
+    public int Port
     {
-        get => _baudRate;
-        set => SetField(ref _baudRate, value);
+        get => _port;
+        set => SetField(ref _port, value);
     }
 
-    public int DataBits
+    public int ConnectTimeoutMs
     {
-        get => _dataBits;
-        set => SetField(ref _dataBits, value);
-    }
-
-    public string Parity
-    {
-        get => _parity;
-        set => SetField(ref _parity, value);
-    }
-
-    public string StopBits
-    {
-        get => _stopBits;
-        set => SetField(ref _stopBits, value);
-    }
-
-    public string Handshake
-    {
-        get => _handshake;
-        set => SetField(ref _handshake, value);
+        get => _connectTimeoutMs;
+        set => SetField(ref _connectTimeoutMs, value);
     }
 
     public string NewLine
@@ -64,22 +41,10 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
         set => SetField(ref _newLine, value);
     }
 
-    public int ReadTimeoutMs
-    {
-        get => _readTimeoutMs;
-        set => SetField(ref _readTimeoutMs, value);
-    }
-
     public int WriteTimeoutMs
     {
         get => _writeTimeoutMs;
         set => SetField(ref _writeTimeoutMs, value);
-    }
-
-    public string EncodingName
-    {
-        get => _encodingName;
-        set => SetField(ref _encodingName, value);
     }
 
     public string SendFormat

@@ -12,6 +12,7 @@
   "AnalogOutputMinimum": -10.0,
   "AnalogOutputMaximum": 10.0,
   "ServoEnableTimeoutMilliseconds": 1500,
+  "StopConfirmationTimeoutMilliseconds": 5000,
   "HomeTimeoutSeconds": 60,
   "MoveProfile": {
     "StartVelocity": 0.0,
@@ -19,8 +20,13 @@
     "AccelerationSeconds": 0.1,
     "DecelerationSeconds": 0.1,
     "STimeSeconds": 0.0,
-    "DecelerationStopSeconds": 0.1
+    "DecelerationStopSeconds": 0.1,
+    "WaitForCompletion": true,
+    "CompletionTimeoutMilliseconds": 5000,
+    "CompletionTolerance": 0.01,
+    "AbsolutePositionMode": false
   },
+  "AxisMoveProfiles": {},
   "HomeProfile": {
     "Enabled": false,
     "Mode": 33,
@@ -31,8 +37,5 @@
     "OffsetPosition": 0.0
   },
   "AxisHomeProfiles": {},
-  "HomeSequence": [
-    1, 2, 3, 4, 5, 6, 7, 8,
-    9, 10, 11, 12, 13, 14, 15, 16
-  ]
+  "HomeSequence": []
 }

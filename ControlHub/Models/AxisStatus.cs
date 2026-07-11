@@ -17,9 +17,12 @@ public sealed class AxisStatus : INotifyPropertyChanged
     private bool _positiveLimit;
     private bool _negativeLimit;
     private bool _isAvailable;
+    private bool _statusReadHealthy;
     private bool _isMoving;
+    private bool _homeConfigured;
     private string _name = "";
     private string _state = "未连接";
+    private string _homeConfigurationSummary = "未配置回零参数";
 
     public int AxisNo { get; init; }
     public int HardwareAxisNo => AxisNo - 1;
@@ -32,16 +35,41 @@ public sealed class AxisStatus : INotifyPropertyChanged
     public string DisplayPosition => $"{Position:0.000}";
     public string DisplayTarget => $"{Target:0.000}";
     public string DisplaySpeed => $"{Speed:0.000}";
-    public string ServoText => !IsAvailable ? "未连接" : ServoOn ? "已使能" : "未使能";
-    public string AlarmText => Alarm ? "报警" : "无";
-    public bool CanServoOn => IsAvailable && !ServoOn;
-    public bool CanServoOff => IsAvailable && ServoOn;
-    public bool CanMove => IsAvailable && ServoOn && !Alarm;
-    public bool CanStop => IsAvailable && IsMoving;
-    public Brush ServoBrush => ServoOn ? Brushes.LimeGreen : Brushes.Gray;
-    public Brush AlarmBrush => Alarm ? Brushes.Red : Brushes.LimeGreen;
-    public Brush PositiveLimitBrush => PositiveLimit ? Brushes.Red : Brushes.LightGray;
-    public Brush NegativeLimitBrush => NegativeLimit ? Brushes.Red : Brushes.LightGray;
+    public string ServoText => !IsAvailable ? "未连接" : !StatusReadHealthy ? "状态未知" : ServoOn ? "已使能" : "未使能";
+    public string AlarmText => !StatusReadHealthy ? "未知" : Alarm ? "报警" : "无";
+    public string HomedText => !StatusReadHealthy ? "未知" : Homed ? "已回零" : "未回零";
+    public string PositiveLimitText => !StatusReadHealthy ? "未知" : PositiveLimit ? "已触发" : "未触发";
+    public string NegativeLimitText => !StatusReadHealthy ? "未知" : NegativeLimit ? "已触发" : "未触发";
+    public string CardStateText => !IsAvailable
+        ? "未连接"
+        : !StatusReadHealthy
+            ? "通讯异常"
+        : Alarm
+            ? "报警"
+            : PositiveLimit
+                ? "正限位"
+                : NegativeLimit
+                    ? "负限位"
+                    : IsMoving
+                        ? "运行中"
+                        : !ServoOn
+                            ? "未使能"
+                            : Homed
+                                ? "正常"
+                                : "未回零";
+    public bool CanServoOn => IsAvailable && StatusReadHealthy && !ServoOn;
+    public bool CanServoOff => IsAvailable && StatusReadHealthy && ServoOn && !IsMoving;
+    public bool CanMove => IsAvailable && StatusReadHealthy && ServoOn && !Alarm && !IsMoving;
+    public bool CanJogHoldInput => IsAvailable && StatusReadHealthy && ServoOn && !Alarm;
+    public bool CanStop => IsAvailable && (IsMoving || !StatusReadHealthy);
+    public bool CanEditMotionParameters => IsAvailable && StatusReadHealthy && !IsMoving;
+    public bool CanHome => CanMove && HomeConfigured;
+    public Brush ServoBrush => !StatusReadHealthy ? Brushes.Gray : ServoOn ? Brushes.LimeGreen : Brushes.Gray;
+    public Brush AlarmBrush => !StatusReadHealthy ? Brushes.Gray : Alarm ? Brushes.Red : Brushes.LimeGreen;
+    public Brush PositiveLimitBrush => !StatusReadHealthy ? Brushes.Gray : PositiveLimit ? Brushes.Red : Brushes.LightGray;
+    public Brush NegativeLimitBrush => !StatusReadHealthy ? Brushes.Gray : NegativeLimit ? Brushes.Red : Brushes.LightGray;
+    public Brush HomedBrush => !StatusReadHealthy ? Brushes.Gray : Homed ? Brushes.LimeGreen : Brushes.Gray;
+    public Brush StatusBrush => !IsAvailable || !StatusReadHealthy ? Brushes.Gray : Alarm ? Brushes.Red : ServoOn ? Brushes.LimeGreen : Brushes.DarkGray;
 
     public double Position
     {
@@ -76,7 +104,7 @@ public sealed class AxisStatus : INotifyPropertyChanged
     public double JogDistance
     {
         get => _jogDistance;
-        set => SetField(ref _jogDistance, Math.Max(0, value));
+        set => SetField(ref _jogDistance, value);
     }
 
     public double Speed
@@ -102,7 +130,11 @@ public sealed class AxisStatus : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanServoOn));
                 OnPropertyChanged(nameof(CanServoOff));
                 OnPropertyChanged(nameof(CanMove));
+                OnPropertyChanged(nameof(CanJogHoldInput));
+                OnPropertyChanged(nameof(CanHome));
                 OnPropertyChanged(nameof(ServoBrush));
+                OnPropertyChanged(nameof(StatusBrush));
+                OnPropertyChanged(nameof(CardStateText));
             }
         }
     }
@@ -110,7 +142,15 @@ public sealed class AxisStatus : INotifyPropertyChanged
     public bool Homed
     {
         get => _homed;
-        set => SetField(ref _homed, value);
+        set
+        {
+            if (SetField(ref _homed, value))
+            {
+                OnPropertyChanged(nameof(HomedText));
+                OnPropertyChanged(nameof(HomedBrush));
+                OnPropertyChanged(nameof(CardStateText));
+            }
+        }
     }
 
     public bool Alarm
@@ -123,6 +163,10 @@ public sealed class AxisStatus : INotifyPropertyChanged
                 OnPropertyChanged(nameof(AlarmText));
                 OnPropertyChanged(nameof(AlarmBrush));
                 OnPropertyChanged(nameof(CanMove));
+                OnPropertyChanged(nameof(CanJogHoldInput));
+                OnPropertyChanged(nameof(CanHome));
+                OnPropertyChanged(nameof(StatusBrush));
+                OnPropertyChanged(nameof(CardStateText));
             }
         }
     }
@@ -138,7 +182,42 @@ public sealed class AxisStatus : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanServoOn));
                 OnPropertyChanged(nameof(CanServoOff));
                 OnPropertyChanged(nameof(CanMove));
+                OnPropertyChanged(nameof(CanJogHoldInput));
                 OnPropertyChanged(nameof(CanStop));
+                OnPropertyChanged(nameof(CanEditMotionParameters));
+                OnPropertyChanged(nameof(CanHome));
+                OnPropertyChanged(nameof(StatusBrush));
+                OnPropertyChanged(nameof(CardStateText));
+            }
+        }
+    }
+
+    public bool StatusReadHealthy
+    {
+        get => _statusReadHealthy;
+        set
+        {
+            if (SetField(ref _statusReadHealthy, value))
+            {
+                OnPropertyChanged(nameof(ServoText));
+                OnPropertyChanged(nameof(AlarmText));
+                OnPropertyChanged(nameof(HomedText));
+                OnPropertyChanged(nameof(PositiveLimitText));
+                OnPropertyChanged(nameof(NegativeLimitText));
+                OnPropertyChanged(nameof(CardStateText));
+                OnPropertyChanged(nameof(CanServoOn));
+                OnPropertyChanged(nameof(CanServoOff));
+                OnPropertyChanged(nameof(CanMove));
+                OnPropertyChanged(nameof(CanJogHoldInput));
+                OnPropertyChanged(nameof(CanStop));
+                OnPropertyChanged(nameof(CanEditMotionParameters));
+                OnPropertyChanged(nameof(CanHome));
+                OnPropertyChanged(nameof(ServoBrush));
+                OnPropertyChanged(nameof(AlarmBrush));
+                OnPropertyChanged(nameof(PositiveLimitBrush));
+                OnPropertyChanged(nameof(NegativeLimitBrush));
+                OnPropertyChanged(nameof(HomedBrush));
+                OnPropertyChanged(nameof(StatusBrush));
             }
         }
     }
@@ -150,9 +229,32 @@ public sealed class AxisStatus : INotifyPropertyChanged
         {
             if (SetField(ref _isMoving, value))
             {
+                OnPropertyChanged(nameof(CanMove));
+                OnPropertyChanged(nameof(CanServoOff));
                 OnPropertyChanged(nameof(CanStop));
+                OnPropertyChanged(nameof(CanEditMotionParameters));
+                OnPropertyChanged(nameof(CanHome));
+                OnPropertyChanged(nameof(CardStateText));
             }
         }
+    }
+
+    public bool HomeConfigured
+    {
+        get => _homeConfigured;
+        set
+        {
+            if (SetField(ref _homeConfigured, value))
+            {
+                OnPropertyChanged(nameof(CanHome));
+            }
+        }
+    }
+
+    public string HomeConfigurationSummary
+    {
+        get => _homeConfigurationSummary;
+        set => SetField(ref _homeConfigurationSummary, value?.Trim() ?? "未配置回零参数");
     }
 
     public bool PositiveLimit
@@ -163,6 +265,8 @@ public sealed class AxisStatus : INotifyPropertyChanged
             if (SetField(ref _positiveLimit, value))
             {
                 OnPropertyChanged(nameof(PositiveLimitBrush));
+                OnPropertyChanged(nameof(PositiveLimitText));
+                OnPropertyChanged(nameof(CardStateText));
             }
         }
     }
@@ -175,6 +279,8 @@ public sealed class AxisStatus : INotifyPropertyChanged
             if (SetField(ref _negativeLimit, value))
             {
                 OnPropertyChanged(nameof(NegativeLimitBrush));
+                OnPropertyChanged(nameof(NegativeLimitText));
+                OnPropertyChanged(nameof(CardStateText));
             }
         }
     }

@@ -1,6 +1,5 @@
-using System.Collections.ObjectModel;
 using System.IO;
-using System.IO.Ports;
+using System.Net.Sockets;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,10 +15,11 @@ public partial class ConnectionConfigPage : UserControl
 {
     private const int MaxConnectionLogCount = 300;
     private const string StopVibrationCommand = "&04$";
-    private readonly ObservableCollection<string> _portNames = [];
     private readonly VibrationFeederSettingsStore _settingsStore = new();
-    private readonly VibrationFeederSerialClient _serialClient = new();
+    private readonly VibrationFeederTcpClient _tcpClient = new();
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private bool _closed;
+    private bool _connecting;
     private bool _loaded;
 
     static ConnectionConfigPage()
@@ -30,8 +30,8 @@ public partial class ConnectionConfigPage : UserControl
     public ConnectionConfigPage()
     {
         InitializeComponent();
-        PortNameComboBox.ItemsSource = _portNames;
-        _serialClient.DataReceived += SerialClient_DataReceived;
+        _tcpClient.DataReceived += TcpClient_DataReceived;
+        _tcpClient.ConnectionClosed += TcpClient_ConnectionClosed;
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
@@ -45,10 +45,13 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        SaveSettings(writeLog: false);
-        _serialClient.DataReceived -= SerialClient_DataReceived;
-        _serialClient.Dispose();
         _closed = true;
+        SaveSettings(writeLog: false);
+        _lifetimeCancellation.Cancel();
+        _tcpClient.DataReceived -= TcpClient_DataReceived;
+        _tcpClient.ConnectionClosed -= TcpClient_ConnectionClosed;
+        _tcpClient.Dispose();
+        _lifetimeCancellation.Dispose();
     }
 
     private void ConnectionConfigPage_Loaded(object sender, RoutedEventArgs e)
@@ -58,7 +61,6 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        RefreshPortList();
         AddLog("\u8fde\u63a5\u914d\u7f6e\u9875\u5df2\u52a0\u8f7d");
         _loaded = true;
     }
@@ -68,37 +70,38 @@ public partial class ConnectionConfigPage : UserControl
         Shutdown();
     }
 
-    private void RefreshPorts_Click(object sender, RoutedEventArgs e)
-    {
-        RefreshPortList();
-        AddLog("\u5df2\u5237\u65b0\u4e32\u53e3\u5217\u8868");
-    }
-
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
         SaveSettings(writeLog: true);
     }
 
-    private void ConnectFeeder_Click(object sender, RoutedEventArgs e)
+    private async void ConnectFeeder_Click(object sender, RoutedEventArgs e)
     {
         if (Settings is not { } settings)
         {
             return;
         }
 
+        if (_connecting)
+        {
+            AddLog("TCP \u6b63\u5728\u8fde\u63a5\uff0c\u8bf7\u7a0d\u5019");
+            return;
+        }
+
         SaveSettings(writeLog: false);
+        _connecting = true;
 
         try
         {
-            _serialClient.Open(settings);
+            await _tcpClient.ConnectAsync(settings, _lifetimeCancellation.Token);
             if (ViewModel is { } viewModel)
             {
-                viewModel.FeederConnectionStatusText = $"\u5df2\u8fde\u63a5\uff1a{settings.PortName}";
+                viewModel.FeederConnectionStatusText = $"\u5df2\u8fde\u63a5\uff1a{settings.Host}:{settings.Port}";
             }
 
-            AddLog($"\u5df2\u6253\u5f00 {settings.PortName}  {settings.BaudRate},{settings.DataBits},{settings.Parity},{settings.StopBits}");
+            AddLog($"TCP \u5df2\u8fde\u63a5 {settings.Host}:{settings.Port}");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ArgumentException)
         {
             if (ViewModel is { } viewModel)
             {
@@ -107,21 +110,37 @@ public partial class ConnectionConfigPage : UserControl
 
             AddLog($"\u8fde\u63a5\u5931\u8d25\uff1a{ex.Message}");
         }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (OperationCanceledException)
+        {
+            if (ViewModel is { } viewModel)
+            {
+                viewModel.FeederConnectionStatusText = "\u672a\u8fde\u63a5";
+            }
+
+            AddLog("TCP \u8fde\u63a5\u5df2\u53d6\u6d88");
+        }
+        finally
+        {
+            _connecting = false;
+        }
     }
 
     private void DisconnectFeeder_Click(object sender, RoutedEventArgs e)
     {
-        _serialClient.Close();
+        _tcpClient.Close();
 
         if (ViewModel is { } viewModel)
         {
             viewModel.FeederConnectionStatusText = "\u672a\u8fde\u63a5";
         }
 
-        AddLog("\u5df2\u65ad\u5f00\u9707\u52a8\u76d8\u4e32\u53e3");
+        AddLog("\u5df2\u65ad\u5f00\u9707\u52a8\u76d8 TCP \u8fde\u63a5");
     }
 
-    private void SendManualMessage_Click(object sender, RoutedEventArgs e)
+    private async void SendManualMessage_Click(object sender, RoutedEventArgs e)
     {
         if (Settings is not { } settings)
         {
@@ -136,19 +155,19 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        if (!_serialClient.IsOpen)
+        if (!_tcpClient.IsConnected)
         {
-            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u8bf7\u5148\u8fde\u63a5\u4e32\u53e3");
+            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
             return;
         }
 
         try
         {
             var payload = BuildPayload(settings);
-            _serialClient.Write(payload);
+            await _tcpClient.WriteAsync(payload);
             AddLog($"TX [{NormalizeFormat(settings.SendFormat)}]  {FormatPayload(payload, settings.SendFormat)}");
         }
-        catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or FormatException or InvalidOperationException or ObjectDisposedException)
         {
             if (ViewModel is { } viewModel)
             {
@@ -159,21 +178,21 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private void StopVibration_Click(object sender, RoutedEventArgs e)
+    private async void StopVibration_Click(object sender, RoutedEventArgs e)
     {
-        if (!_serialClient.IsOpen)
+        if (!_tcpClient.IsConnected)
         {
-            AddLog("\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u8fde\u63a5\u4e32\u53e3");
+            AddLog("\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
             return;
         }
 
         try
         {
             var payload = Encoding.ASCII.GetBytes(StopVibrationCommand);
-            _serialClient.Write(payload);
+            await _tcpClient.WriteAsync(payload);
             AddLog($"TX [ASCII]  {StopVibrationCommand}  \u505c\u6b62\u9707\u52a8");
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
         {
             if (ViewModel is { } viewModel)
             {
@@ -187,23 +206,6 @@ public partial class ConnectionConfigPage : UserControl
     private void ClearLog_Click(object sender, RoutedEventArgs e)
     {
         ViewModel?.FeederConnectionLogs.Clear();
-    }
-
-    private void RefreshPortList()
-    {
-        var selectedPort = Settings?.PortName;
-        _portNames.Clear();
-
-        foreach (var portName in SerialPort.GetPortNames().OrderBy(item => item, StringComparer.OrdinalIgnoreCase))
-        {
-            _portNames.Add(portName);
-        }
-
-        if (!string.IsNullOrWhiteSpace(selectedPort) &&
-            !_portNames.Contains(selectedPort, StringComparer.OrdinalIgnoreCase))
-        {
-            _portNames.Insert(0, selectedPort);
-        }
     }
 
     private void SaveSettings(bool writeLog)
@@ -239,7 +241,7 @@ public partial class ConnectionConfigPage : UserControl
         ConnectionLogListBox.ScrollIntoView(logItem);
     }
 
-    private void SerialClient_DataReceived(byte[] payload)
+    private void TcpClient_DataReceived(byte[] payload)
     {
         Dispatcher.BeginInvoke(new Action(() =>
         {
@@ -249,6 +251,21 @@ public partial class ConnectionConfigPage : UserControl
             }
 
             AddLog($"RX [{NormalizeFormat(settings.ReceiveFormat)}]  {FormatPayload(payload, settings.ReceiveFormat)}");
+        }));
+    }
+
+    private void TcpClient_ConnectionClosed(Exception? exception)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (ViewModel is { } viewModel)
+            {
+                viewModel.FeederConnectionStatusText = "\u672a\u8fde\u63a5";
+            }
+
+            AddLog(exception is null
+                ? "TCP \u8fde\u63a5\u5df2\u7531\u5bf9\u7aef\u5173\u95ed"
+                : $"TCP \u8fde\u63a5\u4e2d\u65ad\uff1a{exception.Message}");
         }));
     }
 

@@ -1,8 +1,11 @@
 namespace ControlHub.Services.Motion;
 
+public sealed record MotionCardDescriptor(ushort CardNo, uint CardType);
+
 public sealed record MotionCardConnectionInfo(
     ushort CardNo,
     int DetectedCardCount,
+    IReadOnlyList<MotionCardDescriptor> DetectedCards,
     int AxisCount,
     int DigitalInputCount,
     int DigitalOutputCount,

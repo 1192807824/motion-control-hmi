@@ -37,6 +37,7 @@ public sealed class SimulatedMotionCard : IMotionCard
             return new MotionCardConnectionInfo(
                 _options.CardNo ?? 0,
                 1,
+                [new MotionCardDescriptor(_options.CardNo ?? 0, 0)],
                 AxisCount,
                 DigitalInputCount,
                 DigitalOutputCount,
@@ -166,9 +167,10 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             var axis = GetAxis(hardwareAxisNo);
-            if (!enabled)
+            if (!enabled && axis.IsMoving)
             {
-                axis.Stop(0);
+                throw new MotionCardException(
+                    $"仿真硬件轴 {hardwareAxisNo} 正在运动，必须先停止并确认后才能解除使能。");
             }
 
             axis.ServoEnabled = enabled;
@@ -180,13 +182,13 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
+            if (!enabled && _axes.Any(axis => axis.IsMoving))
+            {
+                throw new MotionCardException("仍有仿真轴在运动，必须先停止并确认后才能解除全轴使能。");
+            }
+
             foreach (var axis in _axes)
             {
-                if (!enabled)
-                {
-                    axis.Stop(0);
-                }
-
                 axis.ServoEnabled = enabled;
             }
         }
@@ -197,6 +199,7 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             var axis = GetReadyAxis(hardwareAxisNo);
+            EnsureAxisStopped(axis, hardwareAxisNo);
             var profile = _options.GetHomeProfile(hardwareAxisNo);
             profile.Validate(requireEnabled: true);
             axis.Homed = false;
@@ -209,6 +212,7 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             var axis = GetReadyAxis(hardwareAxisNo);
+            EnsureAxisStopped(axis, hardwareAxisNo);
             if (!double.IsFinite(velocity) || velocity == 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(velocity));
@@ -223,6 +227,7 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             var axis = GetReadyAxis(hardwareAxisNo);
+            EnsureAxisStopped(axis, hardwareAxisNo);
             if (!double.IsFinite(distance) || distance == 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(distance));
@@ -243,8 +248,38 @@ public sealed class SimulatedMotionCard : IMotionCard
                 throw new MotionCardException("仿真轴负限位已触发，禁止继续负向运动。");
             }
 
-            axis.Update();
             axis.StartMove(axis.Position + distance, velocity, runMode: 1, markHomedOnCompletion: false);
+        }
+    }
+
+    public void MoveAbsolute(int hardwareAxisNo, double position, double velocity)
+    {
+        lock (_sync)
+        {
+            var axis = GetReadyAxis(hardwareAxisNo);
+            EnsureAxisStopped(axis, hardwareAxisNo);
+            if (!double.IsFinite(position))
+            {
+                throw new ArgumentOutOfRangeException(nameof(position));
+            }
+
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(velocity));
+            }
+
+            var direction = Math.Sign(position - axis.Position);
+            if (direction > 0 && axis.PositiveLimit)
+            {
+                throw new MotionCardException("仿真轴正限位已触发，禁止继续正向运动。");
+            }
+
+            if (direction < 0 && axis.NegativeLimit)
+            {
+                throw new MotionCardException("仿真轴负限位已触发，禁止继续负向运动。");
+            }
+
+            axis.StartMove(position, velocity, runMode: 1, markHomedOnCompletion: false);
         }
     }
 
@@ -312,6 +347,15 @@ public sealed class SimulatedMotionCard : IMotionCard
         }
 
         return _axes[hardwareAxisNo];
+    }
+
+    private static void EnsureAxisStopped(SimulatedAxis axis, int hardwareAxisNo)
+    {
+        axis.Update();
+        if (axis.IsMoving)
+        {
+            throw new MotionCardException($"仿真硬件轴 {hardwareAxisNo} 正在运动，拒绝重复下发运动命令。");
+        }
     }
 
     private void EnsureOpen()
