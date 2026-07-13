@@ -18,12 +18,12 @@ public partial class ConnectionConfigPage : UserControl
     private const string LightControlCommandName = "\u5149\u6e90\u63a7\u5236";
     private const string LightOnCommand = "&07,1$";
     private const string LightOffCommand = "&07,0$";
-    private const int OneKeyGatherCycleCount = 3;
-    private const int LeftRightGatherPulseDurationMs = 2000;
-    private const int UpDownGatherPulseDurationMs = 3000;
-    private const string LeftRightGatherParameterCommand = "&02,075,038,1,075,038,1,075,038,1,075,038,1,05$";
+    private const int OneKeyGatherCycleCount = 1;
+    private const int LeftRightGatherPulseDurationMs = 1500;
+    private const int UpDownGatherPulseDurationMs = 1500;
+    private const string LeftRightGatherParameterCommand = "&02,044,077,1,044,077,1,044,077,1,044,077,1,05$";
     private const string LeftRightGatherStartCommand = "&03,05$";
-    private const string UpDownGatherParameterCommand = "&02,085,045,1,085,045,1,085,045,1,085,045,1,06$";
+    private const string UpDownGatherParameterCommand = "&02,044,077,1,044,077,1,044,077,1,044,077,1,06$";
     private const string UpDownGatherStartCommand = "&03,06$";
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
