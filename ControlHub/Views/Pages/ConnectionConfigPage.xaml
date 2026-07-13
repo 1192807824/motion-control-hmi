@@ -385,7 +385,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="220" />
                             <RowDefinition Height="10" />
-                            <RowDefinition Height="128" />
+                            <RowDefinition Height="154" />
                             <RowDefinition Height="10" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
@@ -456,8 +456,8 @@
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
+                                <RowDefinition Height="56" />
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="44" />
                             </Grid.RowDefinitions>
                             <Border Background="{StaticResource PanelHeader}"
                                     BorderBrush="{StaticResource PanelBorder}"
@@ -467,13 +467,13 @@
                                 <TextBlock Text="&#x5149;&#x6E90;&#x63A7;&#x5236;" Style="{StaticResource PanelTitle}" />
                             </Border>
 
-                            <Grid Grid.Row="1" Margin="14,10,14,0">
+                            <Grid Grid.Row="1" Margin="14,10,14,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="88" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="12" />
-                                    <ColumnDefinition Width="76" />
-                                    <ColumnDefinition Width="76" />
+                                    <ColumnDefinition Width="84" />
+                                    <ColumnDefinition Width="84" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="&#x5F00;&#x542F;&#x4EAE;&#x5EA6;" Style="{StaticResource FieldLabel}" />
                                 <TextBox Grid.Column="1"
@@ -484,14 +484,14 @@
                                         Style="{StaticResource PrimaryButton}"
                                         Background="{StaticResource AccentGreen}"
                                         BorderBrush="#126700"
-                                        MinWidth="68"
+                                        MinWidth="76"
                                         Click="LightOn_Click" />
                                 <Button Grid.Column="4"
                                         Content="&#x5149;&#x6E90;&#x5173;"
                                         Style="{StaticResource PrimaryButton}"
                                         Background="{StaticResource AccentRed}"
                                         BorderBrush="#9E0B08"
-                                        MinWidth="68"
+                                        MinWidth="76"
                                         Margin="0"
                                         Click="LightOff_Click" />
                             </Grid>
