@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Windows.Media;
 using ControlHub.Data;
 using ControlHub.Models;
 using ControlHub.Services.Devices;
@@ -21,7 +20,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _motionDetectedCardsText = "未检测卡";
     private string _motionAxisSummaryText = "■ 轴状态监控";
     private bool _motionControlsEnabled;
-    private ImageSource? _visionPreviewImage;
 
     public MainWindowViewModel()
         : this(new AxisSettingsStore().LoadWithDiagnostics())
@@ -44,7 +42,6 @@ public sealed class MainWindowViewModel : ObservableObject
         TrayCells = new ObservableCollection<int>(Enumerable.Range(1, 27));
         Logs = [];
         VisionSettings = new VisionMasterSettings();
-        VisionOutputs = [];
         VisionLogs = [];
         FeederSettings = new VibrationFeederSettingsStore().Load();
         FeederConnectionLogs = [];
@@ -90,8 +87,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public VisionMasterSettings VisionSettings { get; }
 
-    public ObservableCollection<VisionOutputItem> VisionOutputs { get; }
-
     public ObservableCollection<string> VisionLogs { get; }
 
     public VibrationFeederSettings FeederSettings { get; }
@@ -134,12 +129,6 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _feederConnectionStatusText;
         set => SetField(ref _feederConnectionStatusText, value);
-    }
-
-    public ImageSource? VisionPreviewImage
-    {
-        get => _visionPreviewImage;
-        set => SetField(ref _visionPreviewImage, value);
     }
 
     public string MotionConnectionText

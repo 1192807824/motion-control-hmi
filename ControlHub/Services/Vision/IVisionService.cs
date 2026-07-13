@@ -1,14 +1,21 @@
+using VMControls.Interface;
+
 namespace ControlHub.Services.Vision;
 
 public interface IVisionService : IDisposable
 {
     bool IsLoaded { get; }
 
+    IVmModule? RenderModuleSource { get; }
+
     VisionRunResult LoadSolution(VisionMasterSettings settings);
 
     VisionRunResult RunOnce(VisionMasterSettings settings);
 
-    void StartContinuous(VisionMasterSettings settings);
+    VisionPointMeasurement CapturePoint(VisionMasterSettings settings);
 
-    void StopContinuous();
+    VisionCalibrationFileResult GenerateNinePointCalibrationFile(
+        VisionMasterSettings settings,
+        IReadOnlyList<NinePointCalibrationSample> samples,
+        string filePath);
 }

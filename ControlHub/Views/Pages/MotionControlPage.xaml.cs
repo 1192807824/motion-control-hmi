@@ -31,6 +31,7 @@ public partial class MotionControlPage : UserControl
     private CancellationTokenSource? _homeSequenceCancellation;
     private CancellationTokenSource? _positionMoveCancellation;
     private CancellationTokenSource? _axisSelectionFeedbackCancellation;
+    private CancellationTokenSource? _calibrationMotionCancellation;
     private Stopwatch? _commandStopwatch;
     private int? _activeJogAxisNo;
     private FrameworkElement? _activeJogInputOwner;
@@ -57,6 +58,7 @@ public partial class MotionControlPage : UserControl
     private bool _motionSafetyLock;
     private bool _loadingAxisSettings;
     private bool _homeConfigurationSaveHealthy = true;
+    private bool _calibrationOperationActive;
     private string? _motionSafetyLockReason;
     private Window? _ownerWindow;
 
@@ -119,6 +121,7 @@ public partial class MotionControlPage : UserControl
         _homeSequenceCancellation?.Cancel();
         _positionMoveCancellation?.Cancel();
         _axisSelectionFeedbackCancellation?.Cancel();
+        _calibrationMotionCancellation?.Cancel();
 
         if (_motionCard.IsOpen)
         {
@@ -209,6 +212,304 @@ public partial class MotionControlPage : UserControl
     public void Shutdown()
     {
         _ = TryShutdown(out _);
+    }
+
+    public async Task RunNinePointCalibrationAsync(
+        NinePointMotionRequest request,
+        Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,
+        IProgress<NinePointMotionProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(captureAsync);
+        ValidateNinePointMotionRequest(request);
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭，不能执行标定。 ");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。 ");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。 ");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，请等待完成后再标定。 ");
+        }
+
+        var xAxis = GetCalibrationAxis(request.XHardwareAxisNo, "X");
+        var yAxis = GetCalibrationAxis(request.YHardwareAxisNo, "Y");
+        var initialX = ReadReadyCalibrationAxis(xAxis, "X");
+        var initialY = ReadReadyCalibrationAxis(yAxis, "Y");
+        var offsets = new (double X, double Y)[]
+        {
+            (-request.StepX, -request.StepY),
+            (0, -request.StepY),
+            (request.StepX, -request.StepY),
+            (request.StepX, 0),
+            (request.StepX, request.StepY),
+            (0, request.StepY),
+            (-request.StepX, request.StepY),
+            (-request.StepX, 0),
+            (0, 0)
+        };
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        var completed = false;
+
+        try
+        {
+            for (var index = 0; index < offsets.Length; index++)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var pointNumber = index + 1;
+                var targetX = initialX.FeedbackPosition + offsets[index].X;
+                var targetY = initialY.FeedbackPosition + offsets[index].Y;
+                progress?.Report(new NinePointMotionProgress(
+                    index,
+                    offsets.Length,
+                    $"正在移动到第 {pointNumber}/9 点：({targetX:0.###}, {targetY:0.###})"));
+
+                await MoveCalibrationAxesAsync(
+                    xAxis,
+                    yAxis,
+                    targetX,
+                    targetY,
+                    request,
+                    linkedCancellation.Token);
+
+                if (request.SettleMilliseconds > 0)
+                {
+                    progress?.Report(new NinePointMotionProgress(
+                        index,
+                        offsets.Length,
+                        $"第 {pointNumber}/9 点已到位，等待机构稳定"));
+                    await Task.Delay(request.SettleMilliseconds, linkedCancellation.Token);
+                }
+
+                var (actualX, actualY) = ReadSettledCalibrationPosition(
+                    xAxis,
+                    yAxis,
+                    targetX,
+                    targetY,
+                    request.PositionTolerance);
+                var position = new NinePointMotionPosition(
+                    pointNumber,
+                    targetX,
+                    targetY,
+                    actualX,
+                    actualY);
+                await captureAsync(position, linkedCancellation.Token);
+                progress?.Report(new NinePointMotionProgress(
+                    pointNumber,
+                    offsets.Length,
+                    $"第 {pointNumber}/9 点采集完成"));
+            }
+
+            completed = true;
+        }
+        finally
+        {
+            if (!completed && _motionCard.IsOpen)
+            {
+                StopCalibrationAxesNoThrow(xAxis, yAxis);
+            }
+
+            _calibrationOperationActive = false;
+            _calibrationMotionCancellation = null;
+            UpdateHomeEditorState();
+        }
+    }
+
+    private static void ValidateNinePointMotionRequest(NinePointMotionRequest request)
+    {
+        if (request.XHardwareAxisNo < 0 || request.YHardwareAxisNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "X、Y 轴号必须有效。 ");
+        }
+
+        if (request.XHardwareAxisNo == request.YHardwareAxisNo)
+        {
+            throw new ArgumentException("X 轴和 Y 轴不能选择同一根轴。", nameof(request));
+        }
+
+        if (!double.IsFinite(request.StepX) || Math.Abs(request.StepX) <= double.Epsilon ||
+            !double.IsFinite(request.StepY) || Math.Abs(request.StepY) <= double.Epsilon)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "X、Y 每步距离必须是非零有效数值。 ");
+        }
+
+        if (!double.IsFinite(request.Velocity) || request.Velocity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "标定速度必须大于 0。 ");
+        }
+
+        if (!double.IsFinite(request.PositionTolerance) || request.PositionTolerance <= 0 ||
+            request.MoveTimeoutMilliseconds < 100 || request.SettleMilliseconds < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "标定到位容差、超时或稳定等待参数无效。 ");
+        }
+    }
+
+    private AxisStatus GetCalibrationAxis(int hardwareAxisNo, string coordinateName)
+    {
+        if (hardwareAxisNo >= _motionCard.AxisCount)
+        {
+            throw new InvalidOperationException(
+                $"{coordinateName} 轴选择了轴 {hardwareAxisNo + 1}，但当前控制卡只有 {_motionCard.AxisCount} 根轴。 ");
+        }
+
+        return Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == hardwareAxisNo && axis.IsAvailable)
+            ?? throw new InvalidOperationException($"{coordinateName} 轴（轴 {hardwareAxisNo + 1}）当前不可用。 ");
+    }
+
+    private MotionAxisSnapshot ReadReadyCalibrationAxis(AxisStatus axis, string coordinateName)
+    {
+        var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+        ApplySnapshot(axis, snapshot);
+        EnsureCalibrationAxisSafe(snapshot, coordinateName);
+        if (!snapshot.Homed)
+        {
+            throw new InvalidOperationException(
+                $"{coordinateName} 轴（轴 {axis.HardwareAxisNo + 1}）尚未回零，禁止开始九点标定。 ");
+        }
+
+        if (snapshot.IsMoving)
+        {
+            throw new InvalidOperationException(
+                $"{coordinateName} 轴（轴 {axis.HardwareAxisNo + 1}）仍在运动。 ");
+        }
+
+        return snapshot;
+    }
+
+    private async Task MoveCalibrationAxesAsync(
+        AxisStatus xAxis,
+        AxisStatus yAxis,
+        double targetX,
+        double targetY,
+        NinePointMotionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var beforeX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
+        var beforeY = _motionCard.ReadAxis(yAxis.HardwareAxisNo);
+        EnsureCalibrationAxisSafe(beforeX, "X");
+        EnsureCalibrationAxisSafe(beforeY, "Y");
+
+        if (Math.Abs(beforeX.FeedbackPosition - targetX) > request.PositionTolerance)
+        {
+            _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, request.Velocity);
+        }
+
+        if (Math.Abs(beforeY.FeedbackPosition - targetY) > request.PositionTolerance)
+        {
+            _motionCard.MoveAbsolute(yAxis.HardwareAxisNo, targetY, request.Velocity);
+        }
+
+        xAxis.Target = targetX;
+        yAxis.Target = targetY;
+        var deadline = DateTime.UtcNow.AddMilliseconds(request.MoveTimeoutMilliseconds);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var currentX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
+            var currentY = _motionCard.ReadAxis(yAxis.HardwareAxisNo);
+            ApplySnapshot(xAxis, currentX);
+            ApplySnapshot(yAxis, currentY);
+            EnsureCalibrationAxisSafe(currentX, "X");
+            EnsureCalibrationAxisSafe(currentY, "Y");
+
+            var xInPosition = Math.Abs(currentX.FeedbackPosition - targetX) <= request.PositionTolerance;
+            var yInPosition = Math.Abs(currentY.FeedbackPosition - targetY) <= request.PositionTolerance;
+            if (!currentX.IsMoving && !currentY.IsMoving && xInPosition && yInPosition)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    $"九点标定运动超时。X={currentX.FeedbackPosition:0.###}/{targetX:0.###}，" +
+                    $"Y={currentY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
+            }
+
+            await Task.Delay(50, cancellationToken);
+        }
+    }
+
+    private (double X, double Y) ReadSettledCalibrationPosition(
+        AxisStatus xAxis,
+        AxisStatus yAxis,
+        double targetX,
+        double targetY,
+        double tolerance)
+    {
+        var settledX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
+        var settledY = _motionCard.ReadAxis(yAxis.HardwareAxisNo);
+        ApplySnapshot(xAxis, settledX);
+        ApplySnapshot(yAxis, settledY);
+        EnsureCalibrationAxisSafe(settledX, "X");
+        EnsureCalibrationAxisSafe(settledY, "Y");
+
+        if (settledX.IsMoving || settledY.IsMoving ||
+            Math.Abs(settledX.FeedbackPosition - targetX) > tolerance ||
+            Math.Abs(settledY.FeedbackPosition - targetY) > tolerance)
+        {
+            throw new InvalidOperationException(
+                $"机构稳定等待后偏离目标。X={settledX.FeedbackPosition:0.###}/{targetX:0.###}，" +
+                $"Y={settledY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
+        }
+
+        return (settledX.FeedbackPosition, settledY.FeedbackPosition);
+    }
+
+    private static void EnsureCalibrationAxisSafe(MotionAxisSnapshot snapshot, string coordinateName)
+    {
+        if (!snapshot.ServoEnabled)
+        {
+            throw new InvalidOperationException($"{coordinateName} 轴未使能。 ");
+        }
+
+        if (snapshot.Alarm || snapshot.EmergencyInput || snapshot.PositiveLimit || snapshot.NegativeLimit)
+        {
+            throw new InvalidOperationException(
+                $"{coordinateName} 轴存在报警、急停或限位信号：{snapshot.StateText}。 ");
+        }
+    }
+
+    private void StopCalibrationAxesNoThrow(AxisStatus xAxis, AxisStatus yAxis)
+    {
+        foreach (var axis in new[] { xAxis, yAxis }.DistinctBy(item => item.HardwareAxisNo))
+        {
+            try
+            {
+                _motionCard.Stop(axis.HardwareAxisNo);
+            }
+            catch (Exception decelerationStopException)
+            {
+                try
+                {
+                    _motionCard.Stop(axis.HardwareAxisNo, emergency: true);
+                }
+                catch (Exception emergencyStopException)
+                {
+                    ActivateMotionSafetyLock(
+                        $"九点标定异常后轴 {axis.HardwareAxisNo + 1} 停止失败",
+                        new AggregateException(decelerationStopException, emergencyStopException),
+                        $"CALIBRATION-AXIS-{axis.HardwareAxisNo:00}-STOP-FAILED");
+                }
+            }
+        }
     }
 
     private void MotionControlPage_Loaded(object sender, RoutedEventArgs e)
@@ -2906,6 +3207,15 @@ public partial class MotionControlPage : UserControl
 
     private bool EnsureConnected()
     {
+        if (_calibrationOperationActive)
+        {
+            RecordAlarmOnce(
+                "motion-command-blocked-by-calibration",
+                "CALIBRATION-IN-PROGRESS",
+                "九点标定正在运行，其他运动命令已被暂时阻止。 ");
+            return false;
+        }
+
         if (_motionSafetyLock)
         {
             RecordAlarmOnce(
@@ -3024,7 +3334,8 @@ public partial class MotionControlPage : UserControl
 
     private bool IsAnyMotionWorkflowActive()
     {
-        return _activeJogAxisNo is not null ||
+        return _calibrationOperationActive ||
+               _activeJogAxisNo is not null ||
                _activePositionAxisNo is not null ||
                _pendingStopAxisNos.Count > 0 ||
                _homeDeadlines.Count > 0 ||

@@ -21,6 +21,7 @@ public partial class MainWindow : Window
 
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;
+        VisionContent.MotionController = MotionPage;
         LoadRememberedLogin();
 
         _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -90,6 +91,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        VisionContent.PrepareForClosing();
         if (!_motionShutdownPrepared && !MotionPage.TryShutdown(out var failureMessage))
         {
             e.Cancel = true;
@@ -108,6 +110,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        VisionContent.Shutdown();
         ConnectionConfigContent.Shutdown();
         _clockTimer.Stop();
         base.OnClosed(e);

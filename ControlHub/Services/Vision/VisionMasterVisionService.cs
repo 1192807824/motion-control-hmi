@@ -1,186 +1,241 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
-using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using ControlHub.Models;
+using IMVSNPointCalibModuCs;
+using VM.Core;
+using VM.PlatformSDKCS;
+using VMControls.Interface;
 
 namespace ControlHub.Services.Vision;
 
 public sealed class VisionMasterVisionService : IVisionService
 {
-    private bool _continuousRunEnabled;
+    private VmProcedure? _procedure;
+    private bool _disposed;
 
-    public bool IsLoaded { get; private set; }
+    public bool IsLoaded => _procedure is not null;
+
+    public IVmModule? RenderModuleSource => _procedure;
 
     public VisionRunResult LoadSolution(VisionMasterSettings settings)
     {
-        IsLoaded = File.Exists(settings.SolutionPath);
-        var mode = IsVisionMasterSdkAvailable(settings.SdkDirectory) ? "SDK就绪" : "模拟模式";
-        var message = IsLoaded
-            ? $"已加载方案：{settings.SolutionPath}（{mode}）"
-            : $"方案文件未找到，当前使用{mode}预览配置";
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var solutionPath = settings.SolutionPath?.Trim() ?? "";
+        var procedureName = settings.ProcedureName?.Trim() ?? "";
+        if (!File.Exists(solutionPath))
+        {
+            throw new FileNotFoundException("未找到 VisionMaster 方案文件。", solutionPath);
+        }
+
+        if (string.IsNullOrWhiteSpace(procedureName))
+        {
+            throw new InvalidOperationException("请填写 VisionMaster 流程名称。 ");
+        }
+
+        ReleaseSolution();
+        VmSolution.Load(solutionPath, "");
+        _procedure = VmSolution.Instance[procedureName] as VmProcedure
+            ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
 
         return new VisionRunResult
         {
-            IsOk = IsLoaded,
-            RunTimeMs = 0,
-            PreviewImage = CreatePreviewImage(settings, "LOAD"),
+            IsOk = true,
+            Message = $"方案已加载：{Path.GetFileName(solutionPath)} / {procedureName}",
             Outputs =
             [
-                new VisionOutputItem { Name = "Procedure", Type = "String", Value = settings.ProcedureName },
-                new VisionOutputItem { Name = "Camera", Type = "String", Value = $"{settings.CameraName} / {settings.CameraIp}" },
-                new VisionOutputItem { Name = "SDK", Type = "String", Value = mode }
-            ],
-            Message = message
+                new VisionOutputItem { Name = "方案", Type = "File", Value = solutionPath },
+                new VisionOutputItem { Name = "流程", Type = "Procedure", Value = procedureName }
+            ]
         };
     }
 
     public VisionRunResult RunOnce(VisionMasterSettings settings)
     {
-        var runMode = _continuousRunEnabled ? "连续" : "单次";
-        var stopwatch = Stopwatch.StartNew();
-
-        // VisionMaster V4.4.1 SDK 文档中的真实接入点：
-        // VmSolution.Load(solutionPath, password)
-        // VmProcedure procedure = (VmProcedure)VmSolution.Instance[procedureName]
-        // procedure.ModuParams.SetInputImage_V2(inputName, image)
-        // procedure.Run()
-        // ImageBaseData output = procedure.ModuResult.GetOutputImageV2(outputName)
-        stopwatch.Stop();
-
+        var measurement = CapturePoint(settings);
         return new VisionRunResult
         {
             IsOk = true,
-            RunTimeMs = Math.Max(12, stopwatch.Elapsed.TotalMilliseconds + Random.Shared.Next(8, 26)),
-            PreviewImage = CreatePreviewImage(settings, "RUN"),
+            RunTimeMs = measurement.RunTimeMs,
+            Message = $"流程执行完成，图像点 ({measurement.ImageX:0.###}, {measurement.ImageY:0.###})",
             Outputs =
             [
-                new VisionOutputItem { Name = "OK", Type = "Bool", Value = "True" },
-                new VisionOutputItem { Name = "X", Type = "Float", Value = Random.Shared.NextDouble().ToString("0.000") },
-                new VisionOutputItem { Name = "Y", Type = "Float", Value = Random.Shared.NextDouble().ToString("0.000") },
-                new VisionOutputItem { Name = "Angle", Type = "Float", Value = Random.Shared.Next(-180, 181).ToString("0.0") },
-                new VisionOutputItem { Name = settings.OutputImageName, Type = "Image", Value = "已刷新" }
-            ],
-            Message = $"{runMode}流程执行完成"
+                new VisionOutputItem
+                {
+                    Name = settings.PointXOutputName,
+                    Type = "Float",
+                    Value = measurement.ImageX.ToString("0.######")
+                },
+                new VisionOutputItem
+                {
+                    Name = settings.PointYOutputName,
+                    Type = "Float",
+                    Value = measurement.ImageY.ToString("0.######")
+                }
+            ]
         };
     }
 
-    public void StartContinuous(VisionMasterSettings settings)
+    public VisionPointMeasurement CapturePoint(VisionMasterSettings settings)
     {
-        _continuousRunEnabled = true;
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(settings);
+        var procedure = _procedure
+            ?? throw new InvalidOperationException("请先加载 VisionMaster 方案。 ");
+
+        var stopwatch = Stopwatch.StartNew();
+        procedure.Run();
+        stopwatch.Stop();
+
+        var imageX = ReadFloatOutput(procedure, settings.PointXOutputName, "X");
+        var imageY = ReadFloatOutput(procedure, settings.PointYOutputName, "Y");
+        if (!double.IsFinite(imageX) || !double.IsFinite(imageY))
+        {
+            throw new InvalidOperationException("VisionMaster 输出的图像点不是有效数值。 ");
+        }
+
+        var moduleRunTime = procedure.ModuResult.ModuRunTime;
+        return new VisionPointMeasurement(
+            imageX,
+            imageY,
+            moduleRunTime > 0 ? moduleRunTime : stopwatch.Elapsed.TotalMilliseconds);
     }
 
-    public void StopContinuous()
+    public VisionCalibrationFileResult GenerateNinePointCalibrationFile(
+        VisionMasterSettings settings,
+        IReadOnlyList<NinePointCalibrationSample> samples,
+        string filePath)
     {
-        _continuousRunEnabled = false;
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(samples);
+
+        if (_procedure is null)
+        {
+            throw new InvalidOperationException("请先加载 VisionMaster 方案。 ");
+        }
+
+        if (samples.Count != 9)
+        {
+            throw new InvalidOperationException($"生成九点标定文件需要 9 个点，当前只有 {samples.Count} 个。 ");
+        }
+
+        var configuredOutputPath = filePath?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(configuredOutputPath))
+        {
+            throw new InvalidOperationException("请指定标定文件保存路径。 ");
+        }
+
+        var outputPath = Path.GetFullPath(configuredOutputPath);
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            throw new InvalidOperationException("标定文件路径无效。 ");
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+
+        var moduleName = settings.NPointCalibrationModuleName?.Trim() ?? "";
+        var calibrationTool = VmSolution.Instance[moduleName] as IMVSNPointCalibModuTool
+            ?? throw new InvalidOperationException($"方案中未找到 N 点标定模块“{moduleName}”，请填写模块完整路径。 ");
+
+        var imagePoints = samples
+            .Select(sample => new PointF((float)sample.ImageX, (float)sample.ImageY))
+            .ToList();
+        var physicalPoints = samples
+            .Select(sample => new PointF((float)sample.ActualMachineX, (float)sample.ActualMachineY))
+            .ToList();
+
+        var parameters = calibrationTool.ModuParams;
+        var clearResult = parameters.DoClearPoint();
+        if (clearResult != 0)
+        {
+            throw new InvalidOperationException($"N 点标定模块清空旧点位失败，SDK 返回码：{clearResult}。 ");
+        }
+
+        parameters.CalibPointGet = NPointCalibParam.CalibPointGetEnum.ManualInput;
+        parameters.CalibPointTotalNum = samples.Count;
+        parameters.RotPointTotalNum = 0;
+        parameters.UseRelativeCoordinates = false;
+        parameters.ImagePoint = imagePoints;
+        parameters.PhysicalPoint = physicalPoints;
+        parameters.ImageRotateAngle = [];
+        parameters.WorldRotateAngle = [];
+
+        calibrationTool.Run();
+        var result = calibrationTool.ModuResult;
+        if (result.ModuStatus != 0 || result.CalibStatus != 0 || result.CalibErrStatus != 0)
+        {
+            throw new InvalidOperationException(
+                $"N 点标定计算失败：模块状态={result.ModuStatus}，" +
+                $"标定状态={result.CalibStatus}，误差评估状态={result.CalibErrStatus}。 ");
+        }
+
+        var saveResult = parameters.DoSaveFile(outputPath);
+        if (saveResult != 0)
+        {
+            throw new InvalidOperationException($"VisionMaster 生成标定文件失败，SDK 返回码：{saveResult}。 ");
+        }
+
+        if (!File.Exists(outputPath))
+        {
+            throw new IOException($"VisionMaster 未在指定位置生成标定文件：{outputPath}");
+        }
+
+        return new VisionCalibrationFileResult(
+            outputPath,
+            result.ModuStatus,
+            result.CalibStatus,
+            result.CalibErrStatus,
+            result.TransError,
+            result.TransWorldError,
+            result.PixelPrecision);
     }
 
     public void Dispose()
     {
-        StopContinuous();
-        TryDisposeVmSolution();
-    }
-
-    private static bool IsVisionMasterSdkAvailable(string sdkDirectory)
-    {
-        if (Directory.Exists(sdkDirectory) &&
-            Directory.EnumerateFiles(sdkDirectory, "VM.PlatformSDKCS.dll", SearchOption.AllDirectories).Any())
-        {
-            return true;
-        }
-
-        return AppDomain.CurrentDomain.GetAssemblies()
-            .Any(assembly => assembly.GetName().Name?.Equals("VM.PlatformSDKCS", StringComparison.OrdinalIgnoreCase) == true);
-    }
-
-    private static void TryDisposeVmSolution()
-    {
-        var solutionType = AppDomain.CurrentDomain.GetAssemblies()
-            .Select(assembly => assembly.GetType("VM.PlatformSDKCS.VmSolution", throwOnError: false))
-            .FirstOrDefault(type => type is not null);
-
-        var instance = solutionType?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-        (instance as IDisposable)?.Dispose();
-    }
-
-    private static ImageSource CreatePreviewImage(VisionMasterSettings settings, string caption)
-    {
-        const int width = 960;
-        const int height = 540;
-        const int stride = width * 4;
-        var pixels = new byte[height * stride];
-
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                var offset = y * stride + x * 4;
-                var grid = (x / 32 + y / 32) % 2 == 0 ? 18 : 28;
-                var signal = (byte)Math.Clamp(grid + x * 110 / width + y * 60 / height, 0, 255);
-                pixels[offset] = signal;
-                pixels[offset + 1] = (byte)Math.Clamp(signal + 8, 0, 255);
-                pixels[offset + 2] = (byte)Math.Clamp(signal + 20, 0, 255);
-                pixels[offset + 3] = 255;
-            }
-        }
-
-        DrawCrosshair(pixels, width, height, stride);
-        DrawInspectionBox(pixels, width, height, stride);
-
-        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
-        bitmap.Freeze();
-        return bitmap;
-    }
-
-    private static void DrawCrosshair(byte[] pixels, int width, int height, int stride)
-    {
-        var centerX = width / 2;
-        var centerY = height / 2;
-        for (var x = centerX - 150; x <= centerX + 150; x++)
-        {
-            SetPixel(pixels, width, height, stride, x, centerY, 0, 210, 80);
-        }
-
-        for (var y = centerY - 100; y <= centerY + 100; y++)
-        {
-            SetPixel(pixels, width, height, stride, centerX, y, 0, 210, 80);
-        }
-    }
-
-    private static void DrawInspectionBox(byte[] pixels, int width, int height, int stride)
-    {
-        const int left = 290;
-        const int top = 150;
-        const int right = 670;
-        const int bottom = 390;
-
-        for (var x = left; x <= right; x++)
-        {
-            SetPixel(pixels, width, height, stride, x, top, 240, 210, 70);
-            SetPixel(pixels, width, height, stride, x, bottom, 240, 210, 70);
-        }
-
-        for (var y = top; y <= bottom; y++)
-        {
-            SetPixel(pixels, width, height, stride, left, y, 240, 210, 70);
-            SetPixel(pixels, width, height, stride, right, y, 240, 210, 70);
-        }
-    }
-
-    private static void SetPixel(byte[] pixels, int width, int height, int stride, int x, int y, byte r, byte g, byte b)
-    {
-        if (x < 0 || x >= width || y < 0 || y >= height)
+        if (_disposed)
         {
             return;
         }
 
-        var offset = y * stride + x * 4;
-        pixels[offset] = b;
-        pixels[offset + 1] = g;
-        pixels[offset + 2] = r;
-        pixels[offset + 3] = 255;
+        ReleaseSolution();
+        _disposed = true;
+    }
+
+    private static double ReadFloatOutput(VmProcedure procedure, string configuredName, string coordinateName)
+    {
+        var outputName = configuredName?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(outputName))
+        {
+            throw new InvalidOperationException($"请填写图像点 {coordinateName} 的流程输出名称。 ");
+        }
+
+        var output = procedure.ModuResult.GetOutputFloat(outputName);
+        if (output.nValueNum < 1 || output.pFloatVal is null || output.pFloatVal.Length < 1)
+        {
+            throw new InvalidOperationException($"流程输出“{outputName}”不存在或没有浮点值。 ");
+        }
+
+        return output.pFloatVal[0];
+    }
+
+    private void ReleaseSolution()
+    {
+        _procedure = null;
+        try
+        {
+            VmSolution.Instance?.Dispose();
+        }
+        catch
+        {
+            // A subsequent SDK load will report the actionable VisionMaster error.
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }
