@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Threading;
 using ControlHub.Services.Devices;
 using ControlHub.Services.Persistence;
 using ControlHub.ViewModels;
@@ -14,8 +15,9 @@ namespace ControlHub.Views.Pages;
 public partial class ConnectionConfigPage : UserControl
 {
     private const int MaxConnectionLogCount = 300;
+    private const int BrightnessSendDebounceMs = 150;
     private const string StopVibrationCommand = "&04$";
-    private const string LightControlCommandName = "\u5149\u6e90\u63a7\u5236";
+    private const string ProtocolCommandName = "\u632f\u52a8\u76d8\u534f\u8bae";
     private const string LightOnCommand = "&07,1$";
     private const string LightOffCommand = "&07,0$";
     private const int OneKeyGatherCycleCount = 1;
@@ -28,6 +30,8 @@ public partial class ConnectionConfigPage : UserControl
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly SemaphoreSlim _protocolWriteLock = new(1, 1);
+    private readonly DispatcherTimer _brightnessSendTimer;
     private bool _closed;
     private bool _connecting;
     private bool _loaded;
@@ -40,6 +44,11 @@ public partial class ConnectionConfigPage : UserControl
 
     public ConnectionConfigPage()
     {
+        _brightnessSendTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(BrightnessSendDebounceMs)
+        };
+        _brightnessSendTimer.Tick += BrightnessSendTimer_Tick;
         InitializeComponent();
         _tcpClient.DataReceived += TcpClient_DataReceived;
         _tcpClient.ConnectionClosed += TcpClient_ConnectionClosed;
@@ -57,6 +66,8 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         _closed = true;
+        _brightnessSendTimer.Stop();
+        _brightnessSendTimer.Tick -= BrightnessSendTimer_Tick;
         SaveSettings(writeLog: false);
         _lifetimeCancellation.Cancel();
         _tcpClient.DataReceived -= TcpClient_DataReceived;
@@ -269,21 +280,81 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        SaveSettings(writeLog: false);
-        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
-        if (settings.LightOnBrightness != normalizedBrightness)
+        if (!_tcpClient.IsConnected)
         {
-            settings.LightOnBrightness = normalizedBrightness;
-            _settingsStore.Save(settings);
+            AddLog("\u5149\u6e90\u6253\u5f00\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            return;
         }
 
-        await SendAsciiProtocolCommandAsync($"&06,{normalizedBrightness:00}$", "\u8bbe\u7f6e\u5149\u6e90\u4eae\u5ea6");
+        _brightnessSendTimer.Stop();
+        SaveSettings(writeLog: false);
         await SendAsciiProtocolCommandAsync(LightOnCommand, "\u5149\u6e90\u6253\u5f00");
+        await ApplyLightBrightnessAsync("\u6253\u5f00\u540e\u8bbe\u7f6e\u4eae\u5ea6");
     }
 
     private async void LightOff_Click(object sender, RoutedEventArgs e)
     {
+        _brightnessSendTimer.Stop();
         await SendAsciiProtocolCommandAsync(LightOffCommand, "\u5149\u6e90\u5173\u95ed");
+    }
+
+    private async void ApplyLightBrightness_Click(object sender, RoutedEventArgs e)
+    {
+        _brightnessSendTimer.Stop();
+        SaveSettings(writeLog: false);
+        await ApplyLightBrightnessAsync("\u624b\u52a8\u5e94\u7528\u4eae\u5ea6");
+    }
+
+    private void LightBrightnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (Settings is not { } settings)
+        {
+            return;
+        }
+
+        var normalizedBrightness = (int)Math.Round(Math.Clamp(e.NewValue, 0, 99));
+        if (settings.LightOnBrightness != normalizedBrightness)
+        {
+            settings.LightOnBrightness = normalizedBrightness;
+        }
+
+        if (!_loaded || _closed || !_tcpClient.IsConnected)
+        {
+            return;
+        }
+
+        _brightnessSendTimer.Stop();
+        _brightnessSendTimer.Start();
+    }
+
+    private async void BrightnessSendTimer_Tick(object? sender, EventArgs e)
+    {
+        _brightnessSendTimer.Stop();
+        if (_closed || !_tcpClient.IsConnected)
+        {
+            return;
+        }
+
+        await ApplyLightBrightnessAsync("\u62d6\u52a8\u8bbe\u7f6e\u4eae\u5ea6");
+    }
+
+    private async Task ApplyLightBrightnessAsync(string actionName)
+    {
+        if (Settings is not { } settings)
+        {
+            return;
+        }
+
+        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
+        if (settings.LightOnBrightness != normalizedBrightness)
+        {
+            settings.LightOnBrightness = normalizedBrightness;
+        }
+
+        _settingsStore.Save(settings);
+        await SendAsciiProtocolCommandAsync(
+            $"&06,{normalizedBrightness:00}$",
+            $"{actionName} {normalizedBrightness:00}%");
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
@@ -326,26 +397,34 @@ public partial class ConnectionConfigPage : UserControl
 
     private async Task SendAsciiProtocolCommandAsync(string command, string actionName)
     {
-        if (!_tcpClient.IsConnected)
-        {
-            AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
-            return;
-        }
-
+        await _protocolWriteLock.WaitAsync();
         try
         {
-            var payload = Encoding.ASCII.GetBytes(command);
-            await _tcpClient.WriteAsync(payload);
-            AddLog($"TX [ASCII]  {command}  {LightControlCommandName}-{actionName}");
-        }
-        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
-        {
-            if (ViewModel is { } viewModel)
+            if (!_tcpClient.IsConnected)
             {
-                viewModel.FeederConnectionStatusText = "\u901a\u8baf\u5f02\u5e38";
+                AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+                return;
             }
 
-            AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
+            try
+            {
+                var payload = Encoding.ASCII.GetBytes(command);
+                await _tcpClient.WriteAsync(payload);
+                AddLog($"TX [ASCII]  {command}  {ProtocolCommandName}-{actionName}");
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+            {
+                if (ViewModel is { } viewModel)
+                {
+                    viewModel.FeederConnectionStatusText = "\u901a\u8baf\u5f02\u5e38";
+                }
+
+                AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
+            }
+        }
+        finally
+        {
+            _protocolWriteLock.Release();
         }
     }
 
