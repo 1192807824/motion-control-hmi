@@ -206,8 +206,8 @@
 
     <Grid Margin="8">
         <Grid.RowDefinitions>
-            <RowDefinition Height="571" />
-            <RowDefinition Height="*" MinHeight="250" />
+            <RowDefinition Height="*" MinHeight="571" />
+            <RowDefinition Height="250" />
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
@@ -245,12 +245,12 @@
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <VirtualizingStackPanel Orientation="Vertical" />
+                                <UniformGrid Columns="1" />
                             </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Height="28" Margin="8,0">
+                                <Grid MinHeight="28" Margin="8,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="28" />
                                         <ColumnDefinition Width="*" />
@@ -302,7 +302,7 @@
 
             <Grid Grid.Column="2" Grid.ColumnSpan="3">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="458" />
+                    <RowDefinition Height="*" MinHeight="458" />
                     <RowDefinition Height="8" />
                     <RowDefinition Height="105" />
                 </Grid.RowDefinitions>
