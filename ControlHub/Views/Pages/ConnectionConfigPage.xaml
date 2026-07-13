@@ -136,6 +136,114 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+
+        <Style x:Key="BrightnessStepButton" TargetType="Button">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="#0F4C81" />
+            <Setter Property="Background" Value="#E6F0FA" />
+            <Setter Property="BorderBrush" Value="#6D91B4" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#D4E7F8" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#1F5F9F" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#B9D8F2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="BrightnessSlider" TargetType="Slider">
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="36" VerticalAlignment="Center">
+                            <Border Height="12"
+                                    VerticalAlignment="Center"
+                                    Background="#CBD5E1"
+                                    BorderBrush="#A6B3C2"
+                                    BorderThickness="1"
+                                    CornerRadius="6" />
+                            <Track x:Name="PART_Track"
+                                   Height="26"
+                                   VerticalAlignment="Center"
+                                   IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                                  Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="12"
+                                                        VerticalAlignment="Center"
+                                                        Background="#1F5F9F"
+                                                        CornerRadius="6,0,0,6" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                                  Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="24" Height="24" Focusable="False">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Grid>
+                                                    <Ellipse Fill="#FFFFFF"
+                                                             Stroke="#1F5F9F"
+                                                             StrokeThickness="3" />
+                                                    <Ellipse Width="8" Height="8" Fill="#1F5F9F" />
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="RenderTransform">
+                                                            <Setter.Value>
+                                                                <ScaleTransform ScaleX="1.08" ScaleY="1.08" />
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="10,10,10,8" Background="#E8EDF2">
@@ -471,14 +579,23 @@
                             <Grid Grid.Row="1" Margin="14,8,14,0" VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="76" />
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="8" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="32" />
                                     <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="52" />
                                     <ColumnDefinition Width="22" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="&#x5149;&#x6E90;&#x4EAE;&#x5EA6;" Style="{StaticResource FieldLabel}" />
+                                <Button Grid.Column="1"
+                                        Content="&#x2212;"
+                                        ToolTip="&#x4EAE;&#x5EA6;&#x51CF; 1"
+                                        Style="{StaticResource BrightnessStepButton}"
+                                        Click="DecreaseLightBrightness_Click" />
                                 <Slider x:Name="LightBrightnessSlider"
-                                        Grid.Column="1"
+                                        Grid.Column="3"
                                         Minimum="0"
                                         Maximum="99"
                                         TickFrequency="1"
@@ -486,19 +603,27 @@
                                         IsMoveToPointEnabled="True"
                                         AutoToolTipPlacement="TopLeft"
                                         AutoToolTipPrecision="0"
-                                        Foreground="{StaticResource AccentBlue}"
+                                        Style="{StaticResource BrightnessSlider}"
                                         VerticalAlignment="Center"
                                         Value="{Binding FeederSettings.LightOnBrightness, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                         ValueChanged="LightBrightnessSlider_ValueChanged" />
-                                <TextBox Grid.Column="3"
+                                <Button Grid.Column="5"
+                                        Content="+"
+                                        ToolTip="&#x4EAE;&#x5EA6;&#x52A0; 1"
+                                        Style="{StaticResource BrightnessStepButton}"
+                                        Click="IncreaseLightBrightness_Click" />
+                                <TextBox Grid.Column="7"
                                          Height="34"
                                          VerticalAlignment="Center"
                                          VerticalContentAlignment="Center"
                                          HorizontalContentAlignment="Center"
                                          Padding="4,0"
                                          Style="{StaticResource ConfigInput}"
+                                         BorderBrush="{StaticResource AccentBlue}"
+                                         BorderThickness="2"
+                                         FontWeight="Bold"
                                          Text="{Binding FeederSettings.LightOnBrightness, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                <TextBlock Grid.Column="4"
+                                <TextBlock Grid.Column="8"
                                            Text="%"
                                            Margin="5,0,0,0"
                                            VerticalAlignment="Center"

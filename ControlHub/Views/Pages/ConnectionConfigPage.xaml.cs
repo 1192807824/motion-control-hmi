@@ -305,6 +305,26 @@ public partial class ConnectionConfigPage : UserControl
         await ApplyLightBrightnessAsync("\u624b\u52a8\u5e94\u7528\u4eae\u5ea6");
     }
 
+    private void DecreaseLightBrightness_Click(object sender, RoutedEventArgs e)
+    {
+        AdjustLightBrightness(-1);
+    }
+
+    private void IncreaseLightBrightness_Click(object sender, RoutedEventArgs e)
+    {
+        AdjustLightBrightness(1);
+    }
+
+    private void AdjustLightBrightness(int delta)
+    {
+        if (Settings is not { } settings)
+        {
+            return;
+        }
+
+        settings.LightOnBrightness = Math.Clamp(settings.LightOnBrightness + delta, 0, 99);
+    }
+
     private void LightBrightnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (Settings is not { } settings)
