@@ -224,7 +224,7 @@ public partial class ConnectionConfigPage : UserControl
         _vibrationSequenceRunning = true;
         try
         {
-            AddLog("\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u8f7b\u9707\u6563 -> \u5de6\u53f3\u805a\u62e2");
+            AddLog("\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u8f7b\u9707\u6563 -> \u5de6\u53f3\u805a\u62e2 -> \u5411\u4e0a\u9707\u52a8");
             await SendAsciiProtocolCommandAsync("&05,00$", "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f");
 
             await RunVibrationPulseAsync(
@@ -238,6 +238,12 @@ public partial class ConnectionConfigPage : UserControl
                 "&03,05$",
                 1800,
                 "\u5de6\u53f3\u805a\u62e2");
+
+            await RunVibrationPulseAsync(
+                "&02,085,055,1,085,055,1,085,055,1,085,055,1,01$",
+                "&03,01$",
+                800,
+                "\u5411\u4e0a\u9707\u52a8");
 
             AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
         }
