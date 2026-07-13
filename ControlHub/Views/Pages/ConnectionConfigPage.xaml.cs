@@ -19,10 +19,11 @@ public partial class ConnectionConfigPage : UserControl
     private const string LightOnCommand = "&07,1$";
     private const string LightOffCommand = "&07,0$";
     private const int OneKeyGatherCycleCount = 3;
-    private const int OneKeyGatherPulseDurationMs = 2000;
+    private const int LeftRightGatherPulseDurationMs = 2000;
+    private const int UpDownGatherPulseDurationMs = 3000;
     private const string LeftRightGatherParameterCommand = "&02,075,038,1,075,038,1,075,038,1,075,038,1,05$";
     private const string LeftRightGatherStartCommand = "&03,05$";
-    private const string UpDownGatherParameterCommand = "&02,075,038,1,075,038,1,075,038,1,075,038,1,06$";
+    private const string UpDownGatherParameterCommand = "&02,085,045,1,085,045,1,085,045,1,085,045,1,06$";
     private const string UpDownGatherStartCommand = "&03,06$";
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
@@ -240,13 +241,13 @@ public partial class ConnectionConfigPage : UserControl
                 await RunVibrationPulseAsync(
                     LeftRightGatherParameterCommand,
                     LeftRightGatherStartCommand,
-                    OneKeyGatherPulseDurationMs,
+                    LeftRightGatherPulseDurationMs,
                     $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2");
 
                 await RunVibrationPulseAsync(
                     UpDownGatherParameterCommand,
                     UpDownGatherStartCommand,
-                    OneKeyGatherPulseDurationMs,
+                    UpDownGatherPulseDurationMs,
                     $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2");
             }
 
