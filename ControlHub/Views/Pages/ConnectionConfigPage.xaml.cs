@@ -16,6 +16,8 @@ public partial class ConnectionConfigPage : UserControl
     private const int MaxConnectionLogCount = 300;
     private const string StopVibrationCommand = "&04$";
     private const string LightControlCommandName = "\u5149\u6e90\u63a7\u5236";
+    private const string LightOnCommand = "&07,1$";
+    private const string LightOffCommand = "&07,0$";
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
@@ -212,12 +214,20 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         SaveSettings(writeLog: false);
-        await SendLightCommandAsync(settings.LightOnBrightness, "\u5149\u6e90\u6253\u5f00");
+        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
+        if (settings.LightOnBrightness != normalizedBrightness)
+        {
+            settings.LightOnBrightness = normalizedBrightness;
+            _settingsStore.Save(settings);
+        }
+
+        await SendAsciiProtocolCommandAsync($"&06,{normalizedBrightness:00}$", "\u8bbe\u7f6e\u5149\u6e90\u4eae\u5ea6");
+        await SendAsciiProtocolCommandAsync(LightOnCommand, "\u5149\u6e90\u6253\u5f00");
     }
 
     private async void LightOff_Click(object sender, RoutedEventArgs e)
     {
-        await SendLightCommandAsync(0, "\u5149\u6e90\u5173\u95ed");
+        await SendAsciiProtocolCommandAsync(LightOffCommand, "\u5149\u6e90\u5173\u95ed");
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
@@ -258,7 +268,7 @@ public partial class ConnectionConfigPage : UserControl
         ConnectionLogListBox.ScrollIntoView(logItem);
     }
 
-    private async Task SendLightCommandAsync(int brightness, string actionName)
+    private async Task SendAsciiProtocolCommandAsync(string command, string actionName)
     {
         if (!_tcpClient.IsConnected)
         {
@@ -266,14 +276,6 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        var normalizedBrightness = Math.Clamp(brightness, 0, 99);
-        if (Settings is { } settings && settings.LightOnBrightness != normalizedBrightness && brightness > 0)
-        {
-            settings.LightOnBrightness = normalizedBrightness;
-            _settingsStore.Save(settings);
-        }
-
-        var command = $"&06,{normalizedBrightness:00}$";
         try
         {
             var payload = Encoding.ASCII.GetBytes(command);
