@@ -271,10 +271,9 @@
                                              FontSize="13"
                                              FontWeight="Bold"
                                              VerticalContentAlignment="Center"
+                                             InputMethod.IsInputMethodEnabled="True"
                                              ToolTip="双击修改轴名称"
                                              MouseDoubleClick="AxisName_MouseDoubleClick"
-                                             PreviewTextInput="AxisName_PreviewTextInput"
-                                             DataObject.Pasting="AxisName_Pasting"
                                              LostFocus="AxisName_LostFocus"
                                              KeyDown="AxisName_KeyDown">
                                         <TextBox.Style>

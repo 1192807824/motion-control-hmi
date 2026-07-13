@@ -743,29 +743,6 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private void AxisName_PreviewTextInput(object sender, TextCompositionEventArgs e)
-    {
-        if (ContainsChineseCharacters(e.Text))
-        {
-            e.Handled = true;
-        }
-    }
-
-    private void AxisName_Pasting(object sender, DataObjectPastingEventArgs e)
-    {
-        if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
-        {
-            e.CancelCommand();
-            return;
-        }
-
-        var pastedText = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string;
-        if (ContainsChineseCharacters(pastedText))
-        {
-            e.CancelCommand();
-        }
-    }
-
     private void AxisName_LostFocus(object sender, RoutedEventArgs e)
     {
         if (sender is not TextBox { DataContext: AxisStatus axis } editor || editor.IsReadOnly)
@@ -869,14 +846,6 @@ public partial class MotionControlPage : UserControl
             editor.Text = previousDisplayName;
             RecordAlarm("IO-NAME-SAVE", $"I/O 名称保存失败：{exception.Message}");
         }
-    }
-
-    private static bool ContainsChineseCharacters(string? text)
-    {
-        return !string.IsNullOrEmpty(text) && text.Any(character =>
-            character is >= '\u3400' and <= '\u4DBF' or
-                         >= '\u4E00' and <= '\u9FFF' or
-                         >= '\uF900' and <= '\uFAFF');
     }
 
     private void ModeTab_Click(object sender, RoutedEventArgs e)
