@@ -207,7 +207,7 @@
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
-            <RowDefinition Height="200" />
+            <RowDefinition Height="250" />
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
@@ -240,7 +240,7 @@
                              BorderThickness="0"
                              ItemContainerStyle="{StaticResource AxisCardItem}"
                              SelectionChanged="AxisSelector_SelectionChanged"
-                             Height="520"
+                             Height="470"
                              VerticalAlignment="Top"
                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -303,9 +303,9 @@
 
             <Grid Grid.Column="2" Grid.ColumnSpan="3">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="500" />
+                    <RowDefinition Height="458" />
                     <RowDefinition Height="8" />
-                    <RowDefinition Height="130" />
+                    <RowDefinition Height="105" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -592,7 +592,7 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource Panel}" Padding="12">
+            <Border Grid.Row="0" Grid.RowSpan="3" Grid.Column="2" Style="{StaticResource Panel}" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="34" />
@@ -653,14 +653,14 @@
                 </Grid>
             </Border>
 
-            <Expander Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" IsExpanded="True" Background="#162F45" BorderBrush="#345269" BorderThickness="1">
+            <Expander Grid.Row="2" Grid.Column="0" IsExpanded="True" Background="#162F45" BorderBrush="#345269" BorderThickness="1">
                 <Expander.Header>
                     <TextBlock Foreground="#E6EEF4" Margin="8,5">
                         <Run Text="运动参数" FontWeight="Bold" />
                         <Run Text="  ·  速度单位：units（脉冲）/s" Foreground="#8FA7B8" FontSize="11" />
                     </TextBlock>
                 </Expander.Header>
-                <Grid Margin="10,30,10,10" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}">
+                <Grid Margin="10,8" IsEnabled="{Binding SelectedAxis.CanEditMotionParameters}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
