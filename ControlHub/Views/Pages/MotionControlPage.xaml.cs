@@ -483,6 +483,93 @@ public partial class MotionControlPage : UserControl
         SaveAxisSettings();
     }
 
+    private void IoName_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: IoPoint point } editor)
+        {
+            return;
+        }
+
+        editor.Tag = point.Name;
+        editor.IsReadOnly = false;
+        editor.Focus();
+        editor.SelectAll();
+        e.Handled = true;
+    }
+
+    private void IoName_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox editor || editor.IsReadOnly)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            editor.Text = editor.Tag as string ?? editor.Text;
+            editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        }
+    }
+
+    private void IoName_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: IoPoint point } editor || editor.IsReadOnly)
+        {
+            return;
+        }
+
+        var previousDisplayName = editor.Tag as string ?? point.Name;
+        var normalizedName = editor.Text.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            normalizedName = point.DefaultName;
+        }
+
+        editor.Text = normalizedName;
+        editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        editor.IsReadOnly = true;
+        editor.Tag = null;
+
+        var key = GetIoNameKey(point.Kind, point.Channel);
+        var hadPreviousValue = _motionOptions.IoPointNames.TryGetValue(key, out var previousStoredName);
+        if (string.Equals(normalizedName, point.DefaultName, StringComparison.Ordinal))
+        {
+            _motionOptions.IoPointNames.Remove(key);
+        }
+        else
+        {
+            _motionOptions.IoPointNames[key] = normalizedName;
+        }
+
+        try
+        {
+            _motionOptionsStore.Save(_motionOptions);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            if (hadPreviousValue && previousStoredName is not null)
+            {
+                _motionOptions.IoPointNames[key] = previousStoredName;
+            }
+            else
+            {
+                _motionOptions.IoPointNames.Remove(key);
+            }
+
+            point.Name = previousDisplayName;
+            editor.Text = previousDisplayName;
+            RecordAlarm("IO-NAME-SAVE", $"I/O 名称保存失败：{exception.Message}");
+        }
+    }
+
     private static bool ContainsChineseCharacters(string? text)
     {
         return !string.IsNullOrEmpty(text) && text.Any(character =>
@@ -2358,18 +2445,22 @@ public partial class MotionControlPage : UserControl
         viewModel.IoPoints.Clear();
         for (var channel = 0; channel < count; channel++)
         {
+            var defaultName = mode switch
+            {
+                IoPointKind.DigitalInput => $"X{channel:00}",
+                IoPointKind.DigitalOutput => $"Y{channel:00}",
+                IoPointKind.AnalogInput => $"AI{channel}",
+                IoPointKind.AnalogOutput => $"AO{channel}",
+                _ => channel.ToString()
+            };
+            var nameKey = GetIoNameKey(mode, channel);
+            var displayName = _motionOptions.IoPointNames.GetValueOrDefault(nameKey);
             viewModel.IoPoints.Add(new IoPoint
             {
                 Channel = channel,
                 Kind = mode,
-                Name = mode switch
-                {
-                    IoPointKind.DigitalInput => $"X{channel:00}",
-                    IoPointKind.DigitalOutput => $"Y{channel:00}",
-                    IoPointKind.AnalogInput => $"AI{channel}",
-                    IoPointKind.AnalogOutput => $"AO{channel}",
-                    _ => channel.ToString()
-                }
+                DefaultName = defaultName,
+                Name = string.IsNullOrWhiteSpace(displayName) ? defaultName : displayName
             });
         }
 
@@ -2377,6 +2468,11 @@ public partial class MotionControlPage : UserControl
         SetIoModeButtonState(DigitalOutputTab, mode == IoPointKind.DigitalOutput);
         SetIoModeButtonState(AnalogInputTab, mode == IoPointKind.AnalogInput);
         SetIoModeButtonState(AnalogOutputTab, mode == IoPointKind.AnalogOutput);
+    }
+
+    private static string GetIoNameKey(IoPointKind kind, int channel)
+    {
+        return $"{kind}:{channel}";
     }
 
     private static void SetIoModeButtonState(Button button, bool selected)

@@ -17,12 +17,21 @@ public sealed class IoPoint : INotifyPropertyChanged
 {
     private bool _isOn;
     private double _value;
+    private string _name = "";
 
     public int Channel { get; init; }
 
     public int BitNo => Channel;
 
-    public string Name { get; init; } = "";
+    public string DefaultName { get; init; } = "";
+
+    public string Name
+    {
+        get => _name;
+        set => SetField(ref _name, value);
+    }
+
+    public string NameEditToolTip => $"{DefaultName} · 双击修改名称";
 
     public IoPointKind Kind { get; init; }
 
@@ -74,6 +83,18 @@ public sealed class IoPoint : INotifyPropertyChanged
     public Visibility AnalogOutputVisibility => Kind == IoPointKind.AnalogOutput ? Visibility.Visible : Visibility.Collapsed;
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {

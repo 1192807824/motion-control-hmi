@@ -47,6 +47,8 @@ public sealed class MotionCardOptions
 
     public int[] HomeSequence { get; set; } = [];
 
+    public Dictionary<string, string> IoPointNames { get; set; } = [];
+
     public void ApplyMigrations()
     {
         if (ConfigurationVersion >= 3)
@@ -181,6 +183,15 @@ public sealed class MotionCardOptions
         if (HomeTimeoutSeconds is < 1 or > 3600)
         {
             throw new InvalidDataException("HomeTimeoutSeconds 必须在 1 到 3600 之间。");
+        }
+
+        if (IoPointNames is null ||
+            IoPointNames.Count > 256 ||
+            IoPointNames.Any(item =>
+                string.IsNullOrWhiteSpace(item.Key) || item.Key.Length > 64 ||
+                string.IsNullOrWhiteSpace(item.Value) || item.Value.Length > 64))
+        {
+            throw new InvalidDataException("I/O 名称配置无效：键和值不能为空，且长度不能超过 64 个字符。");
         }
 
         MoveProfile.Validate();

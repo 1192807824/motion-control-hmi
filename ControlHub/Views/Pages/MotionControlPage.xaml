@@ -709,15 +709,63 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Grid Margin="3">
-                                    <StackPanel Visibility="{Binding DigitalInputVisibility}" HorizontalAlignment="Center">
-                                        <TextBlock Text="{Binding Name}" Foreground="#C9D6DF" FontSize="10" HorizontalAlignment="Center" />
-                                        <Ellipse Width="13" Height="13" Fill="{Binding LampBrush}" Margin="0,5,0,0" />
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="18" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBox Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                             IsReadOnly="True"
+                                             MaxLength="12"
+                                             Height="18"
+                                             Padding="0"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             Foreground="#C9D6DF"
+                                             FontSize="9"
+                                             FontWeight="SemiBold"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             HorizontalContentAlignment="Center"
+                                             ToolTip="{Binding NameEditToolTip}"
+                                             MouseDoubleClick="IoName_MouseDoubleClick"
+                                             LostFocus="IoName_LostFocus"
+                                             KeyDown="IoName_KeyDown" />
+
+                                    <Ellipse Grid.Row="1"
+                                             Visibility="{Binding DigitalInputVisibility}"
+                                             Width="13"
+                                             Height="13"
+                                             Fill="{Binding LampBrush}"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center" />
+
+                                    <Button Grid.Row="1"
+                                            Visibility="{Binding DigitalOutputVisibility}"
+                                            Tag="{Binding Channel}"
+                                            Content="{Binding DigitalOutputText}"
+                                            Style="{StaticResource FlatButton}"
+                                            Height="24"
+                                            Padding="2"
+                                            FontSize="9"
+                                            Click="DigitalOutput_Click" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Visibility="{Binding AnalogInputVisibility}"
+                                               Text="{Binding DisplayValue}"
+                                               Foreground="White"
+                                               FontSize="11"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+
+                                    <StackPanel Grid.Row="1"
+                                                Visibility="{Binding AnalogOutputVisibility}"
+                                                Orientation="Horizontal"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                        <TextBox Width="36" Height="22" Text="{Binding Value, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" TextAlignment="Center" FontSize="9" Padding="1" />
+                                        <Button Content="写入" Style="{StaticResource FlatButton}" Height="22" Padding="3,0" Margin="3,0,0,0" FontSize="9" Click="AnalogOutput_Click" />
                                     </StackPanel>
-                                    <Button Visibility="{Binding DigitalOutputVisibility}" Tag="{Binding Channel}" Style="{StaticResource FlatButton}" Height="42" Padding="2" Click="DigitalOutput_Click">
-                                        <StackPanel><TextBlock Text="{Binding Name}" FontSize="10" HorizontalAlignment="Center" /><TextBlock Text="{Binding DigitalOutputText}" FontSize="10" HorizontalAlignment="Center" /></StackPanel>
-                                    </Button>
-                                    <StackPanel Visibility="{Binding AnalogInputVisibility}" HorizontalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="#C9D6DF" FontSize="10" /><TextBlock Text="{Binding DisplayValue}" Foreground="White" FontSize="11" /></StackPanel>
-                                    <StackPanel Visibility="{Binding AnalogOutputVisibility}" HorizontalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="#C9D6DF" FontSize="10" /><TextBox Width="54" Height="24" Text="{Binding Value, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" TextAlignment="Center" /><Button Content="写入" Style="{StaticResource FlatButton}" Height="22" Padding="2" Margin="0,3,0,0" Click="AnalogOutput_Click" /></StackPanel>
                                 </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
