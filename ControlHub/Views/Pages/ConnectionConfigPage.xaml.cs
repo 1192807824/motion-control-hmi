@@ -21,7 +21,7 @@ public partial class ConnectionConfigPage : UserControl
     private const int OneKeyGatherCycleCount = 1;
     private const int LeftRightGatherPulseDurationMs = 1500;
     private const int UpDownGatherPulseDurationMs = 1500;
-    private const string LeftRightGatherParameterCommand = "&02,044,077,1,044,077,1,044,077,1,044,077,1,05$";
+    private const string LeftRightGatherParameterCommand = "&02,044,050,1,044,050,1,044,050,1,044,050,1,05$";
     private const string LeftRightGatherStartCommand = "&03,05$";
     private const string UpDownGatherParameterCommand = "&02,044,077,1,044,077,1,044,077,1,044,077,1,06$";
     private const string UpDownGatherStartCommand = "&03,06$";
