@@ -18,6 +18,12 @@ public partial class ConnectionConfigPage : UserControl
     private const string LightControlCommandName = "\u5149\u6e90\u63a7\u5236";
     private const string LightOnCommand = "&07,1$";
     private const string LightOffCommand = "&07,0$";
+    private const int OneKeyGatherCycleCount = 3;
+    private const int OneKeyGatherPulseDurationMs = 2000;
+    private const string LeftRightGatherParameterCommand = "&02,075,038,1,075,038,1,075,038,1,075,038,1,05$";
+    private const string LeftRightGatherStartCommand = "&03,05$";
+    private const string UpDownGatherParameterCommand = "&02,075,038,1,075,038,1,075,038,1,075,038,1,06$";
+    private const string UpDownGatherStartCommand = "&03,06$";
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
@@ -224,20 +230,25 @@ public partial class ConnectionConfigPage : UserControl
         _vibrationSequenceRunning = true;
         try
         {
-            AddLog("\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u5de6\u53f3\u805a\u62e2 -> \u4e0a\u4e0b\u805a\u62e2");
+            AddLog($"\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u5de6\u53f3\u805a\u62e2 -> \u4e0a\u4e0b\u805a\u62e2\uff0c\u5faa\u73af {OneKeyGatherCycleCount} \u6b21");
             await SendAsciiProtocolCommandAsync("&05,00$", "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f");
 
-            await RunVibrationPulseAsync(
-                "&02,075,038,1,075,038,1,075,038,1,075,038,1,05$",
-                "&03,05$",
-                2000,
-                "\u5de6\u53f3\u805a\u62e2");
+            for (var cycleIndex = 1; cycleIndex <= OneKeyGatherCycleCount; cycleIndex++)
+            {
+                AddLog($"\u4e00\u952e\u805a\u62e2\u7b2c {cycleIndex}/{OneKeyGatherCycleCount} \u8f6e");
 
-            await RunVibrationPulseAsync(
-                "&02,075,038,1,075,038,1,075,038,1,075,038,1,06$",
-                "&03,06$",
-                2000,
-                "\u4e0a\u4e0b\u805a\u62e2");
+                await RunVibrationPulseAsync(
+                    LeftRightGatherParameterCommand,
+                    LeftRightGatherStartCommand,
+                    OneKeyGatherPulseDurationMs,
+                    $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2");
+
+                await RunVibrationPulseAsync(
+                    UpDownGatherParameterCommand,
+                    UpDownGatherStartCommand,
+                    OneKeyGatherPulseDurationMs,
+                    $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2");
+            }
 
             AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
         }
