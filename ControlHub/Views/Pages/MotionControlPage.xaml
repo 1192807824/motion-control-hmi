@@ -701,7 +701,7 @@
                     </StackPanel>
                     <ItemsControl x:Name="IoItemsControl" Grid.Row="1" ItemsSource="{Binding IoPoints}" Margin="0,8,0,0">
                         <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate><UniformGrid Columns="10" /></ItemsPanelTemplate>
+                            <ItemsPanelTemplate><UniformGrid Columns="8" /></ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
