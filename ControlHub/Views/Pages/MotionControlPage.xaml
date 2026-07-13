@@ -240,8 +240,7 @@
                              BorderThickness="0"
                              ItemContainerStyle="{StaticResource AxisCardItem}"
                              SelectionChanged="AxisSelector_SelectionChanged"
-                             Height="470"
-                             VerticalAlignment="Top"
+                             VerticalAlignment="Stretch"
                              ScrollViewer.VerticalScrollBarVisibility="Disabled"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.ItemsPanel>
@@ -668,7 +667,8 @@
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
                         <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
-                        <ColumnDefinition Width="*" /><ColumnDefinition Width="76" />
+                        <ColumnDefinition Width="*" /><ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0"><TextBlock Text="起始速度" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.StartVelocity, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
                     <StackPanel Grid.Column="2"><TextBlock Text="运行速度" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding SelectedAxis.JogSpeed, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="AxisSettingsTextBox_LostFocus" /></StackPanel>
@@ -677,7 +677,10 @@
                     <StackPanel Grid.Column="8"><TextBlock Text="减速时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.DecelerationMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
                     <StackPanel Grid.Column="10"><TextBlock Text="S 曲线时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.STimeMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
                     <StackPanel Grid.Column="12"><TextBlock Text="减速停止时间 (ms)" Style="{StaticResource MutedLabel}" /><TextBox Text="{Binding Tuning.DecelerationStopMilliseconds, ElementName=Root, UpdateSourceTrigger=PropertyChanged, StringFormat=0.###}" Style="{StaticResource InputBox}" LostFocus="MotionProfile_LostFocus" /></StackPanel>
-                    <Button Grid.Column="13" Content="恢复默认" Style="{StaticResource FlatButton}" Height="32" Margin="8,18,0,0" Padding="4,0" Click="ResetProfile_Click" />
+                    <StackPanel Grid.Column="14">
+                        <TextBlock Text="操作" Style="{StaticResource MutedLabel}" />
+                        <Button Content="恢复默认" Style="{StaticResource FlatButton}" Height="32" Padding="4,0" Click="ResetProfile_Click" />
+                    </StackPanel>
                 </Grid>
             </Expander>
         </Grid>
