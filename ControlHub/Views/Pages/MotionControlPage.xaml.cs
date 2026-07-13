@@ -1841,7 +1841,9 @@ public partial class MotionControlPage : UserControl
         }
 
         ViewModel?.AlarmRecords.Clear();
-        _activeAlarmKeys.Clear();
+        // Keep active keys while a physical alarm is still present. Clearing them
+        // here makes the following poll insert every active alarm straight back
+        // into the history, so the operator sees no visible effect.
         PollMotionState();
     }
 
