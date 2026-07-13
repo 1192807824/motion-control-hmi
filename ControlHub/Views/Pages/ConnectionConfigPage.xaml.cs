@@ -230,19 +230,19 @@ public partial class ConnectionConfigPage : UserControl
             await RunVibrationPulseAsync(
                 "&02,055,020,1,055,020,1,055,020,1,055,020,1,04$",
                 "&03,04$",
-                180,
+                200,
                 "\u8f7b\u9707\u6563");
 
             await RunVibrationPulseAsync(
                 "&02,065,025,1,065,025,1,065,025,1,065,025,1,05$",
                 "&03,05$",
-                350,
+                1000,
                 "\u5de6\u53f3\u805a\u62e2");
 
             await RunVibrationPulseAsync(
                 "&02,065,025,1,065,025,1,065,025,1,065,025,1,06$",
                 "&03,06$",
-                350,
+                700,
                 "\u4e0a\u4e0b\u805a\u62e2");
 
             AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
