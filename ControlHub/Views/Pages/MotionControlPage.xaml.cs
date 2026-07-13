@@ -2347,7 +2347,12 @@ public partial class MotionControlPage : UserControl
             _ => 0
         };
 
-        count = Math.Min(count, 20);
+        // Digital port reads return a 32-bit image. Do not truncate the 32
+        // hardware points to the old 20-point dashboard limit.
+        if (mode is IoPointKind.DigitalInput or IoPointKind.DigitalOutput)
+        {
+            count = Math.Min(count, 32);
+        }
         viewModel.IoPoints.Clear();
         for (var channel = 0; channel < count; channel++)
         {
