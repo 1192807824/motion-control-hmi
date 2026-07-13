@@ -240,9 +240,9 @@ public partial class ConnectionConfigPage : UserControl
                 "\u5de6\u53f3\u805a\u62e2");
 
             await RunVibrationPulseAsync(
-                "&02,085,055,1,085,055,1,085,055,1,085,055,1,01$",
+                "&02,045,020,1,045,020,1,045,020,1,045,020,1,01$",
                 "&03,01$",
-                800,
+                250,
                 "\u5411\u4e0a\u9707\u52a8");
 
             AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
