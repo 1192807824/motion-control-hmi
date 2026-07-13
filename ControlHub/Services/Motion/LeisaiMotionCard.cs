@@ -94,9 +94,12 @@ public sealed class LeisaiMotionCard : IMotionCard
 
                 ushort digitalInputs = 0;
                 ushort digitalOutputs = 0;
+                // dmc_get_total_ionum only reports the controller's local I/O (8/8 on
+                // DMC-E3064S). The motion card UI and the 32-bit port APIs expose the
+                // complete EtherCAT I/O image, whose size is reported by nmc_*.
                 EnsureSuccess(
-                    LeisaiNative.dmc_get_total_ionum(_cardNo, ref digitalInputs, ref digitalOutputs),
-                    "dmc_get_total_ionum");
+                    LeisaiNative.nmc_get_total_ionum(_cardNo, ref digitalInputs, ref digitalOutputs),
+                    "nmc_get_total_ionum");
                 DigitalInputCount = digitalInputs;
                 DigitalOutputCount = digitalOutputs;
 

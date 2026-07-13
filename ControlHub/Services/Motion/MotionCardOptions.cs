@@ -19,9 +19,9 @@ public sealed class MotionCardOptions
 
     public int DigitalOutputPort { get; init; }
 
-    public int SimulationDigitalInputCount { get; init; } = 20;
+    public int SimulationDigitalInputCount { get; init; } = 32;
 
-    public int SimulationDigitalOutputCount { get; init; } = 20;
+    public int SimulationDigitalOutputCount { get; init; } = 32;
 
     public int SimulationAnalogInputCount { get; init; } = 8;
 
