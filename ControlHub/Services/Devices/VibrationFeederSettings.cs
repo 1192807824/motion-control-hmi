@@ -14,6 +14,7 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     private string _receiveFormat = "ASCII";
     private string _manualSendText = "";
     private bool _appendNewLine = true;
+    private int _lightOnBrightness = 99;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -69,6 +70,12 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     {
         get => _appendNewLine;
         set => SetField(ref _appendNewLine, value);
+    }
+
+    public int LightOnBrightness
+    {
+        get => _lightOnBrightness;
+        set => SetField(ref _lightOnBrightness, value);
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

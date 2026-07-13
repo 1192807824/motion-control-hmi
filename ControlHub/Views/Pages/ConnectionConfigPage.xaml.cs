@@ -15,6 +15,7 @@ public partial class ConnectionConfigPage : UserControl
 {
     private const int MaxConnectionLogCount = 300;
     private const string StopVibrationCommand = "&04$";
+    private const string LightControlCommandName = "\u5149\u6e90\u63a7\u5236";
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
@@ -203,6 +204,22 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    private async void LightOn_Click(object sender, RoutedEventArgs e)
+    {
+        if (Settings is not { } settings)
+        {
+            return;
+        }
+
+        SaveSettings(writeLog: false);
+        await SendLightCommandAsync(settings.LightOnBrightness, "\u5149\u6e90\u6253\u5f00");
+    }
+
+    private async void LightOff_Click(object sender, RoutedEventArgs e)
+    {
+        await SendLightCommandAsync(0, "\u5149\u6e90\u5173\u95ed");
+    }
+
     private void ClearLog_Click(object sender, RoutedEventArgs e)
     {
         ViewModel?.FeederConnectionLogs.Clear();
@@ -239,6 +256,39 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         ConnectionLogListBox.ScrollIntoView(logItem);
+    }
+
+    private async Task SendLightCommandAsync(int brightness, string actionName)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            return;
+        }
+
+        var normalizedBrightness = Math.Clamp(brightness, 0, 99);
+        if (Settings is { } settings && settings.LightOnBrightness != normalizedBrightness && brightness > 0)
+        {
+            settings.LightOnBrightness = normalizedBrightness;
+            _settingsStore.Save(settings);
+        }
+
+        var command = $"&06,{normalizedBrightness:00}$";
+        try
+        {
+            var payload = Encoding.ASCII.GetBytes(command);
+            await _tcpClient.WriteAsync(payload);
+            AddLog($"TX [ASCII]  {command}  {LightControlCommandName}-{actionName}");
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+        {
+            if (ViewModel is { } viewModel)
+            {
+                viewModel.FeederConnectionStatusText = "\u901a\u8baf\u5f02\u5e38";
+            }
+
+            AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
+        }
     }
 
     private void TcpClient_DataReceived(byte[] payload)

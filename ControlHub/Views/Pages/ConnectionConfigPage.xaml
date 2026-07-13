@@ -385,6 +385,8 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="220" />
                             <RowDefinition Height="10" />
+                            <RowDefinition Height="128" />
+                            <RowDefinition Height="10" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
@@ -451,6 +453,60 @@
                     </Border>
 
                     <Border Grid.Row="2" Style="{StaticResource Panel}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="44" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource PanelHeader}"
+                                    BorderBrush="{StaticResource PanelBorder}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="6,6,0,0"
+                                    Padding="14,0">
+                                <TextBlock Text="&#x5149;&#x6E90;&#x63A7;&#x5236;" Style="{StaticResource PanelTitle}" />
+                            </Border>
+
+                            <Grid Grid.Row="1" Margin="14,10,14,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="88" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="76" />
+                                    <ColumnDefinition Width="76" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="&#x5F00;&#x542F;&#x4EAE;&#x5EA6;" Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="1"
+                                         Style="{StaticResource ConfigInput}"
+                                         Text="{Binding FeederSettings.LightOnBrightness, UpdateSourceTrigger=LostFocus}" />
+                                <Button Grid.Column="3"
+                                        Content="&#x5149;&#x6E90;&#x5F00;"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Background="{StaticResource AccentGreen}"
+                                        BorderBrush="#126700"
+                                        MinWidth="68"
+                                        Click="LightOn_Click" />
+                                <Button Grid.Column="4"
+                                        Content="&#x5149;&#x6E90;&#x5173;"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Background="{StaticResource AccentRed}"
+                                        BorderBrush="#9E0B08"
+                                        MinWidth="68"
+                                        Margin="0"
+                                        Click="LightOff_Click" />
+                            </Grid>
+
+                            <TextBlock Grid.Row="2"
+                                       Margin="14,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutedText}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Text="&#x8303;&#x56F4; 00-99" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="4" Style="{StaticResource Panel}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
