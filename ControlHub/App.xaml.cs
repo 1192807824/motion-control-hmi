@@ -8,7 +8,7 @@ namespace ControlHub;
 /// </summary>
 public partial class App : Application
 {
-    private const string VisionMasterX86RuntimeDirectory = @"D:\VM\VisionMaster4.4.0\Applications\PublicFile\x86";
+    private const string VisionMasterX86RuntimeDirectory = @"D:\VisonMaster\VisionMaster4.4.0\Applications\PublicFile\x86";
 
     public App()
     {
