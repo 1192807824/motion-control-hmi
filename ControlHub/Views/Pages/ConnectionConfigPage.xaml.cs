@@ -24,6 +24,7 @@ public partial class ConnectionConfigPage : UserControl
     private bool _closed;
     private bool _connecting;
     private bool _loaded;
+    private bool _vibrationSequenceRunning;
 
     static ConnectionConfigPage()
     {
@@ -206,6 +207,55 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    private async void OneKeyVibration_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog("\u4e00\u952e\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            return;
+        }
+
+        if (_vibrationSequenceRunning)
+        {
+            AddLog("\u4e00\u952e\u9707\u52a8\u6b63\u5728\u6267\u884c\uff0c\u8bf7\u7a0d\u5019");
+            return;
+        }
+
+        _vibrationSequenceRunning = true;
+        try
+        {
+            AddLog("\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u8f7b\u9707\u6563 -> \u5de6\u53f3\u805a\u62e2 -> \u4e0a\u4e0b\u805a\u62e2");
+            await SendAsciiProtocolCommandAsync("&05,00$", "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f");
+
+            await RunVibrationPulseAsync(
+                "&02,055,020,1,055,020,1,055,020,1,055,020,1,04$",
+                "&03,04$",
+                180,
+                "\u8f7b\u9707\u6563");
+
+            await RunVibrationPulseAsync(
+                "&02,065,025,1,065,025,1,065,025,1,065,025,1,05$",
+                "&03,05$",
+                350,
+                "\u5de6\u53f3\u805a\u62e2");
+
+            await RunVibrationPulseAsync(
+                "&02,065,025,1,065,025,1,065,025,1,065,025,1,06$",
+                "&03,06$",
+                350,
+                "\u4e0a\u4e0b\u805a\u62e2");
+
+            AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        finally
+        {
+            _vibrationSequenceRunning = false;
+        }
+    }
+
     private async void LightOn_Click(object sender, RoutedEventArgs e)
     {
         if (Settings is not { } settings)
@@ -291,6 +341,15 @@ public partial class ConnectionConfigPage : UserControl
 
             AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
         }
+    }
+
+    private async Task RunVibrationPulseAsync(string parameterCommand, string startCommand, int durationMs, string actionName)
+    {
+        await SendAsciiProtocolCommandAsync(parameterCommand, $"{actionName}-\u4e0b\u53d1\u53c2\u6570");
+        await SendAsciiProtocolCommandAsync(startCommand, $"{actionName}-\u542f\u52a8");
+        await Task.Delay(durationMs, _lifetimeCancellation.Token);
+        await SendAsciiProtocolCommandAsync(StopVibrationCommand, $"{actionName}-\u505c\u6b62");
+        await Task.Delay(120, _lifetimeCancellation.Token);
     }
 
     private void TcpClient_DataReceived(byte[] payload)

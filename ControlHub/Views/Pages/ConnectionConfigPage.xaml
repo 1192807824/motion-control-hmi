@@ -599,6 +599,11 @@
                                         Background="{StaticResource AccentGreen}"
                                         BorderBrush="#126700"
                                         Click="SendManualMessage_Click" />
+                                <Button Content="&#x4E00;&#x952E;&#x9707;&#x52A8;"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Background="{StaticResource AccentBlue}"
+                                        BorderBrush="#174E83"
+                                        Click="OneKeyVibration_Click" />
                                 <Button Content="&#x505C;&#x6B62;&#x9707;&#x52A8;"
                                         Style="{StaticResource PrimaryButton}"
                                         Background="{StaticResource AccentRed}"
