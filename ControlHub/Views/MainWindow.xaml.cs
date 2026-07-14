@@ -48,6 +48,11 @@ public partial class MainWindow : Window
         ShowMotionPage();
     }
 
+    private void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
+    {
+        ShowVisualCalibrationPage();
+    }
+
     private void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
         ShowConnectionConfigPage();
@@ -111,16 +116,30 @@ public partial class MainWindow : Window
     private void ShowMotionPage()
     {
         MotionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
+        VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
         MotionPage.Visibility = Visibility.Visible;
+        VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        ConnectionConfigContent.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowVisualCalibrationPage()
+    {
+        MotionMenuButton.Style = (Style)Resources["MenuButton"];
+        VisualCalibrationMenuButton.Style = (Style)Resources["ActiveMenuButton"];
+        ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
+        MotionPage.Visibility = Visibility.Collapsed;
+        VisualCalibrationContent.Visibility = Visibility.Visible;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
     }
 
     private void ShowConnectionConfigPage()
     {
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
+        VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         MotionPage.Visibility = Visibility.Collapsed;
+        VisualCalibrationContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Visible;
     }
 

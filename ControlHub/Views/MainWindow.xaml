@@ -164,6 +164,16 @@
                             <TextBlock Text="运动控制" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    <Button x:Name="VisualCalibrationMenuButton" Style="{StaticResource MenuButton}" Click="VisualCalibrationMenu_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <Image Width="20"
+                                   Height="20"
+                                   Margin="0,0,8,0"
+                                   Source="/Assets/Icons/TopMenu/ccd.png"
+                                   Stretch="Uniform" />
+                            <TextBlock Text="视觉标定" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="ConnectionMenuButton" Style="{StaticResource MenuButton}" Click="ConnectionMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
@@ -209,6 +219,10 @@
 
             <pages:MotionControlPage x:Name="MotionPage"
                                      Grid.Row="2" />
+
+            <Grid x:Name="VisualCalibrationContent"
+                  Grid.Row="2"
+                  Visibility="Collapsed" />
 
             <pages:ConnectionConfigPage x:Name="ConnectionConfigContent"
                                         Grid.Row="2"
