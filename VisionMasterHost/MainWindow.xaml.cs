@@ -7,16 +7,18 @@ using System.Windows.Media;
 using Microsoft.Win32;
 using VM.Core;
 using VM.PlatformSDKCS;
+using VMControls.Interface;
 
 namespace VisionMasterHost;
 
 public partial class MainWindow : Window
 {
+    private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private VmProcedure? _activeProcedure;
     private bool _solutionLoaded;
-    private bool _workAreaLocked;
     private bool _closed;
     private bool _sdkAvailable = true;
+    private bool _busy;
 
     public MainWindow(bool embedded)
     {
@@ -38,31 +40,66 @@ public partial class MainWindow : Window
             : FormatException(exception);
         SdkErrorTextBlock.Text = message;
         SdkErrorPanel.Visibility = Visibility.Visible;
-        VmMainView.IsEnabled = false;
+        VisionRenderControl.IsEnabled = false;
+        ImagePlaceholder.Visibility = Visibility.Collapsed;
         UpdateCommandState();
         SetStatus(message, StatusKind.Error);
     }
 
-    private void BrowseSolution_Click(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (!_sdkAvailable)
+        {
+            return;
+        }
+
+        try
+        {
+            VisionRenderControl.SetRenderToolbarVisible(true);
+        }
+        catch (Exception exception)
+        {
+            ReportSdkInitializationFailure(exception);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.SolutionPath))
+        {
+            return;
+        }
+
+        SolutionPathTextBox.Text = _settings.SolutionPath;
+        if (!File.Exists(_settings.SolutionPath))
+        {
+            SetStatus("上次使用的方案文件不存在，请重新选择。", StatusKind.Error);
+            return;
+        }
+
+        await LoadSolutionAsync(_settings.SolutionPath, autoRestore: true);
+    }
+
+    private async void ChooseSolution_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
             Title = "选择 VisionMaster 标定方案",
             Filter = "VisionMaster 方案 (*.sol)|*.sol|所有文件 (*.*)|*.*",
             CheckFileExists = true,
-            Multiselect = false
+            Multiselect = false,
+            InitialDirectory = GetInitialSolutionDirectory()
         };
 
-        if (dialog.ShowDialog(this) == true)
+        if (dialog.ShowDialog(this) != true)
         {
-            SolutionPathTextBox.Text = dialog.FileName;
-            SetStatus($"已选择方案：{Path.GetFileName(dialog.FileName)}", StatusKind.Ready);
+            return;
         }
+
+        SolutionPathTextBox.Text = dialog.FileName;
+        await LoadSolutionAsync(dialog.FileName, autoRestore: false);
     }
 
-    private async void LoadSolution_Click(object sender, RoutedEventArgs e)
+    private async Task LoadSolutionAsync(string solutionPath, bool autoRestore)
     {
-        var solutionPath = SolutionPathTextBox.Text?.Trim() ?? "";
         if (!File.Exists(solutionPath))
         {
             SetStatus("请选择有效的 VisionMaster .sol 方案文件。", StatusKind.Error);
@@ -70,7 +107,7 @@ public partial class MainWindow : Window
         }
 
         SetBusy(true);
-        SetStatus("正在加载 VisionMaster 方案…", StatusKind.Busy);
+        SetStatus(autoRestore ? "正在恢复上次标定方案…" : "正在加载标定方案…", StatusKind.Busy);
         await System.Windows.Threading.Dispatcher.Yield(
             System.Windows.Threading.DispatcherPriority.Background);
 
@@ -79,7 +116,7 @@ public partial class MainWindow : Window
         {
             CloseCurrentSolution();
             previousSolutionClosed = true;
-            VmSolution.Load(Path.GetFullPath(solutionPath), SolutionPasswordBox.Password ?? "");
+            VmSolution.Load(Path.GetFullPath(solutionPath), "");
             _solutionLoaded = true;
 
             var procedureNames = GetProcedureNames();
@@ -88,13 +125,16 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("方案中没有可用流程。 ");
             }
 
+            _settings.SolutionPath = Path.GetFullPath(solutionPath);
+            SolutionPathTextBox.Text = _settings.SolutionPath;
             ProcedureComboBox.ItemsSource = procedureNames;
-            ProcedureComboBox.SelectedItem =
-                procedureNames.FirstOrDefault(name => name.Contains("标定"))
-                ?? procedureNames[0];
+            ProcedureComboBox.SelectedItem = SelectPreferredProcedure(procedureNames);
+            SaveSettingsNoThrow();
             UpdateCommandState();
             SetStatus(
-                $"方案已加载：{Path.GetFileName(solutionPath)}，共 {procedureNames.Count} 个流程。",
+                autoRestore
+                    ? $"已自动加载：{Path.GetFileName(solutionPath)}"
+                    : $"方案已加载：{Path.GetFileName(solutionPath)}",
                 StatusKind.Success);
         }
         catch (Exception exception)
@@ -104,30 +144,13 @@ public partial class MainWindow : Window
                 CloseCurrentSolutionNoThrow();
             }
 
-            SetStatus($"加载失败：{FormatException(exception)}", StatusKind.Error);
+            SetStatus(
+                $"{(autoRestore ? "自动加载" : "加载")}失败：{FormatException(exception)}",
+                StatusKind.Error);
         }
         finally
         {
             SetBusy(false);
-        }
-    }
-
-    private void SaveSolution_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_solutionLoaded)
-        {
-            SetStatus("请先加载 VisionMaster 标定方案。", StatusKind.Error);
-            return;
-        }
-
-        try
-        {
-            VmSolution.Save();
-            SetStatus("VisionMaster 标定方案已保存。", StatusKind.Success);
-        }
-        catch (Exception exception)
-        {
-            SetStatus($"保存失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
@@ -143,16 +166,130 @@ public partial class MainWindow : Window
             StopActiveProcedureNoThrow();
             _activeProcedure = VmSolution.Instance[procedureName] as VmProcedure
                 ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
-            VmMainView.BindSingleProcedure(procedureName);
-            ApplyEditState();
+            _settings.ProcedureName = procedureName;
+            PopulateImageSteps(procedureName, _activeProcedure);
+            SaveSettingsNoThrow();
             UpdateCommandState();
-            SetStatus($"当前标定流程：{procedureName}", StatusKind.Ready);
         }
         catch (Exception exception)
         {
             _activeProcedure = null;
+            ImageStepComboBox.ItemsSource = null;
+            ClearRenderer();
             UpdateCommandState();
-            SetStatus($"流程绑定失败：{FormatException(exception)}", StatusKind.Error);
+            SetStatus($"流程加载失败：{FormatException(exception)}", StatusKind.Error);
+        }
+    }
+
+    private void PopulateImageSteps(string procedureName, VmProcedure procedure)
+    {
+        var options = GetImageStepOptions(procedureName, procedure);
+        ImageStepComboBox.ItemsSource = options;
+        ImageStepComboBox.SelectedItem =
+            options.FirstOrDefault(option =>
+                string.Equals(option.ModuleKey, _settings.ImageModuleKey, StringComparison.Ordinal))
+            ?? options.FirstOrDefault(option => option.DisplayName.Contains("N点标定"))
+            ?? options.FirstOrDefault(option => option.DisplayName.Contains("标定"))
+            ?? options.LastOrDefault();
+    }
+
+    private static IReadOnlyList<VisionModuleOption> GetImageStepOptions(
+        string procedureName,
+        VmProcedure procedure)
+    {
+        var options = new List<VisionModuleOption>();
+        var moduleList = procedure.GetProcedureModuleList();
+        for (var index = 0; index < moduleList.nNum; index++)
+        {
+            var info = moduleList.astModuleInfo[index];
+            var displayName = info.strDisplayName?.Trim() ?? "";
+            var moduleName = info.strModuleName?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                continue;
+            }
+
+            var option = ResolveModuleOption(procedureName, displayName, moduleName);
+            if (option is not null
+                && options.All(existing =>
+                    !string.Equals(existing.ModuleKey, option.ModuleKey, StringComparison.Ordinal)))
+            {
+                options.Add(option);
+            }
+        }
+
+        if (options.Count == 0)
+        {
+            options.Add(new VisionModuleOption(
+                $"{procedureName}（流程图像）",
+                procedureName,
+                procedure));
+        }
+
+        return options;
+    }
+
+    private static VisionModuleOption? ResolveModuleOption(
+        string procedureName,
+        string displayName,
+        string moduleName)
+    {
+        var candidates = new[]
+        {
+            $"{procedureName}.{displayName}",
+            $"{procedureName}.{moduleName}",
+            moduleName,
+            displayName
+        };
+
+        foreach (var candidate in candidates
+                     .Where(value => !string.IsNullOrWhiteSpace(value))
+                     .Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                if (VmSolution.Instance[candidate] is IVmModule module)
+                {
+                    return new VisionModuleOption(displayName, candidate, module);
+                }
+            }
+            catch
+            {
+                // Some SDK module names are type names rather than lookup paths.
+            }
+        }
+
+        return null;
+    }
+
+    private void ImageStepComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_solutionLoaded || ImageStepComboBox.SelectedItem is not VisionModuleOption option)
+        {
+            return;
+        }
+
+        try
+        {
+            VisionRenderControl.ModuleSource = option.Module;
+            try
+            {
+                VisionRenderControl.UpdateVMResultShow();
+            }
+            catch
+            {
+                // A newly loaded module may not have a render result until its first run.
+            }
+
+            ImagePlaceholder.Visibility = Visibility.Collapsed;
+            _settings.ImageModuleKey = option.ModuleKey;
+            SaveSettingsNoThrow();
+            SetStatus($"当前图像：{ProcedureComboBox.SelectedItem} / {option.DisplayName}", StatusKind.Ready);
+        }
+        catch (Exception exception)
+        {
+            ClearRenderer();
+            SetStatus($"图像步骤绑定失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
@@ -166,15 +303,16 @@ public partial class MainWindow : Window
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            _activeProcedure!.Run();
+            _activeProcedure!.Run(true);
             stopwatch.Stop();
+            VisionRenderControl.UpdateVMResultShow();
             SetStatus(
-                $"流程“{_activeProcedure.Name}”执行完成，用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms。",
+                $"运行完成，用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms",
                 StatusKind.Success);
         }
         catch (Exception exception)
         {
-            SetStatus($"单次运行失败：{FormatException(exception)}", StatusKind.Error);
+            SetStatus($"运行失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
@@ -189,7 +327,7 @@ public partial class MainWindow : Window
         {
             _activeProcedure!.ContinuousRunEnable = true;
             UpdateCommandState();
-            SetStatus($"流程“{_activeProcedure.Name}”正在连续运行。", StatusKind.Success);
+            SetStatus("流程正在连续运行", StatusKind.Success);
         }
         catch (Exception exception)
         {
@@ -208,7 +346,7 @@ public partial class MainWindow : Window
         {
             _activeProcedure.ContinuousRunEnable = false;
             UpdateCommandState();
-            SetStatus($"流程“{_activeProcedure.Name}”已停止。", StatusKind.Ready);
+            SetStatus("流程已停止", StatusKind.Ready);
         }
         catch (Exception exception)
         {
@@ -216,36 +354,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ToggleEditLock_Click(object sender, RoutedEventArgs e)
+    private string SelectPreferredProcedure(IReadOnlyList<string> procedureNames)
     {
-        try
-        {
-            _workAreaLocked = !_workAreaLocked;
-            ApplyEditState();
-            SetStatus(
-                _workAreaLocked ? "标定流程编辑已锁定。" : "标定流程编辑已解锁。",
-                StatusKind.Ready);
-        }
-        catch (Exception exception)
-        {
-            SetStatus($"切换编辑状态失败：{FormatException(exception)}", StatusKind.Error);
-        }
-    }
-
-    private void ApplyEditState()
-    {
-        if (_workAreaLocked)
-        {
-            VmMainView.LockWorkArea();
-            VmMainView.SetParamTabEditable(false);
-            EditLockButton.Content = "解锁编辑";
-        }
-        else
-        {
-            VmMainView.UnlockWorkArea();
-            VmMainView.SetParamTabEditable(true);
-            EditLockButton.Content = "锁定编辑";
-        }
+        return procedureNames.FirstOrDefault(name =>
+                   string.Equals(name, _settings.ProcedureName, StringComparison.Ordinal))
+               ?? procedureNames.FirstOrDefault(name => name.Contains("标定"))
+               ?? procedureNames[0];
     }
 
     private static IReadOnlyList<string> GetProcedureNames()
@@ -271,13 +385,14 @@ public partial class MainWindow : Window
             return true;
         }
 
-        SetStatus("请先加载方案并选择标定流程。", StatusKind.Error);
+        SetStatus("请先选择方案、流程和图像步骤。", StatusKind.Error);
         return false;
     }
 
     private void CloseCurrentSolution()
     {
         StopActiveProcedureNoThrow();
+        ClearRenderer();
 
         if (_solutionLoaded)
         {
@@ -285,14 +400,16 @@ public partial class MainWindow : Window
         }
 
         _activeProcedure = null;
-        ProcedureComboBox.ItemsSource = null;
         _solutionLoaded = false;
+        ProcedureComboBox.ItemsSource = null;
+        ImageStepComboBox.ItemsSource = null;
         UpdateCommandState();
     }
 
     private void CloseCurrentSolutionNoThrow()
     {
         StopActiveProcedureNoThrow();
+        ClearRenderer();
         try
         {
             VmSolution.Instance?.CloseSolution();
@@ -302,9 +419,27 @@ public partial class MainWindow : Window
         }
 
         _activeProcedure = null;
-        ProcedureComboBox.ItemsSource = null;
         _solutionLoaded = false;
+        ProcedureComboBox.ItemsSource = null;
+        ImageStepComboBox.ItemsSource = null;
         UpdateCommandState();
+    }
+
+    private void ClearRenderer()
+    {
+        try
+        {
+            VisionRenderControl.ModuleSource = null;
+            VisionRenderControl.ClearDisplayView();
+        }
+        catch
+        {
+        }
+
+        if (_sdkAvailable)
+        {
+            ImagePlaceholder.Visibility = Visibility.Visible;
+        }
     }
 
     private void StopActiveProcedureNoThrow()
@@ -320,60 +455,55 @@ public partial class MainWindow : Window
         }
         catch
         {
-            // Cleanup continues so the solution can still be released.
         }
     }
 
     private void SetBusy(bool busy)
     {
-        LoadSolutionButton.IsEnabled = !busy;
-        BrowseSolutionButton.IsEnabled = !busy;
-        SolutionPathTextBox.IsEnabled = !busy;
-        SolutionPasswordBox.IsEnabled = !busy;
-        if (busy)
-        {
-            SaveSolutionButton.IsEnabled = false;
-            ProcedureComboBox.IsEnabled = false;
-            RunOnceButton.IsEnabled = false;
-            ContinuousRunButton.IsEnabled = false;
-            StopRunButton.IsEnabled = false;
-            EditLockButton.IsEnabled = false;
-        }
-        else
-        {
-            UpdateCommandState();
-        }
+        _busy = busy;
+        UpdateCommandState();
     }
 
     private void UpdateCommandState()
     {
         if (!_sdkAvailable)
         {
-            BrowseSolutionButton.IsEnabled = false;
-            SolutionPathTextBox.IsEnabled = false;
-            SolutionPasswordBox.IsEnabled = false;
-            LoadSolutionButton.IsEnabled = false;
-            ProcedureComboBox.IsEnabled = false;
-            SaveSolutionButton.IsEnabled = false;
-            RunOnceButton.IsEnabled = false;
-            ContinuousRunButton.IsEnabled = false;
-            StopRunButton.IsEnabled = false;
-            EditLockButton.IsEnabled = false;
+            CommandBar.IsEnabled = false;
             return;
         }
 
+        CommandBar.IsEnabled = true;
         var procedureReady = _solutionLoaded && _activeProcedure is not null;
         var continuousRunning = procedureReady && _activeProcedure!.ContinuousRunEnable;
-        BrowseSolutionButton.IsEnabled = !continuousRunning;
-        SolutionPathTextBox.IsEnabled = !continuousRunning;
-        SolutionPasswordBox.IsEnabled = !continuousRunning;
-        LoadSolutionButton.IsEnabled = !continuousRunning;
-        ProcedureComboBox.IsEnabled = _solutionLoaded && !continuousRunning;
-        SaveSolutionButton.IsEnabled = _solutionLoaded && !continuousRunning;
-        RunOnceButton.IsEnabled = procedureReady && !continuousRunning;
-        ContinuousRunButton.IsEnabled = procedureReady && !continuousRunning;
-        StopRunButton.IsEnabled = continuousRunning;
-        EditLockButton.IsEnabled = _solutionLoaded && !continuousRunning;
+        ChooseSolutionButton.IsEnabled = !_busy && !continuousRunning;
+        ProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning;
+        ImageStepComboBox.IsEnabled = !_busy && procedureReady && !continuousRunning;
+        RunOnceButton.IsEnabled = !_busy && procedureReady && !continuousRunning;
+        ContinuousRunButton.IsEnabled = !_busy && procedureReady && !continuousRunning;
+        StopRunButton.IsEnabled = !_busy && continuousRunning;
+    }
+
+    private string? GetInitialSolutionDirectory()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.SolutionPath))
+        {
+            return null;
+        }
+
+        var directory = Path.GetDirectoryName(_settings.SolutionPath);
+        return Directory.Exists(directory) ? directory : null;
+    }
+
+    private void SaveSettingsNoThrow()
+    {
+        try
+        {
+            _settings.Save();
+        }
+        catch
+        {
+            // The vision workflow remains usable even if local preferences cannot be persisted.
+        }
     }
 
     private void SetStatus(string message, StatusKind kind)
@@ -420,7 +550,7 @@ public partial class MainWindow : Window
         StopActiveProcedureNoThrow();
         try
         {
-            VmMainView.Dispose();
+            VisionRenderControl.Dispose();
         }
         catch
         {
@@ -441,6 +571,22 @@ public partial class MainWindow : Window
         catch
         {
         }
+    }
+
+    private sealed class VisionModuleOption
+    {
+        public VisionModuleOption(string displayName, string moduleKey, IVmModule module)
+        {
+            DisplayName = displayName;
+            ModuleKey = moduleKey;
+            Module = module;
+        }
+
+        public string DisplayName { get; }
+
+        public string ModuleKey { get; }
+
+        public IVmModule Module { get; }
     }
 
     private enum StatusKind

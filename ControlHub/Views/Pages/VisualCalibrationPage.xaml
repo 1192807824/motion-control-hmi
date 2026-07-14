@@ -9,7 +9,7 @@
              d:DesignHeight="820">
     <Grid Margin="10,10,10,8" Background="#10263A">
         <Grid.RowDefinitions>
-            <RowDefinition Height="42" />
+            <RowDefinition Height="40" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -27,7 +27,7 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="VisionMaster 视觉标定工作台"
+                    <TextBlock Text="视觉标定"
                                Foreground="#F4F8FB"
                                FontSize="16"
                                FontWeight="Bold" />
@@ -38,23 +38,15 @@
                              Fill="#E0A21A" />
                     <TextBlock x:Name="HostStatusText"
                                Margin="8,0,0,0"
-                               Text="正在准备 64 位标定工作台…"
+                               Text="正在准备视觉组件…"
                                Foreground="#D8E4EC"
                                FontSize="13"
                                VerticalAlignment="Center" />
                 </StackPanel>
 
-                <TextBlock Grid.Column="1"
-                           Text="独立 x64 / .NET Framework 4.8 运行"
-                           Foreground="#8297A8"
-                           FontSize="11"
-                           HorizontalAlignment="Right"
-                           VerticalAlignment="Center"
-                           Margin="0,0,12,0" />
-
                 <Button Grid.Column="2"
                         x:Name="RestartHostButton"
-                        Content="重启工作台"
+                        Content="重启组件"
                         Height="30"
                         Padding="12,0"
                         Foreground="White"
@@ -84,13 +76,13 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
                             IsHitTestVisible="False">
-                    <TextBlock Text="VisionMaster 标定工作区"
+                    <TextBlock Text="视觉标定"
                                Foreground="#F4F8FB"
-                               FontSize="24"
+                               FontSize="22"
                                FontWeight="Bold"
                                HorizontalAlignment="Center" />
                     <TextBlock Margin="0,8,0,0"
-                               Text="正在启动官方流程配置控件，请稍候…"
+                               Text="正在启动图像组件，请稍候…"
                                Foreground="#AAB9C6"
                                FontSize="14"
                                HorizontalAlignment="Center" />

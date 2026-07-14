@@ -5,20 +5,21 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:VMControls.WPF.Release;assembly=VMControls.WPF.Release"
         mc:Ignorable="d"
-        Title="VisionMaster 视觉标定工作台"
+        Title="VisionMaster 视觉标定"
         Width="1540"
         Height="760"
         MinWidth="1024"
         MinHeight="640"
-        Background="#202427"
+        Background="#111D29"
         FontFamily="Microsoft YaHei UI"
+        Loaded="MainWindow_Loaded"
         Closing="MainWindow_Closing">
     <Window.Resources>
-        <Style x:Key="ToolbarButton" TargetType="Button">
-            <Setter Property="Height" Value="32" />
-            <Setter Property="MinWidth" Value="72" />
-            <Setter Property="Padding" Value="10,0" />
-            <Setter Property="Margin" Value="0,0,7,0" />
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="78" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Margin" Value="8,0,0,0" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Background" Value="#0D6EE8" />
             <Setter Property="BorderBrush" Value="#0B5CC2" />
@@ -28,149 +29,123 @@
             <Setter Property="Cursor" Value="Hand" />
         </Style>
 
-        <Style x:Key="ToolbarInput" TargetType="TextBox">
-            <Setter Property="Height" Value="32" />
+        <Style x:Key="Selector" TargetType="ComboBox">
+            <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="8,0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Background" Value="#F7FAFC" />
             <Setter Property="Foreground" Value="#10263A" />
-            <Setter Property="BorderBrush" Value="#7F96A8" />
+            <Setter Property="BorderBrush" Value="#668198" />
             <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#AFC0CE" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="14,0,8,0" />
         </Style>
     </Window.Resources>
 
-    <Grid Background="#202427">
+    <Grid Background="#111D29">
         <Grid.RowDefinitions>
-            <RowDefinition Height="58" />
+            <RowDefinition Height="64" />
             <RowDefinition Height="34" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0"
-                Padding="12,8"
+        <Border x:Name="CommandBar"
+                Grid.Row="0"
+                Padding="12,10"
                 Background="#163047"
                 BorderBrush="#345269"
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="280" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="68" />
-                    <ColumnDefinition Width="116" />
+                    <ColumnDefinition Width="185" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="235" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Text="标定方案"
-                           Foreground="#F4F8FB"
-                           FontSize="18"
-                           FontWeight="Bold"
-                           VerticalAlignment="Center"
-                           Margin="0,0,12,0" />
-
-                <Grid Grid.Column="1" Margin="0,0,8,0">
+                <Grid Grid.Column="0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="66" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="SolutionPathTextBox"
-                             Style="{StaticResource ToolbarInput}"
-                             ToolTip="VisionMaster .sol 方案文件绝对路径" />
+                             Height="34"
+                             Padding="10,0"
+                             VerticalContentAlignment="Center"
+                             IsReadOnly="True"
+                             Background="#F7FAFC"
+                             Foreground="#263746"
+                             BorderBrush="#668198"
+                             BorderThickness="1"
+                             Text="未选择方案"
+                             ToolTip="当前 VisionMaster .sol 方案" />
                     <Button Grid.Column="1"
-                            x:Name="BrowseSolutionButton"
-                            Content="选择"
-                            Style="{StaticResource ToolbarButton}"
-                            MinWidth="58"
-                            Margin="8,0,0,0"
-                            Click="BrowseSolution_Click" />
+                            x:Name="ChooseSolutionButton"
+                            Content="选择方案"
+                            Style="{StaticResource PrimaryButton}"
+                            MinWidth="92"
+                            Click="ChooseSolution_Click" />
                 </Grid>
 
-                <TextBlock Grid.Column="2"
-                           Text="密码"
-                           Foreground="#AAB9C6"
-                           FontSize="12"
-                           VerticalAlignment="Center"
-                           HorizontalAlignment="Right"
-                           Margin="0,0,8,0" />
-                <PasswordBox Grid.Column="3"
-                             x:Name="SolutionPasswordBox"
-                             Height="32"
-                             Padding="8,0"
-                             VerticalContentAlignment="Center"
-                             Background="#F7FAFC"
-                             Foreground="#10263A"
-                             BorderBrush="#7F96A8"
-                             Margin="0,0,8,0" />
-
-                <StackPanel Grid.Column="4" Orientation="Horizontal">
-                    <Button x:Name="LoadSolutionButton"
-                            Content="加载方案"
-                            Style="{StaticResource ToolbarButton}"
-                            Click="LoadSolution_Click" />
-                    <Button x:Name="SaveSolutionButton"
-                            Content="保存方案"
-                            Style="{StaticResource ToolbarButton}"
-                            Background="#294A64"
-                            BorderBrush="#45647A"
-                            IsEnabled="False"
-                            Click="SaveSolution_Click" />
-                </StackPanel>
-
-                <ComboBox Grid.Column="5"
+                <TextBlock Grid.Column="1" Text="流程" Style="{StaticResource FieldLabel}" />
+                <ComboBox Grid.Column="2"
                           x:Name="ProcedureComboBox"
-                          Height="32"
-                          Padding="6,0"
-                          Margin="0,0,8,0"
-                          Background="#F7FAFC"
-                          Foreground="#10263A"
-                          BorderBrush="#7F96A8"
-                          ToolTip="选择要显示和运行的标定流程"
+                          Style="{StaticResource Selector}"
                           IsEnabled="False"
+                          ToolTip="选择要运行的流程"
                           SelectionChanged="ProcedureComboBox_SelectionChanged" />
 
-                <StackPanel Grid.Column="6" Orientation="Horizontal">
+                <TextBlock Grid.Column="3" Text="图像步骤" Style="{StaticResource FieldLabel}" />
+                <ComboBox Grid.Column="4"
+                          x:Name="ImageStepComboBox"
+                          Style="{StaticResource Selector}"
+                          DisplayMemberPath="DisplayName"
+                          IsEnabled="False"
+                          ToolTip="仅显示这个步骤的图像与绘制结果"
+                          SelectionChanged="ImageStepComboBox_SelectionChanged" />
+
+                <StackPanel Grid.Column="5" Orientation="Horizontal">
                     <Button x:Name="RunOnceButton"
-                            Content="单次运行"
-                            Style="{StaticResource ToolbarButton}"
-                            Background="#1B8F4D"
-                            BorderBrush="#16723F"
+                            Content="运行一次"
+                            Style="{StaticResource PrimaryButton}"
+                            Background="#17834A"
+                            BorderBrush="#12683A"
                             IsEnabled="False"
                             Click="RunOnce_Click" />
                     <Button x:Name="ContinuousRunButton"
                             Content="连续运行"
-                            Style="{StaticResource ToolbarButton}"
+                            Style="{StaticResource PrimaryButton}"
                             IsEnabled="False"
                             Click="ContinuousRun_Click" />
                     <Button x:Name="StopRunButton"
                             Content="停止"
-                            Style="{StaticResource ToolbarButton}"
+                            Style="{StaticResource PrimaryButton}"
                             Background="#D90D16"
                             BorderBrush="#A90A12"
                             IsEnabled="False"
                             Click="StopRun_Click" />
-                    <Button x:Name="EditLockButton"
-                            Content="锁定编辑"
-                            Style="{StaticResource ToolbarButton}"
-                            Background="#294A64"
-                            BorderBrush="#45647A"
-                            Margin="0"
-                            IsEnabled="False"
-                            Click="ToggleEditLock_Click" />
                 </StackPanel>
             </Grid>
         </Border>
 
         <Border Grid.Row="1"
-                Padding="12,0"
-                Background="#132B40"
+                Padding="14,0"
+                Background="#13283A"
                 BorderBrush="#345269"
                 BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <Ellipse x:Name="StatusIndicator" Width="10" Height="10" Fill="#E0A21A" />
+                <Ellipse x:Name="StatusIndicator" Width="9" Height="9" Fill="#E0A21A" />
                 <TextBlock x:Name="StatusTextBlock"
                            Margin="8,0,0,0"
-                           Text="请选择并加载 VisionMaster 标定方案"
+                           Text="请选择方案；选择后将自动加载"
                            Foreground="#D8E4EC"
                            FontSize="12"
                            FontWeight="SemiBold"
@@ -178,41 +153,77 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Row="2">
-            <vm:VmMainViewConfigControl x:Name="VmMainView" />
+        <Border Grid.Row="2"
+                Margin="10"
+                Background="#202427"
+                BorderBrush="#345269"
+                BorderThickness="1"
+                CornerRadius="5"
+                ClipToBounds="True">
+            <Grid>
+                <vm:VmRenderControl x:Name="VisionRenderControl"
+                                    CoordinateInfoVisible="True" />
 
-            <Border x:Name="SdkErrorPanel"
-                    Visibility="Collapsed"
-                    Background="#E6202427">
-                <Border Width="620"
-                        Padding="28"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Background="#163047"
-                        BorderBrush="#D90D16"
-                        BorderThickness="2"
-                        CornerRadius="8">
-                    <StackPanel>
-                        <TextBlock Text="VisionMaster SDK 初始化失败"
-                                   Foreground="#FFFFFF"
-                                   FontSize="22"
-                                   FontWeight="Bold"
-                                   HorizontalAlignment="Center" />
-                        <TextBlock x:Name="SdkErrorTextBlock"
-                                   Margin="0,14,0,0"
-                                   Foreground="#F2C7C9"
-                                   FontSize="14"
-                                   TextAlignment="Center"
-                                   TextWrapping="Wrap" />
-                        <TextBlock Margin="0,14,0,0"
-                                   Text="请确认 VisionMaster 4.4 已安装并激活、加密狗可用，关闭其他 VisionMaster 程序后再从主界面重启工作台。"
-                                   Foreground="#AAB9C6"
-                                   FontSize="13"
-                                   TextAlignment="Center"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
+                <StackPanel x:Name="ImagePlaceholder"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsHitTestVisible="False">
+                    <Border Width="70"
+                            Height="70"
+                            CornerRadius="35"
+                            Background="#263A4B">
+                        <TextBlock Text="▣"
+                                   Foreground="#6E879A"
+                                   FontSize="34"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Margin="0,18,0,0"
+                               Text="选择标定方案后显示步骤图像"
+                               Foreground="#AAB9C6"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Margin="0,6,0,0"
+                               Text="程序会记住当前方案、流程和图像步骤"
+                               Foreground="#71889A"
+                               FontSize="12"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <Border x:Name="SdkErrorPanel"
+                        Visibility="Collapsed"
+                        Background="#EC202427">
+                    <Border Width="620"
+                            Padding="28"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#163047"
+                            BorderBrush="#D90D16"
+                            BorderThickness="2"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="VisionMaster SDK 初始化失败"
+                                       Foreground="#FFFFFF"
+                                       FontSize="22"
+                                       FontWeight="Bold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock x:Name="SdkErrorTextBlock"
+                                       Margin="0,14,0,0"
+                                       Foreground="#F2C7C9"
+                                       FontSize="14"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Margin="0,14,0,0"
+                                       Text="请确认 VisionMaster 4.4 已安装并激活、加密狗可用，关闭其他 VisionMaster 程序后再重启视觉组件。"
+                                       Foreground="#AAB9C6"
+                                       FontSize="13"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
                 </Border>
-            </Border>
-        </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

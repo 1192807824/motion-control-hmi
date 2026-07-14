@@ -41,7 +41,7 @@ public partial class VisualCalibrationPage : UserControl
     {
         RestartHostButton.IsEnabled = false;
         HostPlaceholder.Visibility = Visibility.Visible;
-        SetHostStatus("正在重启 64 位标定工作台…", HostStatus.Starting);
+        SetHostStatus("正在重启视觉组件…", HostStatus.Starting);
         await VisionHost.RestartAsync();
     }
 
@@ -49,14 +49,14 @@ public partial class VisualCalibrationPage : UserControl
     {
         HostPlaceholder.Visibility = Visibility.Collapsed;
         RestartHostButton.IsEnabled = true;
-        SetHostStatus("标定工作台窗口已启动", HostStatus.Ready);
+        SetHostStatus("视觉组件已启动", HostStatus.Ready);
     }
 
     private void VisionHost_Failed(object? sender, VisionMasterHostFailedEventArgs e)
     {
         HostPlaceholder.Visibility = Visibility.Visible;
         RestartHostButton.IsEnabled = true;
-        SetHostStatus($"工作台启动失败：{e.Message}", HostStatus.Error);
+        SetHostStatus($"视觉组件启动失败：{e.Message}", HostStatus.Error);
     }
 
     private void VisionHost_Exited(object? sender, EventArgs e)
@@ -68,7 +68,7 @@ public partial class VisualCalibrationPage : UserControl
 
         HostPlaceholder.Visibility = Visibility.Visible;
         RestartHostButton.IsEnabled = true;
-        SetHostStatus("标定工作台已退出，可点击重启。", HostStatus.Error);
+        SetHostStatus("视觉组件已退出，可点击重启。", HostStatus.Error);
     }
 
     private void SetHostStatus(string message, HostStatus status)
