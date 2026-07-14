@@ -109,7 +109,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="350" />
                 <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" MaxWidth="1050" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
@@ -353,8 +353,6 @@
             </Border>
 
             <Border Grid.Column="2"
-                    MaxWidth="1050"
-                    HorizontalAlignment="Center"
                     Background="#202427"
                     BorderBrush="#345269"
                     BorderThickness="1"
