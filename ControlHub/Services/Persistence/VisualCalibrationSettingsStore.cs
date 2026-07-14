@@ -65,4 +65,12 @@ public sealed class VisualCalibrationSettings
     public string MovePriority { get; set; } = "X";
 
     public string CalibrationFilePath { get; set; } = "";
+
+    public bool NozzleOffsetCalibrated { get; set; }
+
+    public double NozzleOffsetXPulses { get; set; }
+
+    public double NozzleOffsetYPulses { get; set; }
+
+    public string ClickTargetTool { get; set; } = "Camera";
 }

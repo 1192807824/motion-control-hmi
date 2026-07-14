@@ -315,8 +315,66 @@
                             </StackPanel>
                         </Border>
 
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <TextBlock Text="4　吸嘴对位" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Margin="0,5,0,7"
+                                           Text="同一标记：先十字对准，再手动让吸嘴对准"
+                                           Foreground="#8FB2C9"
+                                           FontSize="10"
+                                           TextAlignment="Center" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="7" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="RecordCameraToolPointButton"
+                                            Content="1 记录十字位置"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            Click="RecordCameraToolPoint_Click" />
+                                    <Button Grid.Column="2"
+                                            x:Name="RecordNozzleToolPointButton"
+                                            Content="2 记录吸嘴位置"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            IsEnabled="False"
+                                            Click="RecordNozzleToolPoint_Click" />
+                                </Grid>
+                                <TextBlock x:Name="NozzleCalibrationStatusText"
+                                           Margin="0,6,0,0"
+                                           Text="吸嘴偏移：未标定"
+                                           Foreground="#8FB2C9"
+                                           FontSize="10"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource SectionCard}" Margin="0">
                             <StackPanel>
+                                <Grid Margin="0,0,0,7">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="5　点击移动"
+                                               Style="{StaticResource SectionTitle}"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox Grid.Column="2"
+                                              x:Name="ClickTargetToolComboBox"
+                                              Style="{StaticResource PanelComboBox}"
+                                              SelectionChanged="ClickTargetTool_SelectionChanged">
+                                        <ComboBoxItem Content="相机中心对准" Tag="Camera" />
+                                        <ComboBoxItem Content="吸嘴中心对准" Tag="Nozzle" />
+                                    </ComboBox>
+                                </Grid>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />

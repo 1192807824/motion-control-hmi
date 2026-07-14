@@ -39,6 +39,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _suppressClickMoveModeEvent;
     private MotionControlPage? _motionController;
     private CalibrationCenterPosition? _recordedCenter;
+    private CalibrationCenterPosition? _nozzleTeachCameraPosition;
     private CancellationTokenSource? _calibrationCancellation;
     private CancellationTokenSource? _clickMoveCancellation;
     private VisualCalibrationSettings _uiSettings = new();
@@ -151,6 +152,78 @@ public partial class VisualCalibrationPage : UserControl
         finally
         {
             _centerSyncRunning = false;
+            UpdateCommandState();
+        }
+    }
+
+    private async void RecordCameraToolPoint_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (IsNozzleTargetSelected())
+            {
+                throw new InvalidOperationException("请先选择“相机中心对准”模式，再点击标记到十字中心。");
+            }
+
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            _nozzleTeachCameraPosition = motionController.CaptureCalibrationCenter(
+                FirstSetXHardwareAxisNo,
+                FirstSetYHardwareAxisNo);
+            SetNozzleCalibrationStatus(
+                $"十字位置已记录：X={_nozzleTeachCameraPosition.ActualX:0.###}，" +
+                $"Y={_nozzleTeachCameraPosition.ActualY:0.###}；请保持Z安全，手动让吸嘴对准同一标记。",
+                WorkflowStatus.Running);
+
+            if (EnableClickMoveCheckBox.IsChecked == true)
+            {
+                SetClickMoveCheckedNoEvent(false);
+                _ = await ConfigureClickMoveModeAsync(false);
+            }
+        }
+        catch (Exception exception)
+        {
+            _nozzleTeachCameraPosition = null;
+            SetNozzleCalibrationStatus($"记录十字位置失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            UpdateCommandState();
+        }
+    }
+
+    private void RecordNozzleToolPoint_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var cameraPosition = _nozzleTeachCameraPosition
+                ?? throw new InvalidOperationException("请先记录十字对准位置。");
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            var nozzlePosition = motionController.CaptureCalibrationCenter(
+                FirstSetXHardwareAxisNo,
+                FirstSetYHardwareAxisNo);
+            var offsetX = nozzlePosition.ActualX - cameraPosition.ActualX;
+            var offsetY = nozzlePosition.ActualY - cameraPosition.ActualY;
+            if (!double.IsFinite(offsetX) || !double.IsFinite(offsetY))
+            {
+                throw new InvalidOperationException("计算得到的吸嘴偏移无效。");
+            }
+
+            _uiSettings.NozzleOffsetXPulses = offsetX;
+            _uiSettings.NozzleOffsetYPulses = offsetY;
+            _uiSettings.NozzleOffsetCalibrated = true;
+            _nozzleTeachCameraPosition = null;
+            SelectClickTargetTool("Nozzle");
+            SaveCalibrationSettingsNoThrow();
+            UpdateNozzleCalibrationDisplay();
+        }
+        catch (Exception exception)
+        {
+            SetNozzleCalibrationStatus($"记录吸嘴位置失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
             UpdateCommandState();
         }
     }
@@ -331,6 +404,22 @@ public partial class VisualCalibrationPage : UserControl
         ScheduleCalibrationSettingsSave();
     }
 
+    private void ClickTargetTool_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_settingsLoaded)
+        {
+            return;
+        }
+
+        if (IsNozzleTargetSelected() && !_uiSettings.NozzleOffsetCalibrated)
+        {
+            SetClickMoveStatus("请先完成第4步吸嘴对位。", WorkflowStatus.Error);
+        }
+
+        ScheduleCalibrationSettingsSave();
+        UpdateCommandState();
+    }
+
     private async void EnableClickMove_Changed(object sender, RoutedEventArgs e)
     {
         if (_suppressClickMoveModeEvent)
@@ -355,6 +444,11 @@ public partial class VisualCalibrationPage : UserControl
         {
             if (enabled)
             {
+                if (IsNozzleTargetSelected() && !_uiSettings.NozzleOffsetCalibrated)
+                {
+                    throw new InvalidOperationException("请先完成吸嘴对位标定。");
+                }
+
                 if (!_hostReady)
                 {
                     throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
@@ -432,6 +526,19 @@ public partial class VisualCalibrationPage : UserControl
             var deltaY = (e.CenterTransformedY - e.TransformedY) * PulsesPerVisionUnit;
             var targetX = current.ActualX + deltaX;
             var targetY = current.ActualY + deltaY;
+            var targetName = "相机";
+            if (IsNozzleTargetSelected())
+            {
+                if (!_uiSettings.NozzleOffsetCalibrated)
+                {
+                    throw new InvalidOperationException("吸嘴偏移尚未标定。");
+                }
+
+                targetX += _uiSettings.NozzleOffsetXPulses;
+                targetY += _uiSettings.NozzleOffsetYPulses;
+                targetName = "吸嘴";
+            }
+
             if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
             {
                 throw new InvalidOperationException("标定转换后的轴目标无效。");
@@ -441,9 +548,12 @@ public partial class VisualCalibrationPage : UserControl
             _clickMoveRunning = true;
             UpdateCommandState();
             SetClickMoveStatus(
-                $"点击({e.PixelX}, {e.PixelY}) → 十字({e.CenterPixelX:0.##}, {e.CenterPixelY:0.##})；" +
-                $"正在移动到 X={targetX:0.###}、Y={targetY:0.###} pulse…",
+                $"点击({e.PixelX}, {e.PixelY})；正在把{targetName}中心移动到 " +
+                $"X={targetX:0.###}、Y={targetY:0.###} pulse…",
                 WorkflowStatus.Running);
+
+            var moveDeltaX = targetX - current.ActualX;
+            var moveDeltaY = targetY - current.ActualY;
 
             var actual = await motionController.MoveCalibrationAxesToAsync(
                 FirstSetXHardwareAxisNo,
@@ -452,10 +562,10 @@ public partial class VisualCalibrationPage : UserControl
                 targetY,
                 velocity,
                 DefaultPositionTolerancePulses,
-                CalculateDirectMoveTimeout(deltaX, deltaY, velocity),
+                CalculateDirectMoveTimeout(moveDeltaX, moveDeltaY, velocity),
                 _clickMoveCancellation.Token);
             SetClickMoveStatus(
-                $"点击移动完成：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###} pulse。",
+                $"{targetName}对位完成：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###} pulse。",
                 WorkflowStatus.Success);
         }
         catch (OperationCanceledException)
@@ -611,6 +721,50 @@ public partial class VisualCalibrationPage : UserControl
             TryGetCalibrationFilePath(_uiSettings.CalibrationFilePath, out var savedPath)
                 ? savedPath
                 : DefaultCalibrationFilePath;
+        var targetTool = string.Equals(
+            _uiSettings.ClickTargetTool,
+            "Nozzle",
+            StringComparison.OrdinalIgnoreCase)
+            ? "Nozzle"
+            : "Camera";
+        SelectClickTargetTool(targetTool);
+        UpdateNozzleCalibrationDisplay();
+    }
+
+    private void SelectClickTargetTool(string targetTool)
+    {
+        ClickTargetToolComboBox.SelectedItem = ClickTargetToolComboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(
+                item.Tag as string,
+                targetTool,
+                StringComparison.Ordinal))
+            ?? ClickTargetToolComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
+    }
+
+    private bool IsNozzleTargetSelected()
+    {
+        return string.Equals(
+            (ClickTargetToolComboBox.SelectedItem as ComboBoxItem)?.Tag as string,
+            "Nozzle",
+            StringComparison.Ordinal);
+    }
+
+    private void UpdateNozzleCalibrationDisplay()
+    {
+        if (_uiSettings.NozzleOffsetCalibrated &&
+            double.IsFinite(_uiSettings.NozzleOffsetXPulses) &&
+            double.IsFinite(_uiSettings.NozzleOffsetYPulses))
+        {
+            SetNozzleCalibrationStatus(
+                $"吸嘴偏移：X {_uiSettings.NozzleOffsetXPulses:0.###}　" +
+                $"Y {_uiSettings.NozzleOffsetYPulses:0.###} pulse",
+                WorkflowStatus.Success);
+            return;
+        }
+
+        _uiSettings.NozzleOffsetCalibrated = false;
+        SetNozzleCalibrationStatus("吸嘴偏移：未标定", WorkflowStatus.Ready);
     }
 
     private static string FormatPositiveSetting(double value, double fallback)
@@ -679,6 +833,9 @@ public partial class VisualCalibrationPage : UserControl
                 (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Y"
                     ? "Y"
                     : "X";
+            _uiSettings.ClickTargetTool = IsNozzleTargetSelected()
+                ? "Nozzle"
+                : "Camera";
             if (TryGetCalibrationFilePath(CalibrationFilePathTextBox.Text, out var calibrationPath))
             {
                 _uiSettings.CalibrationFilePath = calibrationPath;
@@ -706,7 +863,10 @@ public partial class VisualCalibrationPage : UserControl
 
     private void UpdateCommandState()
     {
-        if (RecordCenterButton is null || CalibrationFilePathTextBox is null)
+        if (RecordCenterButton is null ||
+            CalibrationFilePathTextBox is null ||
+            RecordCameraToolPointButton is null ||
+            ClickTargetToolComboBox is null)
         {
             return;
         }
@@ -714,6 +874,8 @@ public partial class VisualCalibrationPage : UserControl
         var calibrationPathValid = TryGetCalibrationFilePath(
             CalibrationFilePathTextBox.Text,
             out var calibrationFilePath);
+        var clickTargetReady =
+            !IsNozzleTargetSelected() || _uiSettings.NozzleOffsetCalibrated;
 
         RecordCenterButton.IsEnabled =
             !_calibrationRunning &&
@@ -750,6 +912,25 @@ public partial class VisualCalibrationPage : UserControl
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
             EnableClickMoveCheckBox.IsChecked != true;
+        RecordCameraToolPointButton.IsEnabled =
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            _motionController is not null;
+        RecordNozzleToolPointButton.IsEnabled =
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            EnableClickMoveCheckBox.IsChecked != true &&
+            _motionController is not null &&
+            _nozzleTeachCameraPosition is not null;
+        ClickTargetToolComboBox.IsEnabled =
+            !_calibrationRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            EnableClickMoveCheckBox.IsChecked != true;
         EnableClickMoveCheckBox.IsEnabled =
             !_calibrationRunning &&
             !_clickMoveRunning &&
@@ -757,6 +938,7 @@ public partial class VisualCalibrationPage : UserControl
             _motionController is not null &&
             _recordedCenter is not null &&
             _hostReady &&
+            clickTargetReady &&
             calibrationPathValid &&
             File.Exists(calibrationFilePath);
         StopClickMoveButton.IsEnabled = _clickMoveRunning;
@@ -789,6 +971,18 @@ public partial class VisualCalibrationPage : UserControl
     {
         ClickMoveStatusText.Text = message;
         ClickMoveStatusText.Foreground = new SolidColorBrush(status switch
+        {
+            WorkflowStatus.Success => Color.FromRgb(73, 209, 125),
+            WorkflowStatus.Error => Color.FromRgb(242, 122, 128),
+            WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
+            _ => Color.FromRgb(143, 178, 201)
+        });
+    }
+
+    private void SetNozzleCalibrationStatus(string message, WorkflowStatus status)
+    {
+        NozzleCalibrationStatusText.Text = message;
+        NozzleCalibrationStatusText.Foreground = new SolidColorBrush(status switch
         {
             WorkflowStatus.Success => Color.FromRgb(73, 209, 125),
             WorkflowStatus.Error => Color.FromRgb(242, 122, 128),
