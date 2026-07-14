@@ -164,16 +164,6 @@
                             <TextBlock Text="运动控制" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="VisionMenuButton" Style="{StaticResource MenuButton}" Click="VisionMenu_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <Image Width="20"
-                                   Height="20"
-                                   Margin="0,0,8,0"
-                                   Source="/Assets/Icons/TopMenu/ccd.png"
-                                   Stretch="Uniform" />
-                            <TextBlock Text="机器视觉" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
                     <Button x:Name="ConnectionMenuButton" Style="{StaticResource MenuButton}" Click="ConnectionMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
@@ -219,11 +209,6 @@
 
             <pages:MotionControlPage x:Name="MotionPage"
                                      Grid.Row="2" />
-
-            <pages:MachineVisionPage x:Name="VisionContent"
-                                     Grid.Row="2"
-                                     Margin="10,10,10,8"
-                                     Visibility="Collapsed" />
 
             <pages:ConnectionConfigPage x:Name="ConnectionConfigContent"
                                         Grid.Row="2"

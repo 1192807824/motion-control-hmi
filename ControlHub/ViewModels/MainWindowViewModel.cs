@@ -3,7 +3,6 @@ using ControlHub.Data;
 using ControlHub.Models;
 using ControlHub.Services.Devices;
 using ControlHub.Services.Persistence;
-using ControlHub.Services.Vision;
 
 namespace ControlHub.ViewModels;
 
@@ -13,8 +12,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private AxisStatus? _selectedAxis;
     private string _nowText = "";
     private string _userPermissionText = "用户权限：未登录";
-    private string _visionStatusText = "未加载";
-    private string _visionRunTimeText = "--";
     private string _feederConnectionStatusText = "\u672a\u8fde\u63a5";
     private string _motionConnectionText = "运动控制：未连接";
     private string _motionDetectedCardsText = "未检测卡";
@@ -41,8 +38,6 @@ public sealed class MainWindowViewModel : ObservableObject
         StationPoints = [];
         TrayCells = new ObservableCollection<int>(Enumerable.Range(1, 27));
         Logs = [];
-        VisionSettings = new VisionMasterSettings();
-        VisionLogs = [];
         FeederSettings = new VibrationFeederSettingsStore().Load();
         FeederConnectionLogs = [];
 
@@ -85,10 +80,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> Logs { get; }
 
-    public VisionMasterSettings VisionSettings { get; }
-
-    public ObservableCollection<string> VisionLogs { get; }
-
     public VibrationFeederSettings FeederSettings { get; }
 
     public ObservableCollection<string> FeederConnectionLogs { get; }
@@ -111,18 +102,6 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _userPermissionText;
         set => SetField(ref _userPermissionText, value);
-    }
-
-    public string VisionStatusText
-    {
-        get => _visionStatusText;
-        set => SetField(ref _visionStatusText, value);
-    }
-
-    public string VisionRunTimeText
-    {
-        get => _visionRunTimeText;
-        set => SetField(ref _visionRunTimeText, value);
     }
 
     public string FeederConnectionStatusText

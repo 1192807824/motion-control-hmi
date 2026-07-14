@@ -21,7 +21,6 @@ public partial class MainWindow : Window
 
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;
-        VisionContent.MotionController = MotionPage;
         LoadRememberedLogin();
 
         _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -47,11 +46,6 @@ public partial class MainWindow : Window
     private void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
         ShowMotionPage();
-    }
-
-    private void VisionMenu_Click(object sender, RoutedEventArgs e)
-    {
-        ShowVisionPage();
     }
 
     private void ConnectionMenu_Click(object sender, RoutedEventArgs e)
@@ -91,7 +85,6 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        VisionContent.PrepareForClosing();
         if (!_motionShutdownPrepared && !MotionPage.TryShutdown(out var failureMessage))
         {
             e.Cancel = true;
@@ -110,7 +103,6 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        VisionContent.Shutdown();
         ConnectionConfigContent.Shutdown();
         _clockTimer.Stop();
         base.OnClosed(e);
@@ -119,30 +111,16 @@ public partial class MainWindow : Window
     private void ShowMotionPage()
     {
         MotionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
-        VisionMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
         MotionPage.Visibility = Visibility.Visible;
-        VisionContent.Visibility = Visibility.Collapsed;
-        ConnectionConfigContent.Visibility = Visibility.Collapsed;
-    }
-
-    private void ShowVisionPage()
-    {
-        MotionMenuButton.Style = (Style)Resources["MenuButton"];
-        VisionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
-        ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
-        MotionPage.Visibility = Visibility.Collapsed;
-        VisionContent.Visibility = Visibility.Visible;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
     }
 
     private void ShowConnectionConfigPage()
     {
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
-        VisionMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         MotionPage.Visibility = Visibility.Collapsed;
-        VisionContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Visible;
     }
 

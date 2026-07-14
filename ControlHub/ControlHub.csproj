@@ -9,38 +9,9 @@
     <PlatformTarget>x86</PlatformTarget>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
-    <VisionMasterAssemblyDirectory Condition="'$(VisionMasterAssemblyDirectory)' == ''">D:\VisonMaster\VisionMaster4.4.0\Development\V4.x\ComControls\Assembly</VisionMasterAssemblyDirectory>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="VM.Core">
-      <HintPath>$(VisionMasterAssemblyDirectory)\VM.Core.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="VM.PlatformSDKCS">
-      <HintPath>$(VisionMasterAssemblyDirectory)\VM.PlatformSDKCS.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="VMControls.BaseInterface">
-      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.BaseInterface.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="VMControls.Interface">
-      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.Interface.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="VMControls.RenderInterface">
-      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.RenderInterface.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="VMControls.WPF.Release">
-      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.WPF.Release.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="IMVSNPointCalibModuCs">
-      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSNPointCalibModuCs.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
     <PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.0" />
   </ItemGroup>
 
