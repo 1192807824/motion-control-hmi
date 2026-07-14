@@ -1032,6 +1032,7 @@ internal static class Program
             inner.SetAllServos(enabled);
         }
         public void Home(int hardwareAxisNo) => inner.Home(hardwareAxisNo);
+        public void Home(int hardwareAxisNo, MotionHomeProfile profile) => inner.Home(hardwareAxisNo, profile);
         public void Jog(int hardwareAxisNo, double velocity) => inner.Jog(hardwareAxisNo, velocity);
         public void MoveRelative(int hardwareAxisNo, double distance, double velocity) => inner.MoveRelative(hardwareAxisNo, distance, velocity);
         public void MoveAbsolute(int hardwareAxisNo, double position, double velocity) => inner.MoveAbsolute(hardwareAxisNo, position, velocity);

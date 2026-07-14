@@ -196,11 +196,15 @@ public sealed class SimulatedMotionCard : IMotionCard
 
     public void Home(int hardwareAxisNo)
     {
+        Home(hardwareAxisNo, _options.GetHomeProfile(hardwareAxisNo));
+    }
+
+    public void Home(int hardwareAxisNo, MotionHomeProfile profile)
+    {
         lock (_sync)
         {
             var axis = GetReadyAxis(hardwareAxisNo);
             EnsureAxisStopped(axis, hardwareAxisNo);
-            var profile = _options.GetHomeProfile(hardwareAxisNo);
             profile.Validate(requireEnabled: true);
             axis.Homed = false;
             axis.StartMove(0, Math.Max(profile.HighVelocity, profile.LowVelocity), runMode: 3, markHomedOnCompletion: true);

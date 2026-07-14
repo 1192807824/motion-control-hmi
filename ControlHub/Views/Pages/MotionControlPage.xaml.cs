@@ -18,6 +18,17 @@ namespace ControlHub.Views.Pages;
 public partial class MotionControlPage : UserControl
 {
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
+    private const double TestHomeLowSpeedRatio = 0.25;
+    private static readonly TestHomeStage[] TestOneKeyResetStages =
+    [
+        new("4个R轴", [6, 8, 10, 12], 33, 30000),
+        new("4个Z轴", [5, 7, 9, 11], -1, 5000),
+        new("上料Y", [2], 33, 150000),
+        new("上料X", [1], 33, 150000),
+        new("下料X", [3], 33, 150000),
+        new("下料Y", [4], 33, 150000),
+        new("D马达", [0], 33, 25000, 600)
+    ];
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -2204,6 +2215,175 @@ public partial class MotionControlPage : UserControl
         PollMotionState();
     }
 
+    private async void TestOneKeyReset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_homeSequenceCancellation is not null || IsAnyMotionWorkflowActive())
+        {
+            RecordAlarm("TEST-RESET-BUSY", "已有运动、回零或停止确认尚未结束，不能启动一键复位测试。");
+            return;
+        }
+
+        if (!EnsureConnected())
+        {
+            return;
+        }
+
+        Dictionary<int, AxisStatus> axes;
+        try
+        {
+            axes = PreflightTestOneKeyReset();
+        }
+        catch (Exception exception)
+        {
+            RecordAlarm("TEST-RESET-PREFLIGHT", FormatException(exception));
+            return;
+        }
+
+        _homeSequenceCancellation = new CancellationTokenSource();
+        TestOneKeyResetButton.SetCurrentValue(IsEnabledProperty, false);
+        _commandStopwatch = Stopwatch.StartNew();
+        try
+        {
+            foreach (var stage in TestOneKeyResetStages)
+            {
+                _homeSequenceCancellation.Token.ThrowIfCancellationRequested();
+                await RunTestHomeStageAsync(stage, axes, _homeSequenceCancellation.Token);
+            }
+
+            SetCommandStage(CommandStage.Stopped, "一键复位测试完成");
+        }
+        catch (OperationCanceledException)
+        {
+            foreach (var axis in axes.Values.Where(axis => axis.IsMoving))
+            {
+                axis.State = "一键复位测试已取消";
+            }
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                _motionCard.EmergencyStop();
+                ClearAllHomeTracking();
+                ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
+                foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
+                {
+                    axis.State = "一键复位测试异常，已发送全轴急停，等待停止确认";
+                }
+            }
+            catch (Exception emergencyException)
+            {
+                ActivateMotionSafetyLock(
+                    "一键复位测试异常，且全轴急停下发失败",
+                    emergencyException,
+                    "TEST-RESET-EMERGENCY-STOP");
+            }
+
+            RecordAlarm("TEST-RESET", FormatException(exception));
+            SetCommandStage(CommandStage.Failed, "一键复位测试失败");
+        }
+        finally
+        {
+            _homeSequenceCancellation.Dispose();
+            _homeSequenceCancellation = null;
+            UpdateHomeActionState();
+            PollMotionState();
+        }
+    }
+
+    private Dictionary<int, AxisStatus> PreflightTestOneKeyReset()
+    {
+        var requestedAxisNumbers = TestOneKeyResetStages
+            .SelectMany(stage => stage.HardwareAxisNumbers)
+            .Distinct()
+            .ToArray();
+        var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
+
+        foreach (var stage in TestOneKeyResetStages)
+        {
+            CreateTestHomeProfile(stage).Validate(requireEnabled: true);
+            foreach (var hardwareAxisNo in stage.HardwareAxisNumbers)
+            {
+                if (!axisByHardwareNo.TryGetValue(hardwareAxisNo, out var axis) || !axis.IsAvailable)
+                {
+                    throw new MotionCardException($"一键复位测试需要的硬件轴 {hardwareAxisNo} 不可用。");
+                }
+            }
+        }
+
+        var busError = _motionCard.ReadBusErrorCode();
+        if (busError != 0 && busError != RingRedundancyDisconnectedWarning)
+        {
+            throw new MotionCardException($"EtherCAT 总线错误 0x{busError:X4}。");
+        }
+
+        foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
+        {
+            var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+            ApplySnapshot(axis, snapshot);
+            ProcessSnapshotAlarms(axis, snapshot);
+            if (snapshot.IsMoving || snapshot.Alarm || snapshot.EmergencyInput)
+            {
+                throw new MotionCardException($"{axis.Name} 正在运动或存在报警/急停输入，不能启动一键复位测试。");
+            }
+        }
+
+        var requestedAxes = requestedAxisNumbers.ToDictionary(axisNo => axisNo, axisNo => axisByHardwareNo[axisNo]);
+        if (requestedAxes.Values.Any(axis => !axis.StatusReadHealthy))
+        {
+            throw new MotionCardException("一键复位测试轴存在状态读取异常，命令未下发。");
+        }
+
+        if (requestedAxes.Values.Any(axis => !axis.ServoOn))
+        {
+            throw new MotionCardException("一键复位测试前必须先使能硬件轴 0～12。");
+        }
+
+        return requestedAxes;
+    }
+
+    private async Task RunTestHomeStageAsync(
+        TestHomeStage stage,
+        IReadOnlyDictionary<int, AxisStatus> axes,
+        CancellationToken cancellationToken)
+    {
+        var profile = CreateTestHomeProfile(stage);
+        var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
+        var stageAxes = stage.HardwareAxisNumbers.Select(axisNo => axes[axisNo]).ToArray();
+
+        foreach (var axis in stageAxes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _motionCard.Home(axis.HardwareAxisNo, profile);
+            axis.Homed = false;
+            axis.IsMoving = true;
+            axis.State = $"一键复位测试：{stage.Name}回零中";
+            StartHomeTracking(axis.HardwareAxisNo, deadline);
+        }
+
+        SetCommandStage(CommandStage.Running, $"一键复位测试：{stage.Name}回零中");
+        await Task.WhenAll(stageAxes.Select(axis => WaitForHomeAsync(axis, deadline, cancellationToken)));
+        foreach (var axis in stageAxes)
+        {
+            ClearHomeTracking(axis.HardwareAxisNo);
+            axis.State = $"一键复位测试：{stage.Name}回零完成";
+        }
+    }
+
+    private static MotionHomeProfile CreateTestHomeProfile(TestHomeStage stage)
+    {
+        return new MotionHomeProfile
+        {
+            Enabled = true,
+            Mode = stage.Mode,
+            LowVelocity = stage.HighVelocity * TestHomeLowSpeedRatio,
+            HighVelocity = stage.HighVelocity,
+            AccelerationSeconds = 0.1,
+            DecelerationSeconds = 0.1,
+            OffsetPosition = stage.OffsetPosition
+        };
+    }
+
     private void IoMode_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string modeText } ||
@@ -3281,6 +3461,24 @@ public partial class MotionControlPage : UserControl
         HomeAllButton?.SetCurrentValue(
             IsEnabledProperty,
             _homeConfigurationSaveHealthy && CanRunHomeSequence());
+        TestOneKeyResetButton?.SetCurrentValue(
+            IsEnabledProperty,
+            CanRunTestOneKeyReset());
+    }
+
+    private bool CanRunTestOneKeyReset()
+    {
+        var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
+        return ViewModel?.MotionControlsEnabled == true &&
+               !_motionSafetyLock &&
+               !IsAnyMotionWorkflowActive() &&
+               TestOneKeyResetStages.SelectMany(stage => stage.HardwareAxisNumbers).Distinct().All(axisNo =>
+                   axisByHardwareNo.TryGetValue(axisNo, out var axis) &&
+                   axis.IsAvailable &&
+                   axis.StatusReadHealthy &&
+                   axis.ServoOn &&
+                   !axis.Alarm &&
+                   !axis.IsMoving);
     }
 
     private bool CanRunHomeSequence()
@@ -3376,6 +3574,13 @@ public partial class MotionControlPage : UserControl
             _ => $"{exception.GetType().Name}: {exception.Message}"
         };
     }
+
+    private sealed record TestHomeStage(
+        string Name,
+        int[] HardwareAxisNumbers,
+        int Mode,
+        double HighVelocity,
+        double OffsetPosition = 0);
 
     private static string FormatInitializationException(Exception exception)
     {

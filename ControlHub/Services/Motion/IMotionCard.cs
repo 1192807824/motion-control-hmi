@@ -40,6 +40,8 @@ public interface IMotionCard : IDisposable
 
     void Home(int hardwareAxisNo);
 
+    void Home(int hardwareAxisNo, MotionHomeProfile profile);
+
     void Jog(int hardwareAxisNo, double velocity);
 
     void MoveRelative(int hardwareAxisNo, double distance, double velocity);

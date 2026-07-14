@@ -454,12 +454,16 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Home(int hardwareAxisNo)
     {
+        Home(hardwareAxisNo, _options.GetHomeProfile(hardwareAxisNo));
+    }
+
+    public void Home(int hardwareAxisNo, MotionHomeProfile profile)
+    {
         lock (_sync)
         {
             var axis = GetAxis(hardwareAxisNo);
             EnsureAxisReadyForDirection(axis, direction: 0);
             EnsureAxisStopped(axis);
-            var profile = _options.GetHomeProfile(hardwareAxisNo);
             profile.Validate(requireEnabled: true);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
             EnsureSuccess(
