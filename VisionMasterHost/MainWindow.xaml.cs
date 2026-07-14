@@ -21,7 +21,8 @@ public partial class MainWindow : Window
     private readonly string? _commandPipeName;
     private readonly CancellationTokenSource _commandPipeCancellation = new();
     private readonly object _commandPipeSync = new();
-    private VmProcedure? _activeProcedure;
+    private VmProcedure? _previewProcedure;
+    private VmProcedure? _calibrationProcedure;
     private NamedPipeServerStream? _activeCommandPipe;
     private Task? _commandPipeTask;
     private VisionCalibrationSession? _calibrationSession;
@@ -190,12 +191,67 @@ public partial class MainWindow : Window
         var parts = command.Split('\t');
         return parts[0] switch
         {
+            "SET_CENTER" => SetCalibrationCenter(parts),
             "PREPARE" => PrepareNinePointCalibration(parts),
             "CAPTURE" => CaptureNinePointCalibration(parts),
             "COMPLETE" => CompleteNinePointCalibration(),
             "ABORT" => AbortNinePointCalibration(),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
+    }
+
+    private string SetCalibrationCenter(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 3)
+        {
+            throw new InvalidDataException("写入标定中心的参数数量不正确。");
+        }
+
+        if (!_solutionLoaded ||
+            _calibrationProcedure is null ||
+            CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        {
+            throw new InvalidOperationException("请先加载方案并选择标定流程。");
+        }
+
+        var centerX = ParseFiniteDouble(parts[1], "基准点X");
+        var centerY = ParseFiniteDouble(parts[2], "基准点Y");
+        var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
+        if (previewWasRunning)
+        {
+            _previewProcedure!.ContinuousRunEnable = false;
+        }
+
+        try
+        {
+            var nPointModule = ResolveNPointCalibrationModule(procedureName);
+            var parameters = nPointModule.ModuParams;
+            parameters.BasePointX = centerX;
+            parameters.BasePointY = centerY;
+            if (Math.Abs(parameters.BasePointX - centerX) > 0.000001 ||
+                Math.Abs(parameters.BasePointY - centerY) > 0.000001)
+            {
+                throw new InvalidOperationException("N点标定模块未接受新的基准点参数。");
+            }
+
+            SetStatus(
+                $"已写入并读回 {procedureName}.N点标定1：基准点 X={parameters.BasePointX:0.####}，" +
+                $"Y={parameters.BasePointY:0.####}",
+                StatusKind.Success);
+            return
+                $"已写入并读回 {procedureName}.N点标定1：基准点 X={parameters.BasePointX:0.####}，" +
+                $"Y={parameters.BasePointY:0.####}。" +
+                "独立打开的 VisionMaster 编辑器不会同步刷新宿主进程内存参数。";
+        }
+        finally
+        {
+            if (previewWasRunning)
+            {
+                _previewProcedure!.ContinuousRunEnable = true;
+            }
+
+            UpdateCommandState();
+        }
     }
 
     private string PrepareNinePointCalibration(IReadOnlyList<string> parts)
@@ -205,7 +261,9 @@ public partial class MainWindow : Window
             throw new InvalidDataException("准备九点标定的参数数量不正确。");
         }
 
-        if (!_solutionLoaded || _activeProcedure is null || ProcedureComboBox.SelectedItem is not string procedureName)
+        if (!_solutionLoaded ||
+            _calibrationProcedure is null ||
+            CalibrationProcedureComboBox.SelectedItem is not string procedureName)
         {
             throw new InvalidOperationException("请先在视觉组件中加载标定方案并选择标定流程。");
         }
@@ -286,13 +344,13 @@ public partial class MainWindow : Window
                 $"采集顺序错误：当前应采集第 {session.NextPointNumber} 点，不是第 {pointNumber} 点。");
         }
 
-        if (_activeProcedure is null)
+        if (_calibrationProcedure is null)
         {
             throw new InvalidOperationException("当前 VisionMaster 流程已失效。");
         }
 
         var stopwatch = Stopwatch.StartNew();
-        _activeProcedure.Run(true);
+        _calibrationProcedure.Run(true);
         stopwatch.Stop();
         VisionRenderControl.UpdateVMResultShow();
 
@@ -475,16 +533,20 @@ public partial class MainWindow : Window
 
             _settings.SolutionPath = Path.GetFullPath(solutionPath);
             SolutionPathTextBox.Text = _settings.SolutionPath;
-            ProcedureComboBox.ItemsSource = procedureNames;
-            ProcedureComboBox.SelectedItem = SelectPreferredProcedure(procedureNames);
+            PreviewProcedureComboBox.ItemsSource = procedureNames;
+            CalibrationProcedureComboBox.ItemsSource = procedureNames;
+            CalibrationProcedureComboBox.SelectedItem =
+                SelectPreferredCalibrationProcedure(procedureNames);
+            PreviewProcedureComboBox.SelectedItem =
+                SelectPreferredPreviewProcedure(procedureNames);
             SaveSettingsNoThrow();
             UpdateCommandState();
-            if (_activeProcedure?.ContinuousRunEnable == true)
+            if (_previewProcedure?.ContinuousRunEnable == true)
             {
                 SetStatus(
                     autoRestore
-                        ? $"已自动加载：{Path.GetFileName(solutionPath)}；实时预览已启动"
-                        : $"方案已加载：{Path.GetFileName(solutionPath)}；实时预览已启动",
+                        ? $"已自动加载：{Path.GetFileName(solutionPath)}；实时与标定流程已分离"
+                        : $"方案已加载：{Path.GetFileName(solutionPath)}；实时与标定流程已分离",
                     StatusKind.Success);
             }
         }
@@ -505,20 +567,20 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_solutionLoaded || ProcedureComboBox.SelectedItem is not string procedureName)
+        if (!_solutionLoaded || PreviewProcedureComboBox.SelectedItem is not string procedureName)
         {
             return;
         }
 
         try
         {
-            StopActiveProcedureNoThrow();
-            _activeProcedure = VmSolution.Instance[procedureName] as VmProcedure
+            StopPreviewProcedureNoThrow();
+            _previewProcedure = VmSolution.Instance[procedureName] as VmProcedure
                 ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
-            _settings.ProcedureName = procedureName;
-            PopulateImageSteps(procedureName, _activeProcedure);
+            _settings.PreviewProcedureName = procedureName;
+            PopulateImageSteps(procedureName, _previewProcedure);
             SaveSettingsNoThrow();
             if (TryStartLivePreview(out var previewError))
             {
@@ -531,11 +593,36 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            _activeProcedure = null;
+            _previewProcedure = null;
             ImageStepComboBox.ItemsSource = null;
             ClearRenderer();
             UpdateCommandState();
-            SetStatus($"流程加载失败：{FormatException(exception)}", StatusKind.Error);
+            SetStatus($"实时流程加载失败：{FormatException(exception)}", StatusKind.Error);
+        }
+    }
+
+    private void CalibrationProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        {
+            return;
+        }
+
+        try
+        {
+            _calibrationProcedure = VmSolution.Instance[procedureName] as VmProcedure
+                ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
+            _settings.CalibrationProcedureName = procedureName;
+            _ = ResolveNPointCalibrationModule(procedureName);
+            SaveSettingsNoThrow();
+            UpdateCommandState();
+            SetStatus($"标定流程已选择：{procedureName}", StatusKind.Ready);
+        }
+        catch (Exception exception)
+        {
+            _calibrationProcedure = null;
+            UpdateCommandState();
+            SetStatus($"标定流程加载失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
@@ -640,7 +727,7 @@ public partial class MainWindow : Window
         try
         {
             BindImageStep(option, persistSelection: true);
-            SetStatus($"当前图像：{ProcedureComboBox.SelectedItem} / {option.DisplayName}", StatusKind.Ready);
+            SetStatus($"当前图像：{PreviewProcedureComboBox.SelectedItem} / {option.DisplayName}", StatusKind.Ready);
         }
         catch (Exception exception)
         {
@@ -659,7 +746,7 @@ public partial class MainWindow : Window
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            _activeProcedure!.Run(true);
+            _previewProcedure!.Run(true);
             stopwatch.Stop();
             VisionRenderControl.UpdateVMResultShow();
             SetStatus(
@@ -698,14 +785,14 @@ public partial class MainWindow : Window
 
     private void StopRun_Click(object sender, RoutedEventArgs e)
     {
-        if (_activeProcedure is null)
+        if (_previewProcedure is null)
         {
             return;
         }
 
         try
         {
-            _activeProcedure.ContinuousRunEnable = false;
+            _previewProcedure.ContinuousRunEnable = false;
             UpdateCommandState();
             SetStatus("实时预览已暂停", StatusKind.Ready);
         }
@@ -715,10 +802,25 @@ public partial class MainWindow : Window
         }
     }
 
-    private string SelectPreferredProcedure(IReadOnlyList<string> procedureNames)
+    private string SelectPreferredPreviewProcedure(IReadOnlyList<string> procedureNames)
     {
         return procedureNames.FirstOrDefault(name =>
-                   string.Equals(name, _settings.ProcedureName, StringComparison.Ordinal))
+                   string.Equals(name, _settings.PreviewProcedureName, StringComparison.Ordinal))
+               ?? procedureNames.FirstOrDefault(name =>
+                   string.Equals(name, "实时相机", StringComparison.Ordinal))
+               ?? procedureNames.FirstOrDefault(name => name.Contains("实时"))
+               ?? procedureNames.FirstOrDefault(name => name.Contains("图像采集"))
+               ?? procedureNames.FirstOrDefault(name => name.Contains("相机"))
+               ?? procedureNames.FirstOrDefault(name => !name.Contains("标定"))
+               ?? procedureNames[0];
+    }
+
+    private string SelectPreferredCalibrationProcedure(IReadOnlyList<string> procedureNames)
+    {
+        return procedureNames.FirstOrDefault(name =>
+                   string.Equals(name, _settings.CalibrationProcedureName, StringComparison.Ordinal))
+               ?? procedureNames.FirstOrDefault(name =>
+                   string.Equals(name, "标定流程", StringComparison.Ordinal))
                ?? procedureNames.FirstOrDefault(name => name.Contains("标定"))
                ?? procedureNames[0];
     }
@@ -741,18 +843,18 @@ public partial class MainWindow : Window
 
     private bool EnsureProcedureReady()
     {
-        if (_solutionLoaded && _activeProcedure is not null)
+        if (_solutionLoaded && _previewProcedure is not null)
         {
             return true;
         }
 
-        SetStatus("请先选择方案、流程和图像步骤。", StatusKind.Error);
+        SetStatus("请先选择方案、实时流程和预览图像。", StatusKind.Error);
         return false;
     }
 
     private void CloseCurrentSolution()
     {
-        StopActiveProcedureNoThrow();
+        StopPreviewProcedureNoThrow();
         ClearRenderer();
 
         if (_solutionLoaded)
@@ -760,16 +862,18 @@ public partial class MainWindow : Window
             VmSolution.Instance?.CloseSolution();
         }
 
-        _activeProcedure = null;
+        _previewProcedure = null;
+        _calibrationProcedure = null;
         _solutionLoaded = false;
-        ProcedureComboBox.ItemsSource = null;
+        PreviewProcedureComboBox.ItemsSource = null;
+        CalibrationProcedureComboBox.ItemsSource = null;
         ImageStepComboBox.ItemsSource = null;
         UpdateCommandState();
     }
 
     private void CloseCurrentSolutionNoThrow()
     {
-        StopActiveProcedureNoThrow();
+        StopPreviewProcedureNoThrow();
         ClearRenderer();
         try
         {
@@ -779,9 +883,11 @@ public partial class MainWindow : Window
         {
         }
 
-        _activeProcedure = null;
+        _previewProcedure = null;
+        _calibrationProcedure = null;
         _solutionLoaded = false;
-        ProcedureComboBox.ItemsSource = null;
+        PreviewProcedureComboBox.ItemsSource = null;
+        CalibrationProcedureComboBox.ItemsSource = null;
         ImageStepComboBox.ItemsSource = null;
         UpdateCommandState();
     }
@@ -803,16 +909,16 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StopActiveProcedureNoThrow()
+    private void StopPreviewProcedureNoThrow()
     {
-        if (_activeProcedure is null)
+        if (_previewProcedure is null)
         {
             return;
         }
 
         try
         {
-            _activeProcedure.ContinuousRunEnable = false;
+            _previewProcedure.ContinuousRunEnable = false;
         }
         catch
         {
@@ -821,10 +927,10 @@ public partial class MainWindow : Window
 
     private void PauseLivePreviewForCalibration()
     {
-        _restoreLivePreviewAfterCalibration = _activeProcedure?.ContinuousRunEnable == true;
+        _restoreLivePreviewAfterCalibration = _previewProcedure?.ContinuousRunEnable == true;
         if (_restoreLivePreviewAfterCalibration)
         {
-            _activeProcedure!.ContinuousRunEnable = false;
+            _previewProcedure!.ContinuousRunEnable = false;
         }
 
         UpdateCommandState();
@@ -832,7 +938,7 @@ public partial class MainWindow : Window
 
     private bool TryStartLivePreview(out string errorMessage)
     {
-        if (!_solutionLoaded || _activeProcedure is null)
+        if (!_solutionLoaded || _previewProcedure is null)
         {
             errorMessage = "视觉方案或流程尚未加载";
             return false;
@@ -851,7 +957,7 @@ public partial class MainWindow : Window
                 BindImageStep(option, persistSelection: false);
             }
 
-            _activeProcedure.ContinuousRunEnable = true;
+            _previewProcedure.ContinuousRunEnable = true;
             UpdateCommandState();
             errorMessage = "";
             return true;
@@ -921,14 +1027,20 @@ public partial class MainWindow : Window
         }
 
         CommandBar.IsEnabled = true;
-        var procedureReady = _solutionLoaded && _activeProcedure is not null;
-        var continuousRunning = procedureReady && _activeProcedure!.ContinuousRunEnable;
+        var previewReady = _solutionLoaded && _previewProcedure is not null;
+        var calibrationReady = _solutionLoaded && _calibrationProcedure is not null;
+        var continuousRunning = previewReady && _previewProcedure!.ContinuousRunEnable;
         ChooseSolutionButton.IsEnabled = !_busy && !continuousRunning;
-        ProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning;
-        ImageStepComboBox.IsEnabled = !_busy && procedureReady && !continuousRunning;
-        RunOnceButton.IsEnabled = !_busy && procedureReady && !continuousRunning;
-        ContinuousRunButton.IsEnabled = !_busy && procedureReady && !continuousRunning;
+        PreviewProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning;
+        CalibrationProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning;
+        ImageStepComboBox.IsEnabled = !_busy && previewReady && !continuousRunning;
+        RunOnceButton.IsEnabled = !_busy && previewReady && !continuousRunning;
+        ContinuousRunButton.IsEnabled = !_busy && previewReady && !continuousRunning;
         StopRunButton.IsEnabled = !_busy && continuousRunning;
+        if (!calibrationReady && _solutionLoaded)
+        {
+            CalibrationProcedureComboBox.ToolTip = "请选择包含N点标定模块的流程";
+        }
     }
 
     private string? GetInitialSolutionDirectory()
@@ -1009,7 +1121,7 @@ public partial class MainWindow : Window
             _activeCommandPipe = null;
         }
 
-        StopActiveProcedureNoThrow();
+        StopPreviewProcedureNoThrow();
         try
         {
             VisionRenderControl.Dispose();

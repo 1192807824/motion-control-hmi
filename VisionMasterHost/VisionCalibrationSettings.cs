@@ -12,7 +12,9 @@ internal sealed class VisionCalibrationSettings
 
     public string SolutionPath { get; set; } = "";
 
-    public string ProcedureName { get; set; } = "";
+    public string PreviewProcedureName { get; set; } = "";
+
+    public string CalibrationProcedureName { get; set; } = "";
 
     public string ImageModuleKey { get; set; } = "";
 
@@ -31,10 +33,13 @@ internal sealed class VisionCalibrationSettings
                 return new VisionCalibrationSettings();
             }
 
+            var legacyProcedureName = (string?)root.Element("procedureName") ?? "";
             return new VisionCalibrationSettings
             {
                 SolutionPath = (string?)root.Element("solutionPath") ?? "",
-                ProcedureName = (string?)root.Element("procedureName") ?? "",
+                PreviewProcedureName = (string?)root.Element("previewProcedureName") ?? "",
+                CalibrationProcedureName =
+                    (string?)root.Element("calibrationProcedureName") ?? legacyProcedureName,
                 ImageModuleKey = (string?)root.Element("imageModuleKey") ?? ""
             };
         }
@@ -54,7 +59,9 @@ internal sealed class VisionCalibrationSettings
             new XElement(
                 "visionCalibration",
                 new XElement("solutionPath", SolutionPath),
-                new XElement("procedureName", ProcedureName),
+                new XElement("previewProcedureName", PreviewProcedureName),
+                new XElement("calibrationProcedureName", CalibrationProcedureName),
+                new XElement("procedureName", CalibrationProcedureName),
                 new XElement("imageModuleKey", ImageModuleKey)))
             .Save(SettingsFilePath);
     }

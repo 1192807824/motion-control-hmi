@@ -203,6 +203,20 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public Task<string> SetCalibrationCenterAsync(
+        double centerX,
+        double centerY,
+        CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync(
+            string.Join(
+                "\t",
+                "SET_CENTER",
+                centerX.ToString("R", CultureInfo.InvariantCulture),
+                centerY.ToString("R", CultureInfo.InvariantCulture)),
+            cancellationToken);
+    }
+
     public Task<string> CaptureCalibrationPointAsync(
         int pointNumber,
         CancellationToken cancellationToken)

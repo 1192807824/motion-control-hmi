@@ -19,6 +19,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _hostReady;
     private bool _hostCanRestart;
     private bool _calibrationRunning;
+    private bool _centerSyncRunning;
     private MotionControlPage? _motionController;
     private CalibrationCenterPosition? _recordedCenter;
     private CancellationTokenSource? _calibrationCancellation;
@@ -61,8 +62,13 @@ public partial class VisualCalibrationPage : UserControl
         VisionHost.Shutdown();
     }
 
-    private void RecordCenter_Click(object sender, RoutedEventArgs e)
+    private async void RecordCenter_Click(object sender, RoutedEventArgs e)
     {
+        if (_centerSyncRunning)
+        {
+            return;
+        }
+
         try
         {
             var motionController = _motionController
@@ -76,10 +82,6 @@ public partial class VisualCalibrationPage : UserControl
                 $"基准点 X：{_recordedCenter.ActualX / PulsesPerVisionUnit:0.####}　" +
                 $"Y：{_recordedCenter.ActualY / PulsesPerVisionUnit:0.####}";
             CalibrationProgressBar.Value = 0;
-            SetWorkflowStatus(
-                $"中心已记录：轴1 X={_recordedCenter.ActualX:0.###} pulse，" +
-                $"轴2 Y={_recordedCenter.ActualY:0.###} pulse",
-                WorkflowStatus.Ready);
         }
         catch (Exception exception)
         {
@@ -88,9 +90,40 @@ public partial class VisualCalibrationPage : UserControl
             CenterYPulseText.Text = "未记录";
             CenterVmText.Text = "基准点 X：--　Y：--";
             SetWorkflowStatus(exception.Message, WorkflowStatus.Error);
+            UpdateCommandState();
+            return;
+        }
+
+        if (!_hostReady)
+        {
+            SetWorkflowStatus(
+                $"中心已记录：轴1 X={_recordedCenter.ActualX:0.###} pulse，" +
+                $"轴2 Y={_recordedCenter.ActualY:0.###} pulse；视觉组件未就绪，启动标定时会再次写入。",
+                WorkflowStatus.Ready);
+            UpdateCommandState();
+            return;
+        }
+
+        _centerSyncRunning = true;
+        UpdateCommandState();
+        SetWorkflowStatus("中心已记录，正在写入标定流程.N点标定1…", WorkflowStatus.Running);
+        try
+        {
+            var message = await VisionHost.SetCalibrationCenterAsync(
+                _recordedCenter.ActualX / PulsesPerVisionUnit,
+                _recordedCenter.ActualY / PulsesPerVisionUnit,
+                CancellationToken.None);
+            SetWorkflowStatus(message, WorkflowStatus.Success);
+        }
+        catch (Exception exception)
+        {
+            SetWorkflowStatus(
+                $"中心坐标已记录，但写入N点标定1失败：{exception.Message}；启动标定时会再次写入。",
+                WorkflowStatus.Error);
         }
         finally
         {
+            _centerSyncRunning = false;
             UpdateCommandState();
         }
     }
@@ -295,9 +328,13 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        RecordCenterButton.IsEnabled = !_calibrationRunning && _motionController is not null;
+        RecordCenterButton.IsEnabled =
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            _motionController is not null;
         StartCalibrationButton.IsEnabled =
             !_calibrationRunning &&
+            !_centerSyncRunning &&
             _motionController is not null &&
             _recordedCenter is not null &&
             _hostReady;
