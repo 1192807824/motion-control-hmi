@@ -29,7 +29,8 @@ public partial class App : Application
             var embedded = e.Args.Any(
                 argument => string.Equals(argument, "--embedded", StringComparison.OrdinalIgnoreCase));
             var parentProcessId = ParseParentProcessId(e.Args);
-            var window = new MainWindow(embedded);
+            var pipeName = ParseArgumentValue(e.Args, "--pipe-name");
+            var window = new MainWindow(embedded, pipeName);
             MainWindow = window;
             _visionMasterInitializationPending = true;
             window.ContentRendered += MainWindow_ContentRendered;
@@ -106,6 +107,26 @@ public partial class App : Application
             }
 
             return parentProcessId;
+        }
+
+        return null;
+    }
+
+    private static string? ParseArgumentValue(IReadOnlyList<string> arguments, string optionName)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            if (!string.Equals(arguments[index], optionName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (index + 1 >= arguments.Count || string.IsNullOrWhiteSpace(arguments[index + 1]))
+            {
+                throw new ArgumentException($"{optionName} requires a value.");
+            }
+
+            return arguments[index + 1].Trim();
         }
 
         return null;

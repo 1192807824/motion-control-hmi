@@ -41,6 +41,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.WPF.Release.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="IMVSNPointCalibModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSNPointCalibModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

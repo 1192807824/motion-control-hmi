@@ -7,6 +7,31 @@
              mc:Ignorable="d"
              d:DesignWidth="1600"
              d:DesignHeight="820">
+    <UserControl.Resources>
+        <Style x:Key="PanelLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#AFC0CD" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+        </Style>
+        <Style x:Key="PanelInput" TargetType="TextBox">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#10263A" />
+            <Setter Property="Background" Value="#F7FAFC" />
+            <Setter Property="BorderBrush" Value="#668198" />
+        </Style>
+        <Style x:Key="PanelButton" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#0D6EE8" />
+            <Setter Property="BorderBrush" Value="#0B5CC2" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+    </UserControl.Resources>
+
     <Grid Margin="10,10,10,8" Background="#10263A">
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
@@ -32,10 +57,7 @@
                                FontSize="16"
                                FontWeight="Bold" />
                     <Border Width="1" Height="20" Margin="12,0" Background="#45647A" />
-                    <Ellipse x:Name="HostStatusIndicator"
-                             Width="10"
-                             Height="10"
-                             Fill="#E0A21A" />
+                    <Ellipse x:Name="HostStatusIndicator" Width="10" Height="10" Fill="#E0A21A" />
                     <TextBlock x:Name="HostStatusText"
                                Margin="8,0,0,0"
                                Text="正在准备视觉组件…"
@@ -59,35 +81,235 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="1"
-                Margin="0,6,0,0"
-                Background="#202427"
-                BorderBrush="#345269"
-                BorderThickness="1"
-                CornerRadius="4"
-                ClipToBounds="True">
-            <Grid>
-                <controls:VisionMasterProcessHost x:Name="VisionHost"
-                                                  Started="VisionHost_Started"
-                                                  Failed="VisionHost_Failed"
-                                                  Exited="VisionHost_Exited" />
+        <Grid Grid.Row="1" Margin="0,6,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="370" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                <StackPanel x:Name="HostPlaceholder"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False">
-                    <TextBlock Text="视觉标定"
-                               Foreground="#F4F8FB"
-                               FontSize="22"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Center" />
-                    <TextBlock Margin="0,8,0,0"
-                               Text="正在启动图像组件，请稍候…"
-                               Foreground="#AAB9C6"
-                               FontSize="14"
-                               HorizontalAlignment="Center" />
-                </StackPanel>
-            </Grid>
-        </Border>
+            <Border Grid.Column="0"
+                    Padding="12"
+                    Background="#163047"
+                    BorderBrush="#345269"
+                    BorderThickness="1"
+                    CornerRadius="5">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="第一套 XY 九点标定"
+                                   Foreground="White"
+                                   FontSize="17"
+                                   FontWeight="Bold" />
+                        <TextBlock Margin="0,5,0,12"
+                                   Text="固定轴映射：X = 硬件轴1，Y = 硬件轴2（零基序号）"
+                                   Foreground="#8FB2C9"
+                                   FontSize="12"
+                                   TextWrapping="Wrap" />
+
+                        <Border Padding="10" Background="#10283C" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="步骤 1　记录料盘中心"
+                                           Foreground="#F4F8FB"
+                                           FontSize="14"
+                                           FontWeight="Bold" />
+                                <TextBlock Margin="0,5,0,9"
+                                           Text="先在运动控制页点动相机，使标定圆位于料盘中心；轴停止后记录真实反馈位置。"
+                                           Foreground="#AFC0CD"
+                                           FontSize="12"
+                                           TextWrapping="Wrap" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="轴1 X（pulse）" Style="{StaticResource PanelLabel}" />
+                                        <TextBlock x:Name="CenterXPulseText"
+                                                   Height="30"
+                                                   Padding="8,0"
+                                                   Text="未记录"
+                                                   Foreground="#F4F8FB"
+                                                   Background="#243E52"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="轴2 Y（pulse）" Style="{StaticResource PanelLabel}" />
+                                        <TextBlock x:Name="CenterYPulseText"
+                                                   Height="30"
+                                                   Padding="8,0"
+                                                   Text="未记录"
+                                                   Foreground="#F4F8FB"
+                                                   Background="#243E52"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Margin="0,8,0,0"
+                                           Text="写入 VisionMaster（反馈位置 ÷ 10000）"
+                                           Foreground="#8FB2C9"
+                                           FontSize="11" />
+                                <TextBlock x:Name="CenterVmText"
+                                           Margin="0,3,0,8"
+                                           Text="基准点 X：--　Y：--"
+                                           Foreground="#49D17D"
+                                           FontSize="13"
+                                           FontWeight="SemiBold" />
+                                <Button x:Name="RecordCenterButton"
+                                        Content="记录当前中心坐标"
+                                        Style="{StaticResource PanelButton}"
+                                        Click="RecordCenter_Click" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Margin="0,10,0,0" Padding="10" Background="#10283C" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="步骤 2　设置九点运动"
+                                           Foreground="#F4F8FB"
+                                           FontSize="14"
+                                           FontWeight="Bold" />
+                                <TextBlock Margin="0,4,0,9"
+                                           Text="输入带方向的脉冲偏移；写入 VisionMaster 时同样自动除以 10000。"
+                                           Foreground="#AFC0CD"
+                                           FontSize="12"
+                                           TextWrapping="Wrap" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="偏移 X（pulse）" Style="{StaticResource PanelLabel}" />
+                                        <TextBox x:Name="StepXPulsesTextBox"
+                                                 Text="250000"
+                                                 Style="{StaticResource PanelInput}"
+                                                 TextChanged="CalibrationInput_Changed" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="偏移 Y（pulse）" Style="{StaticResource PanelLabel}" />
+                                        <TextBox x:Name="StepYPulsesTextBox"
+                                                 Text="-160000"
+                                                 Style="{StaticResource PanelInput}"
+                                                 TextChanged="CalibrationInput_Changed" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="OffsetVmText"
+                                           Margin="0,6,0,8"
+                                           Text="VisionMaster 偏移 X：25　Y：-16"
+                                           Foreground="#49D17D"
+                                           FontSize="12" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="移动优先" Style="{StaticResource PanelLabel}" />
+                                        <ComboBox x:Name="MovePriorityComboBox"
+                                                  Height="32"
+                                                  Padding="8,0"
+                                                  SelectedIndex="1">
+                                            <ComboBoxItem Content="X优先" Tag="X" />
+                                            <ComboBoxItem Content="Y优先" Tag="Y" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                                        <TextBox x:Name="VelocityTextBox"
+                                                 Text="100000"
+                                                 Style="{StaticResource PanelInput}" />
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="到位稳定等待（ms）" Style="{StaticResource PanelLabel}" />
+                                    <TextBox x:Name="SettleMillisecondsTextBox"
+                                             Text="300"
+                                             Style="{StaticResource PanelInput}" />
+                                </StackPanel>
+                                <TextBlock Margin="0,8,0,0"
+                                           Text="点序保证第5点为中心；每点到位并稳定后，VisionMaster流程只运行一次。"
+                                           Foreground="#8FB2C9"
+                                           FontSize="11"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Margin="0,10,0,0" Padding="10" Background="#10283C" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="步骤 3　一键执行"
+                                           Foreground="#F4F8FB"
+                                           FontSize="14"
+                                           FontWeight="Bold" />
+                                <ProgressBar x:Name="CalibrationProgressBar"
+                                             Margin="0,10,0,0"
+                                             Height="8"
+                                             Minimum="0"
+                                             Maximum="9"
+                                             Value="0" />
+                                <TextBlock x:Name="WorkflowStatusText"
+                                           Margin="0,8,0,10"
+                                           Text="请先记录中心坐标"
+                                           Foreground="#D8E4EC"
+                                           FontSize="12"
+                                           TextWrapping="Wrap" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="90" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="StartCalibrationButton"
+                                            Content="一键开始九点标定"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#17834A"
+                                            BorderBrush="#12683A"
+                                            IsEnabled="False"
+                                            Click="StartCalibration_Click" />
+                                    <Button Grid.Column="2"
+                                            x:Name="StopCalibrationButton"
+                                            Content="停止"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#D90D16"
+                                            BorderBrush="#A90A12"
+                                            IsEnabled="False"
+                                            Click="StopCalibration_Click" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Background="#202427"
+                    BorderBrush="#345269"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    ClipToBounds="True">
+                <Grid>
+                    <controls:VisionMasterProcessHost x:Name="VisionHost"
+                                                      Started="VisionHost_Started"
+                                                      Failed="VisionHost_Failed"
+                                                      Exited="VisionHost_Exited" />
+
+                    <StackPanel x:Name="HostPlaceholder"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                IsHitTestVisible="False">
+                        <TextBlock Text="视觉标定"
+                                   Foreground="#F4F8FB"
+                                   FontSize="22"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Text="正在启动图像组件，请稍候…"
+                                   Foreground="#AAB9C6"
+                                   FontSize="14"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

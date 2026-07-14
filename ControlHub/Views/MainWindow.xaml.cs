@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        VisualCalibrationContent.AttachMotionController(MotionPage);
+
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;
         LoadRememberedLogin();

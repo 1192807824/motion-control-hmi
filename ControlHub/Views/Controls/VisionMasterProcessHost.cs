@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 
@@ -27,6 +30,8 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     private readonly object _syncRoot = new();
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly SemaphoreSlim _commandGate = new(1, 1);
+    private readonly string _pipeName = $"ControlHub.VisionCalibration.{Environment.ProcessId}.{Guid.NewGuid():N}";
     private CancellationTokenSource? _startCancellation;
     private Process? _process;
     private IntPtr _hostWindow;
@@ -101,7 +106,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = executablePath,
-                    Arguments = $"--embedded --parent-pid {Environment.ProcessId}",
+                    Arguments = $"--embedded --parent-pid {Environment.ProcessId} --pipe-name {_pipeName}",
                     WorkingDirectory = Path.GetDirectoryName(executablePath)!,
                     UseShellExecute = false,
                     CreateNoWindow = false
@@ -175,6 +180,121 @@ public sealed class VisionMasterProcessHost : HwndHost
         finally
         {
             _lifecycleGate.Release();
+        }
+    }
+
+    public Task<string> PrepareNinePointCalibrationAsync(
+        double centerX,
+        double centerY,
+        double offsetX,
+        double offsetY,
+        bool xFirst,
+        CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync(
+            string.Join(
+                "\t",
+                "PREPARE",
+                centerX.ToString("R", CultureInfo.InvariantCulture),
+                centerY.ToString("R", CultureInfo.InvariantCulture),
+                offsetX.ToString("R", CultureInfo.InvariantCulture),
+                offsetY.ToString("R", CultureInfo.InvariantCulture),
+                xFirst ? "X" : "Y"),
+            cancellationToken);
+    }
+
+    public Task<string> CaptureCalibrationPointAsync(
+        int pointNumber,
+        CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync(
+            $"CAPTURE\t{pointNumber.ToString(CultureInfo.InvariantCulture)}",
+            cancellationToken);
+    }
+
+    public Task<string> CompleteNinePointCalibrationAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("COMPLETE", cancellationToken);
+    }
+
+    public async Task AbortNinePointCalibrationAsync()
+    {
+        try
+        {
+            _ = await SendCalibrationCommandAsync("ABORT", CancellationToken.None);
+        }
+        catch
+        {
+            // The visual process may already have exited; motion cancellation remains authoritative.
+        }
+    }
+
+    private async Task<string> SendCalibrationCommandAsync(
+        string command,
+        CancellationToken cancellationToken)
+    {
+        await _commandGate.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_syncRoot)
+            {
+                if (_process is not { HasExited: false })
+                {
+                    throw new InvalidOperationException("视觉组件尚未启动。");
+                }
+            }
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            await using var pipe = new NamedPipeClientStream(
+                ".",
+                _pipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            await pipe.ConnectAsync(timeout.Token);
+
+            using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 1024, leaveOpen: true);
+            await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true)
+            {
+                AutoFlush = true
+            };
+            await writer.WriteLineAsync(command.AsMemory(), timeout.Token);
+            var response = await reader.ReadLineAsync(timeout.Token);
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                throw new IOException("视觉组件未返回标定命令结果。");
+            }
+
+            var separator = response.IndexOf('\t');
+            var status = separator < 0 ? response : response[..separator];
+            var encodedMessage = separator < 0 ? "" : response[(separator + 1)..];
+            string message;
+            try
+            {
+                message = string.IsNullOrEmpty(encodedMessage)
+                    ? ""
+                    : Encoding.UTF8.GetString(Convert.FromBase64String(encodedMessage));
+            }
+            catch (FormatException)
+            {
+                message = encodedMessage;
+            }
+
+            if (string.Equals(status, "OK", StringComparison.Ordinal))
+            {
+                return message;
+            }
+
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(message) ? "VisionMaster 标定命令执行失败。" : message);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("等待 VisionMaster 标定命令超时。");
+        }
+        finally
+        {
+            _commandGate.Release();
         }
     }
 

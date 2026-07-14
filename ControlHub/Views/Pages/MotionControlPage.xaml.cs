@@ -225,6 +225,47 @@ public partial class MotionControlPage : UserControl
         _ = TryShutdown(out _);
     }
 
+    public CalibrationCenterPosition CaptureCalibrationCenter(
+        int xHardwareAxisNo,
+        int yHardwareAxisNo)
+    {
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭，不能记录标定中心。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException(
+                $"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，请等待完成后再记录中心。");
+        }
+
+        if (xHardwareAxisNo == yHardwareAxisNo)
+        {
+            throw new ArgumentException("X 轴和 Y 轴不能是同一根轴。");
+        }
+
+        var xAxis = GetCalibrationAxis(xHardwareAxisNo, "X");
+        var yAxis = GetCalibrationAxis(yHardwareAxisNo, "Y");
+        var x = ReadReadyCalibrationAxis(xAxis, "X");
+        var y = ReadReadyCalibrationAxis(yAxis, "Y");
+        return new CalibrationCenterPosition(
+            xHardwareAxisNo,
+            yHardwareAxisNo,
+            x.FeedbackPosition,
+            y.FeedbackPosition);
+    }
+
     public async Task RunNinePointCalibrationAsync(
         NinePointMotionRequest request,
         Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,
@@ -257,20 +298,9 @@ public partial class MotionControlPage : UserControl
 
         var xAxis = GetCalibrationAxis(request.XHardwareAxisNo, "X");
         var yAxis = GetCalibrationAxis(request.YHardwareAxisNo, "Y");
-        var initialX = ReadReadyCalibrationAxis(xAxis, "X");
-        var initialY = ReadReadyCalibrationAxis(yAxis, "Y");
-        var offsets = new (double X, double Y)[]
-        {
-            (-request.StepX, -request.StepY),
-            (0, -request.StepY),
-            (request.StepX, -request.StepY),
-            (request.StepX, 0),
-            (request.StepX, request.StepY),
-            (0, request.StepY),
-            (-request.StepX, request.StepY),
-            (-request.StepX, 0),
-            (0, 0)
-        };
+        _ = ReadReadyCalibrationAxis(xAxis, "X");
+        _ = ReadReadyCalibrationAxis(yAxis, "Y");
+        var offsets = CreateNinePointOffsets(request);
 
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _calibrationMotionCancellation = linkedCancellation;
@@ -283,8 +313,8 @@ public partial class MotionControlPage : UserControl
             {
                 linkedCancellation.Token.ThrowIfCancellationRequested();
                 var pointNumber = index + 1;
-                var targetX = initialX.FeedbackPosition + offsets[index].X;
-                var targetY = initialY.FeedbackPosition + offsets[index].Y;
+                var targetX = request.CenterX + offsets[index].X;
+                var targetY = request.CenterY + offsets[index].Y;
                 progress?.Report(new NinePointMotionProgress(
                     index,
                     offsets.Length,
@@ -326,6 +356,18 @@ public partial class MotionControlPage : UserControl
                     $"第 {pointNumber}/9 点采集完成"));
             }
 
+            progress?.Report(new NinePointMotionProgress(
+                offsets.Length,
+                offsets.Length,
+                $"九点采集完成，正在返回中心：({request.CenterX:0.###}, {request.CenterY:0.###})"));
+            await MoveCalibrationAxesAsync(
+                xAxis,
+                yAxis,
+                request.CenterX,
+                request.CenterY,
+                request,
+                linkedCancellation.Token);
+
             completed = true;
         }
         finally
@@ -353,6 +395,11 @@ public partial class MotionControlPage : UserControl
             throw new ArgumentException("X 轴和 Y 轴不能选择同一根轴。", nameof(request));
         }
 
+        if (!double.IsFinite(request.CenterX) || !double.IsFinite(request.CenterY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "标定中心 X、Y 必须是有效数值。");
+        }
+
         if (!double.IsFinite(request.StepX) || Math.Abs(request.StepX) <= double.Epsilon ||
             !double.IsFinite(request.StepY) || Math.Abs(request.StepY) <= double.Epsilon)
         {
@@ -369,6 +416,38 @@ public partial class MotionControlPage : UserControl
         {
             throw new ArgumentOutOfRangeException(nameof(request), "标定到位容差、超时或稳定等待参数无效。 ");
         }
+    }
+
+    private static (double X, double Y)[] CreateNinePointOffsets(NinePointMotionRequest request)
+    {
+        if (request.MovePriority == NinePointMovePriority.YFirst)
+        {
+            return
+            [
+                (-request.StepX, -request.StepY),
+                (-request.StepX, 0),
+                (-request.StepX, request.StepY),
+                (0, request.StepY),
+                (0, 0),
+                (0, -request.StepY),
+                (request.StepX, -request.StepY),
+                (request.StepX, 0),
+                (request.StepX, request.StepY)
+            ];
+        }
+
+        return
+        [
+            (-request.StepX, -request.StepY),
+            (0, -request.StepY),
+            (request.StepX, -request.StepY),
+            (request.StepX, 0),
+            (0, 0),
+            (-request.StepX, 0),
+            (-request.StepX, request.StepY),
+            (0, request.StepY),
+            (request.StepX, request.StepY)
+        ];
     }
 
     private AxisStatus GetCalibrationAxis(int hardwareAxisNo, string coordinateName)
