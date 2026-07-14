@@ -331,8 +331,8 @@ public partial class MainWindow : Window
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
-        var offsetX = ParseFiniteNonZeroDouble(parts[3], "偏移X");
-        var offsetY = ParseFiniteNonZeroDouble(parts[4], "偏移Y");
+        var offsetX = ParsePositiveDouble(parts[3], "间距X");
+        var offsetY = ParsePositiveDouble(parts[4], "间距Y");
         var xFirst = parts[5] switch
         {
             "X" => true,
@@ -502,12 +502,12 @@ public partial class MainWindow : Window
         return result;
     }
 
-    private static double ParseFiniteNonZeroDouble(string value, string name)
+    private static double ParsePositiveDouble(string value, string name)
     {
         var result = ParseFiniteDouble(value, name);
-        if (Math.Abs(result) <= double.Epsilon)
+        if (result <= 0)
         {
-            throw new InvalidDataException($"{name}不能为 0。");
+            throw new InvalidDataException($"{name}必须大于 0。");
         }
 
         return result;

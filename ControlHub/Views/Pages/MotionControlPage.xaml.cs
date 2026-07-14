@@ -497,10 +497,10 @@ public partial class MotionControlPage : UserControl
             throw new ArgumentOutOfRangeException(nameof(request), "标定中心 X、Y 必须是有效数值。");
         }
 
-        if (!double.IsFinite(request.StepX) || Math.Abs(request.StepX) <= double.Epsilon ||
-            !double.IsFinite(request.StepY) || Math.Abs(request.StepY) <= double.Epsilon)
+        if (!double.IsFinite(request.StepX) || request.StepX <= 0 ||
+            !double.IsFinite(request.StepY) || request.StepY <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(request), "X、Y 每步距离必须是非零有效数值。 ");
+            throw new ArgumentOutOfRangeException(nameof(request), "X、Y 标定间距必须大于 0。 ");
         }
 
         if (!double.IsFinite(request.Velocity) || request.Velocity <= 0)
@@ -521,29 +521,29 @@ public partial class MotionControlPage : UserControl
         {
             return
             [
-                (-request.StepX, -request.StepY),
-                (-request.StepX, 0),
-                (-request.StepX, request.StepY),
+                (request.StepX, -request.StepY),
+                (request.StepX, 0),
+                (request.StepX, request.StepY),
                 (0, request.StepY),
                 (0, 0),
                 (0, -request.StepY),
-                (request.StepX, -request.StepY),
-                (request.StepX, 0),
-                (request.StepX, request.StepY)
+                (-request.StepX, -request.StepY),
+                (-request.StepX, 0),
+                (-request.StepX, request.StepY)
             ];
         }
 
         return
         [
-            (-request.StepX, -request.StepY),
-            (0, -request.StepY),
-            (request.StepX, -request.StepY),
+            (-request.StepX, request.StepY),
+            (0, request.StepY),
+            (request.StepX, request.StepY),
             (request.StepX, 0),
             (0, 0),
             (-request.StepX, 0),
-            (-request.StepX, request.StepY),
-            (0, request.StepY),
-            (request.StepX, request.StepY)
+            (-request.StepX, -request.StepY),
+            (0, -request.StepY),
+            (request.StepX, -request.StepY)
         ];
     }
 

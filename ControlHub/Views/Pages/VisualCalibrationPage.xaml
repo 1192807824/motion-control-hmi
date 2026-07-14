@@ -165,23 +165,23 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="偏移 X（pulse）" Style="{StaticResource PanelLabel}" />
+                                        <TextBlock Text="间距 X（pulse，正数）" Style="{StaticResource PanelLabel}" />
                                         <TextBox x:Name="StepXPulsesTextBox"
                                                  Text="250000"
                                                  Style="{StaticResource PanelInput}"
                                                  TextChanged="CalibrationInput_Changed" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">
-                                        <TextBlock Text="偏移 Y（pulse）" Style="{StaticResource PanelLabel}" />
+                                        <TextBlock Text="间距 Y（pulse，正数）" Style="{StaticResource PanelLabel}" />
                                         <TextBox x:Name="StepYPulsesTextBox"
-                                                 Text="-160000"
+                                                 Text="160000"
                                                  Style="{StaticResource PanelInput}"
                                                  TextChanged="CalibrationInput_Changed" />
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock x:Name="OffsetVmText"
                                            Margin="0,6,0,8"
-                                           Text="VisionMaster 偏移 X：25　Y：-16"
+                                           Text="VisionMaster 间距 X：25　Y：16"
                                            Foreground="#49D17D"
                                            FontSize="12" />
                                 <Grid>
@@ -195,9 +195,9 @@
                                         <ComboBox x:Name="MovePriorityComboBox"
                                                   Height="32"
                                                   Padding="8,0"
-                                                  SelectedIndex="1">
-                                            <ComboBoxItem Content="X优先" Tag="X" />
-                                            <ComboBoxItem Content="Y优先" Tag="Y" />
+                                                  SelectedIndex="0">
+                                            <ComboBoxItem Content="X优先（前3点沿X）" Tag="X" />
+                                            <ComboBoxItem Content="Y优先（前3点沿Y）" Tag="Y" />
                                         </ComboBox>
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">

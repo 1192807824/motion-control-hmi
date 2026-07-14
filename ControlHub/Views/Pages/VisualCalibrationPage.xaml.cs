@@ -148,6 +148,7 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         var visionPrepared = false;
+        var calibrationCompleted = false;
         try
         {
             var center = _recordedCenter
@@ -159,8 +160,8 @@ public partial class VisualCalibrationPage : UserControl
                 throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
             }
 
-            var stepX = ParseFiniteNonZeroDouble(StepXPulsesTextBox.Text, "偏移 X");
-            var stepY = ParseFiniteNonZeroDouble(StepYPulsesTextBox.Text, "偏移 Y");
+            var stepX = ParsePositiveDouble(StepXPulsesTextBox.Text, "间距 X");
+            var stepY = ParsePositiveDouble(StepYPulsesTextBox.Text, "间距 Y");
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "标定速度");
             var settleMilliseconds = ParseNonNegativeInt(
                 SettleMillisecondsTextBox.Text,
@@ -224,8 +225,11 @@ public partial class VisualCalibrationPage : UserControl
 
             var completionMessage = await VisionHost.CompleteNinePointCalibrationAsync(cancellationToken);
             visionPrepared = false;
+            calibrationCompleted = true;
             CalibrationProgressBar.Value = 9;
-            SetWorkflowStatus(completionMessage + "；轴1/2已回到记录中心。", WorkflowStatus.Success);
+            SetWorkflowStatus(
+                completionMessage + "；轴1/2已回到记录中心，正在启用点击移动。",
+                WorkflowStatus.Success);
         }
         catch (OperationCanceledException)
         {
@@ -246,6 +250,12 @@ public partial class VisualCalibrationPage : UserControl
             _calibrationCancellation = null;
             _calibrationRunning = false;
             UpdateCommandState();
+        }
+
+        if (calibrationCompleted)
+        {
+            SetClickMoveCheckedNoEvent(true);
+            _ = await ConfigureClickMoveModeAsync(true);
         }
     }
 
@@ -396,15 +406,6 @@ public partial class VisualCalibrationPage : UserControl
             var baseY = calibrationCenter.ActualY / PulsesPerVisionUnit;
             var deltaX = (e.TransformedX - baseX) * PulsesPerVisionUnit;
             var deltaY = (e.TransformedY - baseY) * PulsesPerVisionUnit;
-            var calibrationSpanX = Math.Abs(ParseFiniteNonZeroDouble(StepXPulsesTextBox.Text, "标定偏移 X"));
-            var calibrationSpanY = Math.Abs(ParseFiniteNonZeroDouble(StepYPulsesTextBox.Text, "标定偏移 Y"));
-            if (Math.Abs(deltaX) > calibrationSpanX * 2 || Math.Abs(deltaY) > calibrationSpanY * 2)
-            {
-                throw new InvalidOperationException(
-                    $"点击补偿超出安全范围：ΔX={deltaX:0.###}、ΔY={deltaY:0.###} pulse。" +
-                    "请检查标定文件、基准点和标定偏移。");
-            }
-
             var targetX = current.ActualX + deltaX;
             var targetY = current.ActualY + deltaY;
             if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
@@ -551,17 +552,17 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        if (TryParseFiniteDouble(StepXPulsesTextBox?.Text, out var stepX) &&
-            TryParseFiniteDouble(StepYPulsesTextBox?.Text, out var stepY))
+        if (TryParseFiniteDouble(StepXPulsesTextBox?.Text, out var stepX) && stepX > 0 &&
+            TryParseFiniteDouble(StepYPulsesTextBox?.Text, out var stepY) && stepY > 0)
         {
             OffsetVmText.Text =
-                $"VisionMaster 偏移 X：{stepX / PulsesPerVisionUnit:0.####}　" +
+                $"VisionMaster 间距 X：{stepX / PulsesPerVisionUnit:0.####}　" +
                 $"Y：{stepY / PulsesPerVisionUnit:0.####}";
             OffsetVmText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
             return;
         }
 
-        OffsetVmText.Text = "请输入有效的 X/Y 偏移脉冲数";
+        OffsetVmText.Text = "X/Y 标定间距必须大于 0";
         OffsetVmText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
     }
 
@@ -657,16 +658,6 @@ public partial class VisualCalibrationPage : UserControl
             WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
             _ => Color.FromRgb(143, 178, 201)
         });
-    }
-
-    private static double ParseFiniteNonZeroDouble(string? value, string name)
-    {
-        if (!TryParseFiniteDouble(value, out var result) || Math.Abs(result) <= double.Epsilon)
-        {
-            throw new InvalidDataException($"{name}必须是非零有效数值。");
-        }
-
-        return result;
     }
 
     private static double ParsePositiveDouble(string? value, string name)
