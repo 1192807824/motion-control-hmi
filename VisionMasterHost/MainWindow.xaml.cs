@@ -644,6 +644,10 @@ public partial class MainWindow : Window
             float centerPixelY;
             try
             {
+                // Zooming or panning changes which source pixel is shown below the fixed WPF crosshair.
+                // The click callback has already supplied the source pixel, so reset the viewport now
+                // to make the visible crosshair coincide with the source-image center before moving.
+                VisionRenderControl.InitViewSize();
                 (centerPixelX, centerPixelY) = GetClickCenterPixel();
                 var transformModule = ResolveCalibrationTransformModule(procedureName);
                 transformModule.ModuParams.LoadCalibPath = _clickCalibrationPath;
