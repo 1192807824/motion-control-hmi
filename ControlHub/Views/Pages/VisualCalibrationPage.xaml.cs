@@ -15,7 +15,7 @@ public partial class VisualCalibrationPage : UserControl
     private const int FirstSetYHardwareAxisNo = 2;
     private const double PulsesPerVisionUnit = 10_000d;
     private const double DefaultPositionTolerancePulses = 10d;
-    private static readonly string DefaultClickCalibrationFilePath = Path.Combine(
+    private static readonly string DefaultCalibrationFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ControlHub",
         "Calibration",
@@ -37,7 +37,7 @@ public partial class VisualCalibrationPage : UserControl
     public VisualCalibrationPage()
     {
         InitializeComponent();
-        ClickCalibrationFileTextBox.Text = DefaultClickCalibrationFilePath;
+        CalibrationFilePathTextBox.Text = DefaultCalibrationFilePath;
         UpdateVisionOffsetPreview();
         UpdateCommandState();
     }
@@ -170,6 +170,7 @@ public partial class VisualCalibrationPage : UserControl
                 ? NinePointMovePriority.XFirst
                 : NinePointMovePriority.YFirst;
             var moveTimeoutMilliseconds = CalculateMoveTimeout(stepX, stepY, velocity);
+            var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
 
             _calibrationCancellation = new CancellationTokenSource();
             var cancellationToken = _calibrationCancellation.Token;
@@ -185,6 +186,7 @@ public partial class VisualCalibrationPage : UserControl
                 stepX / PulsesPerVisionUnit,
                 stepY / PulsesPerVisionUnit,
                 xFirst,
+                calibrationFilePath,
                 cancellationToken);
 
             var request = new NinePointMotionRequest(
@@ -254,28 +256,38 @@ public partial class VisualCalibrationPage : UserControl
         _calibrationCancellation?.Cancel();
     }
 
-    private void ChooseClickCalibrationFile_Click(object sender, RoutedEventArgs e)
+    private void ChooseCalibrationFile_Click(object sender, RoutedEventArgs e)
     {
-        var currentPath = ClickCalibrationFileTextBox.Text;
+        var currentPath = CalibrationFilePathTextBox.Text;
         var currentDirectory = string.IsNullOrWhiteSpace(currentPath)
             ? null
             : Path.GetDirectoryName(currentPath);
-        var dialog = new OpenFileDialog
+        var dialog = new SaveFileDialog
         {
-            Title = "选择 VisionMaster 标定文件",
+            Title = "选择标定文件的目录和文件名",
             Filter = "VisionMaster 标定文件 (*.xml)|*.xml|所有文件 (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false,
+            AddExtension = true,
+            DefaultExt = ".xml",
+            OverwritePrompt = false,
             InitialDirectory = Directory.Exists(currentDirectory) ? currentDirectory : null
         };
+        if (!string.IsNullOrWhiteSpace(currentPath))
+        {
+            dialog.FileName = Path.GetFileName(currentPath);
+        }
 
         if (dialog.ShowDialog(Window.GetWindow(this)) != true)
         {
             return;
         }
 
-        ClickCalibrationFileTextBox.Text = dialog.FileName;
-        SetClickMoveStatus($"已选择标定文件：{dialog.FileName}", WorkflowStatus.Ready);
+        CalibrationFilePathTextBox.Text = dialog.FileName;
+        SetWorkflowStatus("标定文件已设置。", WorkflowStatus.Ready);
+        UpdateCommandState();
+    }
+
+    private void CalibrationFilePath_Changed(object sender, TextChangedEventArgs e)
+    {
         UpdateCommandState();
     }
 
@@ -315,7 +327,7 @@ public partial class VisualCalibrationPage : UserControl
                     throw new InvalidOperationException("九点标定正在执行。");
                 }
 
-                var path = ClickCalibrationFileTextBox.Text?.Trim() ?? "";
+                var path = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
                 if (!File.Exists(path))
                 {
                     throw new FileNotFoundException("标定文件不存在，请先选择有效文件。", path);
@@ -323,7 +335,7 @@ public partial class VisualCalibrationPage : UserControl
 
                 var message = await VisionHost.SetClickMoveModeAsync(
                     true,
-                    Path.GetFullPath(path),
+                    path,
                     CancellationToken.None);
                 SetClickMoveStatus(message, WorkflowStatus.Success);
                 return true;
@@ -332,9 +344,9 @@ public partial class VisualCalibrationPage : UserControl
             _clickMoveCancellation?.Cancel();
             if (_hostReady)
             {
-                var path = string.IsNullOrWhiteSpace(ClickCalibrationFileTextBox.Text)
-                    ? DefaultClickCalibrationFilePath
-                    : ClickCalibrationFileTextBox.Text;
+                var path = string.IsNullOrWhiteSpace(CalibrationFilePathTextBox.Text)
+                    ? DefaultCalibrationFilePath
+                    : CalibrationFilePathTextBox.Text;
                 _ = await VisionHost.SetClickMoveModeAsync(false, path, CancellationToken.None);
             }
 
@@ -555,10 +567,14 @@ public partial class VisualCalibrationPage : UserControl
 
     private void UpdateCommandState()
     {
-        if (RecordCenterButton is null)
+        if (RecordCenterButton is null || CalibrationFilePathTextBox is null)
         {
             return;
         }
+
+        var calibrationPathValid = TryGetCalibrationFilePath(
+            CalibrationFilePathTextBox.Text,
+            out var calibrationFilePath);
 
         RecordCenterButton.IsEnabled =
             !_calibrationRunning &&
@@ -573,7 +589,8 @@ public partial class VisualCalibrationPage : UserControl
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null &&
             _recordedCenter is not null &&
-            _hostReady;
+            _hostReady &&
+            calibrationPathValid;
         StopCalibrationButton.IsEnabled = _calibrationRunning;
         RestartHostButton.IsEnabled =
             !_calibrationRunning &&
@@ -585,7 +602,12 @@ public partial class VisualCalibrationPage : UserControl
         VelocityTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
         SettleMillisecondsTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
         MovePriorityComboBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
-        ChooseClickCalibrationFileButton.IsEnabled =
+        CalibrationFilePathTextBox.IsEnabled =
+            !_calibrationRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            EnableClickMoveCheckBox.IsChecked != true;
+        ChooseCalibrationFileButton.IsEnabled =
             !_calibrationRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
@@ -596,7 +618,9 @@ public partial class VisualCalibrationPage : UserControl
             !_clickMoveConfigurationRunning &&
             _motionController is not null &&
             _recordedCenter is not null &&
-            _hostReady;
+            _hostReady &&
+            calibrationPathValid &&
+            File.Exists(calibrationFilePath);
         StopClickMoveButton.IsEnabled = _clickMoveRunning;
     }
 
@@ -663,6 +687,42 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         return result;
+    }
+
+    private static string GetCalibrationFilePath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidDataException("请设置标定文件名和保存位置。");
+        }
+
+        var fullPath = Path.GetFullPath(value.Trim());
+        if (!string.Equals(Path.GetExtension(fullPath), ".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("标定文件必须使用 .xml 扩展名。");
+        }
+
+        if (string.IsNullOrWhiteSpace(Path.GetFileNameWithoutExtension(fullPath)) ||
+            string.IsNullOrWhiteSpace(Path.GetDirectoryName(fullPath)))
+        {
+            throw new InvalidDataException("标定文件路径无效。");
+        }
+
+        return fullPath;
+    }
+
+    private static bool TryGetCalibrationFilePath(string? value, out string fullPath)
+    {
+        try
+        {
+            fullPath = GetCalibrationFilePath(value);
+            return true;
+        }
+        catch
+        {
+            fullPath = "";
+            return false;
+        }
     }
 
     private static bool TryParseFiniteDouble(string? value, out double result)

@@ -317,7 +317,7 @@ public partial class MainWindow : Window
 
     private string PrepareNinePointCalibration(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 6)
+        if (parts.Count != 7)
         {
             throw new InvalidDataException("准备九点标定的参数数量不正确。");
         }
@@ -339,6 +339,24 @@ public partial class MainWindow : Window
             "Y" => false,
             _ => throw new InvalidDataException("移动优先参数只能是 X 或 Y。")
         };
+        string calibrationPath;
+        try
+        {
+            calibrationPath = Path.GetFullPath(
+                Encoding.UTF8.GetString(Convert.FromBase64String(parts[6])));
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException("标定文件路径格式不正确。", exception);
+        }
+
+        if (!string.Equals(Path.GetExtension(calibrationPath), ".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("标定文件必须使用 .xml 扩展名。");
+        }
+
+        var calibrationDirectory = Path.GetDirectoryName(calibrationPath)
+            ?? throw new InvalidDataException("无法确定标定文件的保存目录。");
 
         var nPointModule = ResolveNPointCalibrationModule(procedureName);
         PauseLivePreviewForCalibration();
@@ -359,12 +377,7 @@ public partial class MainWindow : Window
             parameters.ChangeDirectionMoveTime = 3;
             parameters.UseRelativeCoordinates = false;
 
-            var calibrationDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ControlHub",
-                "Calibration");
             Directory.CreateDirectory(calibrationDirectory);
-            var calibrationPath = Path.Combine(calibrationDirectory, "first-xy-calibration.xml");
             parameters.CalibPathName = calibrationPath;
             parameters.RefreshFileEnable = true;
             parameters.DoClearPoint();
@@ -378,7 +391,7 @@ public partial class MainWindow : Window
                 $"九点标定已准备：基准({centerX:0.####}, {centerY:0.####})，" +
                 $"偏移({offsetX:0.####}, {offsetY:0.####})，{(xFirst ? "X" : "Y")}优先",
                 StatusKind.Busy);
-            return "实时预览已暂停；VisionMaster 九点参数已写入，旧标定点已清空。";
+            return $"已准备九点标定：{calibrationPath}";
         }
         catch
         {

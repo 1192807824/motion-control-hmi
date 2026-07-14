@@ -200,8 +200,11 @@ public sealed class VisionMasterProcessHost : HwndHost
         double offsetX,
         double offsetY,
         bool xFirst,
+        string calibrationFilePath,
         CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath));
         return SendCalibrationCommandAsync(
             string.Join(
                 "\t",
@@ -210,7 +213,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 centerY.ToString("R", CultureInfo.InvariantCulture),
                 offsetX.ToString("R", CultureInfo.InvariantCulture),
                 offsetY.ToString("R", CultureInfo.InvariantCulture),
-                xFirst ? "X" : "Y"),
+                xFirst ? "X" : "Y",
+                encodedPath),
             cancellationToken);
     }
 
