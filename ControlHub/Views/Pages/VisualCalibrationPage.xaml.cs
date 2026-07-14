@@ -4,8 +4,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using ControlHub.Services.Motion;
+using ControlHub.Services.Persistence;
 using ControlHub.Views.Controls;
 using Microsoft.Win32;
+using System.Windows.Threading;
 
 namespace ControlHub.Views.Pages;
 
@@ -15,11 +17,17 @@ public partial class VisualCalibrationPage : UserControl
     private const int FirstSetYHardwareAxisNo = 2;
     private const double PulsesPerVisionUnit = 10_000d;
     private const double DefaultPositionTolerancePulses = 10d;
+    private static readonly string DefaultCalibrationDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        "标定文件");
     private static readonly string DefaultCalibrationFilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ControlHub",
-        "Calibration",
-        "first-xy-calibration.xml");
+        DefaultCalibrationDirectory,
+        "第一套XY标定.xml");
+    private readonly VisualCalibrationSettingsStore _settingsStore = new();
+    private readonly DispatcherTimer _settingsSaveTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(500)
+    };
     private bool _startRequested;
     private bool _shutdown;
     private bool _hostReady;
@@ -33,11 +41,17 @@ public partial class VisualCalibrationPage : UserControl
     private CalibrationCenterPosition? _recordedCenter;
     private CancellationTokenSource? _calibrationCancellation;
     private CancellationTokenSource? _clickMoveCancellation;
+    private VisualCalibrationSettings _uiSettings = new();
+    private bool _settingsLoaded;
 
     public VisualCalibrationPage()
     {
         InitializeComponent();
-        CalibrationFilePathTextBox.Text = DefaultCalibrationFilePath;
+        _settingsSaveTimer.Tick += SettingsSaveTimer_Tick;
+        Unloaded += VisualCalibrationPage_Unloaded;
+        EnsureDefaultCalibrationDirectory();
+        LoadCalibrationSettings();
+        _settingsLoaded = true;
         UpdateVisionOffsetPreview();
         UpdateCommandState();
     }
@@ -69,6 +83,7 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         _shutdown = true;
+        SaveCalibrationSettingsNoThrow();
         _calibrationCancellation?.Cancel();
         _clickMoveCancellation?.Cancel();
         VisionHost.Shutdown();
@@ -172,6 +187,7 @@ public partial class VisualCalibrationPage : UserControl
                 : NinePointMovePriority.YFirst;
             var moveTimeoutMilliseconds = CalculateMoveTimeout(stepX, stepY, velocity);
             var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
+            SaveCalibrationSettingsNoThrow();
 
             _calibrationCancellation = new CancellationTokenSource();
             var cancellationToken = _calibrationCancellation.Token;
@@ -279,7 +295,9 @@ public partial class VisualCalibrationPage : UserControl
             AddExtension = true,
             DefaultExt = ".xml",
             OverwritePrompt = false,
-            InitialDirectory = Directory.Exists(currentDirectory) ? currentDirectory : null
+            InitialDirectory = Directory.Exists(currentDirectory)
+                ? currentDirectory
+                : DefaultCalibrationDirectory
         };
         if (!string.IsNullOrWhiteSpace(currentPath))
         {
@@ -293,12 +311,24 @@ public partial class VisualCalibrationPage : UserControl
 
         CalibrationFilePathTextBox.Text = dialog.FileName;
         SetWorkflowStatus("标定文件已设置。", WorkflowStatus.Ready);
+        SaveCalibrationSettingsNoThrow();
         UpdateCommandState();
     }
 
     private void CalibrationFilePath_Changed(object sender, TextChangedEventArgs e)
     {
+        ScheduleCalibrationSettingsSave();
         UpdateCommandState();
+    }
+
+    private void CalibrationSetting_Changed(object sender, TextChangedEventArgs e)
+    {
+        ScheduleCalibrationSettingsSave();
+    }
+
+    private void MovePriority_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ScheduleCalibrationSettingsSave();
     }
 
     private async void EnableClickMove_Changed(object sender, RoutedEventArgs e)
@@ -537,6 +567,7 @@ public partial class VisualCalibrationPage : UserControl
     private void CalibrationInput_Changed(object sender, TextChangedEventArgs e)
     {
         UpdateVisionOffsetPreview();
+        ScheduleCalibrationSettingsSave();
     }
 
     private void UpdateVisionOffsetPreview()
@@ -550,14 +581,127 @@ public partial class VisualCalibrationPage : UserControl
             TryParseFiniteDouble(StepYPulsesTextBox?.Text, out var stepY) && stepY > 0)
         {
             OffsetVmText.Text =
-                $"VisionMaster 间距 X：{stepX / PulsesPerVisionUnit:0.####}　" +
-                $"Y：{stepY / PulsesPerVisionUnit:0.####}";
+                $"VisionMaster：X {stepX / PulsesPerVisionUnit:0.####}　" +
+                $"Y {stepY / PulsesPerVisionUnit:0.####}";
             OffsetVmText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
             return;
         }
 
         OffsetVmText.Text = "X/Y 标定间距必须大于 0";
         OffsetVmText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+    }
+
+    private void LoadCalibrationSettings()
+    {
+        _uiSettings = _settingsStore.Load();
+        StepXPulsesTextBox.Text = FormatPositiveSetting(_uiSettings.StepXPulses, 100_000);
+        StepYPulsesTextBox.Text = FormatPositiveSetting(_uiSettings.StepYPulses, 100_000);
+        VelocityTextBox.Text = FormatPositiveSetting(_uiSettings.VelocityPulsesPerSecond, 100_000);
+        SettleMillisecondsTextBox.Text = Math.Max(0, _uiSettings.SettleMilliseconds)
+            .ToString(CultureInfo.CurrentCulture);
+
+        var priority = string.Equals(_uiSettings.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)
+            ? "Y"
+            : "X";
+        MovePriorityComboBox.SelectedItem = MovePriorityComboBox.Items
+            .OfType<ComboBoxItem>()
+            .First(item => string.Equals(item.Tag as string, priority, StringComparison.Ordinal));
+
+        CalibrationFilePathTextBox.Text =
+            TryGetCalibrationFilePath(_uiSettings.CalibrationFilePath, out var savedPath)
+                ? savedPath
+                : DefaultCalibrationFilePath;
+    }
+
+    private static string FormatPositiveSetting(double value, double fallback)
+    {
+        return (double.IsFinite(value) && value > 0 ? value : fallback)
+            .ToString("0.###", CultureInfo.CurrentCulture);
+    }
+
+    private void ScheduleCalibrationSettingsSave()
+    {
+        if (!_settingsLoaded || _shutdown)
+        {
+            return;
+        }
+
+        _settingsSaveTimer.Stop();
+        _settingsSaveTimer.Start();
+    }
+
+    private void SettingsSaveTimer_Tick(object? sender, EventArgs e)
+    {
+        _settingsSaveTimer.Stop();
+        SaveCalibrationSettingsNoThrow();
+    }
+
+    private void VisualCalibrationPage_Unloaded(object sender, RoutedEventArgs e)
+    {
+        SaveCalibrationSettingsNoThrow();
+    }
+
+    private void SaveCalibrationSettingsNoThrow()
+    {
+        if (!_settingsLoaded)
+        {
+            return;
+        }
+
+        try
+        {
+            if (TryParseFiniteDouble(StepXPulsesTextBox.Text, out var stepX) && stepX > 0)
+            {
+                _uiSettings.StepXPulses = stepX;
+            }
+
+            if (TryParseFiniteDouble(StepYPulsesTextBox.Text, out var stepY) && stepY > 0)
+            {
+                _uiSettings.StepYPulses = stepY;
+            }
+
+            if (TryParseFiniteDouble(VelocityTextBox.Text, out var velocity) && velocity > 0)
+            {
+                _uiSettings.VelocityPulsesPerSecond = velocity;
+            }
+
+            if (int.TryParse(
+                    SettleMillisecondsTextBox.Text,
+                    NumberStyles.Integer,
+                    CultureInfo.CurrentCulture,
+                    out var settleMilliseconds) &&
+                settleMilliseconds >= 0)
+            {
+                _uiSettings.SettleMilliseconds = settleMilliseconds;
+            }
+
+            _uiSettings.MovePriority =
+                (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Y"
+                    ? "Y"
+                    : "X";
+            if (TryGetCalibrationFilePath(CalibrationFilePathTextBox.Text, out var calibrationPath))
+            {
+                _uiSettings.CalibrationFilePath = calibrationPath;
+            }
+
+            _settingsStore.Save(_uiSettings);
+        }
+        catch
+        {
+            // Local preferences must never interrupt motion or vision operation.
+        }
+    }
+
+    private static void EnsureDefaultCalibrationDirectory()
+    {
+        try
+        {
+            Directory.CreateDirectory(DefaultCalibrationDirectory);
+        }
+        catch
+        {
+            // The selected file path is validated again before calibration starts.
+        }
     }
 
     private void UpdateCommandState()

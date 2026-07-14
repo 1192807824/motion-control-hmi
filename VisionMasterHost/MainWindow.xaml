@@ -179,12 +179,12 @@
                       IsHitTestVisible="False"
                       Visibility="Collapsed"
                       Panel.ZIndex="20">
-                    <Border Width="2"
+                    <Border Width="1"
                             Margin="0"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Stretch"
                             Background="#FF00E676" />
-                    <Border Height="2"
+                    <Border Height="1"
                             Margin="0"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
