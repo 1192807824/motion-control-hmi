@@ -29,11 +29,16 @@ public sealed class VisionMasterProcessHost : HwndHost
     private const int WsExControlParent = 0x00010000;
 
     private readonly object _syncRoot = new();
+    private readonly object _eventPipeSync = new();
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _commandGate = new(1, 1);
     private readonly string _pipeName = $"ControlHub.VisionCalibration.{Environment.ProcessId}.{Guid.NewGuid():N}";
+    private readonly string _eventPipeName = $"ControlHub.VisionCalibration.Events.{Environment.ProcessId}.{Guid.NewGuid():N}";
+    private readonly CancellationTokenSource _eventPipeCancellation = new();
     private CancellationTokenSource? _startCancellation;
     private Process? _process;
+    private NamedPipeServerStream? _activeEventPipe;
+    private Task? _eventPipeTask;
     private IntPtr _hostWindow;
     private IntPtr _visionWindow;
     private bool _disposed;
@@ -43,6 +48,10 @@ public sealed class VisionMasterProcessHost : HwndHost
     public event EventHandler<VisionMasterHostFailedEventArgs>? Failed;
 
     public event EventHandler? Exited;
+
+    public event EventHandler<VisionClickTargetEventArgs>? ClickTargetReceived;
+
+    public event EventHandler<VisionClickTargetFailedEventArgs>? ClickTargetFailed;
 
     public async Task StartAsync()
     {
@@ -63,6 +72,8 @@ public sealed class VisionMasterProcessHost : HwndHost
         {
             return;
         }
+
+        StartEventPipeServer();
 
         if (_hostWindow == IntPtr.Zero)
         {
@@ -106,7 +117,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = executablePath,
-                    Arguments = $"--embedded --parent-pid {Environment.ProcessId} --pipe-name {_pipeName}",
+                    Arguments = $"--embedded --parent-pid {Environment.ProcessId} --pipe-name {_pipeName} --event-pipe-name {_eventPipeName}",
                     WorkingDirectory = Path.GetDirectoryName(executablePath)!,
                     UseShellExecute = false,
                     CreateNoWindow = false
@@ -231,6 +242,18 @@ public sealed class VisionMasterProcessHost : HwndHost
         return SendCalibrationCommandAsync("COMPLETE", cancellationToken);
     }
 
+    public Task<string> SetClickMoveModeAsync(
+        bool enabled,
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath));
+        return SendCalibrationCommandAsync(
+            $"SET_CLICK_MODE\t{(enabled ? "1" : "0")}\t{encodedPath}",
+            cancellationToken);
+    }
+
     public async Task AbortNinePointCalibrationAsync()
     {
         try
@@ -320,7 +343,127 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
 
         _disposed = true;
+        _eventPipeCancellation.Cancel();
+        lock (_eventPipeSync)
+        {
+            try
+            {
+                _activeEventPipe?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _activeEventPipe = null;
+        }
+
         StopProcess();
+    }
+
+    private void StartEventPipeServer()
+    {
+        if (_eventPipeTask is not null)
+        {
+            return;
+        }
+
+        _eventPipeTask = RunEventPipeServerAsync(_eventPipeCancellation.Token);
+    }
+
+    private async Task RunEventPipeServerAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            NamedPipeServerStream? pipe = null;
+            try
+            {
+                pipe = new NamedPipeServerStream(
+                    _eventPipeName,
+                    PipeDirection.In,
+                    1,
+                    PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous);
+                lock (_eventPipeSync)
+                {
+                    _activeEventPipe = pipe;
+                }
+
+                await pipe.WaitForConnectionAsync(cancellationToken);
+                using var reader = new StreamReader(
+                    pipe,
+                    new UTF8Encoding(false),
+                    false,
+                    1024,
+                    leaveOpen: true);
+                var message = await reader.ReadLineAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    DispatchHostEvent(message);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (IOException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The helper may close while reconnecting; accept the next event connection.
+            }
+            finally
+            {
+                lock (_eventPipeSync)
+                {
+                    if (ReferenceEquals(_activeEventPipe, pipe))
+                    {
+                        _activeEventPipe = null;
+                    }
+                }
+
+                pipe?.Dispose();
+            }
+        }
+    }
+
+    private void DispatchHostEvent(string message)
+    {
+        var parts = message.Split('\t');
+        if (parts.Length == 5 &&
+            string.Equals(parts[0], "CLICK_TARGET", StringComparison.Ordinal) &&
+            int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixelX) &&
+            int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixelY) &&
+            double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var worldX) &&
+            double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var worldY) &&
+            double.IsFinite(worldX) &&
+            double.IsFinite(worldY))
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => ClickTargetReceived?.Invoke(
+                    this,
+                    new VisionClickTargetEventArgs(pixelX, pixelY, worldX, worldY)));
+            return;
+        }
+
+        if (parts.Length == 2 && string.Equals(parts[0], "CLICK_ERROR", StringComparison.Ordinal))
+        {
+            string errorMessage;
+            try
+            {
+                errorMessage = Encoding.UTF8.GetString(Convert.FromBase64String(parts[1]));
+            }
+            catch (FormatException)
+            {
+                errorMessage = parts[1];
+            }
+
+            _ = Dispatcher.BeginInvoke(
+                () => ClickTargetFailed?.Invoke(
+                    this,
+                    new VisionClickTargetFailedEventArgs(errorMessage)));
+        }
     }
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
@@ -703,6 +846,26 @@ public sealed class VisionMasterProcessHost : HwndHost
 }
 
 public sealed class VisionMasterHostFailedEventArgs(string message) : EventArgs
+{
+    public string Message { get; } = message;
+}
+
+public sealed class VisionClickTargetEventArgs(
+    int pixelX,
+    int pixelY,
+    double transformedX,
+    double transformedY) : EventArgs
+{
+    public int PixelX { get; } = pixelX;
+
+    public int PixelY { get; } = pixelY;
+
+    public double TransformedX { get; } = transformedX;
+
+    public double TransformedY { get; } = transformedY;
+}
+
+public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
 {
     public string Message { get; } = message;
 }

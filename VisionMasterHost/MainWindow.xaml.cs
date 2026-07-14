@@ -7,6 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using IMVSCalibTransformModuCs;
 using IMVSNPointCalibModuCs;
 using Microsoft.Win32;
 using VM.Core;
@@ -19,6 +20,7 @@ public partial class MainWindow : Window
 {
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly string? _commandPipeName;
+    private readonly string? _eventPipeName;
     private readonly CancellationTokenSource _commandPipeCancellation = new();
     private readonly object _commandPipeSync = new();
     private VmProcedure? _previewProcedure;
@@ -31,11 +33,18 @@ public partial class MainWindow : Window
     private bool _sdkAvailable = true;
     private bool _busy;
     private bool _restoreLivePreviewAfterCalibration;
+    private bool _clickMoveEnabled;
+    private bool _clickTransformBusy;
+    private string _clickCalibrationPath = "";
 
-    public MainWindow(bool embedded, string? commandPipeName = null)
+    public MainWindow(
+        bool embedded,
+        string? commandPipeName = null,
+        string? eventPipeName = null)
     {
         InitializeComponent();
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
+        _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
         if (embedded)
         {
             WindowStyle = WindowStyle.None;
@@ -54,6 +63,7 @@ public partial class MainWindow : Window
         SdkErrorTextBlock.Text = message;
         SdkErrorPanel.Visibility = Visibility.Visible;
         VisionRenderControl.IsEnabled = false;
+        CenterCrosshair.Visibility = Visibility.Collapsed;
         ImagePlaceholder.Visibility = Visibility.Collapsed;
         UpdateCommandState();
         SetStatus(message, StatusKind.Error);
@@ -196,8 +206,59 @@ public partial class MainWindow : Window
             "CAPTURE" => CaptureNinePointCalibration(parts),
             "COMPLETE" => CompleteNinePointCalibration(),
             "ABORT" => AbortNinePointCalibration(),
+            "SET_CLICK_MODE" => SetClickMoveMode(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
+    }
+
+    private string SetClickMoveMode(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 3 || (parts[1] != "0" && parts[1] != "1"))
+        {
+            throw new InvalidDataException("点击移动配置参数不正确。");
+        }
+
+        var enabled = parts[1] == "1";
+        string calibrationPath;
+        try
+        {
+            calibrationPath = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException("标定文件路径格式不正确。", exception);
+        }
+
+        if (!enabled)
+        {
+            _clickMoveEnabled = false;
+            _clickCalibrationPath = calibrationPath;
+            SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
+            return "点击视觉移动已关闭。";
+        }
+
+        if (_eventPipeName is null)
+        {
+            throw new InvalidOperationException("当前视觉窗口没有运动回传通道。");
+        }
+
+        if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        {
+            throw new InvalidOperationException("请先加载视觉方案并选择标定流程。");
+        }
+
+        var fullPath = Path.GetFullPath(calibrationPath);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("标定文件不存在。", fullPath);
+        }
+
+        var transformModule = ResolveCalibrationTransformModule(procedureName);
+        transformModule.ModuParams.LoadCalibPath = fullPath;
+        _clickCalibrationPath = fullPath;
+        _clickMoveEnabled = true;
+        SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
+        return $"已引用标定文件：{fullPath}。点击图像后将计算轴1/2目标。";
     }
 
     private string SetCalibrationCenter(IReadOnlyList<string> parts)
@@ -310,6 +371,7 @@ public partial class MainWindow : Window
 
             _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath);
             VisionRenderControl.ModuleSource = nPointModule;
+            CenterCrosshair.Visibility = Visibility.Visible;
             ImagePlaceholder.Visibility = Visibility.Collapsed;
             SetBusy(true);
             SetStatus(
@@ -482,6 +544,163 @@ public partial class MainWindow : Window
         }
 
         throw new InvalidOperationException("当前流程中未找到“N点标定”模块。");
+    }
+
+    private static IMVSCalibTransformModuTool ResolveCalibrationTransformModule(string procedureName)
+    {
+        var procedure = VmSolution.Instance[procedureName] as VmProcedure
+            ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
+        var moduleList = procedure.GetProcedureModuleList();
+        for (var index = 0; index < moduleList.nNum; index++)
+        {
+            var info = moduleList.astModuleInfo[index];
+            var displayName = info.strDisplayName?.Trim() ?? "";
+            var moduleName = info.strModuleName?.Trim() ?? "";
+            if (!string.Equals(moduleName, "IMVSCalibTransformModu", StringComparison.Ordinal) &&
+                !displayName.Contains("标定转换"))
+            {
+                continue;
+            }
+
+            foreach (var candidate in new[]
+                     {
+                         $"{procedureName}.{displayName}",
+                         $"{procedureName}.{moduleName}",
+                         displayName,
+                         moduleName
+                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
+            {
+                try
+                {
+                    if (VmSolution.Instance[candidate] is IMVSCalibTransformModuTool module)
+                    {
+                        return module;
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        throw new InvalidOperationException("当前标定流程中未找到“标定转换”模块。");
+    }
+
+    private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
+    {
+        if (!_clickMoveEnabled || _clickTransformBusy || _closed)
+        {
+            return;
+        }
+
+        _clickTransformBusy = true;
+        try
+        {
+            if (_busy || _calibrationSession is not null)
+            {
+                throw new InvalidOperationException("视觉标定正在执行，暂不允许点击移动。");
+            }
+
+            if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+            {
+                throw new InvalidOperationException("请先加载视觉方案并选择标定流程。");
+            }
+
+            if (string.IsNullOrWhiteSpace(_clickCalibrationPath) || !File.Exists(_clickCalibrationPath))
+            {
+                throw new FileNotFoundException("当前引用的标定文件不存在。", _clickCalibrationPath);
+            }
+
+            var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
+            if (previewWasRunning)
+            {
+                _previewProcedure!.ContinuousRunEnable = false;
+            }
+
+            VM.PlatformSDKCS.PointF transformedPoint;
+            try
+            {
+                var transformModule = ResolveCalibrationTransformModule(procedureName);
+                transformModule.ModuParams.LoadCalibPath = _clickCalibrationPath;
+                transformModule.ModuParams.InputPoint =
+                [
+                    new VM.PlatformSDKCS.PointF
+                    {
+                        X = pixelX,
+                        Y = pixelY
+                    }
+                ];
+                transformModule.Run();
+                var result = transformModule.ModuResult;
+                if (result.ModuStatus != 1 || result.TransPoint is null || result.TransPoint.Count == 0)
+                {
+                    throw new InvalidOperationException("标定转换模块未返回有效的机械坐标。");
+                }
+
+                transformedPoint = result.TransPoint[0];
+            }
+            finally
+            {
+                if (previewWasRunning && _previewProcedure is not null)
+                {
+                    _previewProcedure.ContinuousRunEnable = true;
+                }
+
+                UpdateCommandState();
+            }
+
+            SetStatus(
+                $"点击像素({pixelX}, {pixelY}) → 标定坐标({transformedPoint.X:0.####}, {transformedPoint.Y:0.####})",
+                StatusKind.Success);
+            await SendHostEventAsync(string.Join(
+                "\t",
+                "CLICK_TARGET",
+                pixelX.ToString(CultureInfo.InvariantCulture),
+                pixelY.ToString(CultureInfo.InvariantCulture),
+                transformedPoint.X.ToString("R", CultureInfo.InvariantCulture),
+                transformedPoint.Y.ToString("R", CultureInfo.InvariantCulture)));
+        }
+        catch (Exception exception)
+        {
+            var message = FormatException(exception);
+            SetStatus($"点击坐标转换失败：{message}", StatusKind.Error);
+            try
+            {
+                await SendHostEventAsync(
+                    $"CLICK_ERROR\t{Convert.ToBase64String(Encoding.UTF8.GetBytes(message))}");
+            }
+            catch
+            {
+            }
+        }
+        finally
+        {
+            _clickTransformBusy = false;
+        }
+    }
+
+    private async Task SendHostEventAsync(string message)
+    {
+        if (string.IsNullOrWhiteSpace(_eventPipeName))
+        {
+            return;
+        }
+
+        using var pipe = new NamedPipeClientStream(
+            ".",
+            _eventPipeName,
+            PipeDirection.Out,
+            PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(2_000).ConfigureAwait(false);
+        using var writer = new StreamWriter(
+            pipe,
+            new UTF8Encoding(false),
+            1024,
+            leaveOpen: true)
+        {
+            AutoFlush = true
+        };
+        await writer.WriteLineAsync(message).ConfigureAwait(false);
     }
 
     private async void ChooseSolution_Click(object sender, RoutedEventArgs e)
@@ -905,6 +1124,7 @@ public partial class MainWindow : Window
 
         if (_sdkAvailable)
         {
+            CenterCrosshair.Visibility = Visibility.Collapsed;
             ImagePlaceholder.Visibility = Visibility.Visible;
         }
     }
@@ -1003,6 +1223,7 @@ public partial class MainWindow : Window
         }
 
         ImagePlaceholder.Visibility = Visibility.Collapsed;
+        CenterCrosshair.Visibility = Visibility.Visible;
         if (!persistSelection)
         {
             return;

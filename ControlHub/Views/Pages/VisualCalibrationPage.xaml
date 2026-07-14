@@ -277,6 +277,53 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+
+                        <Border Margin="0,10,0,0" Padding="10" Background="#10283C" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="步骤 4　点击视觉移动"
+                                           Foreground="#F4F8FB"
+                                           FontSize="14"
+                                           FontWeight="Bold" />
+                                <TextBlock Margin="0,5,0,9"
+                                           Text="引用九点标定文件。启用后点击实时图像，程序会按标定偏差移动轴1 X / 轴2 Y；单次补偿限制在标定偏移的 2 倍内。"
+                                           Foreground="#AFC0CD"
+                                           FontSize="12"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="标定文件" Style="{StaticResource PanelLabel}" />
+                                <TextBox x:Name="ClickCalibrationFileTextBox"
+                                         Style="{StaticResource PanelInput}"
+                                         IsReadOnly="True"
+                                         ToolTip="VisionMaster N点标定生成的 XML 文件" />
+                                <Button x:Name="ChooseClickCalibrationFileButton"
+                                        Margin="0,7,0,0"
+                                        Content="选择标定文件"
+                                        Style="{StaticResource PanelButton}"
+                                        Background="#294A64"
+                                        BorderBrush="#45647A"
+                                        Click="ChooseClickCalibrationFile_Click" />
+                                <CheckBox x:Name="EnableClickMoveCheckBox"
+                                          Margin="0,10,0,0"
+                                          Foreground="#F4F8FB"
+                                          FontWeight="SemiBold"
+                                          Content="启用点击移动（轴1 X / 轴2 Y）"
+                                          Checked="EnableClickMove_Changed"
+                                          Unchecked="EnableClickMove_Changed" />
+                                <Button x:Name="StopClickMoveButton"
+                                        Margin="0,8,0,0"
+                                        Content="停止点击移动"
+                                        Style="{StaticResource PanelButton}"
+                                        Background="#D90D16"
+                                        BorderBrush="#A90A12"
+                                        IsEnabled="False"
+                                        Click="StopClickMove_Click" />
+                                <TextBlock x:Name="ClickMoveStatusText"
+                                           Margin="0,8,0,0"
+                                           Text="默认关闭；请先记录与标定文件对应的基准点。"
+                                           Foreground="#8FB2C9"
+                                           FontSize="11"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
@@ -291,7 +338,9 @@
                     <controls:VisionMasterProcessHost x:Name="VisionHost"
                                                       Started="VisionHost_Started"
                                                       Failed="VisionHost_Failed"
-                                                      Exited="VisionHost_Exited" />
+                                                      Exited="VisionHost_Exited"
+                                                      ClickTargetReceived="VisionHost_ClickTargetReceived"
+                                                      ClickTargetFailed="VisionHost_ClickTargetFailed" />
 
                     <StackPanel x:Name="HostPlaceholder"
                                 HorizontalAlignment="Center"

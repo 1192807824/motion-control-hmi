@@ -266,6 +266,99 @@ public partial class MotionControlPage : UserControl
             y.FeedbackPosition);
     }
 
+    public async Task<CalibrationCenterPosition> MoveCalibrationAxesToAsync(
+        int xHardwareAxisNo,
+        int yHardwareAxisNo,
+        double targetX,
+        double targetY,
+        double velocity,
+        double positionTolerance,
+        int moveTimeoutMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        if (xHardwareAxisNo < 0 || yHardwareAxisNo < 0 || xHardwareAxisNo == yHardwareAxisNo)
+        {
+            throw new ArgumentException("X/Y 轴号必须有效且不能相同。");
+        }
+
+        if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetX), "点击移动目标必须是有效数值。");
+        }
+
+        if (!double.IsFinite(velocity) || velocity <= 0 ||
+            !double.IsFinite(positionTolerance) || positionTolerance <= 0 ||
+            moveTimeoutMilliseconds < 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(velocity), "点击移动的速度、容差或超时参数无效。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行点击移动。");
+        }
+
+        var xAxis = GetCalibrationAxis(xHardwareAxisNo, "X");
+        var yAxis = GetCalibrationAxis(yHardwareAxisNo, "Y");
+        _ = ReadReadyCalibrationAxis(xAxis, "X");
+        _ = ReadReadyCalibrationAxis(yAxis, "Y");
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        var completed = false;
+        try
+        {
+            await MoveCalibrationAxesAsync(
+                xAxis,
+                yAxis,
+                targetX,
+                targetY,
+                velocity,
+                positionTolerance,
+                moveTimeoutMilliseconds,
+                linkedCancellation.Token);
+            var settled = ReadSettledCalibrationPosition(
+                xAxis,
+                yAxis,
+                targetX,
+                targetY,
+                positionTolerance);
+            completed = true;
+            return new CalibrationCenterPosition(
+                xHardwareAxisNo,
+                yHardwareAxisNo,
+                settled.X,
+                settled.Y);
+        }
+        finally
+        {
+            if (!completed && _motionCard.IsOpen)
+            {
+                StopCalibrationAxesNoThrow(xAxis, yAxis);
+            }
+
+            _calibrationOperationActive = false;
+            _calibrationMotionCancellation = null;
+            UpdateHomeEditorState();
+        }
+    }
+
     public async Task RunNinePointCalibrationAsync(
         NinePointMotionRequest request,
         Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,
@@ -325,7 +418,9 @@ public partial class MotionControlPage : UserControl
                     yAxis,
                     targetX,
                     targetY,
-                    request,
+                    request.Velocity,
+                    request.PositionTolerance,
+                    request.MoveTimeoutMilliseconds,
                     linkedCancellation.Token);
 
                 if (request.SettleMilliseconds > 0)
@@ -365,7 +460,9 @@ public partial class MotionControlPage : UserControl
                 yAxis,
                 request.CenterX,
                 request.CenterY,
-                request,
+                request.Velocity,
+                request.PositionTolerance,
+                request.MoveTimeoutMilliseconds,
                 linkedCancellation.Token);
 
             completed = true;
@@ -487,7 +584,9 @@ public partial class MotionControlPage : UserControl
         AxisStatus yAxis,
         double targetX,
         double targetY,
-        NinePointMotionRequest request,
+        double velocity,
+        double positionTolerance,
+        int moveTimeoutMilliseconds,
         CancellationToken cancellationToken)
     {
         var beforeX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
@@ -495,19 +594,19 @@ public partial class MotionControlPage : UserControl
         EnsureCalibrationAxisSafe(beforeX, "X");
         EnsureCalibrationAxisSafe(beforeY, "Y");
 
-        if (Math.Abs(beforeX.FeedbackPosition - targetX) > request.PositionTolerance)
+        if (Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance)
         {
-            _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, request.Velocity);
+            _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, velocity);
         }
 
-        if (Math.Abs(beforeY.FeedbackPosition - targetY) > request.PositionTolerance)
+        if (Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance)
         {
-            _motionCard.MoveAbsolute(yAxis.HardwareAxisNo, targetY, request.Velocity);
+            _motionCard.MoveAbsolute(yAxis.HardwareAxisNo, targetY, velocity);
         }
 
         xAxis.Target = targetX;
         yAxis.Target = targetY;
-        var deadline = DateTime.UtcNow.AddMilliseconds(request.MoveTimeoutMilliseconds);
+        var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
 
         while (true)
         {
@@ -519,8 +618,8 @@ public partial class MotionControlPage : UserControl
             EnsureCalibrationAxisSafe(currentX, "X");
             EnsureCalibrationAxisSafe(currentY, "Y");
 
-            var xInPosition = Math.Abs(currentX.FeedbackPosition - targetX) <= request.PositionTolerance;
-            var yInPosition = Math.Abs(currentY.FeedbackPosition - targetY) <= request.PositionTolerance;
+            var xInPosition = Math.Abs(currentX.FeedbackPosition - targetX) <= positionTolerance;
+            var yInPosition = Math.Abs(currentY.FeedbackPosition - targetY) <= positionTolerance;
             if (!currentX.IsMoving && !currentY.IsMoving && xInPosition && yInPosition)
             {
                 return;
@@ -529,7 +628,7 @@ public partial class MotionControlPage : UserControl
             if (DateTime.UtcNow >= deadline)
             {
                 throw new TimeoutException(
-                    $"九点标定运动超时。X={currentX.FeedbackPosition:0.###}/{targetX:0.###}，" +
+                    $"视觉坐标运动超时。X={currentX.FeedbackPosition:0.###}/{targetX:0.###}，" +
                     $"Y={currentY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
             }
 

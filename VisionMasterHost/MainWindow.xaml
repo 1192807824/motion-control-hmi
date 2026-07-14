@@ -172,7 +172,30 @@
                 ClipToBounds="True">
             <Grid>
                 <vm:VmRenderControl x:Name="VisionRenderControl"
-                                    CoordinateInfoVisible="True" />
+                                    CoordinateInfoVisible="True"
+                                    OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
+
+                <Grid x:Name="CenterCrosshair"
+                      IsHitTestVisible="False"
+                      Visibility="Collapsed"
+                      Panel.ZIndex="20">
+                    <Border Width="1"
+                            Height="56"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#FFFF3B30" />
+                    <Border Width="56"
+                            Height="1"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#FFFF3B30" />
+                    <Ellipse Width="12"
+                             Height="12"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"
+                             Stroke="#FFFF3B30"
+                             StrokeThickness="1" />
+                </Grid>
 
                 <StackPanel x:Name="ImagePlaceholder"
                             HorizontalAlignment="Center"

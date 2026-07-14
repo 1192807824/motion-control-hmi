@@ -30,7 +30,8 @@ public partial class App : Application
                 argument => string.Equals(argument, "--embedded", StringComparison.OrdinalIgnoreCase));
             var parentProcessId = ParseParentProcessId(e.Args);
             var pipeName = ParseArgumentValue(e.Args, "--pipe-name");
-            var window = new MainWindow(embedded, pipeName);
+            var eventPipeName = ParseArgumentValue(e.Args, "--event-pipe-name");
+            var window = new MainWindow(embedded, pipeName, eventPipeName);
             MainWindow = window;
             _visionMasterInitializationPending = true;
             window.ContentRendered += MainWindow_ContentRendered;

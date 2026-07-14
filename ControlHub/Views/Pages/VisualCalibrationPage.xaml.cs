@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using ControlHub.Services.Motion;
 using ControlHub.Views.Controls;
+using Microsoft.Win32;
 
 namespace ControlHub.Views.Pages;
 
@@ -14,19 +15,29 @@ public partial class VisualCalibrationPage : UserControl
     private const int FirstSetYHardwareAxisNo = 2;
     private const double PulsesPerVisionUnit = 10_000d;
     private const double DefaultPositionTolerancePulses = 10d;
+    private static readonly string DefaultClickCalibrationFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ControlHub",
+        "Calibration",
+        "first-xy-calibration.xml");
     private bool _startRequested;
     private bool _shutdown;
     private bool _hostReady;
     private bool _hostCanRestart;
     private bool _calibrationRunning;
     private bool _centerSyncRunning;
+    private bool _clickMoveRunning;
+    private bool _clickMoveConfigurationRunning;
+    private bool _suppressClickMoveModeEvent;
     private MotionControlPage? _motionController;
     private CalibrationCenterPosition? _recordedCenter;
     private CancellationTokenSource? _calibrationCancellation;
+    private CancellationTokenSource? _clickMoveCancellation;
 
     public VisualCalibrationPage()
     {
         InitializeComponent();
+        ClickCalibrationFileTextBox.Text = DefaultClickCalibrationFilePath;
         UpdateVisionOffsetPreview();
         UpdateCommandState();
     }
@@ -59,6 +70,7 @@ public partial class VisualCalibrationPage : UserControl
 
         _shutdown = true;
         _calibrationCancellation?.Cancel();
+        _clickMoveCancellation?.Cancel();
         VisionHost.Shutdown();
     }
 
@@ -242,6 +254,218 @@ public partial class VisualCalibrationPage : UserControl
         _calibrationCancellation?.Cancel();
     }
 
+    private void ChooseClickCalibrationFile_Click(object sender, RoutedEventArgs e)
+    {
+        var currentPath = ClickCalibrationFileTextBox.Text;
+        var currentDirectory = string.IsNullOrWhiteSpace(currentPath)
+            ? null
+            : Path.GetDirectoryName(currentPath);
+        var dialog = new OpenFileDialog
+        {
+            Title = "选择 VisionMaster 标定文件",
+            Filter = "VisionMaster 标定文件 (*.xml)|*.xml|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+            InitialDirectory = Directory.Exists(currentDirectory) ? currentDirectory : null
+        };
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true)
+        {
+            return;
+        }
+
+        ClickCalibrationFileTextBox.Text = dialog.FileName;
+        SetClickMoveStatus($"已选择标定文件：{dialog.FileName}", WorkflowStatus.Ready);
+        UpdateCommandState();
+    }
+
+    private async void EnableClickMove_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressClickMoveModeEvent)
+        {
+            return;
+        }
+
+        var enabled = EnableClickMoveCheckBox.IsChecked == true;
+        await ConfigureClickMoveModeAsync(enabled);
+    }
+
+    private async Task<bool> ConfigureClickMoveModeAsync(bool enabled)
+    {
+        if (_clickMoveConfigurationRunning)
+        {
+            return false;
+        }
+
+        _clickMoveConfigurationRunning = true;
+        UpdateCommandState();
+        try
+        {
+            if (enabled)
+            {
+                if (!_hostReady)
+                {
+                    throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
+                }
+
+                _ = _recordedCenter
+                    ?? throw new InvalidOperationException("请先记录与该标定文件对应的基准点。");
+                if (_calibrationRunning)
+                {
+                    throw new InvalidOperationException("九点标定正在执行。");
+                }
+
+                var path = ClickCalibrationFileTextBox.Text?.Trim() ?? "";
+                if (!File.Exists(path))
+                {
+                    throw new FileNotFoundException("标定文件不存在，请先选择有效文件。", path);
+                }
+
+                var message = await VisionHost.SetClickMoveModeAsync(
+                    true,
+                    Path.GetFullPath(path),
+                    CancellationToken.None);
+                SetClickMoveStatus(message, WorkflowStatus.Success);
+                return true;
+            }
+
+            _clickMoveCancellation?.Cancel();
+            if (_hostReady)
+            {
+                var path = string.IsNullOrWhiteSpace(ClickCalibrationFileTextBox.Text)
+                    ? DefaultClickCalibrationFilePath
+                    : ClickCalibrationFileTextBox.Text;
+                _ = await VisionHost.SetClickMoveModeAsync(false, path, CancellationToken.None);
+            }
+
+            SetClickMoveStatus("点击视觉移动已关闭。", WorkflowStatus.Ready);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            if (enabled)
+            {
+                SetClickMoveCheckedNoEvent(false);
+            }
+
+            SetClickMoveStatus($"点击移动配置失败：{exception.Message}", WorkflowStatus.Error);
+            return false;
+        }
+        finally
+        {
+            _clickMoveConfigurationRunning = false;
+            UpdateCommandState();
+        }
+    }
+
+    private async void VisionHost_ClickTargetReceived(object? sender, VisionClickTargetEventArgs e)
+    {
+        if (EnableClickMoveCheckBox.IsChecked != true || _clickMoveRunning || _calibrationRunning)
+        {
+            if (_clickMoveRunning)
+            {
+                SetClickMoveStatus("上一次点击移动尚未完成，本次点击已忽略。", WorkflowStatus.Error);
+            }
+
+            return;
+        }
+
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            var calibrationCenter = _recordedCenter
+                ?? throw new InvalidOperationException("请先记录标定基准点。");
+            var velocity = ParsePositiveDouble(VelocityTextBox.Text, "点击移动速度");
+            var current = motionController.CaptureCalibrationCenter(
+                FirstSetXHardwareAxisNo,
+                FirstSetYHardwareAxisNo);
+            var baseX = calibrationCenter.ActualX / PulsesPerVisionUnit;
+            var baseY = calibrationCenter.ActualY / PulsesPerVisionUnit;
+            var deltaX = (e.TransformedX - baseX) * PulsesPerVisionUnit;
+            var deltaY = (e.TransformedY - baseY) * PulsesPerVisionUnit;
+            var calibrationSpanX = Math.Abs(ParseFiniteNonZeroDouble(StepXPulsesTextBox.Text, "标定偏移 X"));
+            var calibrationSpanY = Math.Abs(ParseFiniteNonZeroDouble(StepYPulsesTextBox.Text, "标定偏移 Y"));
+            if (Math.Abs(deltaX) > calibrationSpanX * 2 || Math.Abs(deltaY) > calibrationSpanY * 2)
+            {
+                throw new InvalidOperationException(
+                    $"点击补偿超出安全范围：ΔX={deltaX:0.###}、ΔY={deltaY:0.###} pulse。" +
+                    "请检查标定文件、基准点和标定偏移。");
+            }
+
+            var targetX = current.ActualX + deltaX;
+            var targetY = current.ActualY + deltaY;
+            if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
+            {
+                throw new InvalidOperationException("标定转换后的轴目标无效。");
+            }
+
+            _clickMoveCancellation = new CancellationTokenSource();
+            _clickMoveRunning = true;
+            UpdateCommandState();
+            SetClickMoveStatus(
+                $"像素({e.PixelX}, {e.PixelY}) → 标定({e.TransformedX:0.####}, {e.TransformedY:0.####})；" +
+                $"正在移动到 X={targetX:0.###}、Y={targetY:0.###} pulse…",
+                WorkflowStatus.Running);
+
+            var actual = await motionController.MoveCalibrationAxesToAsync(
+                FirstSetXHardwareAxisNo,
+                FirstSetYHardwareAxisNo,
+                targetX,
+                targetY,
+                velocity,
+                DefaultPositionTolerancePulses,
+                CalculateDirectMoveTimeout(deltaX, deltaY, velocity),
+                _clickMoveCancellation.Token);
+            SetClickMoveStatus(
+                $"点击移动完成：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###} pulse。",
+                WorkflowStatus.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            SetClickMoveStatus("点击移动已停止，轴1/2已下发减速停止命令。", WorkflowStatus.Error);
+        }
+        catch (Exception exception)
+        {
+            SetClickMoveStatus($"点击移动失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _clickMoveCancellation?.Dispose();
+            _clickMoveCancellation = null;
+            _clickMoveRunning = false;
+            UpdateCommandState();
+        }
+    }
+
+    private void VisionHost_ClickTargetFailed(object? sender, VisionClickTargetFailedEventArgs e)
+    {
+        if (EnableClickMoveCheckBox.IsChecked == true)
+        {
+            SetClickMoveStatus($"标定坐标转换失败：{e.Message}", WorkflowStatus.Error);
+        }
+    }
+
+    private void StopClickMove_Click(object sender, RoutedEventArgs e)
+    {
+        StopClickMoveButton.IsEnabled = false;
+        SetClickMoveStatus("正在停止点击移动…", WorkflowStatus.Running);
+        _clickMoveCancellation?.Cancel();
+    }
+
+    private void SetClickMoveCheckedNoEvent(bool value)
+    {
+        _suppressClickMoveModeEvent = true;
+        try
+        {
+            EnableClickMoveCheckBox.IsChecked = value;
+        }
+        finally
+        {
+            _suppressClickMoveModeEvent = false;
+        }
+    }
+
     private async void RestartHost_Click(object sender, RoutedEventArgs e)
     {
         if (_calibrationRunning)
@@ -258,7 +482,7 @@ public partial class VisualCalibrationPage : UserControl
         await VisionHost.RestartAsync();
     }
 
-    private void VisionHost_Started(object? sender, EventArgs e)
+    private async void VisionHost_Started(object? sender, EventArgs e)
     {
         _hostReady = true;
         _hostCanRestart = true;
@@ -266,6 +490,10 @@ public partial class VisualCalibrationPage : UserControl
         RestartHostButton.IsEnabled = true;
         SetHostStatus("视觉组件已启动", HostStatus.Ready);
         UpdateCommandState();
+        if (EnableClickMoveCheckBox.IsChecked == true)
+        {
+            await ConfigureClickMoveModeAsync(true);
+        }
     }
 
     private void VisionHost_Failed(object? sender, VisionMasterHostFailedEventArgs e)
@@ -273,6 +501,8 @@ public partial class VisualCalibrationPage : UserControl
         _hostReady = false;
         _hostCanRestart = true;
         _calibrationCancellation?.Cancel();
+        _clickMoveCancellation?.Cancel();
+        SetClickMoveCheckedNoEvent(false);
         HostPlaceholder.Visibility = Visibility.Visible;
         RestartHostButton.IsEnabled = true;
         SetHostStatus($"视觉组件启动失败：{e.Message}", HostStatus.Error);
@@ -284,6 +514,8 @@ public partial class VisualCalibrationPage : UserControl
         _hostReady = false;
         _hostCanRestart = true;
         _calibrationCancellation?.Cancel();
+        _clickMoveCancellation?.Cancel();
+        SetClickMoveCheckedNoEvent(false);
         if (_shutdown)
         {
             return;
@@ -331,20 +563,41 @@ public partial class VisualCalibrationPage : UserControl
         RecordCenterButton.IsEnabled =
             !_calibrationRunning &&
             !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null;
         StartCalibrationButton.IsEnabled =
             !_calibrationRunning &&
             !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null &&
             _recordedCenter is not null &&
             _hostReady;
         StopCalibrationButton.IsEnabled = _calibrationRunning;
-        RestartHostButton.IsEnabled = !_calibrationRunning && _hostCanRestart;
-        StepXPulsesTextBox.IsEnabled = !_calibrationRunning;
-        StepYPulsesTextBox.IsEnabled = !_calibrationRunning;
-        VelocityTextBox.IsEnabled = !_calibrationRunning;
-        SettleMillisecondsTextBox.IsEnabled = !_calibrationRunning;
-        MovePriorityComboBox.IsEnabled = !_calibrationRunning;
+        RestartHostButton.IsEnabled =
+            !_calibrationRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            _hostCanRestart;
+        StepXPulsesTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
+        StepYPulsesTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
+        VelocityTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
+        SettleMillisecondsTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
+        MovePriorityComboBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
+        ChooseClickCalibrationFileButton.IsEnabled =
+            !_calibrationRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            EnableClickMoveCheckBox.IsChecked != true;
+        EnableClickMoveCheckBox.IsEnabled =
+            !_calibrationRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            _motionController is not null &&
+            _recordedCenter is not null &&
+            _hostReady;
+        StopClickMoveButton.IsEnabled = _clickMoveRunning;
     }
 
     private void SetHostStatus(string message, HostStatus status)
@@ -367,6 +620,18 @@ public partial class VisualCalibrationPage : UserControl
             WorkflowStatus.Error => Color.FromRgb(242, 122, 128),
             WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
             _ => Color.FromRgb(216, 228, 236)
+        });
+    }
+
+    private void SetClickMoveStatus(string message, WorkflowStatus status)
+    {
+        ClickMoveStatusText.Text = message;
+        ClickMoveStatusText.Foreground = new SolidColorBrush(status switch
+        {
+            WorkflowStatus.Success => Color.FromRgb(73, 209, 125),
+            WorkflowStatus.Error => Color.FromRgb(242, 122, 128),
+            WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
+            _ => Color.FromRgb(143, 178, 201)
         });
     }
 
@@ -410,6 +675,13 @@ public partial class VisualCalibrationPage : UserControl
     private static int CalculateMoveTimeout(double stepX, double stepY, double velocity)
     {
         var longestMovePulses = Math.Max(Math.Abs(stepX), Math.Abs(stepY)) * 2;
+        var estimatedMilliseconds = longestMovePulses / velocity * 1000;
+        return (int)Math.Clamp(estimatedMilliseconds + 15_000, 15_000, 180_000);
+    }
+
+    private static int CalculateDirectMoveTimeout(double deltaX, double deltaY, double velocity)
+    {
+        var longestMovePulses = Math.Max(Math.Abs(deltaX), Math.Abs(deltaY));
         var estimatedMilliseconds = longestMovePulses / velocity * 1000;
         return (int)Math.Clamp(estimatedMilliseconds + 15_000, 15_000, 180_000);
     }

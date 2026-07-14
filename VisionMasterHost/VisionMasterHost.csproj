@@ -45,6 +45,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSNPointCalibModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSCalibTransformModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSCalibTransformModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
