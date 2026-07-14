@@ -329,6 +329,19 @@
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                 <Button Content="伺服使能" Style="{StaticResource FlatButton}" Background="#168A37" Margin="0,0,8,0" IsEnabled="{Binding SelectedAxis.CanServoOn}" Click="ServoOn_Click" />
                                 <Button Content="解除使能" Style="{StaticResource FlatButton}" IsEnabled="{Binding SelectedAxis.CanServoOff}" Click="ServoOff_Click" />
+                                <Button Content="全部使能"
+                                        Style="{StaticResource FlatButton}"
+                                        Background="#168A37"
+                                        Margin="16,0,8,0"
+                                        AutomationProperties.Name="使能全部硬件轴"
+                                        ToolTip="确认机构安全后，逐轴使能控制卡检测到且配置允许的全部硬件轴。"
+                                        Click="ServoAllOn_Click" />
+                                <Button Content="关闭所有使能"
+                                        Style="{StaticResource FlatButton}"
+                                        Background="#B45309"
+                                        AutomationProperties.Name="关闭全部硬件轴使能"
+                                        ToolTip="仅在全部硬件轴均已停止并确认后，逐轴解除使能。"
+                                        Click="ServoAllOff_Click" />
                             </StackPanel>
                         </Grid>
                     </Border>
