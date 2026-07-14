@@ -466,7 +466,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                 LeisaiNative.nmc_set_home_profile(
                     _cardNo,
                     axis,
-                    profile.Mode,
+                    EncodeHomeMode(profile.Mode),
                     profile.LowVelocity,
                     profile.HighVelocity,
                     profile.AccelerationSeconds,
@@ -796,6 +796,21 @@ public sealed class LeisaiMotionCard : IMotionCard
         {
             throw new ArgumentOutOfRangeException(nameof(velocity), "速度必须是大于 0 的有限数值。");
         }
+    }
+
+    private static ushort EncodeHomeMode(int mode)
+    {
+        if (mode is < short.MinValue or > ushort.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(mode),
+                mode,
+                "回零模式必须是 -32768 到 65535 之间的整数。");
+        }
+
+        // LTDMC exposes home_mode as WORD. Preserve negative drive method codes by
+        // passing their 16-bit two's-complement representation to the native API.
+        return unchecked((ushort)mode);
     }
 
     private void ValidateAnalogChannel(int channel, int channelCount, string parameterName)

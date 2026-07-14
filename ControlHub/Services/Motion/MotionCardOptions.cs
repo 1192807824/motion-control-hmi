@@ -310,7 +310,7 @@ public sealed class MotionHomeProfile
 {
     public bool Enabled { get; init; }
 
-    public ushort Mode { get; init; } = 33;
+    public int Mode { get; init; } = 33;
 
     public double LowVelocity { get; init; } = 5;
 
@@ -327,6 +327,11 @@ public sealed class MotionHomeProfile
         if (requireEnabled && !Enabled)
         {
             throw new InvalidDataException("该轴尚未启用回零配置。请按驱动器和机构要求设置 motion-settings.json。");
+        }
+
+        if (Mode is < short.MinValue or > ushort.MaxValue)
+        {
+            throw new InvalidDataException("Mode 必须是 -32768 到 65535 之间的整数。");
         }
 
         MotionMoveProfile.ValidateFinitePositive(LowVelocity, nameof(LowVelocity));

@@ -86,9 +86,9 @@ public sealed class MotionHomeTuningSettings : INotifyPropertyChanged
 
     public MotionHomeProfile CreateProfile()
     {
-        if (Mode is < ushort.MinValue or > ushort.MaxValue)
+        if (Mode is < short.MinValue or > ushort.MaxValue)
         {
-            throw new InvalidDataException("回零模式必须是 0 到 65535 之间的整数。");
+            throw new InvalidDataException("回零模式必须是 -32768 到 65535 之间的整数。");
         }
 
         if (TimeoutSeconds is < 1 or > 3600)
@@ -104,7 +104,7 @@ public sealed class MotionHomeTuningSettings : INotifyPropertyChanged
         var profile = new MotionHomeProfile
         {
             Enabled = Enabled,
-            Mode = (ushort)Mode,
+            Mode = Mode,
             LowVelocity = LowVelocity,
             HighVelocity = HighVelocity,
             AccelerationSeconds = AccelerationMilliseconds / 1000,

@@ -38,7 +38,7 @@
 | 等待运动完成 | `WaitForCompletion` | 软件等待策略 | 勾选时命令调用等待到位；未勾选时后台仍继续监控到位/超时 |
 | 完成超时 | `CompletionTimeoutMilliseconds` | 软件截止时间 | 超时后先单轴减速停；停止确认超时再升级全轴急停 |
 | 到位误差 | `CompletionTolerance` | 编码器反馈与目标差值 | 必须大于 0；与 `dmc_check_done==1` 同时满足才算完成 |
-| 回零模式 | 当前轴 `HomeTuning.Mode` | `nmc_set_home_profile.home_mode` | 可直接输入 0..65535 的整数，必须按驱动器与传感器确认 |
+| 回零模式 | 当前轴 `HomeTuning.Mode` | `nmc_set_home_profile.home_mode` | 可输入 -32768..65535；负数按 16 位补码下发，必须按驱动器与传感器确认 |
 | 回零低速/高速 | 当前轴独立配置 | `nmc_set_home_profile.low/high_vel` | 都必须大于 0，且高速不得小于低速 |
 | 回零加速/减速 | 界面 ms，保存/下发为 s | `nmc_set_home_profile.tacc/tdec` | 必须大于 0 |
 | 回零偏移 | 当前轴独立配置 | `nmc_set_home_profile.offset_pos` | 允许正、负或零，必须是有限数值 |
