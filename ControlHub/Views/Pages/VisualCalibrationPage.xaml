@@ -109,7 +109,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="350" />
                 <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="*" MaxWidth="1050" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"

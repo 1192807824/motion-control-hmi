@@ -163,94 +163,143 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="2"
-                Margin="10"
-                Background="#202427"
-                BorderBrush="#345269"
-                BorderThickness="1"
-                CornerRadius="5"
-                ClipToBounds="True">
-            <Grid>
-                <vm:VmRenderControl x:Name="VisionRenderControl"
-                                    CoordinateInfoVisible="True"
-                                    OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
+        <Grid Grid.Row="2" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                <Grid x:Name="CenterCrosshair"
-                      IsHitTestVisible="False"
-                      Visibility="Collapsed"
-                      Panel.ZIndex="20">
-                    <Border Width="1"
-                            Margin="0"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Stretch"
-                            Background="#FF00E676" />
-                    <Border Height="1"
-                            Margin="0"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Center"
-                            Background="#FF00E676" />
-                </Grid>
-
-                <StackPanel x:Name="ImagePlaceholder"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False">
-                    <Border Width="70"
-                            Height="70"
-                            CornerRadius="35"
-                            Background="#263A4B">
-                        <TextBlock Text="▣"
-                                   Foreground="#6E879A"
-                                   FontSize="34"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center" />
-                    </Border>
-                    <TextBlock Margin="0,18,0,0"
-                               Text="选择标定方案后显示步骤图像"
-                               Foreground="#AAB9C6"
-                               FontSize="16"
-                               FontWeight="SemiBold"
-                               HorizontalAlignment="Center" />
-                    <TextBlock Margin="0,6,0,0"
-                               Text="程序会记住当前方案、流程和图像步骤"
-                               Foreground="#71889A"
-                               FontSize="12"
-                               HorizontalAlignment="Center" />
-                </StackPanel>
-
-                <Border x:Name="SdkErrorPanel"
-                        Visibility="Collapsed"
-                        Background="#EC202427">
-                    <Border Width="620"
-                            Padding="28"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
+            <Border Grid.Column="0"
+                    Background="#202427"
+                    BorderBrush="#345269"
+                    BorderThickness="1"
+                    CornerRadius="5"
+                    ClipToBounds="True">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Padding="10,0"
                             Background="#163047"
-                            BorderBrush="#D90D16"
-                            BorderThickness="2"
-                            CornerRadius="8">
-                        <StackPanel>
-                            <TextBlock Text="VisionMaster SDK 初始化失败"
-                                       Foreground="#FFFFFF"
-                                       FontSize="22"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Center" />
-                            <TextBlock x:Name="SdkErrorTextBlock"
-                                       Margin="0,14,0,0"
-                                       Foreground="#F2C7C9"
-                                       FontSize="14"
-                                       TextAlignment="Center"
-                                       TextWrapping="Wrap" />
-                            <TextBlock Margin="0,14,0,0"
-                                       Text="请确认 VisionMaster 4.4 已安装并激活、加密狗可用，关闭其他 VisionMaster 程序后再重启视觉组件。"
-                                       Foreground="#AAB9C6"
-                                       FontSize="13"
-                                       TextAlignment="Center"
-                                       TextWrapping="Wrap" />
+                            BorderBrush="#345269"
+                            BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="#39C56B" />
+                            <TextBlock Margin="7,0,0,0"
+                                       Text="实时相机"
+                                       Foreground="#F4F8FB"
+                                       FontSize="12"
+                                       FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
+                    <Grid Grid.Row="1">
+                        <vm:VmRenderControl x:Name="VisionRenderControl"
+                                            CoordinateInfoVisible="True"
+                                            OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
+                        <Grid x:Name="CenterCrosshair"
+                              IsHitTestVisible="False"
+                              Visibility="Collapsed"
+                              Panel.ZIndex="20">
+                            <Border Width="1"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Stretch"
+                                    Background="#FF00E676" />
+                            <Border Height="1"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Center"
+                                    Background="#FF00E676" />
+                        </Grid>
+                        <StackPanel x:Name="ImagePlaceholder"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False">
+                            <TextBlock Text="等待实时图像"
+                                       Foreground="#AAB9C6"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Background="#202427"
+                    BorderBrush="#345269"
+                    BorderThickness="1"
+                    CornerRadius="5"
+                    ClipToBounds="True">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Padding="10,0"
+                            Background="#163047"
+                            BorderBrush="#345269"
+                            BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="#0D6EE8" />
+                            <TextBlock Margin="7,0,0,0"
+                                       Text="标定渲染"
+                                       Foreground="#F4F8FB"
+                                       FontSize="12"
+                                       FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <Grid Grid.Row="1">
+                        <vm:VmRenderControl x:Name="CalibrationRenderControl"
+                                            CoordinateInfoVisible="True" />
+                        <StackPanel x:Name="CalibrationImagePlaceholder"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False">
+                            <TextBlock Text="等待九点标定"
+                                       Foreground="#AAB9C6"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.ColumnSpan="3"
+                    x:Name="SdkErrorPanel"
+                    Visibility="Collapsed"
+                    Background="#EC202427"
+                    Panel.ZIndex="100">
+                <Border Width="620"
+                        Padding="28"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="#163047"
+                        BorderBrush="#D90D16"
+                        BorderThickness="2"
+                        CornerRadius="8">
+                    <StackPanel>
+                        <TextBlock Text="VisionMaster SDK 初始化失败"
+                                   Foreground="#FFFFFF"
+                                   FontSize="22"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock x:Name="SdkErrorTextBlock"
+                                   Margin="0,14,0,0"
+                                   Foreground="#F2C7C9"
+                                   FontSize="14"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,14,0,0"
+                                   Text="请确认 VisionMaster 4.4 已安装并激活、加密狗可用，关闭其他 VisionMaster 程序后再重启视觉组件。"
+                                   Foreground="#AAB9C6"
+                                   FontSize="13"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
                 </Border>
-            </Grid>
-        </Border>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
