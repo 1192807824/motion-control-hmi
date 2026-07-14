@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private bool _closed;
     private bool _sdkAvailable = true;
     private bool _busy;
+    private bool _restoreLivePreviewAfterCalibration;
 
     public MainWindow(bool embedded, string? commandPipeName = null)
     {
@@ -209,11 +210,6 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("请先在视觉组件中加载标定方案并选择标定流程。");
         }
 
-        if (_activeProcedure.ContinuousRunEnable)
-        {
-            throw new InvalidOperationException("请先停止 VisionMaster 连续运行。");
-        }
-
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
         var offsetX = ParseFiniteNonZeroDouble(parts[3], "偏移X");
@@ -226,39 +222,51 @@ public partial class MainWindow : Window
         };
 
         var nPointModule = ResolveNPointCalibrationModule(procedureName);
-        var parameters = nPointModule.ModuParams;
-        parameters.CalibPointGet = NPointCalibParam.CalibPointGetEnum.TriggerAcquisition;
-        parameters.CalibPointTotalNum = 9;
-        parameters.RotPointTotalNum = 0;
-        parameters.TeachEnable = false;
-        parameters.BasePointX = centerX;
-        parameters.BasePointY = centerY;
-        parameters.MoveAlignX = offsetX;
-        parameters.MoveAlignY = offsetY;
-        parameters.MoveFirstType = xFirst
-            ? NPointCalibParam.MoveFirstTypeEnum.XFirst
-            : NPointCalibParam.MoveFirstTypeEnum.YFirst;
-        parameters.ChangeDirectionMoveTime = 3;
-        parameters.UseRelativeCoordinates = false;
+        PauseLivePreviewForCalibration();
+        try
+        {
+            var parameters = nPointModule.ModuParams;
+            parameters.CalibPointGet = NPointCalibParam.CalibPointGetEnum.TriggerAcquisition;
+            parameters.CalibPointTotalNum = 9;
+            parameters.RotPointTotalNum = 0;
+            parameters.TeachEnable = false;
+            parameters.BasePointX = centerX;
+            parameters.BasePointY = centerY;
+            parameters.MoveAlignX = offsetX;
+            parameters.MoveAlignY = offsetY;
+            parameters.MoveFirstType = xFirst
+                ? NPointCalibParam.MoveFirstTypeEnum.XFirst
+                : NPointCalibParam.MoveFirstTypeEnum.YFirst;
+            parameters.ChangeDirectionMoveTime = 3;
+            parameters.UseRelativeCoordinates = false;
 
-        var calibrationDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ControlHub",
-            "Calibration");
-        Directory.CreateDirectory(calibrationDirectory);
-        var calibrationPath = Path.Combine(calibrationDirectory, "first-xy-calibration.xml");
-        parameters.CalibPathName = calibrationPath;
-        parameters.RefreshFileEnable = true;
-        parameters.DoClearPoint();
+            var calibrationDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ControlHub",
+                "Calibration");
+            Directory.CreateDirectory(calibrationDirectory);
+            var calibrationPath = Path.Combine(calibrationDirectory, "first-xy-calibration.xml");
+            parameters.CalibPathName = calibrationPath;
+            parameters.RefreshFileEnable = true;
+            parameters.DoClearPoint();
 
-        _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath);
-        VisionRenderControl.ModuleSource = nPointModule;
-        SetBusy(true);
-        SetStatus(
-            $"九点标定已准备：基准({centerX:0.####}, {centerY:0.####})，" +
-            $"偏移({offsetX:0.####}, {offsetY:0.####})，{(xFirst ? "X" : "Y")}优先",
-            StatusKind.Busy);
-        return "VisionMaster 九点参数已写入，旧标定点已清空。";
+            _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath);
+            VisionRenderControl.ModuleSource = nPointModule;
+            ImagePlaceholder.Visibility = Visibility.Collapsed;
+            SetBusy(true);
+            SetStatus(
+                $"九点标定已准备：基准({centerX:0.####}, {centerY:0.####})，" +
+                $"偏移({offsetX:0.####}, {offsetY:0.####})，{(xFirst ? "X" : "Y")}优先",
+                StatusKind.Busy);
+            return "实时预览已暂停；VisionMaster 九点参数已写入，旧标定点已清空。";
+        }
+        catch
+        {
+            _calibrationSession = null;
+            _ = TryRestoreLivePreview(out _);
+            SetBusy(false);
+            throw;
+        }
     }
 
     private string CaptureNinePointCalibration(IReadOnlyList<string> parts)
@@ -324,12 +332,13 @@ public partial class MainWindow : Window
         }
 
         session.Module.ModuParams.DoSaveFile(session.CalibrationPath);
+        _calibrationSession = null;
+        var previewRestored = TryRestoreLivePreview(out var previewStatus);
         var message =
             $"九点标定成功，像素精度 {result.PixelPrecision:0.######}，" +
-            $"标定文件：{session.CalibrationPath}";
-        _calibrationSession = null;
+            $"标定文件：{session.CalibrationPath}{previewStatus}";
         SetBusy(false);
-        SetStatus(message, StatusKind.Success);
+        SetStatus(message, previewRestored ? StatusKind.Success : StatusKind.Error);
         return message;
     }
 
@@ -341,9 +350,11 @@ public partial class MainWindow : Window
             _calibrationSession = null;
         }
 
+        var previewRestored = TryRestoreLivePreview(out var previewStatus);
+        var message = $"九点标定已取消，本次未完成的标定点已清空{previewStatus}。";
         SetBusy(false);
-        SetStatus("九点标定已取消，本次未完成的标定点已清空。", StatusKind.Ready);
-        return "VisionMaster 九点标定已取消。";
+        SetStatus(message, previewRestored ? StatusKind.Ready : StatusKind.Error);
+        return message;
     }
 
     private static double ParseFiniteDouble(string value, string name)
@@ -468,11 +479,14 @@ public partial class MainWindow : Window
             ProcedureComboBox.SelectedItem = SelectPreferredProcedure(procedureNames);
             SaveSettingsNoThrow();
             UpdateCommandState();
-            SetStatus(
-                autoRestore
-                    ? $"已自动加载：{Path.GetFileName(solutionPath)}"
-                    : $"方案已加载：{Path.GetFileName(solutionPath)}",
-                StatusKind.Success);
+            if (_activeProcedure?.ContinuousRunEnable == true)
+            {
+                SetStatus(
+                    autoRestore
+                        ? $"已自动加载：{Path.GetFileName(solutionPath)}；实时预览已启动"
+                        : $"方案已加载：{Path.GetFileName(solutionPath)}；实时预览已启动",
+                    StatusKind.Success);
+            }
         }
         catch (Exception exception)
         {
@@ -506,7 +520,14 @@ public partial class MainWindow : Window
             _settings.ProcedureName = procedureName;
             PopulateImageSteps(procedureName, _activeProcedure);
             SaveSettingsNoThrow();
-            UpdateCommandState();
+            if (TryStartLivePreview(out var previewError))
+            {
+                SetStatus($"{procedureName} 实时预览已启动", StatusKind.Success);
+            }
+            else
+            {
+                SetStatus($"流程已加载，但实时预览启动失败：{previewError}", StatusKind.Error);
+            }
         }
         catch (Exception exception)
         {
@@ -524,6 +545,11 @@ public partial class MainWindow : Window
         ImageStepComboBox.ItemsSource = options;
         ImageStepComboBox.SelectedItem =
             options.FirstOrDefault(option =>
+                string.Equals(option.DisplayName, "图像源1", StringComparison.Ordinal))
+            ?? options.FirstOrDefault(option => option.IsImageSource)
+            ?? options.FirstOrDefault(option =>
+                option.DisplayName.Contains("图像采集"))
+            ?? options.FirstOrDefault(option =>
                 string.Equals(option.ModuleKey, _settings.ImageModuleKey, StringComparison.Ordinal))
             ?? options.FirstOrDefault(option => option.DisplayName.Contains("N点标定"))
             ?? options.FirstOrDefault(option => option.DisplayName.Contains("标定"))
@@ -560,7 +586,8 @@ public partial class MainWindow : Window
             options.Add(new VisionModuleOption(
                 $"{procedureName}（流程图像）",
                 procedureName,
-                procedure));
+                procedure,
+                isImageSource: false));
         }
 
         return options;
@@ -587,7 +614,11 @@ public partial class MainWindow : Window
             {
                 if (VmSolution.Instance[candidate] is IVmModule module)
                 {
-                    return new VisionModuleOption(displayName, candidate, module);
+                    var isImageSource =
+                        displayName.Contains("图像源") ||
+                        displayName.Contains("图像采集") ||
+                        moduleName.IndexOf("ImageSource", StringComparison.OrdinalIgnoreCase) >= 0;
+                    return new VisionModuleOption(displayName, candidate, module, isImageSource);
                 }
             }
             catch
@@ -608,19 +639,7 @@ public partial class MainWindow : Window
 
         try
         {
-            VisionRenderControl.ModuleSource = option.Module;
-            try
-            {
-                VisionRenderControl.UpdateVMResultShow();
-            }
-            catch
-            {
-                // A newly loaded module may not have a render result until its first run.
-            }
-
-            ImagePlaceholder.Visibility = Visibility.Collapsed;
-            _settings.ImageModuleKey = option.ModuleKey;
-            SaveSettingsNoThrow();
+            BindImageStep(option, persistSelection: true);
             SetStatus($"当前图像：{ProcedureComboBox.SelectedItem} / {option.DisplayName}", StatusKind.Ready);
         }
         catch (Exception exception)
@@ -662,9 +681,14 @@ public partial class MainWindow : Window
 
         try
         {
-            _activeProcedure!.ContinuousRunEnable = true;
-            UpdateCommandState();
-            SetStatus("流程正在连续运行", StatusKind.Success);
+            if (TryStartLivePreview(out var previewError))
+            {
+                SetStatus("实时预览已启动", StatusKind.Success);
+            }
+            else
+            {
+                SetStatus($"实时预览启动失败：{previewError}", StatusKind.Error);
+            }
         }
         catch (Exception exception)
         {
@@ -683,7 +707,7 @@ public partial class MainWindow : Window
         {
             _activeProcedure.ContinuousRunEnable = false;
             UpdateCommandState();
-            SetStatus("流程已停止", StatusKind.Ready);
+            SetStatus("实时预览已暂停", StatusKind.Ready);
         }
         catch (Exception exception)
         {
@@ -793,6 +817,93 @@ public partial class MainWindow : Window
         catch
         {
         }
+    }
+
+    private void PauseLivePreviewForCalibration()
+    {
+        _restoreLivePreviewAfterCalibration = _activeProcedure?.ContinuousRunEnable == true;
+        if (_restoreLivePreviewAfterCalibration)
+        {
+            _activeProcedure!.ContinuousRunEnable = false;
+        }
+
+        UpdateCommandState();
+    }
+
+    private bool TryStartLivePreview(out string errorMessage)
+    {
+        if (!_solutionLoaded || _activeProcedure is null)
+        {
+            errorMessage = "视觉方案或流程尚未加载";
+            return false;
+        }
+
+        if (_calibrationSession is not null)
+        {
+            errorMessage = "九点标定正在执行";
+            return false;
+        }
+
+        try
+        {
+            if (ImageStepComboBox.SelectedItem is VisionModuleOption option)
+            {
+                BindImageStep(option, persistSelection: false);
+            }
+
+            _activeProcedure.ContinuousRunEnable = true;
+            UpdateCommandState();
+            errorMessage = "";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            UpdateCommandState();
+            errorMessage = FormatException(exception);
+            return false;
+        }
+    }
+
+    private bool TryRestoreLivePreview(out string statusSuffix)
+    {
+        var shouldRestore = _restoreLivePreviewAfterCalibration;
+        _restoreLivePreviewAfterCalibration = false;
+        if (!shouldRestore)
+        {
+            statusSuffix = "";
+            return true;
+        }
+
+        if (TryStartLivePreview(out var errorMessage))
+        {
+            statusSuffix = "；实时预览已恢复";
+            return true;
+        }
+
+        statusSuffix = $"；实时预览恢复失败：{errorMessage}";
+        return false;
+    }
+
+    private void BindImageStep(VisionModuleOption option, bool persistSelection)
+    {
+        VisionRenderControl.ModuleSource = option.Module;
+        try
+        {
+            VisionRenderControl.UpdateVMResultShow();
+        }
+        catch
+        {
+            // A newly loaded image source may not have a render result until its first frame.
+        }
+
+        ImagePlaceholder.Visibility = Visibility.Collapsed;
+        if (!persistSelection)
+        {
+            return;
+        }
+
+        _settings.ImageModuleKey = option.ModuleKey;
+        SaveSettingsNoThrow();
     }
 
     private void SetBusy(bool busy)
@@ -926,11 +1037,16 @@ public partial class MainWindow : Window
 
     private sealed class VisionModuleOption
     {
-        public VisionModuleOption(string displayName, string moduleKey, IVmModule module)
+        public VisionModuleOption(
+            string displayName,
+            string moduleKey,
+            IVmModule module,
+            bool isImageSource)
         {
             DisplayName = displayName;
             ModuleKey = moduleKey;
             Module = module;
+            IsImageSource = isImageSource;
         }
 
         public string DisplayName { get; }
@@ -938,6 +1054,8 @@ public partial class MainWindow : Window
         public string ModuleKey { get; }
 
         public IVmModule Module { get; }
+
+        public bool IsImageSource { get; }
     }
 
     private sealed class VisionCalibrationSession

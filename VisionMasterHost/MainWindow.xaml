@@ -121,12 +121,12 @@
                             IsEnabled="False"
                             Click="RunOnce_Click" />
                     <Button x:Name="ContinuousRunButton"
-                            Content="连续运行"
+                            Content="实时预览"
                             Style="{StaticResource PrimaryButton}"
                             IsEnabled="False"
                             Click="ContinuousRun_Click" />
                     <Button x:Name="StopRunButton"
-                            Content="停止"
+                            Content="暂停预览"
                             Style="{StaticResource PrimaryButton}"
                             Background="#D90D16"
                             BorderBrush="#A90A12"
@@ -145,7 +145,7 @@
                 <Ellipse x:Name="StatusIndicator" Width="9" Height="9" Fill="#E0A21A" />
                 <TextBlock x:Name="StatusTextBlock"
                            Margin="8,0,0,0"
-                           Text="请选择方案；选择后将自动加载"
+                           Text="请选择方案；加载后将自动开启实时预览"
                            Foreground="#D8E4EC"
                            FontSize="12"
                            FontWeight="SemiBold"
