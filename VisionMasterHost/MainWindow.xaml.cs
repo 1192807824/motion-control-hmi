@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private NamedPipeServerStream? _activeCommandPipe;
     private Task? _commandPipeTask;
     private VisionCalibrationSession? _calibrationSession;
+    private CancellationTokenSource? _calibrationResultDisplayCancellation;
     private bool _solutionLoaded;
     private bool _closed;
     private bool _sdkAvailable = true;
@@ -378,6 +379,7 @@ public partial class MainWindow : Window
             ?? throw new InvalidDataException("无法确定标定文件的保存目录。");
 
         var nPointModule = ResolveNPointCalibrationModule(procedureName);
+        CancelCalibrationResultDisplayRestore();
         PauseLivePreviewForCalibration();
         try
         {
@@ -488,9 +490,11 @@ public partial class MainWindow : Window
         _calibrationSession = null;
         var previewRestored = TryRestoreLivePreview(out var previewStatus);
         ShowCalibrationResult(session.Module);
+        ScheduleLivePreviewDisplayRestore();
         var message =
             $"九点标定成功，像素精度 {result.PixelPrecision:0.######}，" +
-            $"标定文件：{session.CalibrationPath}{previewStatus}；已显示N点标定1结果";
+            $"标定文件：{session.CalibrationPath}{previewStatus}；" +
+            "N点标定1结果已显示，1秒后返回实时画面";
         SetBusy(false);
         SetStatus(message, previewRestored ? StatusKind.Success : StatusKind.Error);
         return message;
@@ -1277,6 +1281,7 @@ public partial class MainWindow : Window
 
     private void CloseCurrentSolution()
     {
+        CancelCalibrationResultDisplayRestore();
         DetachCrosshairModule();
         _clickMoveEnabled = false;
         StopPreviewProcedureNoThrow();
@@ -1298,6 +1303,7 @@ public partial class MainWindow : Window
 
     private void CloseCurrentSolutionNoThrow()
     {
+        CancelCalibrationResultDisplayRestore();
         DetachCrosshairModule();
         _clickMoveEnabled = false;
         StopPreviewProcedureNoThrow();
@@ -1440,6 +1446,66 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ScheduleLivePreviewDisplayRestore()
+    {
+        CancelCalibrationResultDisplayRestore();
+        _calibrationResultDisplayCancellation = new CancellationTokenSource();
+        _ = RestoreLivePreviewDisplayAsync(_calibrationResultDisplayCancellation);
+    }
+
+    private async Task RestoreLivePreviewDisplayAsync(CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(1000, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (_closed || !_solutionLoaded || _calibrationSession is not null)
+            {
+                return;
+            }
+
+            if (ImageStepComboBox.SelectedItem is not VisionModuleOption option)
+            {
+                return;
+            }
+
+            BindImageStep(option, persistSelection: false);
+            SetStatus(
+                _clickMoveEnabled
+                    ? "标定完成，实时相机已恢复；点击移动已启用。"
+                    : "标定完成，实时相机已恢复。",
+                StatusKind.Success);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"标定完成，但实时画面恢复失败：{FormatException(exception)}", StatusKind.Error);
+        }
+        finally
+        {
+            if (ReferenceEquals(_calibrationResultDisplayCancellation, cancellation))
+            {
+                _calibrationResultDisplayCancellation = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelCalibrationResultDisplayRestore()
+    {
+        var cancellation = _calibrationResultDisplayCancellation;
+        _calibrationResultDisplayCancellation = null;
+        if (cancellation is null)
+        {
+            return;
+        }
+
+        cancellation.Cancel();
+    }
+
     private void BindImageStep(VisionModuleOption option, bool persistSelection)
     {
         DetachCrosshairModule();
@@ -1571,6 +1637,7 @@ public partial class MainWindow : Window
         }
 
         _closed = true;
+        CancelCalibrationResultDisplayRestore();
         DetachCrosshairModule();
         _commandPipeCancellation.Cancel();
         lock (_commandPipeSync)
