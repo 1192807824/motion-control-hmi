@@ -521,29 +521,29 @@ public partial class MotionControlPage : UserControl
         {
             return
             [
-                (request.StepX, -request.StepY),
-                (request.StepX, 0),
-                (request.StepX, request.StepY),
+                (-request.StepX, -request.StepY),
+                (-request.StepX, 0),
+                (-request.StepX, request.StepY),
                 (0, request.StepY),
                 (0, 0),
                 (0, -request.StepY),
-                (-request.StepX, -request.StepY),
-                (-request.StepX, 0),
-                (-request.StepX, request.StepY)
+                (request.StepX, -request.StepY),
+                (request.StepX, 0),
+                (request.StepX, request.StepY)
             ];
         }
 
         return
         [
-            (-request.StepX, request.StepY),
-            (0, request.StepY),
-            (request.StepX, request.StepY),
+            (-request.StepX, -request.StepY),
+            (0, -request.StepY),
+            (request.StepX, -request.StepY),
             (request.StepX, 0),
             (0, 0),
             (-request.StepX, 0),
-            (-request.StepX, -request.StepY),
-            (0, -request.StepY),
-            (request.StepX, -request.StepY)
+            (-request.StepX, request.StepY),
+            (0, request.StepY),
+            (request.StepX, request.StepY)
         ];
     }
 
