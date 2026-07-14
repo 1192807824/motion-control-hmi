@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly object _commandPipeSync = new();
     private VmProcedure? _previewProcedure;
     private VmProcedure? _calibrationProcedure;
+    private VmProcedure? _crosshairProcedure;
     private NamedPipeServerStream? _activeCommandPipe;
     private Task? _commandPipeTask;
     private VisionCalibrationSession? _calibrationSession;
@@ -38,6 +39,8 @@ public partial class MainWindow : Window
     private bool _clickCenterPixelReady;
     private float _clickCenterPixelX;
     private float _clickCenterPixelY;
+    private int _clickImagePixelWidth;
+    private int _clickImagePixelHeight;
     private string _clickCalibrationPath = "";
 
     public MainWindow(
@@ -235,9 +238,12 @@ public partial class MainWindow : Window
         if (!enabled)
         {
             _clickMoveEnabled = false;
+            DetachCrosshairProcedure();
             _clickCenterPixelReady = false;
             _clickCalibrationPath = calibrationPath;
             VisionRenderControl.SetRenderToolbarVisible(true);
+            CenterCrosshair.Visibility = Visibility.Visible;
+            UpdateCommandState();
             SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
             return "点击视觉移动已关闭。";
         }
@@ -262,9 +268,13 @@ public partial class MainWindow : Window
         transformModule.ModuParams.LoadCalibPath = fullPath;
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
-        VisionRenderControl.InitViewSize();
-        VisionRenderControl.SetRenderToolbarVisible(false);
+        _ = GetClickCenterPixel();
+        VisionRenderControl.SetRenderToolbarVisible(true);
         _clickMoveEnabled = true;
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        AttachCrosshairProcedure();
+        DrawImageCenterCrosshair();
+        UpdateCommandState();
         SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
         return $"已引用标定文件：{fullPath}。点击图像后将把该点移到红色十字中心。";
     }
@@ -644,10 +654,6 @@ public partial class MainWindow : Window
             float centerPixelY;
             try
             {
-                // Zooming or panning changes which source pixel is shown below the fixed WPF crosshair.
-                // The click callback has already supplied the source pixel, so reset the viewport now
-                // to make the visible crosshair coincide with the source-image center before moving.
-                VisionRenderControl.InitViewSize();
                 (centerPixelX, centerPixelY) = GetClickCenterPixel();
                 var transformModule = ResolveCalibrationTransformModule(procedureName);
                 transformModule.ModuParams.LoadCalibPath = _clickCalibrationPath;
@@ -752,6 +758,8 @@ public partial class MainWindow : Window
 
             _clickCenterPixelX = (float)((pixelWidth - 1) / 2d);
             _clickCenterPixelY = (float)((pixelHeight - 1) / 2d);
+            _clickImagePixelWidth = checked((int)pixelWidth);
+            _clickImagePixelHeight = checked((int)pixelHeight);
             _clickCenterPixelReady = true;
             return (_clickCenterPixelX, _clickCenterPixelY);
         }
@@ -769,6 +777,75 @@ public partial class MainWindow : Window
             {
             }
         }
+    }
+
+    private void DrawImageCenterCrosshair()
+    {
+        if (!_clickMoveEnabled || !_clickCenterPixelReady || _closed)
+        {
+            return;
+        }
+
+        const string crosshairColor = "#00E676";
+        const double crosshairThickness = 2d;
+        var horizontal = new VMControls.WPF.LineEx(
+            new Point(0, _clickCenterPixelY),
+            new Point(_clickImagePixelWidth - 1, _clickCenterPixelY),
+            1d,
+            crosshairColor,
+            crosshairThickness,
+            false,
+            "图像中心");
+        var vertical = new VMControls.WPF.LineEx(
+            new Point(_clickCenterPixelX, 0),
+            new Point(_clickCenterPixelX, _clickImagePixelHeight - 1),
+            1d,
+            crosshairColor,
+            crosshairThickness,
+            false,
+            "图像中心");
+        VisionRenderControl.DrawShape(horizontal);
+        VisionRenderControl.DrawShape(vertical);
+    }
+
+    private void AttachCrosshairProcedure()
+    {
+        DetachCrosshairProcedure();
+        if (_previewProcedure is null)
+        {
+            return;
+        }
+
+        _crosshairProcedure = _previewProcedure;
+        _crosshairProcedure.OnWorkEndStatusCallBack += CrosshairProcedure_OnWorkEndStatusCallBack;
+    }
+
+    private void DetachCrosshairProcedure()
+    {
+        if (_crosshairProcedure is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _crosshairProcedure.OnWorkEndStatusCallBack -= CrosshairProcedure_OnWorkEndStatusCallBack;
+        }
+        catch
+        {
+        }
+
+        _crosshairProcedure = null;
+    }
+
+    private void CrosshairProcedure_OnWorkEndStatusCallBack(object? sender, EventArgs e)
+    {
+        if (!_clickMoveEnabled || !_clickCenterPixelReady || _closed)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(new Action(DrawImageCenterCrosshair));
     }
 
     private async Task SendHostEventAsync(string message)
@@ -1165,6 +1242,8 @@ public partial class MainWindow : Window
 
     private void CloseCurrentSolution()
     {
+        DetachCrosshairProcedure();
+        _clickMoveEnabled = false;
         StopPreviewProcedureNoThrow();
         ClearRenderer();
 
@@ -1184,6 +1263,8 @@ public partial class MainWindow : Window
 
     private void CloseCurrentSolutionNoThrow()
     {
+        DetachCrosshairProcedure();
+        _clickMoveEnabled = false;
         StopPreviewProcedureNoThrow();
         ClearRenderer();
         try
@@ -1305,6 +1386,8 @@ public partial class MainWindow : Window
     private void BindImageStep(VisionModuleOption option, bool persistSelection)
     {
         _clickCenterPixelReady = false;
+        _clickImagePixelWidth = 0;
+        _clickImagePixelHeight = 0;
         VisionRenderControl.ModuleSource = option.Module;
         try
         {
@@ -1344,10 +1427,10 @@ public partial class MainWindow : Window
         var previewReady = _solutionLoaded && _previewProcedure is not null;
         var calibrationReady = _solutionLoaded && _calibrationProcedure is not null;
         var continuousRunning = previewReady && _previewProcedure!.ContinuousRunEnable;
-        ChooseSolutionButton.IsEnabled = !_busy && !continuousRunning;
-        PreviewProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning;
-        CalibrationProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning;
-        ImageStepComboBox.IsEnabled = !_busy && previewReady && !continuousRunning;
+        ChooseSolutionButton.IsEnabled = !_busy && !continuousRunning && !_clickMoveEnabled;
+        PreviewProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning && !_clickMoveEnabled;
+        CalibrationProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning && !_clickMoveEnabled;
+        ImageStepComboBox.IsEnabled = !_busy && previewReady && !continuousRunning && !_clickMoveEnabled;
         RunOnceButton.IsEnabled = !_busy && previewReady && !continuousRunning;
         ContinuousRunButton.IsEnabled = !_busy && previewReady && !continuousRunning;
         StopRunButton.IsEnabled = !_busy && continuousRunning;
@@ -1421,6 +1504,7 @@ public partial class MainWindow : Window
         }
 
         _closed = true;
+        DetachCrosshairProcedure();
         _commandPipeCancellation.Cancel();
         lock (_commandPipeSync)
         {

@@ -37,6 +37,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.RenderInterface.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="VMControls.WPF">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.WPF.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="VMControls.WPF.Release">
       <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.WPF.Release.dll</HintPath>
       <Private>false</Private>
