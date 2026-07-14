@@ -283,7 +283,7 @@
                                           Margin="0,8,0,0"
                                           Foreground="#F4F8FB"
                                           FontWeight="SemiBold"
-                                          Content="启用点击移动（轴1 X / 轴2 Y）"
+                                          Content="点击图像移到十字中心"
                                           Checked="EnableClickMove_Changed"
                                           Unchecked="EnableClickMove_Changed" />
                                 <Button x:Name="StopClickMoveButton"

@@ -35,6 +35,9 @@ public partial class MainWindow : Window
     private bool _restoreLivePreviewAfterCalibration;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
+    private bool _clickCenterPixelReady;
+    private float _clickCenterPixelX;
+    private float _clickCenterPixelY;
     private string _clickCalibrationPath = "";
 
     public MainWindow(
@@ -232,7 +235,9 @@ public partial class MainWindow : Window
         if (!enabled)
         {
             _clickMoveEnabled = false;
+            _clickCenterPixelReady = false;
             _clickCalibrationPath = calibrationPath;
+            VisionRenderControl.SetRenderToolbarVisible(true);
             SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
             return "点击视觉移动已关闭。";
         }
@@ -256,9 +261,12 @@ public partial class MainWindow : Window
         var transformModule = ResolveCalibrationTransformModule(procedureName);
         transformModule.ModuParams.LoadCalibPath = fullPath;
         _clickCalibrationPath = fullPath;
+        _clickCenterPixelReady = false;
+        VisionRenderControl.InitViewSize();
+        VisionRenderControl.SetRenderToolbarVisible(false);
         _clickMoveEnabled = true;
         SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
-        return $"已引用标定文件：{fullPath}。点击图像后将计算轴1/2目标。";
+        return $"已引用标定文件：{fullPath}。点击图像后将把该点移到红色十字中心。";
     }
 
     private string SetCalibrationCenter(IReadOnlyList<string> parts)
@@ -631,8 +639,12 @@ public partial class MainWindow : Window
             }
 
             VM.PlatformSDKCS.PointF transformedPoint;
+            VM.PlatformSDKCS.PointF transformedCenter;
+            float centerPixelX;
+            float centerPixelY;
             try
             {
+                (centerPixelX, centerPixelY) = GetClickCenterPixel();
                 var transformModule = ResolveCalibrationTransformModule(procedureName);
                 transformModule.ModuParams.LoadCalibPath = _clickCalibrationPath;
                 transformModule.ModuParams.InputPoint =
@@ -641,16 +653,22 @@ public partial class MainWindow : Window
                     {
                         X = pixelX,
                         Y = pixelY
+                    },
+                    new VM.PlatformSDKCS.PointF
+                    {
+                        X = centerPixelX,
+                        Y = centerPixelY
                     }
                 ];
                 transformModule.Run();
                 var result = transformModule.ModuResult;
-                if (result.ModuStatus != 1 || result.TransPoint is null || result.TransPoint.Count == 0)
+                if (result.ModuStatus != 1 || result.TransPoint is null || result.TransPoint.Count < 2)
                 {
-                    throw new InvalidOperationException("标定转换模块未返回有效的机械坐标。");
+                    throw new InvalidOperationException("标定转换模块未返回点击点和中心点的机械坐标。");
                 }
 
                 transformedPoint = result.TransPoint[0];
+                transformedCenter = result.TransPoint[1];
             }
             finally
             {
@@ -663,7 +681,7 @@ public partial class MainWindow : Window
             }
 
             SetStatus(
-                $"点击像素({pixelX}, {pixelY}) → 标定坐标({transformedPoint.X:0.####}, {transformedPoint.Y:0.####})",
+                $"点击({pixelX}, {pixelY}) → 十字中心({centerPixelX:0.##}, {centerPixelY:0.##})",
                 StatusKind.Success);
             await SendHostEventAsync(string.Join(
                 "\t",
@@ -671,7 +689,11 @@ public partial class MainWindow : Window
                 pixelX.ToString(CultureInfo.InvariantCulture),
                 pixelY.ToString(CultureInfo.InvariantCulture),
                 transformedPoint.X.ToString("R", CultureInfo.InvariantCulture),
-                transformedPoint.Y.ToString("R", CultureInfo.InvariantCulture)));
+                transformedPoint.Y.ToString("R", CultureInfo.InvariantCulture),
+                centerPixelX.ToString("R", CultureInfo.InvariantCulture),
+                centerPixelY.ToString("R", CultureInfo.InvariantCulture),
+                transformedCenter.X.ToString("R", CultureInfo.InvariantCulture),
+                transformedCenter.Y.ToString("R", CultureInfo.InvariantCulture)));
         }
         catch (Exception exception)
         {
@@ -689,6 +711,59 @@ public partial class MainWindow : Window
         finally
         {
             _clickTransformBusy = false;
+        }
+    }
+
+    private (float X, float Y) GetClickCenterPixel()
+    {
+        if (_clickCenterPixelReady)
+        {
+            return (_clickCenterPixelX, _clickCenterPixelY);
+        }
+
+        var temporaryImagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"ControlHub-click-center-{Guid.NewGuid():N}.bmp");
+        try
+        {
+            VisionRenderControl.SaveOriginalImage(temporaryImagePath);
+            using var stream = new FileStream(
+                temporaryImagePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            using var reader = new BinaryReader(stream);
+            if (stream.Length < 26 || reader.ReadUInt16() != 0x4D42)
+            {
+                throw new InvalidDataException("VisionMaster 保存的原图不是有效 BMP 图像。");
+            }
+
+            stream.Position = 18;
+            var pixelWidth = Math.Abs((long)reader.ReadInt32());
+            var pixelHeight = Math.Abs((long)reader.ReadInt32());
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                throw new InvalidDataException("当前图像尺寸无效。");
+            }
+
+            _clickCenterPixelX = (float)((pixelWidth - 1) / 2d);
+            _clickCenterPixelY = (float)((pixelHeight - 1) / 2d);
+            _clickCenterPixelReady = true;
+            return (_clickCenterPixelX, _clickCenterPixelY);
+        }
+        catch (Exception exception) when (exception is not InvalidOperationException)
+        {
+            throw new InvalidOperationException("无法读取当前图像中心，请确认实时画面已经正常出图。", exception);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporaryImagePath);
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -1225,6 +1300,7 @@ public partial class MainWindow : Window
 
     private void BindImageStep(VisionModuleOption option, bool persistSelection)
     {
+        _clickCenterPixelReady = false;
         VisionRenderControl.ModuleSource = option.Module;
         try
         {

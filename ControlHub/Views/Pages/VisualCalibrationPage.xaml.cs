@@ -330,8 +330,6 @@ public partial class VisualCalibrationPage : UserControl
                     throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
                 }
 
-                _ = _recordedCenter
-                    ?? throw new InvalidOperationException("请先记录与该标定文件对应的基准点。");
                 if (_calibrationRunning)
                 {
                     throw new InvalidOperationException("九点标定正在执行。");
@@ -396,16 +394,12 @@ public partial class VisualCalibrationPage : UserControl
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
-            var calibrationCenter = _recordedCenter
-                ?? throw new InvalidOperationException("请先记录标定基准点。");
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "点击移动速度");
             var current = motionController.CaptureCalibrationCenter(
                 FirstSetXHardwareAxisNo,
                 FirstSetYHardwareAxisNo);
-            var baseX = calibrationCenter.ActualX / PulsesPerVisionUnit;
-            var baseY = calibrationCenter.ActualY / PulsesPerVisionUnit;
-            var deltaX = (e.TransformedX - baseX) * PulsesPerVisionUnit;
-            var deltaY = (e.TransformedY - baseY) * PulsesPerVisionUnit;
+            var deltaX = (e.CenterTransformedX - e.TransformedX) * PulsesPerVisionUnit;
+            var deltaY = (e.CenterTransformedY - e.TransformedY) * PulsesPerVisionUnit;
             var targetX = current.ActualX + deltaX;
             var targetY = current.ActualY + deltaY;
             if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
@@ -417,7 +411,7 @@ public partial class VisualCalibrationPage : UserControl
             _clickMoveRunning = true;
             UpdateCommandState();
             SetClickMoveStatus(
-                $"像素({e.PixelX}, {e.PixelY}) → 标定({e.TransformedX:0.####}, {e.TransformedY:0.####})；" +
+                $"点击({e.PixelX}, {e.PixelY}) → 十字({e.CenterPixelX:0.##}, {e.CenterPixelY:0.##})；" +
                 $"正在移动到 X={targetX:0.###}、Y={targetY:0.###} pulse…",
                 WorkflowStatus.Running);
 
@@ -589,7 +583,6 @@ public partial class VisualCalibrationPage : UserControl
             !_clickMoveRunning &&
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null &&
-            _recordedCenter is not null &&
             _hostReady &&
             calibrationPathValid;
         StopCalibrationButton.IsEnabled = _calibrationRunning;

@@ -435,19 +435,35 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void DispatchHostEvent(string message)
     {
         var parts = message.Split('\t');
-        if (parts.Length == 5 &&
+        if (parts.Length == 9 &&
             string.Equals(parts[0], "CLICK_TARGET", StringComparison.Ordinal) &&
             int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixelX) &&
             int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixelY) &&
             double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var worldX) &&
             double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var worldY) &&
+            double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerPixelX) &&
+            double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerPixelY) &&
+            double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerWorldX) &&
+            double.TryParse(parts[8], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerWorldY) &&
             double.IsFinite(worldX) &&
-            double.IsFinite(worldY))
+            double.IsFinite(worldY) &&
+            double.IsFinite(centerPixelX) &&
+            double.IsFinite(centerPixelY) &&
+            double.IsFinite(centerWorldX) &&
+            double.IsFinite(centerWorldY))
         {
             _ = Dispatcher.BeginInvoke(
                 () => ClickTargetReceived?.Invoke(
                     this,
-                    new VisionClickTargetEventArgs(pixelX, pixelY, worldX, worldY)));
+                    new VisionClickTargetEventArgs(
+                        pixelX,
+                        pixelY,
+                        worldX,
+                        worldY,
+                        centerPixelX,
+                        centerPixelY,
+                        centerWorldX,
+                        centerWorldY)));
             return;
         }
 
@@ -858,7 +874,11 @@ public sealed class VisionClickTargetEventArgs(
     int pixelX,
     int pixelY,
     double transformedX,
-    double transformedY) : EventArgs
+    double transformedY,
+    double centerPixelX,
+    double centerPixelY,
+    double centerTransformedX,
+    double centerTransformedY) : EventArgs
 {
     public int PixelX { get; } = pixelX;
 
@@ -867,6 +887,14 @@ public sealed class VisionClickTargetEventArgs(
     public double TransformedX { get; } = transformedX;
 
     public double TransformedY { get; } = transformedY;
+
+    public double CenterPixelX { get; } = centerPixelX;
+
+    public double CenterPixelY { get; } = centerPixelY;
+
+    public double CenterTransformedX { get; } = centerTransformedX;
+
+    public double CenterTransformedY { get; } = centerTransformedY;
 }
 
 public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
