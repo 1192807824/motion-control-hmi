@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <VisionMasterHome Condition="'$(VisionMasterHome)' == ''">D:\VM\VisionMaster4.4.0</VisionMasterHome>
+    <VisionMasterAssemblyDirectory Condition="'$(VisionMasterAssemblyDirectory)' == ''">$(VisionMasterHome)\Development\V4.x\ComControls\Assembly</VisionMasterAssemblyDirectory>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="VM.Core">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VM.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VM.PlatformSDKCS">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VM.PlatformSDKCS.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VMControls.BaseInterface">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.BaseInterface.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VMControls.Interface">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.Interface.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VMControls.RenderInterface">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.RenderInterface.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VMControls.WPF.Release">
+      <HintPath>$(VisionMasterAssemblyDirectory)\VMControls.WPF.Release.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="$(VisionMasterAssemblyDirectory)\myLibs\**\*">
+      <Link>myLibs\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="VerifyVisionMasterSdk" BeforeTargets="ResolveReferences"
+          Condition="!Exists('$(VisionMasterAssemblyDirectory)\VM.PlatformSDKCS.dll')">
+    <Error Text="未找到 VisionMaster SDK：$(VisionMasterAssemblyDirectory)。请安装 VisionMaster 4.4.0，或通过 VisionMasterHome/MSBuild 属性指定安装目录。" />
+  </Target>
+
+</Project>

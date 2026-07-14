@@ -1,0 +1,574 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+
+namespace ControlHub.Views.Controls;
+
+public sealed class VisionMasterProcessHost : HwndHost
+{
+    private const int GwlStyle = -16;
+    private const int SwShow = 5;
+    private const int WmClose = 0x0010;
+    private const int WmSize = 0x0005;
+    private const int SwpNoActivate = 0x0010;
+    private const int SwpFrameChanged = 0x0020;
+    private const int SwpShowWindow = 0x0040;
+    private const int WsChild = 0x40000000;
+    private const int WsVisible = 0x10000000;
+    private const int WsClipSiblings = 0x04000000;
+    private const int WsClipChildren = 0x02000000;
+    private const int WsCaption = 0x00C00000;
+    private const int WsThickFrame = 0x00040000;
+    private const int WsPopup = unchecked((int)0x80000000);
+    private const int WsExControlParent = 0x00010000;
+
+    private readonly object _syncRoot = new();
+    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private CancellationTokenSource? _startCancellation;
+    private Process? _process;
+    private IntPtr _hostWindow;
+    private IntPtr _visionWindow;
+    private bool _disposed;
+
+    public event EventHandler? Started;
+
+    public event EventHandler<VisionMasterHostFailedEventArgs>? Failed;
+
+    public event EventHandler? Exited;
+
+    public async Task StartAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            await StartCoreAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    private async Task StartCoreAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_hostWindow == IntPtr.Zero)
+        {
+            await Dispatcher.InvokeAsync(
+                () => { },
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        if (_hostWindow == IntPtr.Zero)
+        {
+            RaiseFailed("嵌入窗口尚未创建。 ");
+            return;
+        }
+
+        lock (_syncRoot)
+        {
+            if (_process is { HasExited: false })
+            {
+                return;
+            }
+
+            _startCancellation?.Dispose();
+            _startCancellation = new CancellationTokenSource();
+        }
+
+        var cancellationToken = _startCancellation.Token;
+
+        var executablePath = ResolveHostExecutablePath();
+        if (!File.Exists(executablePath))
+        {
+            StopProcess();
+            RaiseFailed($"未找到 VisionMasterHost：{executablePath}");
+            return;
+        }
+
+        Process process;
+        try
+        {
+            process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = $"--embedded --parent-pid {Environment.ProcessId}",
+                    WorkingDirectory = Path.GetDirectoryName(executablePath)!,
+                    UseShellExecute = false,
+                    CreateNoWindow = false
+                },
+                EnableRaisingEvents = true
+            };
+            process.Exited += VisionProcess_Exited;
+            if (!process.Start())
+            {
+                process.Dispose();
+                StopProcess();
+                RaiseFailed("VisionMasterHost 进程未能启动。 ");
+                return;
+            }
+
+            lock (_syncRoot)
+            {
+                _process = process;
+            }
+        }
+        catch (Exception exception)
+        {
+            StopProcess();
+            if (!_disposed)
+            {
+                RaiseFailed(exception.Message);
+            }
+            return;
+        }
+
+        try
+        {
+            var windowHandle = await WaitForMainWindowAsync(process, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (windowHandle == IntPtr.Zero)
+            {
+                throw new TimeoutException("等待 VisionMaster 标定窗口超时。 ");
+            }
+
+            await Dispatcher.InvokeAsync(() => AttachVisionWindow(windowHandle));
+            Started?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            // A restart or application shutdown intentionally cancels startup.
+        }
+        catch (Exception exception)
+        {
+            StopProcess();
+            if (!_disposed)
+            {
+                RaiseFailed(exception.Message);
+            }
+        }
+    }
+
+    public async Task RestartAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            StopProcess();
+            await StartCoreAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public void Shutdown()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        StopProcess();
+    }
+
+    protected override HandleRef BuildWindowCore(HandleRef hwndParent)
+    {
+        _hostWindow = CreateWindowEx(
+            WsExControlParent,
+            "static",
+            "",
+            WsChild | WsVisible | WsClipChildren | WsClipSiblings,
+            0,
+            0,
+            1,
+            1,
+            hwndParent.Handle,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero);
+
+        if (_hostWindow == IntPtr.Zero)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法创建 VisionMaster 承载窗口。 ");
+        }
+
+        return new HandleRef(this, _hostWindow);
+    }
+
+    protected override void DestroyWindowCore(HandleRef hwnd)
+    {
+        Shutdown();
+        if (hwnd.Handle != IntPtr.Zero)
+        {
+            _ = DestroyWindow(hwnd.Handle);
+        }
+
+        _hostWindow = IntPtr.Zero;
+    }
+
+    protected override void OnWindowPositionChanged(Rect rcBoundingBox)
+    {
+        base.OnWindowPositionChanged(rcBoundingBox);
+        ResizeVisionWindow();
+    }
+
+    protected override IntPtr WndProc(
+        IntPtr hwnd,
+        int msg,
+        IntPtr wParam,
+        IntPtr lParam,
+        ref bool handled)
+    {
+        if (msg == WmSize)
+        {
+            ResizeVisionWindow();
+        }
+
+        return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
+    }
+
+    private static async Task<IntPtr> WaitForMainWindowAsync(
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        return await Task.Run(() =>
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (process.HasExited)
+                {
+                    throw new InvalidOperationException(
+                        $"VisionMasterHost 已提前退出（代码 {process.ExitCode}）。");
+                }
+
+                process.Refresh();
+                var windowHandle = process.MainWindowHandle;
+                if (windowHandle == IntPtr.Zero)
+                {
+                    windowHandle = FindVisibleTopLevelWindow(process.Id);
+                }
+
+                if (windowHandle != IntPtr.Zero)
+                {
+                    return windowHandle;
+                }
+
+                Thread.Sleep(50);
+            }
+
+            return IntPtr.Zero;
+        }, cancellationToken);
+    }
+
+    private static IntPtr FindVisibleTopLevelWindow(int processId)
+    {
+        var result = IntPtr.Zero;
+        _ = EnumWindows(
+            (windowHandle, parameter) =>
+            {
+                _ = GetWindowThreadProcessId(windowHandle, out var windowProcessId);
+                if (windowProcessId != (uint)processId || !IsWindowVisible(windowHandle))
+                {
+                    return true;
+                }
+
+                result = windowHandle;
+                return false;
+            },
+            IntPtr.Zero);
+        return result;
+    }
+
+    private void AttachVisionWindow(IntPtr windowHandle)
+    {
+        if (_hostWindow == IntPtr.Zero || windowHandle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("VisionMaster 嵌入窗口句柄无效。 ");
+        }
+
+        if (!IsWindow(windowHandle))
+        {
+            throw new Win32Exception("VisionMaster 窗口句柄已失效。 ");
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        var style = GetWindowLong(windowHandle, GwlStyle);
+        var getStyleError = Marshal.GetLastPInvokeError();
+        if (style == 0 && getStyleError != 0)
+        {
+            throw new Win32Exception(getStyleError, "无法读取 VisionMaster 窗口样式。 ");
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        var previousParent = SetParent(windowHandle, _hostWindow);
+        var setParentError = Marshal.GetLastPInvokeError();
+        if (previousParent == IntPtr.Zero && setParentError != 0)
+        {
+            throw new Win32Exception(setParentError, "无法嵌入 VisionMaster 窗口。 ");
+        }
+
+        style &= ~(WsPopup | WsCaption | WsThickFrame);
+        style |= WsChild | WsVisible | WsClipChildren | WsClipSiblings;
+
+        Marshal.SetLastPInvokeError(0);
+        var previousStyle = SetWindowLong(windowHandle, GwlStyle, style);
+        var setStyleError = Marshal.GetLastPInvokeError();
+        if (previousStyle == 0 && setStyleError != 0)
+        {
+            _ = SetParent(windowHandle, previousParent);
+            throw new Win32Exception(setStyleError, "无法设置 VisionMaster 嵌入窗口样式。 ");
+        }
+
+        if (GetParent(windowHandle) != _hostWindow)
+        {
+            _ = SetParent(windowHandle, previousParent);
+            throw new Win32Exception("VisionMaster 窗口父子关系验证失败。 ");
+        }
+
+        _visionWindow = windowHandle;
+        _ = ShowWindow(windowHandle, SwShow);
+        ResizeVisionWindow(throwOnFailure: true);
+    }
+
+    private void ResizeVisionWindow(bool throwOnFailure = false)
+    {
+        if (_hostWindow == IntPtr.Zero || _visionWindow == IntPtr.Zero)
+        {
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException("VisionMaster 承载窗口尚未准备完成。 ");
+            }
+
+            return;
+        }
+
+        if (!GetClientRect(_hostWindow, out var bounds))
+        {
+            if (throwOnFailure)
+            {
+                throw new Win32Exception(Marshal.GetLastPInvokeError(), "无法读取 VisionMaster 承载区域。 ");
+            }
+
+            return;
+        }
+
+        var width = Math.Max(1, bounds.Right - bounds.Left);
+        var height = Math.Max(1, bounds.Bottom - bounds.Top);
+        var resized = SetWindowPos(
+            _visionWindow,
+            IntPtr.Zero,
+            0,
+            0,
+            width,
+            height,
+            SwpNoActivate | SwpFrameChanged | SwpShowWindow);
+        if (!resized && throwOnFailure)
+        {
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "无法调整 VisionMaster 嵌入窗口大小。 ");
+        }
+    }
+
+    private void StopProcess()
+    {
+        Process? process;
+        IntPtr visionWindow;
+        lock (_syncRoot)
+        {
+            _startCancellation?.Cancel();
+            _startCancellation?.Dispose();
+            _startCancellation = null;
+            process = _process;
+            _process = null;
+            visionWindow = _visionWindow;
+            _visionWindow = IntPtr.Zero;
+        }
+
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            process.Exited -= VisionProcess_Exited;
+            if (!process.HasExited)
+            {
+                var closeRequested = visionWindow != IntPtr.Zero
+                    && IsWindow(visionWindow)
+                    && PostMessage(visionWindow, WmClose, IntPtr.Zero, IntPtr.Zero);
+                if (!closeRequested)
+                {
+                    closeRequested = process.CloseMainWindow();
+                }
+
+                if (!closeRequested || !process.WaitForExit(8_000))
+                {
+                    process.Kill(entireProcessTree: true);
+                    _ = process.WaitForExit(2_000);
+                }
+            }
+        }
+        catch
+        {
+            // The owned helper process may already be terminating.
+        }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+
+    private void VisionProcess_Exited(object? sender, EventArgs e)
+    {
+        if (sender is not Process process)
+        {
+            return;
+        }
+
+        var shouldNotify = false;
+        lock (_syncRoot)
+        {
+            if (!ReferenceEquals(_process, process))
+            {
+                return;
+            }
+
+            _process = null;
+            _visionWindow = IntPtr.Zero;
+            shouldNotify = !_disposed;
+        }
+
+        process.Exited -= VisionProcess_Exited;
+        process.Dispose();
+
+        if (shouldNotify)
+        {
+            _ = Dispatcher.BeginInvoke(() => Exited?.Invoke(this, EventArgs.Empty));
+        }
+    }
+
+    private void RaiseFailed(string message)
+    {
+        Failed?.Invoke(this, new VisionMasterHostFailedEventArgs(message));
+    }
+
+    private static string ResolveHostExecutablePath()
+    {
+        var configuredPath = Environment.GetEnvironmentVariable("VISIONMASTER_HOST_PATH");
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return Path.GetFullPath(configuredPath);
+        }
+
+        return Path.Combine(AppContext.BaseDirectory, "VisionMasterHost", "VisionMasterHost.exe");
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowEx(
+        int exStyle,
+        string className,
+        string windowName,
+        int style,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr parent,
+        IntPtr menu,
+        IntPtr instance,
+        IntPtr parameter);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyWindow(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetParent(IntPtr child, IntPtr newParent);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr window, int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr window, int index, int newStyle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr window,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        int flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr window, out NativeRect rectangle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(
+        IntPtr window,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam);
+
+    private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+}
+
+public sealed class VisionMasterHostFailedEventArgs(string message) : EventArgs
+{
+    public string Message { get; } = message;
+}

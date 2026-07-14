@@ -9,10 +9,16 @@
     <PlatformTarget>x86</PlatformTarget>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+    <NoWarn>$(NoWarn);NU1702</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VisionMasterHost\VisionMasterHost.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,5 +32,23 @@
           CopyToPublishDirectory="PreserveNewest"
           TargetPath="LTDMC.dll" />
   </ItemGroup>
+
+  <Target Name="CopyVisionMasterHost" AfterTargets="Build">
+    <ItemGroup>
+      <VisionMasterHostFiles Include="$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(VisionMasterHostFiles)"
+          DestinationFiles="@(VisionMasterHostFiles->'$(OutDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyVisionMasterHostToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <VisionMasterHostPublishFiles Include="$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(VisionMasterHostPublishFiles)"
+          DestinationFiles="@(VisionMasterHostPublishFiles->'$(PublishDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

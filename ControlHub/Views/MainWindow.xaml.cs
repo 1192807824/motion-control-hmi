@@ -48,9 +48,10 @@ public partial class MainWindow : Window
         ShowMotionPage();
     }
 
-    private void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
+    private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
         ShowVisualCalibrationPage();
+        await VisualCalibrationContent.EnsureStartedAsync();
     }
 
     private void ConnectionMenu_Click(object sender, RoutedEventArgs e)
@@ -108,6 +109,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        VisualCalibrationContent.Shutdown();
         ConnectionConfigContent.Shutdown();
         _clockTimer.Stop();
         base.OnClosed(e);
