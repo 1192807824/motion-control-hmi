@@ -21,13 +21,13 @@ public partial class MotionControlPage : UserControl
     private const double TestHomeLowSpeedRatio = 0.25;
     private static readonly TestHomeStage[] TestOneKeyResetStages =
     [
-        new("4个R轴", [6, 8, 10, 12], 33, 60000),
-        new("4个Z轴", [5, 7, 9, 11], -1, 10000),
-        new("上料Y", [2], 33, 300000),
-        new("上料X", [1], 33, 300000),
-        new("下料X", [3], 33, 300000),
-        new("下料Y", [4], 33, 300000),
-        new("D马达", [0], 33, 50000, 600)
+        new("4个R轴", [6, 8, 10, 12], 33, 30000),
+        new("4个Z轴", [5, 7, 9, 11], -1, 5000),
+        new("上料Y", [2], 33, 150000),
+        new("上料X", [1], 33, 150000),
+        new("下料X", [3], 33, 150000),
+        new("下料Y", [4], 33, 150000),
+        new("D马达", [0], 33, 25000, 600)
     ];
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
