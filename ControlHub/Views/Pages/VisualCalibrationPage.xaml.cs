@@ -38,6 +38,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _centerSyncRunning;
     private bool _clickMoveRunning;
     private bool _clickMoveConfigurationRunning;
+    private bool _calibrationFileImporting;
     private bool _nozzle1ClickVerified;
     private bool _nozzle2ClickVerified;
     private bool _suppressClickMoveModeEvent;
@@ -462,6 +463,71 @@ public partial class VisualCalibrationPage : UserControl
         SetWorkflowStatus("标定文件已设置。", WorkflowStatus.Ready);
         SaveCalibrationSettingsNoThrow();
         UpdateCommandState();
+    }
+
+    private async void ImportCalibrationFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_calibrationFileImporting || _calibrationRunning)
+        {
+            return;
+        }
+
+        var currentPath = CalibrationFilePathTextBox.Text;
+        var currentDirectory = string.IsNullOrWhiteSpace(currentPath)
+            ? null
+            : Path.GetDirectoryName(currentPath);
+        var dialog = new OpenFileDialog
+        {
+            Title = "导入已有九点标定文件",
+            Filter = "VisionMaster 标定文件 (*.xml)|*.xml|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+            InitialDirectory = Directory.Exists(currentDirectory)
+                ? currentDirectory
+                : DefaultCalibrationDirectory
+        };
+        if (!string.IsNullOrWhiteSpace(currentPath) && File.Exists(currentPath))
+        {
+            dialog.FileName = Path.GetFileName(currentPath);
+        }
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true)
+        {
+            return;
+        }
+
+        _calibrationFileImporting = true;
+        UpdateCommandState();
+        SetWorkflowStatus("正在导入并应用标定文件…", WorkflowStatus.Running);
+        try
+        {
+            var fullPath = GetCalibrationFilePath(dialog.FileName);
+            if (!File.Exists(fullPath))
+            {
+                throw new FileNotFoundException("选择的标定文件不存在。", fullPath);
+            }
+
+            await EnsureStartedAsync();
+            if (!_hostReady)
+            {
+                throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
+            }
+
+            var message = await VisionHost.ImportCalibrationFileAsync(
+                fullPath,
+                CancellationToken.None);
+            CalibrationFilePathTextBox.Text = fullPath;
+            SaveCalibrationSettingsNoThrow();
+            SetWorkflowStatus(message + "；主页开始流程将直接使用此文件。", WorkflowStatus.Success);
+        }
+        catch (Exception exception)
+        {
+            SetWorkflowStatus($"导入标定文件失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _calibrationFileImporting = false;
+            UpdateCommandState();
+        }
     }
 
     private void LoadCalibrationProfile_Click(object sender, RoutedEventArgs e)
@@ -1146,6 +1212,7 @@ public partial class VisualCalibrationPage : UserControl
         if (RecordCenterButton is null ||
             CalibrationFilePathTextBox is null ||
             RecordCameraToolPointButton is null ||
+            ImportCalibrationFileButton is null ||
             LoadCalibrationProfileButton is null ||
             SaveCalibrationProfileButton is null ||
             ClickTargetToolComboBox is null)
@@ -1173,6 +1240,7 @@ public partial class VisualCalibrationPage : UserControl
             _motionController is not null;
         StartCalibrationButton.IsEnabled =
             !_calibrationRunning &&
+            !_calibrationFileImporting &&
             !_centerSyncRunning &&
             !_clickMoveRunning &&
             EnableClickMoveCheckBox.IsChecked != true &&
@@ -1192,11 +1260,19 @@ public partial class VisualCalibrationPage : UserControl
         MovePriorityComboBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning;
         CalibrationFilePathTextBox.IsEnabled =
             !_calibrationRunning &&
+            !_calibrationFileImporting &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
             EnableClickMoveCheckBox.IsChecked != true;
         ChooseCalibrationFileButton.IsEnabled =
             !_calibrationRunning &&
+            !_calibrationFileImporting &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            EnableClickMoveCheckBox.IsChecked != true;
+        ImportCalibrationFileButton.IsEnabled =
+            !_calibrationRunning &&
+            !_calibrationFileImporting &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
             EnableClickMoveCheckBox.IsChecked != true;

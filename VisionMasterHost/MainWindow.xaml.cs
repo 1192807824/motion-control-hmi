@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly object _commandPipeSync = new();
     private VmProcedure? _previewProcedure;
     private VmProcedure? _calibrationProcedure;
+    private IMVSCalibTransformModuTool? _standaloneTransformModule;
     private VmModule? _displayedModule;
     private VmModule? _crosshairModule;
     private NamedPipeServerStream? _activeCommandPipe;
@@ -217,10 +218,29 @@ public partial class MainWindow : Window
             "COMPLETE" => CompleteNinePointCalibration(),
             "ABORT" => AbortNinePointCalibration(),
             "SET_CLICK_MODE" => SetClickMoveMode(parts),
+            "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
+    }
+
+    /// <summary>
+    /// 导入已有九点标定 XML。标定转换模块若未放进当前流程，则创建一个独立工具，
+    /// 让主页坐标换算不再依赖“标定流程”中必须存在标定转换模块。
+    /// </summary>
+    private string ImportCalibrationFile(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 2)
+        {
+            throw new InvalidDataException("导入标定文件命令参数不正确。");
+        }
+
+        var fullPath = DecodeAndValidateCalibrationFilePath(parts[1]);
+        var transformModule = GetCalibrationTransformModule();
+        transformModule.ModuParams.LoadCalibPath = fullPath;
+        SetStatus($"已导入标定文件：{Path.GetFileName(fullPath)}", StatusKind.Success);
+        return $"标定文件已导入并应用：{fullPath}";
     }
 
     /// <summary>
@@ -415,30 +435,16 @@ public partial class MainWindow : Window
             throw new InvalidDataException("像素坐标不能小于0。");
         }
 
-        string calibrationPath;
-        try
-        {
-            calibrationPath = Encoding.UTF8.GetString(Convert.FromBase64String(parts[3]));
-        }
-        catch (FormatException exception)
-        {
-            throw new InvalidDataException("标定文件路径格式不正确。", exception);
-        }
+        var fullPath = DecodeAndValidateCalibrationFilePath(parts[3]);
 
         if (_busy || _calibrationSession is not null)
         {
             throw new InvalidOperationException("视觉标定正在执行，暂不允许像素坐标转换。");
         }
 
-        if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        if (!_solutionLoaded)
         {
-            throw new InvalidOperationException("请先加载视觉方案并选择标定流程。");
-        }
-
-        var fullPath = Path.GetFullPath(calibrationPath);
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException("标定文件不存在。", fullPath);
+            throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
         }
 
         var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
@@ -457,7 +463,7 @@ public partial class MainWindow : Window
                     $"像素坐标超出当前图像范围：宽{_clickImagePixelWidth}，高{_clickImagePixelHeight}。");
             }
 
-            var transformModule = ResolveCalibrationTransformModule(procedureName);
+            var transformModule = GetCalibrationTransformModule();
             transformModule.ModuParams.LoadCalibPath = fullPath;
             transformModule.ModuParams.InputPoint =
             [
@@ -504,15 +510,7 @@ public partial class MainWindow : Window
         }
 
         var enabled = parts[1] == "1";
-        string calibrationPath;
-        try
-        {
-            calibrationPath = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
-        }
-        catch (FormatException exception)
-        {
-            throw new InvalidDataException("标定文件路径格式不正确。", exception);
-        }
+        var calibrationPath = DecodeCalibrationFilePath(parts[2]);
 
         if (!enabled)
         {
@@ -532,18 +530,13 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("当前视觉窗口没有运动回传通道。");
         }
 
-        if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        if (!_solutionLoaded)
         {
-            throw new InvalidOperationException("请先加载视觉方案并选择标定流程。");
+            throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
         }
 
-        var fullPath = Path.GetFullPath(calibrationPath);
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException("标定文件不存在。", fullPath);
-        }
-
-        var transformModule = ResolveCalibrationTransformModule(procedureName);
+        var fullPath = ValidateCalibrationFilePath(calibrationPath);
+        var transformModule = GetCalibrationTransformModule();
         transformModule.ModuParams.LoadCalibPath = fullPath;
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
@@ -808,6 +801,39 @@ public partial class MainWindow : Window
         return result;
     }
 
+    private static string DecodeAndValidateCalibrationFilePath(string encodedPath)
+    {
+        return ValidateCalibrationFilePath(DecodeCalibrationFilePath(encodedPath));
+    }
+
+    private static string DecodeCalibrationFilePath(string encodedPath)
+    {
+        try
+        {
+            return Encoding.UTF8.GetString(Convert.FromBase64String(encodedPath));
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException("标定文件路径格式不正确。", exception);
+        }
+    }
+
+    private static string ValidateCalibrationFilePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!string.Equals(Path.GetExtension(fullPath), ".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("标定文件必须使用 .xml 扩展名。");
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("标定文件不存在。", fullPath);
+        }
+
+        return fullPath;
+    }
+
     private static string EncodePipeResponse(bool success, string message)
     {
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(message ?? ""));
@@ -895,6 +921,27 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 优先复用流程里已有的标定转换模块；没有时使用独立模块读取导入的 XML。
+    /// 独立模块只负责坐标换算，不参与或修改用户的 VisionMaster 流程。
+    /// </summary>
+    private IMVSCalibTransformModuTool GetCalibrationTransformModule()
+    {
+        if (CalibrationProcedureComboBox.SelectedItem is string procedureName)
+        {
+            try
+            {
+                return ResolveCalibrationTransformModule(procedureName);
+            }
+            catch (InvalidOperationException)
+            {
+                // 当前流程只有N点标定也可以，下面创建独立转换工具直接读取XML。
+            }
+        }
+
+        return _standaloneTransformModule ??= new IMVSCalibTransformModuTool();
+    }
+
+    /// <summary>
     /// 在当前实时流程中定位海康 Blob分析模块。显示名和模块类型名都参与匹配，
     /// 以兼容用户给模块改名以及不同 VisionMaster 方案的命名方式。
     /// </summary>
@@ -955,9 +1002,9 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("视觉标定正在执行，暂不允许点击移动。");
             }
 
-            if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+            if (!_solutionLoaded)
             {
-                throw new InvalidOperationException("请先加载视觉方案并选择标定流程。");
+                throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
             }
 
             if (string.IsNullOrWhiteSpace(_clickCalibrationPath) || !File.Exists(_clickCalibrationPath))
@@ -978,7 +1025,7 @@ public partial class MainWindow : Window
             try
             {
                 (centerPixelX, centerPixelY) = GetClickCenterPixel();
-                var transformModule = ResolveCalibrationTransformModule(procedureName);
+                var transformModule = GetCalibrationTransformModule();
                 transformModule.ModuParams.LoadCalibPath = _clickCalibrationPath;
                 transformModule.ModuParams.InputPoint =
                 [
@@ -1918,6 +1965,15 @@ public partial class MainWindow : Window
         }
 
         StopPreviewProcedureNoThrow();
+        try
+        {
+            _standaloneTransformModule?.Dispose();
+            _standaloneTransformModule = null;
+        }
+        catch
+        {
+        }
+
         try
         {
             VisionRenderControl.Dispose();

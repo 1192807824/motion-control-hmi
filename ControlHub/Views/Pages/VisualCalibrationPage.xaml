@@ -257,8 +257,10 @@
                                 <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="6" />
-                                        <ColumnDefinition Width="62" />
+                                        <ColumnDefinition Width="5" />
+                                        <ColumnDefinition Width="68" />
+                                        <ColumnDefinition Width="5" />
+                                        <ColumnDefinition Width="68" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox x:Name="CalibrationFilePathTextBox"
                                              Style="{StaticResource PanelInput}"
@@ -267,11 +269,19 @@
                                              ToolTip="标定文件保存位置" />
                                     <Button Grid.Column="2"
                                             x:Name="ChooseCalibrationFileButton"
-                                            Content="选择"
+                                            Content="保存位置"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             Click="ChooseCalibrationFile_Click" />
+                                    <Button Grid.Column="4"
+                                            x:Name="ImportCalibrationFileButton"
+                                            Content="导入已有"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#17834A"
+                                            BorderBrush="#12683A"
+                                            ToolTip="导入已有的九点标定 XML，并应用到主页坐标换算"
+                                            Click="ImportCalibrationFile_Click" />
                                 </Grid>
                                 <Grid Margin="0,4,0,0">
                                     <Grid.ColumnDefinitions>

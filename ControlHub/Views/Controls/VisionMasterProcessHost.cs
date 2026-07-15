@@ -258,6 +258,17 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public Task<string> ImportCalibrationFileAsync(
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath));
+        return SendCalibrationCommandAsync(
+            $"IMPORT_CALIBRATION_FILE\t{encodedPath}",
+            cancellationToken);
+    }
+
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
         double pixelX,
         double pixelY,
