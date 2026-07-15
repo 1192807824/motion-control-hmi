@@ -15,6 +15,10 @@ public readonly record struct VisionMotionTarget(
     double Y,
     VisionTargetTool Tool);
 
+public readonly record struct DualNozzleMechanicalTargets(
+    VisionMotionTarget Nozzle1,
+    VisionMotionTarget Nozzle2);
+
 public sealed record VisionCalibrationSnapshot(
     string CalibrationFilePath,
     bool CalibrationFileExists,

@@ -779,12 +779,12 @@
                             </Grid.RowDefinitions>
 
                             <Grid>
-                                <TextBlock Text="第一套 XY 吸嘴测试"
+                                <TextBlock Text="第一套 XY 坐标换算（pulse）"
                                            Foreground="#EAF2F7"
                                            FontSize="12"
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
-                                <TextBlock Text="标定页自动同步"
+                                <TextBlock Text="只读 · 不移动"
                                            Foreground="#49D17D"
                                            FontSize="10"
                                            HorizontalAlignment="Right"
@@ -805,11 +805,11 @@
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="92" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="像素 X（px）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <TextBox x:Name="TestCameraTargetXTextBox"
+                                    <TextBox x:Name="PixelXTextBox"
                                              Height="25"
                                              Text=""
                                              TextAlignment="Center"
@@ -819,7 +819,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="像素 Y（px）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <TextBox x:Name="TestCameraTargetYTextBox"
+                                    <TextBox x:Name="PixelYTextBox"
                                              Height="25"
                                              Text=""
                                              TextAlignment="Center"
@@ -828,54 +828,58 @@
                                              Background="#F7FAFC" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="4">
-                                    <TextBlock Text="速度（pulse/s）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <TextBox x:Name="TestMoveVelocityTextBox"
-                                             Height="25"
-                                             Text="100000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC" />
+                                    <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <Button x:Name="ConvertBothNozzlesButton"
+                                            Height="25"
+                                            Content="换算双吸嘴"
+                                            Foreground="White"
+                                            Background="#1674D1"
+                                            BorderBrush="#62B5FF"
+                                            Cursor="Hand"
+                                            Click="ConvertBothNozzles_Click" />
                                 </StackPanel>
                             </Grid>
 
                             <Grid Grid.Row="3">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="48" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="68" />
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="TestNozzle1MoveButton"
-                                        Content="测试吸嘴1"
-                                        Foreground="White"
-                                        Background="#1674D1"
-                                        BorderBrush="#62B5FF"
-                                        Cursor="Hand"
-                                        Click="TestNozzle1Move_Click" />
-                                <Button Grid.Column="2"
-                                        x:Name="TestNozzle2MoveButton"
-                                        Content="测试吸嘴2"
-                                        Foreground="White"
-                                        Background="#1674D1"
-                                        BorderBrush="#62B5FF"
-                                        Cursor="Hand"
-                                        Click="TestNozzle2Move_Click" />
-                                <Button Grid.Column="4"
-                                        x:Name="StopNozzleTestButton"
-                                        Content="停止"
-                                        Foreground="White"
-                                        Background="#A83238"
-                                        BorderBrush="#E45A61"
-                                        IsEnabled="False"
-                                        Cursor="Hand"
-                                        Click="StopNozzleTest_Click" />
+                                <TextBlock Text="吸嘴1"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1"
+                                           x:Name="Nozzle1MechanicalCoordinateText"
+                                           Text="X = —　Y = —"
+                                           Foreground="#DCE7EE"
+                                           FontFamily="Consolas"
+                                           FontSize="10"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1"
+                                           Text="吸嘴2"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1"
+                                           Grid.Column="1"
+                                           x:Name="Nozzle2MechanicalCoordinateText"
+                                           Text="X = —　Y = —"
+                                           Foreground="#DCE7EE"
+                                           FontFamily="Consolas"
+                                           FontSize="10"
+                                           VerticalAlignment="Center" />
                             </Grid>
 
                             <TextBlock Grid.Row="4"
-                                       x:Name="NozzleTestStatusText"
-                                       Text="输入相机拍摄图像的像素坐标后选择吸嘴测试"
+                                       x:Name="CoordinateTransformStatusText"
+                                       Text="输入像素坐标后换算；不会下发运动命令"
                                        Foreground="#9FB1BF"
                                        FontSize="10"
                                        TextWrapping="Wrap"

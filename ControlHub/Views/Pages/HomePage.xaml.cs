@@ -2,7 +2,6 @@ using System.Globalization;
 using System.IO;
 using System.Windows.Controls;
 using System.Windows.Media;
-using ControlHub.Services.Motion;
 using ControlHub.Services.Vision;
 
 namespace ControlHub.Views.Pages;
@@ -12,8 +11,7 @@ public partial class HomePage : UserControl
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
-    private CancellationTokenSource? _nozzleTestCancellation;
-    private bool _nozzleTestRunning;
+    private bool _coordinateTransformRunning;
 
     public HomePage()
     {
@@ -26,14 +24,14 @@ public partial class HomePage : UserControl
     public void AttachMotionController(MotionControlPage motionController)
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
-        UpdateNozzleTestCommandState();
+        UpdateCoordinateTransformCommandState();
     }
 
     public void AttachVisionCalibrationController(VisualCalibrationPage visualCalibrationController)
     {
         _visualCalibrationController = visualCalibrationController
             ?? throw new ArgumentNullException(nameof(visualCalibrationController));
-        UpdateNozzleTestCommandState();
+        UpdateCoordinateTransformCommandState();
     }
 
     /// <summary>
@@ -81,71 +79,43 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 上料流程：输入相机图像像素坐标，把第一套 XY 的吸嘴1移动到该像素对应的位置。
+    /// 把相机图像中的像素坐标转换成第一套 XY 两个吸嘴各自的机械目标坐标。
+    /// 此方法只读取当前轴坐标，不下发任何运动命令。
     /// </summary>
-    public Task<CalibrationCenterPosition> ShangLiao_move_xizui1(
+    public async Task<DualNozzleMechanicalTargets> ConvertPixelToMechanicalTargetsAsync(
         double pixelX,
         double pixelY,
-        double velocityPulsesPerSecond = 100_000d,
-        double positionTolerancePulses = 10d,
-        int timeoutMilliseconds = 30_000,
         CancellationToken cancellationToken = default)
     {
-        return MoveFirstSetNozzleToPixelAsync(
-            pixelX,
-            pixelY,
-            VisionTargetTool.Nozzle1,
-            velocityPulsesPerSecond,
-            positionTolerancePulses,
-            timeoutMilliseconds,
-            cancellationToken);
-    }
+        if (!double.IsFinite(pixelX) || !double.IsFinite(pixelY) || pixelX < 0 || pixelY < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pixelX), "像素坐标必须是大于等于0的有效数字。");
+        }
 
-    /// <summary>
-    /// 上料流程：输入相机图像像素坐标，把第一套 XY 的吸嘴2移动到该像素对应的位置。
-    /// </summary>
-    public Task<CalibrationCenterPosition> ShangLiao_move_xizui2(
-        double pixelX,
-        double pixelY,
-        double velocityPulsesPerSecond = 100_000d,
-        double positionTolerancePulses = 10d,
-        int timeoutMilliseconds = 30_000,
-        CancellationToken cancellationToken = default)
-    {
-        return MoveFirstSetNozzleToPixelAsync(
-            pixelX,
-            pixelY,
-            VisionTargetTool.Nozzle2,
-            velocityPulsesPerSecond,
-            positionTolerancePulses,
-            timeoutMilliseconds,
-            cancellationToken);
-    }
-
-    /// <summary>
-    /// 主页运动流程可直接调用：按选定工具的标定偏移移动第一套 XY（硬件轴1、轴2）。
-    /// </summary>
-    public async Task<CalibrationCenterPosition> MoveToVisionTargetAsync(
-        double cameraTargetX,
-        double cameraTargetY,
-        VisionTargetTool targetTool,
-        double velocityPulsesPerSecond,
-        double positionTolerancePulses = 10d,
-        int timeoutMilliseconds = 30_000,
-        CancellationToken cancellationToken = default)
-    {
+        var snapshot = EnsureFirstSetToolsReady();
+        var visualCalibrationController = _visualCalibrationController
+            ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var target = CalculateVisionTarget(cameraTargetX, cameraTargetY, targetTool);
-        return await motionController.MoveCalibrationAxesToAsync(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo,
-            target.X,
-            target.Y,
-            velocityPulsesPerSecond,
-            positionTolerancePulses,
-            timeoutMilliseconds,
+
+        var transformed = await visualCalibrationController.TransformPixelAsync(
+            pixelX,
+            pixelY,
+            snapshot.CalibrationFilePath,
             cancellationToken);
+        var current = motionController.CaptureCalibrationCenter(
+            VisionCalibrationService.FirstSetXHardwareAxisNo,
+            VisionCalibrationService.FirstSetYHardwareAxisNo);
+        var cameraTargetX = current.ActualX +
+            (transformed.CenterTransformedX - transformed.TransformedX) *
+            VisionCalibrationService.PulsesPerVisionUnit;
+        var cameraTargetY = current.ActualY +
+            (transformed.CenterTransformedY - transformed.TransformedY) *
+            VisionCalibrationService.PulsesPerVisionUnit;
+
+        return new DualNozzleMechanicalTargets(
+            CalculateVisionTarget(cameraTargetX, cameraTargetY, VisionTargetTool.Nozzle1),
+            CalculateVisionTarget(cameraTargetX, cameraTargetY, VisionTargetTool.Nozzle2));
     }
 
     private void VisionCalibration_Changed(object? sender, EventArgs e)
@@ -196,126 +166,46 @@ public partial class HomePage : UserControl
         VisionCalibrationStatusIndicator.Fill = new SolidColorBrush(statusColor);
     }
 
-    private async void TestNozzle1Move_Click(object sender, System.Windows.RoutedEventArgs e)
+    private async void ConvertBothNozzles_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        await ExecuteNozzleTestAsync(VisionTargetTool.Nozzle1);
-    }
-
-    private async void TestNozzle2Move_Click(object sender, System.Windows.RoutedEventArgs e)
-    {
-        await ExecuteNozzleTestAsync(VisionTargetTool.Nozzle2);
-    }
-
-    private void StopNozzleTest_Click(object sender, System.Windows.RoutedEventArgs e)
-    {
-        _nozzleTestCancellation?.Cancel();
-        SetNozzleTestStatus("正在停止第一套 XY 测试移动…", false);
-    }
-
-    private async Task ExecuteNozzleTestAsync(VisionTargetTool tool)
-    {
-        if (_nozzleTestRunning)
+        if (_coordinateTransformRunning)
         {
             return;
         }
 
         try
         {
-            var pixelX = ParsePixelCoordinate(TestCameraTargetXTextBox.Text, "像素 X");
-            var pixelY = ParsePixelCoordinate(TestCameraTargetYTextBox.Text, "像素 Y");
-            var velocity = ParsePositiveTestValue(TestMoveVelocityTextBox.Text, "速度");
-            var toolName = tool == VisionTargetTool.Nozzle1 ? "吸嘴1" : "吸嘴2";
+            var pixelX = ParsePixelCoordinate(PixelXTextBox.Text, "像素 X");
+            var pixelY = ParsePixelCoordinate(PixelYTextBox.Text, "像素 Y");
 
-            _nozzleTestCancellation = new CancellationTokenSource();
-            _nozzleTestRunning = true;
-            UpdateNozzleTestCommandState();
-            SetNozzleTestStatus(
-                $"正在转换像素({pixelX}, {pixelY})并移动{toolName}…",
-                true);
+            _coordinateTransformRunning = true;
+            UpdateCoordinateTransformCommandState();
+            SetCoordinateTransformStatus($"正在换算像素({pixelX}, {pixelY})…", true);
 
-            var actual = tool == VisionTargetTool.Nozzle1
-                ? await ShangLiao_move_xizui1(
-                    pixelX,
-                    pixelY,
-                    velocity,
-                    cancellationToken: _nozzleTestCancellation.Token)
-                : await ShangLiao_move_xizui2(
-                    pixelX,
-                    pixelY,
-                    velocity,
-                    cancellationToken: _nozzleTestCancellation.Token);
-            SetNozzleTestStatus(
-                $"{toolName}测试完成：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
-                true);
-        }
-        catch (OperationCanceledException)
-        {
-            SetNozzleTestStatus("测试移动已停止。", false);
+            var targets = await ConvertPixelToMechanicalTargetsAsync(pixelX, pixelY);
+            Nozzle1MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle1);
+            Nozzle2MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle2);
+            SetCoordinateTransformStatus("换算完成；仅显示坐标，未下发运动命令。", true);
         }
         catch (Exception exception)
         {
-            SetNozzleTestStatus($"测试失败：{exception.Message}", false);
+            Nozzle1MechanicalCoordinateText.Text = "X = —　Y = —";
+            Nozzle2MechanicalCoordinateText.Text = "X = —　Y = —";
+            SetCoordinateTransformStatus($"换算失败：{exception.Message}", false);
         }
         finally
         {
-            _nozzleTestCancellation?.Dispose();
-            _nozzleTestCancellation = null;
-            _nozzleTestRunning = false;
-            UpdateNozzleTestCommandState();
+            _coordinateTransformRunning = false;
+            UpdateCoordinateTransformCommandState();
         }
     }
 
-    private async Task<CalibrationCenterPosition> MoveFirstSetNozzleToPixelAsync(
-        double pixelX,
-        double pixelY,
-        VisionTargetTool tool,
-        double velocityPulsesPerSecond,
-        double positionTolerancePulses,
-        int timeoutMilliseconds,
-        CancellationToken cancellationToken)
-    {
-        var snapshot = EnsureFirstSetToolReady(tool);
-        var visualCalibrationController = _visualCalibrationController
-            ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
-        var motionController = _motionController
-            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var transformed = await visualCalibrationController.TransformPixelAsync(
-            pixelX,
-            pixelY,
-            snapshot.CalibrationFilePath,
-            cancellationToken);
-        var current = motionController.CaptureCalibrationCenter(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo);
-        var cameraTargetX = current.ActualX +
-            (transformed.CenterTransformedX - transformed.TransformedX) *
-            VisionCalibrationService.PulsesPerVisionUnit;
-        var cameraTargetY = current.ActualY +
-            (transformed.CenterTransformedY - transformed.TransformedY) *
-            VisionCalibrationService.PulsesPerVisionUnit;
-        return await MoveToVisionTargetAsync(
-            cameraTargetX,
-            cameraTargetY,
-            tool,
-            velocityPulsesPerSecond,
-            positionTolerancePulses,
-            timeoutMilliseconds,
-            cancellationToken);
-    }
-
-    private VisionCalibrationSnapshot EnsureFirstSetToolReady(VisionTargetTool tool)
+    private VisionCalibrationSnapshot EnsureFirstSetToolsReady()
     {
         var snapshot = GetFirstSetCalibrationSnapshot();
-        var calibrated = tool switch
+        if (!snapshot.Nozzle1Calibrated || !snapshot.Nozzle2Calibrated)
         {
-            VisionTargetTool.Nozzle1 => snapshot.Nozzle1Calibrated,
-            VisionTargetTool.Nozzle2 => snapshot.Nozzle2Calibrated,
-            _ => true
-        };
-        if (!calibrated)
-        {
-            var toolName = tool == VisionTargetTool.Nozzle1 ? "吸嘴1" : "吸嘴2";
-            throw new InvalidOperationException($"第一套 XY 的{toolName}偏移尚未标定。");
+            throw new InvalidOperationException("第一套 XY 的两个吸嘴偏移尚未全部标定。");
         }
 
         return snapshot;
@@ -342,36 +232,38 @@ public partial class HomePage : UserControl
             $"吸嘴2偏移：X={snapshot.Nozzle2OffsetX:0.###}，Y={snapshot.Nozzle2OffsetY:0.###} pulse";
     }
 
-    private void UpdateNozzleTestCommandState()
+    private void UpdateCoordinateTransformCommandState()
     {
-        if (TestNozzle1MoveButton is null)
+        if (ConvertBothNozzlesButton is null)
         {
             return;
         }
 
         var canStart =
-            !_nozzleTestRunning &&
+            !_coordinateTransformRunning &&
             _motionController is not null &&
             _visualCalibrationController is not null;
-        TestNozzle1MoveButton.IsEnabled = canStart;
-        TestNozzle2MoveButton.IsEnabled = canStart;
-        StopNozzleTestButton.IsEnabled = _nozzleTestRunning;
-        TestCameraTargetXTextBox.IsEnabled = !_nozzleTestRunning;
-        TestCameraTargetYTextBox.IsEnabled = !_nozzleTestRunning;
-        TestMoveVelocityTextBox.IsEnabled = !_nozzleTestRunning;
+        ConvertBothNozzlesButton.IsEnabled = canStart;
+        PixelXTextBox.IsEnabled = !_coordinateTransformRunning;
+        PixelYTextBox.IsEnabled = !_coordinateTransformRunning;
     }
 
-    private void SetNozzleTestStatus(string message, bool success)
+    private void SetCoordinateTransformStatus(string message, bool success)
     {
-        NozzleTestStatusText.Text = message;
-        NozzleTestStatusText.Foreground = new SolidColorBrush(success
+        CoordinateTransformStatusText.Text = message;
+        CoordinateTransformStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)
             : Color.FromRgb(242, 181, 68));
     }
 
-    private static double ParseFiniteTestValue(string? value, string fieldName)
+    private static string FormatMechanicalCoordinate(VisionMotionTarget target)
     {
-        if (!TryParseTestValue(value, out var parsed))
+        return $"X = {target.X:0.###}　Y = {target.Y:0.###}";
+    }
+
+    private static double ParseFiniteCoordinate(string? value, string fieldName)
+    {
+        if (!TryParseCoordinate(value, out var parsed))
         {
             throw new ArgumentException($"{fieldName}必须是有效数字。");
         }
@@ -381,7 +273,7 @@ public partial class HomePage : UserControl
 
     private static double ParsePixelCoordinate(string? value, string fieldName)
     {
-        var parsed = ParseFiniteTestValue(value, fieldName);
+        var parsed = ParseFiniteCoordinate(value, fieldName);
         if (parsed < 0)
         {
             throw new ArgumentException($"{fieldName}必须大于等于0。");
@@ -390,18 +282,7 @@ public partial class HomePage : UserControl
         return parsed;
     }
 
-    private static double ParsePositiveTestValue(string? value, string fieldName)
-    {
-        var parsed = ParseFiniteTestValue(value, fieldName);
-        if (parsed <= 0)
-        {
-            throw new ArgumentOutOfRangeException(fieldName, $"{fieldName}必须大于0。");
-        }
-
-        return parsed;
-    }
-
-    private static bool TryParseTestValue(string? value, out double parsed)
+    private static bool TryParseCoordinate(string? value, out double parsed)
     {
         return (double.TryParse(
                     value,
