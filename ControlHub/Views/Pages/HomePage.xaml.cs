@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Xml.Linq;
 using ControlHub.Services.Vision;
 using ControlHub.Views.Controls;
 using ShapeLine = System.Windows.Shapes.Line;
@@ -44,6 +45,11 @@ public partial class HomePage : UserControl
     /// 主页生产逻辑读取的视觉标定快照，包括标定文件和两个吸嘴的偏移。
     /// </summary>
     public VisionCalibrationSnapshot VisionCalibration => _visionCalibration.GetSnapshot();
+
+    /// <summary>
+    /// 主页正在换算或执行“回中心→拍照→Blob”时禁止切换视觉模式，避免中途释放相机或宿主。
+    /// </summary>
+    public bool IsOperationRunning => _coordinateTransformRunning || _startSequenceRunning;
 
     /// <summary>
     /// 将视觉计算出的相机轴坐标转换为相机/吸嘴1/吸嘴2的实际轴目标。
@@ -122,7 +128,7 @@ public partial class HomePage : UserControl
             ClearBlobInspectionResult();
             SetStartProductionStatus("步骤1/3：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
 
-            var center = await ReadFirstSetCalibrationCenterAsync(CancellationToken.None);
+            var center = ReadFirstSetCalibrationCenter();
 
             // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
             var current = motionController.CaptureCalibrationFeedback(
@@ -148,8 +154,8 @@ public partial class HomePage : UserControl
                 moveTimeoutMilliseconds: timeoutMilliseconds,
                 cancellationToken: CancellationToken.None);
 
-            // XY 确认到位后才允许触发相机；VisionMaster 实时流程内部按模块顺序执行
-            // “图像采集 → Blob分析”，因此读取到的质心一定对应本次拍摄的图像。
+            // XY 确认到位后才按需启动视觉宿主；主页不会加载 VisionMaster 方案，
+            // 而是用 MVS SDK 直接拍一帧，再由本地 C# Blob 分析同一张原图。
             SetStartProductionStatus(
                 $"步骤2/3：XY已到位({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                 "海康拍照 → 步骤3/3 Blob分析中…",
@@ -176,33 +182,109 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 从 VisionMaster 标定文件读取图像中心对应的机械绝对坐标，并换算为控制卡脉冲。
+    /// 直接读取九点标定 XML 中的九个机械坐标。规则九点阵列的平均值就是记录标定时
+    /// 的 XY 中心，因此第一步不需要启动视觉方案，也不会在移动前占用或触发相机。
     /// </summary>
-    private async Task<(double X, double Y)> ReadFirstSetCalibrationCenterAsync(
-        CancellationToken cancellationToken)
+    private (double X, double Y) ReadFirstSetCalibrationCenter()
     {
         var snapshot = GetFirstSetCalibrationFileSnapshot();
-        var visualCalibrationController = _visualCalibrationController
-            ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
+        XDocument document;
+        try
+        {
+            document = XDocument.Load(snapshot.CalibrationFilePath);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidDataException("无法读取第一套 XY 九点标定文件。", exception);
+        }
 
-        // TRANSFORM_PIXEL 会同时返回输入点和图像中心的转换结果。
-        // 此处输入(0,0)仅用于触发读取，步骤1只使用 CenterTransformedX/Y。
-        var transformed = await visualCalibrationController.TransformPixelAsync(
-            0d,
-            0d,
-            snapshot.CalibrationFilePath,
-            cancellationToken);
+        ValidateNPointCalibration(document, "第一套 XY 标定文件");
 
-        // 标定文件中的中心坐标单位是 VisionMaster 单位；控制卡使用 pulse。
-        // 回标定中心移动的是相机所在的 XY 基准点，因此这里不能叠加吸嘴1/2偏移。
-        var centerX = transformed.CenterTransformedX * VisionCalibrationService.PulsesPerVisionUnit;
-        var centerY = transformed.CenterTransformedY * VisionCalibrationService.PulsesPerVisionUnit;
+        var worldPointList = document
+            .Descendants()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "CalibPointFListParam", StringComparison.Ordinal) &&
+                string.Equals(
+                    (string?)element.Attribute("ParamName"),
+                    "WorldPointLst",
+                    StringComparison.Ordinal));
+        var worldPoints = worldPointList?
+            .Elements()
+            .Where(element => string.Equals(element.Name.LocalName, "PointF", StringComparison.Ordinal))
+            .Select(element => new
+            {
+                X = ParseCalibrationCoordinate(element, "X"),
+                Y = ParseCalibrationCoordinate(element, "Y")
+            })
+            .ToArray();
+        if (worldPoints is not { Length: 9 })
+        {
+            throw new InvalidDataException("第一套 XY 标定文件中未找到完整的 9 个机械标定点。");
+        }
+
+        // 标定文件使用 VisionMaster 机械单位，控制卡使用 pulse；相机中心不叠加吸嘴偏移。
+        var centerX = worldPoints.Average(point => point.X) *
+            VisionCalibrationService.PulsesPerVisionUnit;
+        var centerY = worldPoints.Average(point => point.Y) *
+            VisionCalibrationService.PulsesPerVisionUnit;
         if (!double.IsFinite(centerX) || !double.IsFinite(centerY))
         {
             throw new InvalidOperationException("第一套 XY 标定中心坐标无效。");
         }
 
         return (centerX, centerY);
+    }
+
+    private static void ValidateNPointCalibration(XDocument document, string displayName)
+    {
+        var calibrationType = ReadCalibrationParameter(document, "CalibType");
+        if (!string.Equals(calibrationType, "NPointCalib", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"{displayName}不是有效的 N 点标定结果。");
+        }
+
+        var errorStatus = ReadCalibrationParameter(document, "CalibErrStatus");
+        if (!string.Equals(errorStatus, "0", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"{displayName}的 CalibErrStatus 不是 0，禁止用于机械移动。");
+        }
+    }
+
+    private static string? ReadCalibrationParameter(XDocument document, string parameterName)
+    {
+        return document
+            .Descendants()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "CalibParam", StringComparison.Ordinal) &&
+                string.Equals(
+                    (string?)element.Attribute("ParamName"),
+                    parameterName,
+                    StringComparison.Ordinal))?
+            .Elements()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "ParamValue", StringComparison.Ordinal))?
+            .Value
+            .Trim();
+    }
+
+    private static double ParseCalibrationCoordinate(XElement point, string coordinateName)
+    {
+        var value = point
+            .Elements()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, coordinateName, StringComparison.Ordinal))
+            ?.Value;
+        if (!double.TryParse(
+                value,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var coordinate) ||
+            !double.IsFinite(coordinate))
+        {
+            throw new InvalidDataException($"九点标定文件中的机械坐标 {coordinateName} 无效。");
+        }
+
+        return coordinate;
     }
 
     /// <summary>
@@ -405,14 +487,14 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 加载 VisionMaster 本次保存的相机图，并在同一像素坐标系中叠加两个 Blob 框和质心。
+    /// 加载本次单拍保存的相机图，并在同一像素坐标系中叠加两个 Blob 框和质心。
     /// BitmapCacheOption.OnLoad 会把文件完整读入内存，因此加载后即可删除临时文件。
     /// </summary>
     private void ShowBlobInspectionImage(VisionRectangleBlobResult result)
     {
         if (string.IsNullOrWhiteSpace(result.ImagePath) || !File.Exists(result.ImagePath))
         {
-            throw new FileNotFoundException("VisionMaster 本次Blob检测图不存在。", result.ImagePath);
+            throw new FileNotFoundException("本次 Blob 检测图不存在。", result.ImagePath);
         }
 
         BitmapImage bitmap;
@@ -447,7 +529,7 @@ public partial class HomePage : UserControl
         var imageHeight = bitmap.PixelHeight > 0 ? bitmap.PixelHeight : result.ImageHeight;
         if (imageWidth <= 0 || imageHeight <= 0)
         {
-            throw new InvalidDataException("VisionMaster 本次Blob检测图尺寸无效。");
+            throw new InvalidDataException("本次 Blob 检测图尺寸无效。");
         }
 
         BlobInspectionImageSurface.Width = imageWidth;

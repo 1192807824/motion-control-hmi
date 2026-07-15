@@ -54,8 +54,8 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSCalibTransformModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
-    <Reference Include="IMVSBlobFindModuCs">
-      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSBlobFindModuCs.dll</HintPath>
+    <Reference Include="MvCameraControl.Net">
+      <HintPath>$(VisionMasterAssemblyDirectory)\MvCameraControl.Net.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

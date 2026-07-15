@@ -41,6 +41,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     private Task? _eventPipeTask;
     private IntPtr _hostWindow;
     private IntPtr _visionWindow;
+    private bool? _livePreviewMode;
     private bool _disposed;
 
     public event EventHandler? Started;
@@ -49,16 +50,36 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     public event EventHandler? Exited;
 
+    public event EventHandler? SolutionReady;
+
+    public event EventHandler<VisionMasterHostFailedEventArgs>? SolutionNotReady;
+
     public event EventHandler<VisionClickTargetEventArgs>? ClickTargetReceived;
 
     public event EventHandler<VisionClickTargetFailedEventArgs>? ClickTargetFailed;
 
-    public async Task StartAsync()
+    /// <summary>
+    /// 按指定模式启动视觉宿主。标定页使用实时预览模式；主页只使用单次运行模式，
+    /// 避免后台连续取图长期占用相机。
+    /// </summary>
+    public async Task StartAsync(bool enableLivePreview)
     {
         await _lifecycleGate.WaitAsync();
         try
         {
-            await StartCoreAsync();
+            var modeChanged = false;
+            lock (_syncRoot)
+            {
+                modeChanged = _process is { HasExited: false } &&
+                    _livePreviewMode != enableLivePreview;
+            }
+
+            if (modeChanged)
+            {
+                StopProcess();
+            }
+
+            await StartCoreAsync(enableLivePreview);
         }
         finally
         {
@@ -66,7 +87,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
     }
 
-    private async Task StartCoreAsync()
+    private async Task StartCoreAsync(bool enableLivePreview)
     {
         if (_disposed)
         {
@@ -88,8 +109,14 @@ public sealed class VisionMasterProcessHost : HwndHost
             return;
         }
 
+        CancellationToken cancellationToken;
         lock (_syncRoot)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             if (_process is { HasExited: false })
             {
                 return;
@@ -97,9 +124,8 @@ public sealed class VisionMasterProcessHost : HwndHost
 
             _startCancellation?.Dispose();
             _startCancellation = new CancellationTokenSource();
+            cancellationToken = _startCancellation.Token;
         }
-
-        var cancellationToken = _startCancellation.Token;
 
         var executablePath = ResolveHostExecutablePath();
         if (!File.Exists(executablePath))
@@ -109,7 +135,8 @@ public sealed class VisionMasterProcessHost : HwndHost
             return;
         }
 
-        Process process;
+        Process? process = null;
+        var processOwnedByHost = false;
         try
         {
             process = new Process
@@ -117,7 +144,10 @@ public sealed class VisionMasterProcessHost : HwndHost
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = executablePath,
-                    Arguments = $"--embedded --parent-pid {Environment.ProcessId} --pipe-name {_pipeName} --event-pipe-name {_eventPipeName}",
+                    Arguments =
+                        $"--embedded --parent-pid {Environment.ProcessId} " +
+                        $"--pipe-name {_pipeName} --event-pipe-name {_eventPipeName}" +
+                        (enableLivePreview ? " --live-preview" : ""),
                     WorkingDirectory = Path.GetDirectoryName(executablePath)!,
                     UseShellExecute = false,
                     CreateNoWindow = false
@@ -125,23 +155,43 @@ public sealed class VisionMasterProcessHost : HwndHost
                 EnableRaisingEvents = true
             };
             process.Exited += VisionProcess_Exited;
-            if (!process.Start())
-            {
-                process.Dispose();
-                StopProcess();
-                RaiseFailed("VisionMasterHost 进程未能启动。 ");
-                return;
-            }
-
+            // 与 Shutdown 共用同一把锁：要么把新进程登记完成后再由 Shutdown 停止，
+            // 要么在启动前观察到取消，绝不允许 Shutdown 之后漏出孤儿视觉进程。
             lock (_syncRoot)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_disposed)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                if (!process.Start())
+                {
+                    throw new InvalidOperationException("VisionMasterHost 进程未能启动。 ");
+                }
+
                 _process = process;
+                _livePreviewMode = enableLivePreview;
+                processOwnedByHost = true;
             }
         }
         catch (Exception exception)
         {
-            StopProcess();
-            if (!_disposed)
+            if (!processOwnedByHost && process is not null)
+            {
+                process.Exited -= VisionProcess_Exited;
+                process.Dispose();
+            }
+
+            try
+            {
+                StopProcess();
+            }
+            catch
+            {
+            }
+
+            if (!_disposed && exception is not OperationCanceledException)
             {
                 RaiseFailed(exception.Message);
             }
@@ -163,7 +213,14 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
         catch (OperationCanceledException)
         {
-            // A restart or application shutdown intentionally cancels startup.
+            // 应用退出可能在等待窗口期间取消启动；再次收口可覆盖所有竞态顺序。
+            try
+            {
+                StopProcess();
+            }
+            catch
+            {
+            }
         }
         catch (Exception exception)
         {
@@ -185,8 +242,28 @@ public sealed class VisionMasterProcessHost : HwndHost
                 return;
             }
 
+            var enableLivePreview = _livePreviewMode ?? true;
             StopProcess();
-            await StartCoreAsync();
+            await StartCoreAsync(enableLivePreview);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 停止当前视觉子进程但保留宿主控件，后续进入标定页或主页拍照时仍可重新启动。
+    /// </summary>
+    public async Task StopAsync()
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (!_disposed)
+            {
+                StopProcess();
+            }
         }
         finally
         {
@@ -320,6 +397,25 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
+    /// 等待子进程完成窗口初始化（标定模式还会等待方案自动恢复）并开放命令管道。
+    /// </summary>
+    public async Task<bool> WaitUntilReadyAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await SendCalibrationCommandAsync("PING", cancellationToken);
+        if (string.Equals(response, "READY", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(response, "READY_NO_SOLUTION", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        throw new InvalidDataException("视觉子进程就绪握手返回无效。");
+    }
+
+    /// <summary>
     /// 让 VisionMaster 当前实时流程单次执行“拍照→Blob分析”，并读取两个矩形的像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
@@ -397,7 +493,11 @@ public sealed class VisionMasterProcessHost : HwndHost
             }
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            timeout.CancelAfter(
+                command.StartsWith("RUN_RECTANGLE_BLOB", StringComparison.Ordinal) ||
+                string.Equals(command, "PING", StringComparison.Ordinal)
+                ? TimeSpan.FromSeconds(60)
+                : TimeSpan.FromSeconds(30));
             await using var pipe = new NamedPipeClientStream(
                 ".",
                 _pipeName,
@@ -472,7 +572,14 @@ public sealed class VisionMasterProcessHost : HwndHost
             _activeEventPipe = null;
         }
 
-        StopProcess();
+        try
+        {
+            StopProcess();
+        }
+        catch
+        {
+            // 应用正在退出；StopProcess 已保留未退出进程的句柄，父进程退出监视仍会再次收口。
+        }
     }
 
     private void StartEventPipeServer()
@@ -546,6 +653,33 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void DispatchHostEvent(string message)
     {
         var parts = message.Split('\t');
+        if (parts.Length == 1 &&
+            string.Equals(parts[0], "SOLUTION_READY", StringComparison.Ordinal))
+        {
+            _ = Dispatcher.BeginInvoke(() => SolutionReady?.Invoke(this, EventArgs.Empty));
+            return;
+        }
+
+        if (parts.Length == 2 &&
+            string.Equals(parts[0], "SOLUTION_NOT_READY", StringComparison.Ordinal))
+        {
+            string stateMessage;
+            try
+            {
+                stateMessage = Encoding.UTF8.GetString(Convert.FromBase64String(parts[1]));
+            }
+            catch (FormatException)
+            {
+                stateMessage = parts[1];
+            }
+
+            _ = Dispatcher.BeginInvoke(
+                () => SolutionNotReady?.Invoke(
+                    this,
+                    new VisionMasterHostFailedEventArgs(stateMessage)));
+            return;
+        }
+
         if (parts.Length == 9 &&
             string.Equals(parts[0], "CLICK_TARGET", StringComparison.Ordinal) &&
             int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixelX) &&
@@ -806,19 +940,26 @@ public sealed class VisionMasterProcessHost : HwndHost
             _startCancellation?.Dispose();
             _startCancellation = null;
             process = _process;
-            _process = null;
             visionWindow = _visionWindow;
-            _visionWindow = IntPtr.Zero;
         }
 
         if (process is null)
         {
+            lock (_syncRoot)
+            {
+                _livePreviewMode = null;
+                _visionWindow = IntPtr.Zero;
+            }
+
             return;
         }
 
+        Exception? stopFailure = null;
+        var exited = false;
+        var processId = TryGetProcessId(process);
+        process.Exited -= VisionProcess_Exited;
         try
         {
-            process.Exited -= VisionProcess_Exited;
             if (!process.HasExited)
             {
                 var closeRequested = visionWindow != IntPtr.Zero
@@ -832,17 +973,84 @@ public sealed class VisionMasterProcessHost : HwndHost
                 if (!closeRequested || !process.WaitForExit(8_000))
                 {
                     process.Kill(entireProcessTree: true);
-                    _ = process.WaitForExit(2_000);
+                    if (!process.WaitForExit(2_000))
+                    {
+                        throw new TimeoutException(
+                            $"视觉子进程 {processId} 在强制终止后仍未退出。");
+                    }
                 }
             }
+
+            exited = HasExitedOrDisposed(process);
+        }
+        catch (Exception exception)
+        {
+            stopFailure = exception;
+        }
+
+        if (exited)
+        {
+            lock (_syncRoot)
+            {
+                if (ReferenceEquals(_process, process))
+                {
+                    _process = null;
+                    _livePreviewMode = null;
+                    _visionWindow = IntPtr.Zero;
+                }
+            }
+
+            process.Dispose();
+            return;
+        }
+
+        // 未确认退出时保留进程引用，禁止再启动第二个隐藏宿主继续争用相机。
+        try
+        {
+            process.Exited += VisionProcess_Exited;
+        }
+        catch (ObjectDisposedException)
+        {
+            VisionProcess_Exited(process, EventArgs.Empty);
+            return;
+        }
+
+        if (HasExitedOrDisposed(process))
+        {
+            VisionProcess_Exited(process, EventArgs.Empty);
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"无法停止视觉子进程 {processId}，已保留该进程以防重复启动。",
+            stopFailure);
+    }
+
+    private static string TryGetProcessId(Process process)
+    {
+        try
+        {
+            return process.Id.ToString(CultureInfo.InvariantCulture);
         }
         catch
         {
-            // The owned helper process may already be terminating.
+            return "（未知PID）";
         }
-        finally
+    }
+
+    private static bool HasExitedOrDisposed(Process process)
+    {
+        try
         {
-            process.Dispose();
+            return process.HasExited;
+        }
+        catch (ObjectDisposedException)
+        {
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
         }
     }
 
@@ -862,6 +1070,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             }
 
             _process = null;
+            _livePreviewMode = null;
             _visionWindow = IntPtr.Zero;
             shouldNotify = !_disposed;
         }

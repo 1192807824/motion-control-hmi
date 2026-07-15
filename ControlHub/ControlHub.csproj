@@ -10,6 +10,15 @@
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <NoWarn>$(NoWarn);NU1702</NoWarn>
+    <!--
+      ControlHub 固定为 x86，但 VisionMasterHost 的 PlatformTarget 固定为 x64。
+      当父工程以 /p:Platform=x86 构建时，MSBuild 仍会把宿主输出到 bin\x86；
+      这里按实际 Platform 选择目录，避免复制到旧的 bin\Debug 宿主。
+    -->
+    <VisionMasterHostOutputDirectory
+      Condition="'$(Platform)' == '' Or '$(Platform)' == 'AnyCPU'">$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48</VisionMasterHostOutputDirectory>
+    <VisionMasterHostOutputDirectory
+      Condition="'$(Platform)' != '' And '$(Platform)' != 'AnyCPU'">$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Platform)\$(Configuration)\net48</VisionMasterHostOutputDirectory>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,7 +44,7 @@
 
   <Target Name="CopyVisionMasterHost" AfterTargets="Build">
     <ItemGroup>
-      <VisionMasterHostFiles Include="$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48\**\*" />
+      <VisionMasterHostFiles Include="$(VisionMasterHostOutputDirectory)\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(VisionMasterHostFiles)"
           DestinationFiles="@(VisionMasterHostFiles->'$(OutDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"
@@ -44,7 +53,7 @@
 
   <Target Name="CopyVisionMasterHostToPublish" AfterTargets="Publish">
     <ItemGroup>
-      <VisionMasterHostPublishFiles Include="$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48\**\*" />
+      <VisionMasterHostPublishFiles Include="$(VisionMasterHostOutputDirectory)\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(VisionMasterHostPublishFiles)"
           DestinationFiles="@(VisionMasterHostPublishFiles->'$(PublishDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"

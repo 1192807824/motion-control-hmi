@@ -86,7 +86,7 @@
                              Fill="#E0A21A" />
                     <TextBlock x:Name="HostStatusText"
                                Margin="6,0,0,0"
-                               Text="正在准备视觉组件…"
+                               Text="未启动（进入本页后加载方案）"
                                Foreground="#D8E4EC"
                                FontSize="12"
                                VerticalAlignment="Center" />
@@ -470,6 +470,8 @@
                                                       Started="VisionHost_Started"
                                                       Failed="VisionHost_Failed"
                                                       Exited="VisionHost_Exited"
+                                                      SolutionReady="VisionHost_SolutionReady"
+                                                      SolutionNotReady="VisionHost_SolutionNotReady"
                                                       ClickTargetReceived="VisionHost_ClickTargetReceived"
                                                       ClickTargetFailed="VisionHost_ClickTargetFailed" />
                     <StackPanel x:Name="HostPlaceholder"

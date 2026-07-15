@@ -10,6 +10,7 @@ namespace ControlHub.Views;
 public partial class MainWindow : Window
 {
     private readonly RememberedLoginStore _rememberedLoginStore = new();
+    private readonly SemaphoreSlim _navigationGate = new(1, 1);
     private readonly DispatcherTimer _clockTimer;
     private readonly MainWindowViewModel _viewModel;
     private RememberedLogin? _rememberedLogin;
@@ -47,25 +48,62 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MotionMenu_Click(object sender, RoutedEventArgs e)
+    private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
-        ShowMotionPage();
+        await NavigateAsync(ShowMotionPage, enterCalibration: false);
     }
 
-    private void HomeMenu_Click(object sender, RoutedEventArgs e)
+    private async void HomeMenu_Click(object sender, RoutedEventArgs e)
     {
-        ShowHomePage();
+        await NavigateAsync(ShowHomePage, enterCalibration: false);
     }
 
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
-        ShowVisualCalibrationPage();
-        await VisualCalibrationContent.EnsureStartedAsync();
+        await NavigateAsync(ShowVisualCalibrationPage, enterCalibration: true);
     }
 
-    private void ConnectionMenu_Click(object sender, RoutedEventArgs e)
+    private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
-        ShowConnectionConfigPage();
+        await NavigateAsync(ShowConnectionConfigPage, enterCalibration: false);
+    }
+
+    private async Task NavigateAsync(Action showPage, bool enterCalibration)
+    {
+        await _navigationGate.WaitAsync();
+        try
+        {
+            if (HomeContent.IsOperationRunning)
+            {
+                return;
+            }
+
+            if (enterCalibration)
+            {
+                showPage();
+                await VisualCalibrationContent.EnterCalibrationAsync();
+            }
+            else
+            {
+                await VisualCalibrationContent.LeaveCalibrationAsync();
+                showPage();
+            }
+        }
+        catch (Exception exception)
+        {
+            // 释放视觉宿主失败时保持当前页面，不继续切页；否则遗留的实时方案
+            // 仍可能占用相机，主页再次单拍就会出现“设备忙/使能失败”。
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "视觉模式切换失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            _navigationGate.Release();
+        }
     }
 
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e)
