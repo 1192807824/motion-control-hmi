@@ -308,6 +308,33 @@ public sealed class VisionMasterProcessHost : HwndHost
             centerTransformedY);
     }
 
+    /// <summary>
+    /// 让 VisionMaster 当前实时流程单次执行“拍照→Blob分析”，并读取两个矩形的像素质心。
+    /// </summary>
+    public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+        CancellationToken cancellationToken)
+    {
+        var response = await SendCalibrationCommandAsync("RUN_RECTANGLE_BLOB", cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 4 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstX) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstY) ||
+            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondX) ||
+            !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondY) ||
+            !double.IsFinite(firstX) ||
+            !double.IsFinite(firstY) ||
+            !double.IsFinite(secondX) ||
+            !double.IsFinite(secondY) ||
+            firstX < 0 || firstY < 0 || secondX < 0 || secondY < 0)
+        {
+            throw new InvalidDataException("VisionMaster 返回的两个矩形质心坐标无效。");
+        }
+
+        return new VisionRectangleBlobResult(
+            new VisionPixelPoint(firstX, firstY),
+            new VisionPixelPoint(secondX, secondY));
+    }
+
     public async Task AbortNinePointCalibrationAsync()
     {
         try
@@ -961,3 +988,9 @@ public sealed record VisionPixelTransformResult(
     double CenterPixelY,
     double CenterTransformedX,
     double CenterTransformedY);
+
+public sealed record VisionPixelPoint(double X, double Y);
+
+public sealed record VisionRectangleBlobResult(
+    VisionPixelPoint Rectangle1,
+    VisionPixelPoint Rectangle2);

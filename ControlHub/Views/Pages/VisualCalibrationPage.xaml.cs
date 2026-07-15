@@ -101,6 +101,22 @@ public partial class VisualCalibrationPage : UserControl
             cancellationToken);
     }
 
+    /// <summary>
+    /// 执行当前 VisionMaster 实时流程中的相机取像和 Blob 分析，返回两个矩形的像素质心。
+    /// </summary>
+    public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+        CancellationToken cancellationToken)
+    {
+        await EnsureStartedAsync();
+        if (!_hostReady)
+        {
+            throw new InvalidOperationException(
+                "视觉组件尚未就绪，请先进入视觉标定页加载包含图像采集和Blob分析的实时流程。");
+        }
+
+        return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
+    }
+
     public void Shutdown()
     {
         if (_shutdown)

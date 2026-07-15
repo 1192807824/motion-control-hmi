@@ -663,8 +663,8 @@
                         <RowDefinition Height="86" />
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
-                        <RowDefinition Height="*" MinHeight="178" />
-                        <RowDefinition Height="166" />
+                        <RowDefinition Height="*" MinHeight="202" />
+                        <RowDefinition Height="142" />
                     </Grid.RowDefinitions>
 
                     <Grid>
@@ -747,7 +747,7 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
                                 <TextBlock x:Name="StartProductionHintText"
-                                           Text="步骤1：第一套 XY 回标定中心"
+                                           Text="XY回中心 → 海康拍照 → Blob分析"
                                            Foreground="#D7F4E5"
                                            FontSize="11"
                                            Margin="0,3,0,0"
@@ -885,13 +885,24 @@
                                            VerticalAlignment="Center" />
                             </Grid>
 
-                            <TextBlock Grid.Row="4"
-                                       x:Name="CoordinateTransformStatusText"
-                                       Text="输入像素坐标后换算；不会下发运动命令"
-                                       Foreground="#9FB1BF"
-                                       FontSize="10"
-                                       TextWrapping="Wrap"
-                                       VerticalAlignment="Center" />
+                            <StackPanel Grid.Row="4" VerticalAlignment="Center">
+                                <TextBlock x:Name="CoordinateTransformStatusText"
+                                           Text="输入像素坐标后换算；不会下发运动命令"
+                                           Foreground="#9FB1BF"
+                                           FontSize="10"
+                                           TextWrapping="Wrap" />
+                                <TextBlock x:Name="BlobRectangle1CenterText"
+                                           Text="矩形1质心(px)：X = —　Y = —"
+                                           Foreground="#49D17D"
+                                           FontFamily="Consolas"
+                                           FontSize="10"
+                                           Margin="0,2,0,0" />
+                                <TextBlock x:Name="BlobRectangle2CenterText"
+                                           Text="矩形2质心(px)：X = —　Y = —"
+                                           Foreground="#49D17D"
+                                           FontFamily="Consolas"
+                                           FontSize="10" />
+                            </StackPanel>
                         </Grid>
                     </Border>
 

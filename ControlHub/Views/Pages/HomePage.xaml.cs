@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows.Controls;
 using System.Windows.Media;
 using ControlHub.Services.Vision;
+using ControlHub.Views.Controls;
 
 namespace ControlHub.Views.Pages;
 
@@ -89,8 +90,9 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 主页开始按钮目前只执行步骤1：第一套 XY 回到九点标定时记录的中心位置。
-    /// 完成此步后流程立即结束，不触发拍照、取料或吸嘴动作。
+    /// 主页开始按钮当前执行三个顺序步骤：
+    /// 1. 第一套 XY 回到九点标定中心；2. 海康相机拍照；3. Blob分析并显示两个矩形质心。
+    /// 本阶段仍不执行取料、吸嘴或后续摆盘动作。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -103,6 +105,8 @@ public partial class HomePage : UserControl
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var visualCalibrationController = _visualCalibrationController
+                ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
             var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
             if (!double.IsFinite(velocity) || velocity <= 0)
             {
@@ -111,7 +115,8 @@ public partial class HomePage : UserControl
 
             _startSequenceRunning = true;
             UpdateHomeCommandState();
-            SetStartProductionStatus("步骤1/1：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
+            ClearBlobInspectionResult();
+            SetStartProductionStatus("步骤1/3：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
 
             var center = await ReadFirstSetCalibrationCenterAsync(CancellationToken.None);
 
@@ -127,7 +132,7 @@ public partial class HomePage : UserControl
                 velocity);
 
             SetStartProductionStatus(
-                $"步骤1/1：第一套 XY 正在回标定中心 X={center.X:0.###}，Y={center.Y:0.###}…",
+                $"步骤1/3：第一套 XY 正在回标定中心 X={center.X:0.###}，Y={center.Y:0.###}…",
                 Color.FromRgb(242, 181, 68));
             var actual = await motionController.MoveCalibrationAxesToAsync(
                 VisionCalibrationService.FirstSetXHardwareAxisNo,
@@ -139,14 +144,24 @@ public partial class HomePage : UserControl
                 moveTimeoutMilliseconds: timeoutMilliseconds,
                 cancellationToken: CancellationToken.None);
 
+            // XY 确认到位后才允许触发相机；VisionMaster 实时流程内部按模块顺序执行
+            // “图像采集 → Blob分析”，因此读取到的质心一定对应本次拍摄的图像。
             SetStartProductionStatus(
-                $"步骤1完成：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse",
+                $"步骤2/3：XY已到位({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+                "海康拍照 → 步骤3/3 Blob分析中…",
+                Color.FromRgb(242, 181, 68));
+            var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
+                CancellationToken.None);
+            SetBlobInspectionResult(blobResult);
+
+            SetStartProductionStatus(
+                "步骤3完成：已找到两个矩形并显示像素质心 XY",
                 Color.FromRgb(73, 209, 125));
         }
         catch (Exception exception)
         {
             SetStartProductionStatus(
-                $"步骤1失败：{exception.Message}",
+                $"开始流程失败：{exception.Message}",
                 Color.FromRgb(242, 122, 128));
         }
         finally
@@ -362,6 +377,20 @@ public partial class HomePage : UserControl
         StartProductionHintText.Text = message;
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
+    }
+
+    private void ClearBlobInspectionResult()
+    {
+        BlobRectangle1CenterText.Text = "矩形1质心(px)：X = —　Y = —";
+        BlobRectangle2CenterText.Text = "矩形2质心(px)：X = —　Y = —";
+    }
+
+    private void SetBlobInspectionResult(VisionRectangleBlobResult result)
+    {
+        BlobRectangle1CenterText.Text =
+            $"矩形1质心(px)：X = {result.Rectangle1.X:0.###}　Y = {result.Rectangle1.Y:0.###}";
+        BlobRectangle2CenterText.Text =
+            $"矩形2质心(px)：X = {result.Rectangle2.X:0.###}　Y = {result.Rectangle2.Y:0.###}";
     }
 
     /// <summary>

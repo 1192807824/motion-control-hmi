@@ -7,6 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSNPointCalibModuCs;
 using Microsoft.Win32;
@@ -217,8 +218,115 @@ public partial class MainWindow : Window
             "ABORT" => AbortNinePointCalibration(),
             "SET_CLICK_MODE" => SetClickMoveMode(parts),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
+            "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
+    }
+
+    /// <summary>
+    /// 单次运行当前实时流程。流程中的图像采集模块先触发拍照，随后由 Blob 分析模块
+    /// 输出候选目标；这里取矩形度最高、面积最大的两个有效 Blob，并返回其像素质心。
+    /// </summary>
+    private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 1)
+        {
+            throw new InvalidDataException("Blob检测命令不需要附加参数。");
+        }
+
+        if (_busy || _calibrationSession is not null)
+        {
+            throw new InvalidOperationException("视觉标定正在执行，暂不允许拍照检测。");
+        }
+
+        if (!_solutionLoaded ||
+            _previewProcedure is null ||
+            PreviewProcedureComboBox.SelectedItem is not string procedureName)
+        {
+            throw new InvalidOperationException("请先加载视觉方案并选择实时流程。");
+        }
+
+        var blobModule = ResolveBlobFindModule(procedureName);
+        var previewWasRunning = _previewProcedure.ContinuousRunEnable;
+        if (previewWasRunning)
+        {
+            // 连续预览必须先暂停，才能保证下面读取到的是本次拍照对应的结果。
+            _previewProcedure.ContinuousRunEnable = false;
+        }
+
+        try
+        {
+            _previewProcedure.Run(true);
+            VisionRenderControl.UpdateVMResultShow();
+
+            var result = blobModule.ModuResult;
+            if (result.ModuStatus != 1)
+            {
+                throw new InvalidOperationException("Blob分析模块返回NG，请检查相机取像、阈值和检测区域。");
+            }
+
+            var points = result.CentroidPoint;
+            if (points is null || points.Count < 2 || result.BlobNum < 2)
+            {
+                throw new InvalidOperationException(
+                    $"Blob分析只找到 {Math.Max(0, result.BlobNum)} 个目标，需要找到两个矩形。");
+            }
+
+            var candidates = new List<RectangleBlobCandidate>();
+            var candidateCount = Math.Min(result.BlobNum, points.Count);
+            for (var index = 0; index < candidateCount; index++)
+            {
+                var point = points[index];
+                if (float.IsNaN(point.X) || float.IsInfinity(point.X) ||
+                    float.IsNaN(point.Y) || float.IsInfinity(point.Y))
+                {
+                    continue;
+                }
+
+                var rectangularity = result.Rectangularity is not null && index < result.Rectangularity.Count
+                    ? result.Rectangularity[index]
+                    : 0f;
+                var area = result.Area is not null && index < result.Area.Count
+                    ? result.Area[index]
+                    : 0f;
+                candidates.Add(new RectangleBlobCandidate(point.X, point.Y, rectangularity, area));
+            }
+
+            if (candidates.Count < 2)
+            {
+                throw new InvalidOperationException("Blob分析未返回两个有效矩形质心。");
+            }
+
+            // 先选出最像矩形的两个目标，再按 X、Y 排序，保证矩形1/2编号稳定。
+            var selected = candidates
+                .OrderByDescending(candidate => candidate.Rectangularity)
+                .ThenByDescending(candidate => candidate.Area)
+                .Take(2)
+                .OrderBy(candidate => candidate.PixelX)
+                .ThenBy(candidate => candidate.PixelY)
+                .ToArray();
+
+            SetStatus(
+                $"拍照及Blob分析完成：矩形1({selected[0].PixelX:0.###}, {selected[0].PixelY:0.###})，" +
+                $"矩形2({selected[1].PixelX:0.###}, {selected[1].PixelY:0.###})",
+                StatusKind.Success);
+
+            return string.Join(
+                "\t",
+                selected[0].PixelX.ToString("R", CultureInfo.InvariantCulture),
+                selected[0].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                selected[1].PixelX.ToString("R", CultureInfo.InvariantCulture),
+                selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            if (previewWasRunning && !_closed)
+            {
+                _previewProcedure.ContinuousRunEnable = true;
+            }
+
+            UpdateCommandState();
+        }
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -712,6 +820,52 @@ public partial class MainWindow : Window
         }
 
         throw new InvalidOperationException("当前标定流程中未找到“标定转换”模块。");
+    }
+
+    /// <summary>
+    /// 在当前实时流程中定位海康 Blob分析模块。显示名和模块类型名都参与匹配，
+    /// 以兼容用户给模块改名以及不同 VisionMaster 方案的命名方式。
+    /// </summary>
+    private static IMVSBlobFindModuTool ResolveBlobFindModule(string procedureName)
+    {
+        var procedure = VmSolution.Instance[procedureName] as VmProcedure
+            ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
+        var moduleList = procedure.GetProcedureModuleList();
+        for (var index = 0; index < moduleList.nNum; index++)
+        {
+            var info = moduleList.astModuleInfo[index];
+            var displayName = info.strDisplayName?.Trim() ?? "";
+            var moduleName = info.strModuleName?.Trim() ?? "";
+            if (!string.Equals(moduleName, "IMVSBlobFindModu", StringComparison.Ordinal) &&
+                !displayName.Contains("Blob分析"))
+            {
+                continue;
+            }
+
+            foreach (var candidate in new[]
+                     {
+                         $"{procedureName}.{displayName}",
+                         $"{procedureName}.{moduleName}",
+                         displayName,
+                         moduleName
+                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
+            {
+                try
+                {
+                    if (VmSolution.Instance[candidate] is IMVSBlobFindModuTool module)
+                    {
+                        return module;
+                    }
+                }
+                catch
+                {
+                    // 部分 SDK 模块类型名不是可查询路径，继续尝试下一个候选名。
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            "当前实时流程中未找到“Blob分析”模块，请先在 VisionMaster 流程中添加并配置图像采集和Blob分析。");
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
@@ -1763,6 +1917,25 @@ public partial class MainWindow : Window
         public string CalibrationPath { get; }
 
         public int NextPointNumber { get; set; } = 1;
+    }
+
+    private sealed class RectangleBlobCandidate
+    {
+        public RectangleBlobCandidate(float pixelX, float pixelY, float rectangularity, float area)
+        {
+            PixelX = pixelX;
+            PixelY = pixelY;
+            Rectangularity = rectangularity;
+            Area = area;
+        }
+
+        public float PixelX { get; }
+
+        public float PixelY { get; }
+
+        public float Rectangularity { get; }
+
+        public float Area { get; }
     }
 
     private enum StatusKind
