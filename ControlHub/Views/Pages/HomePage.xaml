@@ -735,15 +735,23 @@
                     </Border>
 
                     <Button Grid.Row="4"
+                            x:Name="StartProductionButton"
                             Style="{StaticResource OperationButton}"
                             Background="#168B50"
-                            BorderBrush="#38B979">
+                            BorderBrush="#38B979"
+                            IsEnabled="False"
+                            Click="StartProduction_Click">
                         <Grid Margin="20,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="50" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="31" Height="31" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
-                                <TextBlock Text="启动自动生产流程" Foreground="#D7F4E5" FontSize="11" Margin="0,3,0,0" />
+                                <TextBlock x:Name="StartProductionHintText"
+                                           Text="步骤1：第一套 XY 回标定中心"
+                                           Foreground="#D7F4E5"
+                                           FontSize="11"
+                                           Margin="0,3,0,0"
+                                           TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </Grid>
                     </Button>

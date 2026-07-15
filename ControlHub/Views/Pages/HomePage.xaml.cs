@@ -12,6 +12,7 @@ public partial class HomePage : UserControl
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
     private bool _coordinateTransformRunning;
+    private bool _startSequenceRunning;
 
     public HomePage()
     {
@@ -24,14 +25,14 @@ public partial class HomePage : UserControl
     public void AttachMotionController(MotionControlPage motionController)
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
-        UpdateCoordinateTransformCommandState();
+        UpdateHomeCommandState();
     }
 
     public void AttachVisionCalibrationController(VisualCalibrationPage visualCalibrationController)
     {
         _visualCalibrationController = visualCalibrationController
             ?? throw new ArgumentNullException(nameof(visualCalibrationController));
-        UpdateCoordinateTransformCommandState();
+        UpdateHomeCommandState();
     }
 
     /// <summary>
@@ -51,9 +52,9 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 从视觉标定页的共享配置中加载第一套 XY 标定文件和两个吸嘴偏移。
+    /// 从视觉标定页的共享配置中加载第一套 XY 标定文件。
     /// </summary>
-    private VisionCalibrationSnapshot GetFirstSetCalibrationSnapshot()
+    private VisionCalibrationSnapshot GetFirstSetCalibrationFileSnapshot()
     {
         var snapshot = _visionCalibration.GetSnapshot();
         if (string.IsNullOrWhiteSpace(snapshot.CalibrationFilePath))
@@ -68,6 +69,15 @@ public partial class HomePage : UserControl
                 snapshot.CalibrationFilePath);
         }
 
+        return snapshot;
+    }
+
+    /// <summary>
+    /// 加载需要同时使用标定文件和双吸嘴偏移的完整配置。
+    /// </summary>
+    private VisionCalibrationSnapshot GetFirstSetCalibrationSnapshot()
+    {
+        var snapshot = GetFirstSetCalibrationFileSnapshot();
         if (!snapshot.CalibrationProfileExists)
         {
             throw new FileNotFoundException(
@@ -76,6 +86,104 @@ public partial class HomePage : UserControl
         }
 
         return snapshot;
+    }
+
+    /// <summary>
+    /// 主页开始按钮目前只执行步骤1：第一套 XY 回到九点标定时记录的中心位置。
+    /// 完成此步后流程立即结束，不触发拍照、取料或吸嘴动作。
+    /// </summary>
+    private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_startSequenceRunning || _coordinateTransformRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
+            }
+
+            _startSequenceRunning = true;
+            UpdateHomeCommandState();
+            SetStartProductionStatus("步骤1/1：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
+
+            var center = await ReadFirstSetCalibrationCenterAsync(CancellationToken.None);
+
+            // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
+            var timeoutMilliseconds = CalculateStartMoveTimeout(
+                current.ActualX,
+                current.ActualY,
+                center.X,
+                center.Y,
+                velocity);
+
+            SetStartProductionStatus(
+                $"步骤1/1：第一套 XY 正在回标定中心 X={center.X:0.###}，Y={center.Y:0.###}…",
+                Color.FromRgb(242, 181, 68));
+            var actual = await motionController.MoveCalibrationAxesToAsync(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo,
+                center.X,
+                center.Y,
+                velocity,
+                positionTolerance: 10d,
+                moveTimeoutMilliseconds: timeoutMilliseconds,
+                cancellationToken: CancellationToken.None);
+
+            SetStartProductionStatus(
+                $"步骤1完成：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse",
+                Color.FromRgb(73, 209, 125));
+        }
+        catch (Exception exception)
+        {
+            SetStartProductionStatus(
+                $"步骤1失败：{exception.Message}",
+                Color.FromRgb(242, 122, 128));
+        }
+        finally
+        {
+            _startSequenceRunning = false;
+            UpdateHomeCommandState();
+        }
+    }
+
+    /// <summary>
+    /// 从 VisionMaster 标定文件读取图像中心对应的机械绝对坐标，并换算为控制卡脉冲。
+    /// </summary>
+    private async Task<(double X, double Y)> ReadFirstSetCalibrationCenterAsync(
+        CancellationToken cancellationToken)
+    {
+        var snapshot = GetFirstSetCalibrationFileSnapshot();
+        var visualCalibrationController = _visualCalibrationController
+            ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
+
+        // TRANSFORM_PIXEL 会同时返回输入点和图像中心的转换结果。
+        // 此处输入(0,0)仅用于触发读取，步骤1只使用 CenterTransformedX/Y。
+        var transformed = await visualCalibrationController.TransformPixelAsync(
+            0d,
+            0d,
+            snapshot.CalibrationFilePath,
+            cancellationToken);
+
+        // 标定文件中的中心坐标单位是 VisionMaster 单位；控制卡使用 pulse。
+        // 回标定中心移动的是相机所在的 XY 基准点，因此这里不能叠加吸嘴1/2偏移。
+        var centerX = transformed.CenterTransformedX * VisionCalibrationService.PulsesPerVisionUnit;
+        var centerY = transformed.CenterTransformedY * VisionCalibrationService.PulsesPerVisionUnit;
+        if (!double.IsFinite(centerX) || !double.IsFinite(centerY))
+        {
+            throw new InvalidOperationException("第一套 XY 标定中心坐标无效。");
+        }
+
+        return (centerX, centerY);
     }
 
     /// <summary>
@@ -168,7 +276,7 @@ public partial class HomePage : UserControl
 
     private async void ConvertBothNozzles_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_coordinateTransformRunning)
+        if (_coordinateTransformRunning || _startSequenceRunning)
         {
             return;
         }
@@ -179,7 +287,7 @@ public partial class HomePage : UserControl
             var pixelY = ParsePixelCoordinate(PixelYTextBox.Text, "像素 Y");
 
             _coordinateTransformRunning = true;
-            UpdateCoordinateTransformCommandState();
+            UpdateHomeCommandState();
             SetCoordinateTransformStatus($"正在换算像素({pixelX}, {pixelY})…", true);
 
             var targets = await ConvertPixelToMechanicalTargetsAsync(pixelX, pixelY);
@@ -196,7 +304,7 @@ public partial class HomePage : UserControl
         finally
         {
             _coordinateTransformRunning = false;
-            UpdateCoordinateTransformCommandState();
+            UpdateHomeCommandState();
         }
     }
 
@@ -232,20 +340,45 @@ public partial class HomePage : UserControl
             $"吸嘴2偏移：X={snapshot.Nozzle2OffsetX:0.###}，Y={snapshot.Nozzle2OffsetY:0.###} pulse";
     }
 
-    private void UpdateCoordinateTransformCommandState()
+    private void UpdateHomeCommandState()
     {
-        if (ConvertBothNozzlesButton is null)
+        if (ConvertBothNozzlesButton is null || StartProductionButton is null)
         {
             return;
         }
 
-        var canStart =
-            !_coordinateTransformRunning &&
+        var controllersReady =
             _motionController is not null &&
             _visualCalibrationController is not null;
-        ConvertBothNozzlesButton.IsEnabled = canStart;
-        PixelXTextBox.IsEnabled = !_coordinateTransformRunning;
-        PixelYTextBox.IsEnabled = !_coordinateTransformRunning;
+        var commandsIdle = !_coordinateTransformRunning && !_startSequenceRunning;
+        ConvertBothNozzlesButton.IsEnabled = controllersReady && commandsIdle;
+        StartProductionButton.IsEnabled = controllersReady && commandsIdle;
+        PixelXTextBox.IsEnabled = commandsIdle;
+        PixelYTextBox.IsEnabled = commandsIdle;
+    }
+
+    private void SetStartProductionStatus(string message, Color color)
+    {
+        StartProductionHintText.Text = message;
+        StartProductionHintText.ToolTip = message;
+        StartProductionHintText.Foreground = new SolidColorBrush(color);
+    }
+
+    /// <summary>
+    /// 按当前距离和配置速度估算超时，额外预留5秒用于加减速和状态刷新。
+    /// </summary>
+    private static int CalculateStartMoveTimeout(
+        double currentX,
+        double currentY,
+        double targetX,
+        double targetY,
+        double velocity)
+    {
+        var longestDistance = Math.Max(
+            Math.Abs(targetX - currentX),
+            Math.Abs(targetY - currentY));
+        var estimatedMilliseconds = longestDistance / velocity * 1000d + 5000d;
+        return (int)Math.Clamp(Math.Ceiling(estimatedMilliseconds), 10_000d, 120_000d);
     }
 
     private void SetCoordinateTransformStatus(string message, bool success)
