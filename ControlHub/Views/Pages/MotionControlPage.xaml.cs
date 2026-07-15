@@ -266,6 +266,44 @@ public partial class MotionControlPage : UserControl
             y.FeedbackPosition);
     }
 
+    /// <summary>
+    /// 只读取坐标换算所需的当前轴反馈位置，不要求轴使能或已回零，也不下发运动命令。
+    /// </summary>
+    public CalibrationCenterPosition CaptureCalibrationFeedback(
+        int xHardwareAxisNo,
+        int yHardwareAxisNo)
+    {
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭，不能读取坐标换算基准位置。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能读取拍照位置。");
+        }
+
+        if (xHardwareAxisNo == yHardwareAxisNo)
+        {
+            throw new ArgumentException("X 轴和 Y 轴不能是同一根轴。");
+        }
+
+        var xAxis = GetCalibrationAxis(xHardwareAxisNo, "X");
+        var yAxis = GetCalibrationAxis(yHardwareAxisNo, "Y");
+        var x = ReadStationaryCalibrationFeedback(xAxis, "X");
+        var y = ReadStationaryCalibrationFeedback(yAxis, "Y");
+        return new CalibrationCenterPosition(
+            xHardwareAxisNo,
+            yHardwareAxisNo,
+            x.FeedbackPosition,
+            y.FeedbackPosition);
+    }
+
     public async Task<CalibrationCenterPosition> MoveCalibrationAxesToAsync(
         int xHardwareAxisNo,
         int yHardwareAxisNo,
@@ -574,6 +612,26 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException(
                 $"{coordinateName} 轴（轴 {axis.HardwareAxisNo + 1}）仍在运动。 ");
+        }
+
+        return snapshot;
+    }
+
+    private MotionAxisSnapshot ReadStationaryCalibrationFeedback(
+        AxisStatus axis,
+        string coordinateName)
+    {
+        var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+        ApplySnapshot(axis, snapshot);
+        if (!double.IsFinite(snapshot.FeedbackPosition))
+        {
+            throw new InvalidOperationException($"{coordinateName} 轴反馈位置无效。");
+        }
+
+        if (snapshot.IsMoving)
+        {
+            throw new InvalidOperationException(
+                $"{coordinateName} 轴（轴 {axis.HardwareAxisNo + 1}）仍在运动，不能换算拍照坐标。");
         }
 
         return snapshot;

@@ -103,7 +103,7 @@ public partial class HomePage : UserControl
             pixelY,
             snapshot.CalibrationFilePath,
             cancellationToken);
-        var current = motionController.CaptureCalibrationCenter(
+        var current = motionController.CaptureCalibrationFeedback(
             VisionCalibrationService.FirstSetXHardwareAxisNo,
             VisionCalibrationService.FirstSetYHardwareAxisNo);
         var cameraTargetX = current.ActualX +
