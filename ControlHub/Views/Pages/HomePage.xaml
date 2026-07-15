@@ -663,8 +663,8 @@
                         <RowDefinition Height="86" />
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="220" />
+                        <RowDefinition Height="*" MinHeight="178" />
+                        <RowDefinition Height="166" />
                     </Grid.RowDefinitions>
 
                     <Grid>
