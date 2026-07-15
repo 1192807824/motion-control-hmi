@@ -17,6 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="System.Drawing" />
     <Reference Include="VM.Core">
       <HintPath>$(VisionMasterAssemblyDirectory)\VM.Core.dll</HintPath>
       <Private>false</Private>

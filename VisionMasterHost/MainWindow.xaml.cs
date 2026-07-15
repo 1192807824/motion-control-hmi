@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private VmProcedure? _previewProcedure;
     private VmProcedure? _calibrationProcedure;
     private IMVSCalibTransformModuTool? _standaloneTransformModule;
+    private IMVSBlobFindModuTool? _standaloneBlobModule;
     private VmModule? _displayedModule;
     private VmModule? _crosshairModule;
     private NamedPipeServerStream? _activeCommandPipe;
@@ -244,8 +245,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 单次运行当前实时流程。流程中的图像采集模块先触发拍照，随后由 Blob 分析模块
-    /// 输出候选目标；这里取矩形度最高、面积最大的两个有效 Blob，并返回其像素质心。
+    /// 单次运行当前实时流程触发拍照。流程中有 Blob 模块时复用其结果；没有时由代码
+    /// 创建 Blob 工具分析本次相机图，再取矩形度最高、面积最大的两个有效目标。
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
@@ -266,7 +267,16 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("请先加载视觉方案并选择实时流程。");
         }
 
-        var blobModule = ResolveBlobFindModule(procedureName);
+        IMVSBlobFindModuTool? procedureBlobModule = null;
+        try
+        {
+            procedureBlobModule = ResolveBlobFindModule(procedureName);
+        }
+        catch (InvalidOperationException)
+        {
+            // 实时流程只需要负责相机取图；没有Blob模块时，后面使用纯代码模块分析。
+        }
+
         var previewWasRunning = _previewProcedure.ContinuousRunEnable;
         if (previewWasRunning)
         {
@@ -278,89 +288,65 @@ public partial class MainWindow : Window
         {
             _previewProcedure.Run(true);
             VisionRenderControl.UpdateVMResultShow();
-
-            var result = blobModule.ModuResult;
-            if (result.ModuStatus != 1)
+            var inspectionImage = SaveInspectionImage();
+            try
             {
-                throw new InvalidOperationException("Blob分析模块返回NG，请检查相机取像、阈值和检测区域。");
-            }
-
-            var points = result.CentroidPoint;
-            if (points is null || points.Count < 2 || result.BlobNum < 2)
-            {
-                throw new InvalidOperationException(
-                    $"Blob分析只找到 {Math.Max(0, result.BlobNum)} 个目标，需要找到两个矩形。");
-            }
-
-            var candidates = new List<RectangleBlobCandidate>();
-            var candidateCount = Math.Min(result.BlobNum, points.Count);
-            for (var index = 0; index < candidateCount; index++)
-            {
-                var point = points[index];
-                if (float.IsNaN(point.X) || float.IsInfinity(point.X) ||
-                    float.IsNaN(point.Y) || float.IsInfinity(point.Y))
+                var candidates = procedureBlobModule is null
+                    ? RunStandaloneBlobAnalysis(inspectionImage)
+                    : ReadBlobCandidates(
+                        procedureBlobModule.ModuResult,
+                        inspectionImage.PixelWidth,
+                        inspectionImage.PixelHeight,
+                        excludeFullFrameBlob: false);
+                if (candidates.Count < 2)
                 {
-                    continue;
+                    throw new InvalidOperationException(
+                        $"代码Blob分析只找到 {candidates.Count} 个矩形目标，请检查光照和阈值参数。");
                 }
 
-                var rectangularity = result.Rectangularity is not null && index < result.Rectangularity.Count
-                    ? result.Rectangularity[index]
-                    : 0f;
-                var area = result.Area is not null && index < result.Area.Count
-                    ? result.Area[index]
-                    : 0f;
-                var blobRect = result.BlobRect is not null && index < result.BlobRect.Count
-                    ? result.BlobRect[index]
-                    : null;
-                candidates.Add(new RectangleBlobCandidate(
-                    point.X,
-                    point.Y,
-                    rectangularity,
-                    area,
-                    blobRect?.RectPoint.X ?? (int)Math.Round(point.X),
-                    blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y),
-                    blobRect?.RectWidth ?? 1,
-                    blobRect?.RectHeight ?? 1));
-            }
+                // 先选出最像矩形的两个目标，再按 X、Y 排序，保证矩形1/2编号稳定。
+                var selected = candidates
+                    .OrderByDescending(candidate => candidate.Rectangularity)
+                    .ThenByDescending(candidate => candidate.Area)
+                    .Take(2)
+                    .OrderBy(candidate => candidate.PixelX)
+                    .ThenBy(candidate => candidate.PixelY)
+                    .ToArray();
 
-            if (candidates.Count < 2)
+                SetStatus(
+                    $"拍照及代码Blob分析完成：矩形1({selected[0].PixelX:0.###}, {selected[0].PixelY:0.###})，" +
+                    $"矩形2({selected[1].PixelX:0.###}, {selected[1].PixelY:0.###})",
+                    StatusKind.Success);
+                return string.Join(
+                    "\t",
+                    selected[0].PixelX.ToString("R", CultureInfo.InvariantCulture),
+                    selected[0].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                    selected[0].Left.ToString(CultureInfo.InvariantCulture),
+                    selected[0].Top.ToString(CultureInfo.InvariantCulture),
+                    selected[0].Width.ToString(CultureInfo.InvariantCulture),
+                    selected[0].Height.ToString(CultureInfo.InvariantCulture),
+                    selected[1].PixelX.ToString("R", CultureInfo.InvariantCulture),
+                    selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                    selected[1].Left.ToString(CultureInfo.InvariantCulture),
+                    selected[1].Top.ToString(CultureInfo.InvariantCulture),
+                    selected[1].Width.ToString(CultureInfo.InvariantCulture),
+                    selected[1].Height.ToString(CultureInfo.InvariantCulture),
+                    inspectionImage.PixelWidth.ToString(CultureInfo.InvariantCulture),
+                    inspectionImage.PixelHeight.ToString(CultureInfo.InvariantCulture),
+                    inspectionImage.FilePath);
+            }
+            catch
             {
-                throw new InvalidOperationException("Blob分析未返回两个有效矩形质心。");
+                try
+                {
+                    File.Delete(inspectionImage.FilePath);
+                }
+                catch
+                {
+                }
+
+                throw;
             }
-
-            // 先选出最像矩形的两个目标，再按 X、Y 排序，保证矩形1/2编号稳定。
-            var selected = candidates
-                .OrderByDescending(candidate => candidate.Rectangularity)
-                .ThenByDescending(candidate => candidate.Area)
-                .Take(2)
-                .OrderBy(candidate => candidate.PixelX)
-                .ThenBy(candidate => candidate.PixelY)
-                .ToArray();
-
-            // 保存本次相机原图。主程序会在主页加载它，并使用下面返回的 Blob 框和质心
-            // 叠加检测标记；这样无需把同一个 VisionMaster 窗口嵌入两个页面。
-            var inspectionImage = SaveInspectionImage();
-            SetStatus(
-                $"拍照及Blob分析完成：矩形1({selected[0].PixelX:0.###}, {selected[0].PixelY:0.###})，" +
-                $"矩形2({selected[1].PixelX:0.###}, {selected[1].PixelY:0.###})",
-                StatusKind.Success);
-            return string.Join(
-                "\t",
-                selected[0].PixelX.ToString("R", CultureInfo.InvariantCulture),
-                selected[0].PixelY.ToString("R", CultureInfo.InvariantCulture),
-                selected[0].Left.ToString(CultureInfo.InvariantCulture),
-                selected[0].Top.ToString(CultureInfo.InvariantCulture),
-                selected[0].Width.ToString(CultureInfo.InvariantCulture),
-                selected[0].Height.ToString(CultureInfo.InvariantCulture),
-                selected[1].PixelX.ToString("R", CultureInfo.InvariantCulture),
-                selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture),
-                selected[1].Left.ToString(CultureInfo.InvariantCulture),
-                selected[1].Top.ToString(CultureInfo.InvariantCulture),
-                selected[1].Width.ToString(CultureInfo.InvariantCulture),
-                selected[1].Height.ToString(CultureInfo.InvariantCulture),
-                inspectionImage.PixelWidth.ToString(CultureInfo.InvariantCulture),
-                inspectionImage.PixelHeight.ToString(CultureInfo.InvariantCulture),
-                inspectionImage.FilePath);
         }
         finally
         {
@@ -419,6 +405,171 @@ public partial class MainWindow : Window
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// 不依赖 VisionMaster 流程中的 Blob 节点，直接创建 SDK Blob 工具分析本次相机图。
+    /// 自动阈值分别尝试“暗目标/亮背景”和“亮目标/暗背景”，选择矩形质量更好的一组。
+    /// </summary>
+    private List<RectangleBlobCandidate> RunStandaloneBlobAnalysis(InspectionImageFile image)
+    {
+        _standaloneBlobModule ??= new IMVSBlobFindModuTool();
+        using var bitmap = new System.Drawing.Bitmap(image.FilePath);
+        var inputImage = new ImageBaseData(bitmap);
+        try
+        {
+            var parameters = _standaloneBlobModule.ModuParams
+                ?? throw new InvalidOperationException("无法初始化海康代码Blob分析参数。");
+            var pixelCount = (long)image.PixelWidth * image.PixelHeight;
+            var minimumArea = (int)Math.Min(5000L, Math.Max(20L, pixelCount / 100000L));
+            var maximumArea = (int)Math.Min(
+                int.MaxValue,
+                Math.Max(minimumArea + 1L, pixelCount / 2L));
+            var candidateSets = new List<List<RectangleBlobCandidate>>();
+            Exception? lastRunException = null;
+
+            foreach (var polarity in new[]
+                     {
+                         BlobFindParam.PolarityEnum.DarkOnBright,
+                         BlobFindParam.PolarityEnum.BrightOnDark
+                     })
+            {
+                try
+                {
+                    parameters.InputImage = inputImage;
+                    parameters.ThresholdType = BlobFindParam.ThresholdTypeEnum.AutoThreshold;
+                    parameters.Polarity = polarity;
+                    parameters.FindNum = 100;
+                    parameters.SelectByArea = true;
+                    parameters.MinArea = minimumArea;
+                    parameters.MaxArea = maximumArea;
+                    parameters.SelectByRectangularity = false;
+                    parameters.SortFeature = BlobFindParam.SortFeatureEnum.SortFeatureRect;
+                    parameters.SortMode = BlobFindParam.SortModeEnum.SortModeDecend;
+                    parameters.Connectivity = BlobFindParam.ConnectivityEnum.Connected_8;
+                    parameters.BlobNumLimitEnable = false;
+                    parameters.OKWhenNumIsZero = false;
+                    parameters.BolbOutLineEnable = true;
+                    _standaloneBlobModule.Run();
+
+                    var result = _standaloneBlobModule.ModuResult;
+                    if (result.ModuStatus != 1)
+                    {
+                        continue;
+                    }
+
+                    candidateSets.Add(ReadBlobCandidates(
+                        result,
+                        image.PixelWidth,
+                        image.PixelHeight,
+                        excludeFullFrameBlob: true));
+                }
+                catch (Exception exception)
+                {
+                    lastRunException = exception;
+                }
+            }
+
+            if (candidateSets.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "海康代码Blob分析执行失败，请检查当前相机图是否有效。",
+                    lastRunException);
+            }
+
+            return candidateSets
+                .OrderByDescending(ScoreBlobCandidateSet)
+                .ThenByDescending(set => set.Count)
+                .First();
+        }
+        finally
+        {
+            inputImage.Dispose();
+        }
+    }
+
+    private static double ScoreBlobCandidateSet(IReadOnlyCollection<RectangleBlobCandidate> candidates)
+    {
+        return candidates
+            .OrderByDescending(candidate => candidate.Rectangularity)
+            .ThenByDescending(candidate => candidate.Area)
+            .Take(2)
+            .Sum(candidate =>
+                Math.Max(0d, Math.Min(1d, candidate.Rectangularity)) * 1000d +
+                Math.Log10(Math.Max(1d, candidate.Area)));
+    }
+
+    private static List<RectangleBlobCandidate> ReadBlobCandidates(
+        BlobFindResult result,
+        int imageWidth,
+        int imageHeight,
+        bool excludeFullFrameBlob)
+    {
+        if (result.ModuStatus != 1)
+        {
+            throw new InvalidOperationException("Blob分析返回NG，请检查相机图和阈值参数。");
+        }
+
+        var candidates = new List<RectangleBlobCandidate>();
+        var points = result.CentroidPoint;
+        if (points is null)
+        {
+            return candidates;
+        }
+
+        var candidateCount = Math.Min(result.BlobNum, points.Count);
+        for (var index = 0; index < candidateCount; index++)
+        {
+            var point = points[index];
+            if (float.IsNaN(point.X) || float.IsInfinity(point.X) ||
+                float.IsNaN(point.Y) || float.IsInfinity(point.Y))
+            {
+                continue;
+            }
+
+            var rectangularity = result.Rectangularity is not null && index < result.Rectangularity.Count
+                ? result.Rectangularity[index]
+                : 0f;
+            var area = result.Area is not null && index < result.Area.Count
+                ? result.Area[index]
+                : 0f;
+            if (float.IsNaN(rectangularity) || float.IsInfinity(rectangularity))
+            {
+                rectangularity = 0f;
+            }
+
+            if (float.IsNaN(area) || float.IsInfinity(area))
+            {
+                area = 0f;
+            }
+
+            var blobRect = result.BlobRect is not null && index < result.BlobRect.Count
+                ? result.BlobRect[index]
+                : null;
+            var left = blobRect?.RectPoint.X ?? (int)Math.Round(point.X);
+            var top = blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y);
+            var width = Math.Max(1, blobRect?.RectWidth ?? 1);
+            var height = Math.Max(1, blobRect?.RectHeight ?? 1);
+            if (excludeFullFrameBlob &&
+                left <= 1 && top <= 1 &&
+                left + width >= imageWidth - 1 &&
+                top + height >= imageHeight - 1)
+            {
+                continue;
+            }
+
+            candidates.Add(new RectangleBlobCandidate(
+                point.X,
+                point.Y,
+                rectangularity,
+                area,
+                left,
+                top,
+                width,
+                height));
+        }
+
+        return candidates;
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -1969,6 +2120,15 @@ public partial class MainWindow : Window
         {
             _standaloneTransformModule?.Dispose();
             _standaloneTransformModule = null;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _standaloneBlobModule?.Dispose();
+            _standaloneBlobModule = null;
         }
         catch
         {
