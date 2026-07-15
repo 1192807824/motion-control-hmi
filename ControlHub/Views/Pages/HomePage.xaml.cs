@@ -4,8 +4,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Xml.Linq;
 using ControlHub.Services.Vision;
 using ControlHub.Views.Controls;
+using Microsoft.Win32;
 using ShapeLine = System.Windows.Shapes.Line;
 using ShapeRectangle = System.Windows.Shapes.Rectangle;
 
@@ -13,6 +15,8 @@ namespace ControlHub.Views.Pages;
 
 public partial class HomePage : UserControl
 {
+    private const string ChipInspectionProcedureName = "流程1";
+    private const string ChipInspectionBlobModuleName = "Blob分析1";
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
@@ -94,8 +98,9 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 主页开始按钮当前执行三个顺序步骤：
-    /// 1. 第一套 XY 回到九点标定中心；2. 海康相机拍照；3. Blob分析并显示两个矩形质心。
+    /// 主页开始按钮只执行两个顺序步骤：
+    /// 1. 第一套 XY 回到九点标定中心；2. 运行“找芯片”方案中的“流程1”。
+    /// 流程完成后读取“Blob分析1”结果表的前两行，并在主页显示两组像素质心 X、Y。
     /// 本阶段仍不执行取料、吸嘴或后续摆盘动作。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -117,12 +122,22 @@ public partial class HomePage : UserControl
                 throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
             }
 
+            // 方案和标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
+            // 选择成功会保存，后续点击“开始”不再重复弹窗。
+            var calibrationFile = GetOrSelectFirstSetCalibrationFile();
+            var inspectionSolution = GetOrSelectChipInspectionSolution();
+
             _startSequenceRunning = true;
             UpdateHomeCommandState();
             ClearBlobInspectionResult();
-            SetStartProductionStatus("步骤1/3：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
+            SetStartProductionStatus("步骤1/2：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
 
-            var center = await ReadFirstSetCalibrationCenterAsync(CancellationToken.None);
+            var center = ReadFirstSetCalibrationCenter(calibrationFile.FilePath);
+            if (calibrationFile.WasSelected)
+            {
+                _visionCalibration.Settings.CalibrationFilePath = calibrationFile.FilePath;
+                _visionCalibration.Save();
+            }
 
             // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
             var current = motionController.CaptureCalibrationFeedback(
@@ -136,7 +151,7 @@ public partial class HomePage : UserControl
                 velocity);
 
             SetStartProductionStatus(
-                $"步骤1/3：第一套 XY 正在回标定中心 X={center.X:0.###}，Y={center.Y:0.###}…",
+                $"步骤1/2：第一套 XY 正在回初始中心 X={center.X:0.###}，Y={center.Y:0.###}…",
                 Color.FromRgb(242, 181, 68));
             var actual = await motionController.MoveCalibrationAxesToAsync(
                 VisionCalibrationService.FirstSetXHardwareAxisNo,
@@ -148,19 +163,33 @@ public partial class HomePage : UserControl
                 moveTimeoutMilliseconds: timeoutMilliseconds,
                 cancellationToken: CancellationToken.None);
 
-            // XY 确认到位后才允许触发相机；VisionMaster 实时流程内部按模块顺序执行
-            // “图像采集 → Blob分析”，因此读取到的质心一定对应本次拍摄的图像。
+            // 必须等轴1、轴2均确认到位后，才允许加载并单次执行找芯片流程。
+            // 流程名和模块名都采用截图中的固定名称，避免误跑标定流程或其他实时流程。
             SetStartProductionStatus(
-                $"步骤2/3：XY已到位({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
-                "海康拍照 → 步骤3/3 Blob分析中…",
+                $"步骤2/2：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+                $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
                 Color.FromRgb(242, 181, 68));
             var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
+                inspectionSolution.FilePath,
                 CancellationToken.None);
             SetBlobInspectionResult(blobResult);
 
+            // 只有方案确实包含流程1/Blob分析1并成功执行后，才记住首次选择的路径。
+            if (inspectionSolution.WasSelected)
+            {
+                _visionCalibration.Settings.ChipInspectionSolutionPath = inspectionSolution.FilePath;
+                _visionCalibration.Save();
+            }
+
             SetStartProductionStatus(
-                "步骤3完成：已找到两个矩形并显示像素质心 XY",
+                "完成：流程1已执行，Blob分析1的两组像素质心 X、Y 已显示",
                 Color.FromRgb(73, 209, 125));
+        }
+        catch (OperationCanceledException exception)
+        {
+            SetStartProductionStatus(
+                exception.Message,
+                Color.FromRgb(242, 181, 68));
         }
         catch (Exception exception)
         {
@@ -176,33 +205,205 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 从 VisionMaster 标定文件读取图像中心对应的机械绝对坐标，并换算为控制卡脉冲。
+    /// 从第一套九点标定 XML 的 WorldPointLst 读取机械网格中心，并换算为控制卡脉冲。
+    /// 直接读取标定文件可保证“回初始位置”不依赖当前加载的是标定方案还是找芯片方案。
     /// </summary>
-    private async Task<(double X, double Y)> ReadFirstSetCalibrationCenterAsync(
-        CancellationToken cancellationToken)
+    private static (double X, double Y) ReadFirstSetCalibrationCenter(string calibrationFilePath)
     {
-        var snapshot = GetFirstSetCalibrationFileSnapshot();
-        var visualCalibrationController = _visualCalibrationController
-            ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
+        XDocument document;
+        try
+        {
+            document = XDocument.Load(calibrationFilePath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            throw new InvalidDataException("第一套 XY 标定文件无法读取。", exception);
+        }
 
-        // TRANSFORM_PIXEL 会同时返回输入点和图像中心的转换结果。
-        // 此处输入(0,0)仅用于触发读取，步骤1只使用 CenterTransformedX/Y。
-        var transformed = await visualCalibrationController.TransformPixelAsync(
-            0d,
-            0d,
-            snapshot.CalibrationFilePath,
-            cancellationToken);
+        var worldPointList = document
+            .Descendants()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "CalibPointFListParam", StringComparison.Ordinal) &&
+                string.Equals(
+                    element.Attributes().FirstOrDefault(attribute =>
+                        string.Equals(attribute.Name.LocalName, "ParamName", StringComparison.Ordinal))?.Value,
+                    "WorldPointLst",
+                    StringComparison.Ordinal));
+        if (worldPointList is null)
+        {
+            throw new InvalidDataException("第一套 XY 标定文件中未找到 WorldPointLst。");
+        }
 
-        // 标定文件中的中心坐标单位是 VisionMaster 单位；控制卡使用 pulse。
-        // 回标定中心移动的是相机所在的 XY 基准点，因此这里不能叠加吸嘴1/2偏移。
-        var centerX = transformed.CenterTransformedX * VisionCalibrationService.PulsesPerVisionUnit;
-        var centerY = transformed.CenterTransformedY * VisionCalibrationService.PulsesPerVisionUnit;
+        var calibrationType = ReadCalibrationParameter(document, "CalibType");
+        var calibrationPointCountText = ReadCalibrationParameter(document, "TransNum");
+        var calibrationErrorStatusText = ReadCalibrationParameter(document, "CalibErrStatus");
+        if (!string.Equals(calibrationType, "NPointCalib", StringComparison.Ordinal) ||
+            !int.TryParse(
+                calibrationPointCountText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var calibrationPointCount) ||
+            calibrationPointCount != 9 ||
+            !int.TryParse(
+                calibrationErrorStatusText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var calibrationErrorStatus) ||
+            calibrationErrorStatus != 0)
+        {
+            throw new InvalidDataException("所选文件不是成功完成的九点标定文件，禁止移动到其中的坐标。");
+        }
+
+        var worldPoints = worldPointList
+            .Elements()
+            .Where(element => string.Equals(element.Name.LocalName, "PointF", StringComparison.Ordinal))
+            .Select(ReadWorldPoint)
+            .ToArray();
+        if (worldPoints.Length != 9)
+        {
+            throw new InvalidDataException("第一套 XY 标定文件的机械标定点数量不是9，禁止移动。");
+        }
+
+        // 本程序的九点采集顺序固定把第5点记录为 (0,0) 偏移，因此它就是当时记录的初始中心。
+        // 使用实测中心点而不是重新求平均，避免非对称误差把绝对运动目标悄悄改掉。
+        var recordedCenter = worldPoints[4];
+        var centerX = recordedCenter.X *
+            VisionCalibrationService.PulsesPerVisionUnit;
+        var centerY = recordedCenter.Y *
+            VisionCalibrationService.PulsesPerVisionUnit;
         if (!double.IsFinite(centerX) || !double.IsFinite(centerY))
         {
             throw new InvalidOperationException("第一套 XY 标定中心坐标无效。");
         }
 
         return (centerX, centerY);
+    }
+
+    private static string? ReadCalibrationParameter(XDocument document, string parameterName)
+    {
+        return document
+            .Descendants()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "CalibParam", StringComparison.Ordinal) &&
+                string.Equals(
+                    element.Attributes().FirstOrDefault(attribute =>
+                        string.Equals(attribute.Name.LocalName, "ParamName", StringComparison.Ordinal))?.Value,
+                    parameterName,
+                    StringComparison.Ordinal))?
+            .Descendants()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "ParamValue", StringComparison.Ordinal))?
+            .Value;
+    }
+
+    private static (double X, double Y) ReadWorldPoint(XElement pointElement)
+    {
+        var xText = pointElement.Elements().FirstOrDefault(element =>
+            string.Equals(element.Name.LocalName, "X", StringComparison.Ordinal))?.Value;
+        var yText = pointElement.Elements().FirstOrDefault(element =>
+            string.Equals(element.Name.LocalName, "Y", StringComparison.Ordinal))?.Value;
+        if (!double.TryParse(xText, NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+            !double.TryParse(yText, NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y))
+        {
+            throw new InvalidDataException("第一套 XY 标定文件包含无效的 WorldPointLst 坐标。");
+        }
+
+        return (x, y);
+    }
+
+    private (string FilePath, bool WasSelected) GetOrSelectFirstSetCalibrationFile()
+    {
+        var configuredPath = _visionCalibration.Settings.CalibrationFilePath?.Trim() ?? "";
+        if (IsExistingFileWithExtension(configuredPath, ".xml"))
+        {
+            return (Path.GetFullPath(configuredPath), false);
+        }
+
+        return (
+            SelectFile(
+                "选择第一套 XY 标定文件",
+                "VisionMaster 标定文件 (*.xml)|*.xml|所有文件 (*.*)|*.*",
+                configuredPath,
+                "已取消开始：未选择第一套 XY 标定文件。"),
+            true);
+    }
+
+    private (string FilePath, bool WasSelected) GetOrSelectChipInspectionSolution()
+    {
+        var configuredPath = _visionCalibration.Settings.ChipInspectionSolutionPath?.Trim() ?? "";
+        if (IsExistingFileWithExtension(configuredPath, ".sol"))
+        {
+            return (Path.GetFullPath(configuredPath), false);
+        }
+
+        return (
+            SelectFile(
+                "选择“找芯片”VisionMaster方案（需包含 流程1 / Blob分析1）",
+                "VisionMaster 方案 (*.sol)|*.sol|所有文件 (*.*)|*.*",
+                configuredPath,
+                "已取消开始：未选择“找芯片”方案。"),
+            true);
+    }
+
+    private string SelectFile(
+        string title,
+        string filter,
+        string configuredPath,
+        string cancelledMessage)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            CheckFileExists = true,
+            Multiselect = false,
+            InitialDirectory = GetExistingDirectory(configuredPath)
+        };
+        var owner = Window.GetWindow(this);
+        var accepted = owner is null ? dialog.ShowDialog() : dialog.ShowDialog(owner);
+        if (accepted != true)
+        {
+            throw new OperationCanceledException(cancelledMessage);
+        }
+
+        return Path.GetFullPath(dialog.FileName);
+    }
+
+    private static string GetExistingDirectory(string configuredPath)
+    {
+        try
+        {
+            var configuredDirectory = string.IsNullOrWhiteSpace(configuredPath)
+                ? ""
+                : Path.GetDirectoryName(Path.GetFullPath(configuredPath)) ?? "";
+            if (Directory.Exists(configuredDirectory))
+            {
+                return configuredDirectory;
+            }
+        }
+        catch
+        {
+            // 路径格式失效时回退到桌面，让用户重新选择。
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    }
+
+    private static bool IsExistingFileWithExtension(string path, string extension)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(path) &&
+                   string.Equals(Path.GetExtension(path), extension, StringComparison.OrdinalIgnoreCase) &&
+                   File.Exists(path);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -401,7 +602,27 @@ public partial class HomePage : UserControl
             $"矩形1质心(px)：X = {result.Rectangle1.X:0.###}　Y = {result.Rectangle1.Y:0.###}";
         BlobRectangle2CenterText.Text =
             $"矩形2质心(px)：X = {result.Rectangle2.X:0.###}　Y = {result.Rectangle2.Y:0.###}";
-        ShowBlobInspectionImage(result);
+        if (result.ImageWidth <= 0 ||
+            result.ImageHeight <= 0 ||
+            string.IsNullOrWhiteSpace(result.ImagePath))
+        {
+            BlobInspectionImageStatusText.Text = "XY已显示 · 本次未返回检测图";
+            BlobInspectionImageStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(242, 181, 68));
+            return;
+        }
+
+        try
+        {
+            ShowBlobInspectionImage(result);
+        }
+        catch
+        {
+            // 图片显示不是生产结果的前置条件；Blob 的两组 X/Y 已成功取得并保留在主页。
+            BlobInspectionImageStatusText.Text = "XY已显示 · 检测图加载失败";
+            BlobInspectionImageStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(242, 181, 68));
+        }
     }
 
     /// <summary>

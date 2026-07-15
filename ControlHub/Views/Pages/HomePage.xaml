@@ -829,7 +829,7 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
                                 <TextBlock x:Name="StartProductionHintText"
-                                           Text="XY回中心 → 海康拍照 → Blob分析"
+                                           Text="XY回初始中心 → 找芯片/流程1 → 显示XY"
                                            Foreground="#D7F4E5"
                                            FontSize="11"
                                            Margin="0,3,0,0"

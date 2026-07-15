@@ -320,12 +320,29 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
-    /// 让 VisionMaster 当前实时流程单次执行“拍照→Blob分析”，并读取两个矩形的像素质心。
+    /// 加载“找芯片”方案并单次执行其中的“流程1 → Blob分析1”，
+    /// 返回 VisionMaster 结果表前两行的矩形与像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+        string solutionPath,
         CancellationToken cancellationToken)
     {
-        var response = await SendCalibrationCommandAsync("RUN_RECTANGLE_BLOB", cancellationToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(solutionPath);
+        var fullPath = Path.GetFullPath(solutionPath);
+        if (!string.Equals(Path.GetExtension(fullPath), ".sol", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("找芯片方案必须使用 .sol 扩展名。");
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("找芯片方案文件不存在。", fullPath);
+        }
+
+        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(fullPath));
+        var response = await SendCalibrationCommandAsync(
+            $"RUN_RECTANGLE_BLOB\t{encodedPath}",
+            cancellationToken);
         var parts = response.Split('\t');
         if (parts.Length != 15 ||
             !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstX) ||
@@ -356,7 +373,8 @@ public sealed class VisionMasterProcessHost : HwndHost
             !double.IsFinite(secondHeight) ||
             firstX < 0 || firstY < 0 || secondX < 0 || secondY < 0 ||
             firstWidth <= 0 || firstHeight <= 0 || secondWidth <= 0 || secondHeight <= 0 ||
-            imageWidth <= 0 || imageHeight <= 0 || string.IsNullOrWhiteSpace(parts[14]))
+            !((imageWidth > 0 && imageHeight > 0 && !string.IsNullOrWhiteSpace(parts[14])) ||
+              (imageWidth == 0 && imageHeight == 0 && string.IsNullOrWhiteSpace(parts[14]))))
         {
             throw new InvalidDataException("VisionMaster 返回的Blob检测图或矩形结果无效。");
         }

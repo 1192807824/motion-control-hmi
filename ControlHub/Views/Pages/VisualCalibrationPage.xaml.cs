@@ -103,19 +103,20 @@ public partial class VisualCalibrationPage : UserControl
     }
 
     /// <summary>
-    /// 执行当前 VisionMaster 实时流程中的相机取像和 Blob 分析，返回两个矩形的像素质心。
+    /// 加载“找芯片”方案，执行固定的“流程1 → Blob分析1”，返回前两个结果的像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+        string solutionPath,
         CancellationToken cancellationToken)
     {
         await EnsureStartedAsync();
         if (!_hostReady)
         {
             throw new InvalidOperationException(
-                "视觉组件尚未就绪，请先进入视觉标定页加载包含图像采集和Blob分析的实时流程。");
+                "视觉组件尚未就绪，无法运行找芯片流程。");
         }
 
-        return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
+        return await VisionHost.RunRectangleBlobInspectionAsync(solutionPath, cancellationToken);
     }
 
     public void Shutdown()
