@@ -72,5 +72,11 @@ public sealed class VisualCalibrationSettings
 
     public double NozzleOffsetYPulses { get; set; }
 
+    public bool Nozzle2OffsetCalibrated { get; set; }
+
+    public double Nozzle2OffsetXPulses { get; set; }
+
+    public double Nozzle2OffsetYPulses { get; set; }
+
     public string ClickTargetTool { get; set; } = "Camera";
 }

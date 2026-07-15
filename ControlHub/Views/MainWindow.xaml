@@ -144,7 +144,7 @@
 
             <Border Grid.Row="1" Background="{StaticResource TopBar2}" Padding="0,4,14,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                    <Button Style="{StaticResource MenuButton}">
+                    <Button x:Name="HomeMenuButton" Style="{StaticResource ActiveMenuButton}" Click="HomeMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
                                    Height="20"
@@ -154,7 +154,7 @@
                             <TextBlock Text="主页" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="MotionMenuButton" Style="{StaticResource ActiveMenuButton}" Click="MotionMenu_Click">
+                    <Button x:Name="MotionMenuButton" Style="{StaticResource MenuButton}" Click="MotionMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
                                    Height="20"
@@ -217,8 +217,12 @@
                 </StackPanel>
             </Border>
 
+            <pages:HomePage x:Name="HomeContent"
+                            Grid.Row="2" />
+
             <pages:MotionControlPage x:Name="MotionPage"
-                                     Grid.Row="2" />
+                                     Grid.Row="2"
+                                     Visibility="Collapsed" />
 
             <pages:VisualCalibrationPage x:Name="VisualCalibrationContent"
                                          Grid.Row="2"
