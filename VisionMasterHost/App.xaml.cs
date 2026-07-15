@@ -31,12 +31,7 @@ public partial class App : Application
             var parentProcessId = ParseParentProcessId(e.Args);
             var pipeName = ParseArgumentValue(e.Args, "--pipe-name");
             var eventPipeName = ParseArgumentValue(e.Args, "--event-pipe-name");
-            var livePreview = !embedded || e.Args.Any(
-                argument => string.Equals(
-                    argument,
-                    "--live-preview",
-                    StringComparison.OrdinalIgnoreCase));
-            var window = new MainWindow(embedded, pipeName, eventPipeName, livePreview);
+            var window = new MainWindow(embedded, pipeName, eventPipeName);
             MainWindow = window;
             _visionMasterInitializationPending = true;
             window.ContentRendered += MainWindow_ContentRendered;

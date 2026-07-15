@@ -33,8 +33,6 @@ public partial class VisualCalibrationPage : UserControl
     private bool _startRequested;
     private bool _shutdown;
     private bool _hostReady;
-    private bool _hostLivePreview;
-    private bool _calibrationPageActive;
     private bool _hostCanRestart;
     private bool _calibrationRunning;
     private bool _centerSyncRunning;
@@ -71,122 +69,17 @@ public partial class VisualCalibrationPage : UserControl
         UpdateCommandState();
     }
 
-    /// <summary>
-    /// 进入标定菜单后才启动带连续预览的 VisionMaster 宿主。
-    /// </summary>
-    public async Task EnterCalibrationAsync()
+    public async Task EnsureStartedAsync()
     {
-        _calibrationPageActive = true;
-        try
-        {
-            await EnsureStartedAsync(enableLivePreview: true);
-        }
-        catch (Exception exception)
-        {
-            SetHostStatus($"视觉组件启动失败：{exception.Message}", HostStatus.Error);
-            UpdateCommandState();
-        }
-    }
-
-    /// <summary>
-    /// 离开标定菜单立即关闭视觉子进程，从而关闭方案、停止实时取图并释放相机。
-    /// </summary>
-    public async Task LeaveCalibrationAsync()
-    {
-        if (!_calibrationPageActive && !_hostReady && !_startRequested)
-        {
-            return;
-        }
-
-        _calibrationCancellation?.Cancel();
-        _clickMoveCancellation?.Cancel();
-        SetClickMoveCheckedNoEvent(false);
-        try
-        {
-            await StopVisionHostAsync();
-        }
-        catch (Exception exception)
-        {
-            // 未确认宿主退出时继续把页面视为标定模式，禁止主页再启动第二个相机宿主。
-            SetHostStatus($"停止视觉组件失败：{exception.Message}", HostStatus.Error);
-            UpdateCommandState();
-            throw;
-        }
-
-        _calibrationPageActive = false;
-        HostPlaceholder.Visibility = Visibility.Visible;
-        SetHostStatus("视觉标定未启动；进入标定菜单后才加载方案", HostStatus.Ready);
-        UpdateCommandState();
-    }
-
-    public Task EnsureStartedAsync()
-    {
-        return EnsureStartedAsync(enableLivePreview: true);
-    }
-
-    private async Task EnsureStartedAsync(bool enableLivePreview)
-    {
-        if (_shutdown)
-        {
-            return;
-        }
-
-        if (_hostReady && _hostLivePreview == enableLivePreview)
+        if (_startRequested || _shutdown)
         {
             return;
         }
 
         _startRequested = true;
         _hostCanRestart = false;
-        _hostLivePreview = enableLivePreview;
         UpdateCommandState();
-        try
-        {
-            await VisionHost.StartAsync(enableLivePreview);
-            var solutionReady = await VisionHost.WaitUntilReadyAsync();
-            if (!_startRequested)
-            {
-                throw new InvalidOperationException("视觉组件启动失败，请查看视觉状态提示。");
-            }
-
-            if (enableLivePreview && !solutionReady)
-            {
-                // 首次安装或原路径失效时保留嵌入窗口，让用户直接选择 .sol。
-                _hostReady = false;
-                _hostCanRestart = true;
-                RestartHostButton.IsEnabled = true;
-                SetHostStatus("视觉组件已启动；请在右侧窗口选择标定方案", HostStatus.Starting);
-                UpdateCommandState();
-                return;
-            }
-
-            // 窗口句柄出现并不等于方案已就绪；只有 PING 成功后才开放标定命令。
-            _hostReady = true;
-            _hostCanRestart = true;
-            RestartHostButton.IsEnabled = true;
-            SetHostStatus(
-                enableLivePreview ? "视觉组件及标定方案已就绪" : "主页单拍组件已就绪",
-                HostStatus.Ready);
-            UpdateCommandState();
-            if (enableLivePreview && EnableClickMoveCheckBox.IsChecked == true)
-            {
-                await ConfigureClickMoveModeAsync(true);
-            }
-        }
-        catch
-        {
-            // READY 握手失败时也要收口已启动的隐藏进程，不能让它留在后台占相机。
-            try
-            {
-                await StopVisionHostAsync();
-            }
-            catch
-            {
-                // StopVisionHostAsync 会保留未退出进程的模式状态，避免重复启动。
-            }
-
-            throw;
-        }
+        await VisionHost.StartAsync();
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -195,56 +88,34 @@ public partial class VisualCalibrationPage : UserControl
         string calibrationFilePath,
         CancellationToken cancellationToken)
     {
-        var stopAfterCommand = !_calibrationPageActive;
-        await EnsureStartedAsync(enableLivePreview: !stopAfterCommand);
-        try
+        await EnsureStartedAsync();
+        if (!_hostReady)
         {
-            return await VisionHost.TransformPixelAsync(
-                pixelX,
-                pixelY,
-                calibrationFilePath,
-                cancellationToken);
+            throw new InvalidOperationException(
+                "视觉组件尚未就绪，请先进入视觉标定页确认实时相机和标定流程已启动。");
         }
-        finally
-        {
-            if (stopAfterCommand)
-            {
-                await StopVisionHostAsync();
-            }
-        }
+
+        return await VisionHost.TransformPixelAsync(
+            pixelX,
+            pixelY,
+            calibrationFilePath,
+            cancellationToken);
     }
 
     /// <summary>
-    /// 主页模式直接使用 MVS SDK 单拍并执行 C# Blob；标定页模式才复用当前实时取像流程。
-    /// 两种模式都返回两个矩形的像素质心和带分析标记的图像。
+    /// 执行当前 VisionMaster 实时流程中的相机取像和 Blob 分析，返回两个矩形的像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
         CancellationToken cancellationToken)
     {
-        var stopAfterCommand = !_calibrationPageActive;
-        await EnsureStartedAsync(enableLivePreview: !stopAfterCommand);
-        try
+        await EnsureStartedAsync();
+        if (!_hostReady)
         {
-            return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
+            throw new InvalidOperationException(
+                "视觉组件尚未就绪，请先进入视觉标定页加载包含图像采集和Blob分析的实时流程。");
         }
-        finally
-        {
-            if (stopAfterCommand)
-            {
-                await StopVisionHostAsync();
-            }
-        }
-    }
 
-    private async Task StopVisionHostAsync()
-    {
-        // 只有在子进程确认退出后才清除就绪状态；若退出失败，保留当前模式状态，
-        // 防止调用方误以为相机已经释放并启动另一个宿主。
-        await VisionHost.StopAsync();
-        _hostReady = false;
-        _hostLivePreview = false;
-        _hostCanRestart = true;
-        _startRequested = false;
+        return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
     }
 
     public void Shutdown()
@@ -952,43 +823,32 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        try
-        {
-            _hostReady = false;
-            _hostCanRestart = false;
-            RestartHostButton.IsEnabled = false;
-            HostPlaceholder.Visibility = Visibility.Visible;
-            SetHostStatus("正在重启视觉组件…", HostStatus.Starting);
-            UpdateCommandState();
-            await StopVisionHostAsync();
-            await EnsureStartedAsync(enableLivePreview: true);
-        }
-        catch (Exception exception)
-        {
-            SetHostStatus($"视觉组件重启失败：{exception.Message}", HostStatus.Error);
-            _hostCanRestart = true;
-            RestartHostButton.IsEnabled = true;
-            UpdateCommandState();
-        }
+        _hostReady = false;
+        _hostCanRestart = false;
+        RestartHostButton.IsEnabled = false;
+        HostPlaceholder.Visibility = Visibility.Visible;
+        SetHostStatus("正在重启视觉组件…", HostStatus.Starting);
+        UpdateCommandState();
+        await VisionHost.RestartAsync();
     }
 
-    private void VisionHost_Started(object? sender, EventArgs e)
+    private async void VisionHost_Started(object? sender, EventArgs e)
     {
-        // 此事件只代表子窗口已经嵌入；方案/命令管道是否就绪由 PING 握手确认。
-        _hostReady = false;
-        _startRequested = true;
-        _hostCanRestart = false;
+        _hostReady = true;
+        _hostCanRestart = true;
         HostPlaceholder.Visibility = Visibility.Collapsed;
-        RestartHostButton.IsEnabled = false;
-        SetHostStatus("视觉组件已启动，正在等待方案就绪…", HostStatus.Starting);
+        RestartHostButton.IsEnabled = true;
+        SetHostStatus("视觉组件已启动", HostStatus.Ready);
         UpdateCommandState();
+        if (EnableClickMoveCheckBox.IsChecked == true)
+        {
+            await ConfigureClickMoveModeAsync(true);
+        }
     }
 
     private void VisionHost_Failed(object? sender, VisionMasterHostFailedEventArgs e)
     {
         _hostReady = false;
-        _startRequested = false;
-        _hostLivePreview = false;
         _hostCanRestart = true;
         _calibrationCancellation?.Cancel();
         _clickMoveCancellation?.Cancel();
@@ -999,52 +859,9 @@ public partial class VisualCalibrationPage : UserControl
         UpdateCommandState();
     }
 
-    private async void VisionHost_SolutionReady(object? sender, EventArgs e)
-    {
-        if (_shutdown || !_calibrationPageActive)
-        {
-            return;
-        }
-
-        _hostReady = true;
-        _hostLivePreview = true;
-        _hostCanRestart = true;
-        _startRequested = true;
-        HostPlaceholder.Visibility = Visibility.Collapsed;
-        RestartHostButton.IsEnabled = true;
-        SetHostStatus("标定方案已加载，实时视觉已就绪", HostStatus.Ready);
-        UpdateCommandState();
-        if (EnableClickMoveCheckBox.IsChecked == true)
-        {
-            await ConfigureClickMoveModeAsync(true);
-        }
-    }
-
-    private void VisionHost_SolutionNotReady(
-        object? sender,
-        VisionMasterHostFailedEventArgs e)
-    {
-        if (_shutdown || !_calibrationPageActive)
-        {
-            return;
-        }
-
-        // 只禁用依赖方案的命令，保留嵌入窗口，用户仍可在其中重新选择 .sol。
-        _hostReady = false;
-        _hostLivePreview = true;
-        _hostCanRestart = true;
-        _startRequested = true;
-        HostPlaceholder.Visibility = Visibility.Collapsed;
-        RestartHostButton.IsEnabled = true;
-        SetHostStatus(e.Message, HostStatus.Error);
-        UpdateCommandState();
-    }
-
     private void VisionHost_Exited(object? sender, EventArgs e)
     {
         _hostReady = false;
-        _startRequested = false;
-        _hostLivePreview = false;
         _hostCanRestart = true;
         _calibrationCancellation?.Cancel();
         _clickMoveCancellation?.Cancel();

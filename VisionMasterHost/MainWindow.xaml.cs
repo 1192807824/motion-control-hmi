@@ -7,7 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Xml.Linq;
+using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSNPointCalibModuCs;
 using Microsoft.Win32;
@@ -22,12 +22,12 @@ public partial class MainWindow : Window
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly string? _commandPipeName;
     private readonly string? _eventPipeName;
-    private readonly bool _startLivePreview;
     private readonly CancellationTokenSource _commandPipeCancellation = new();
     private readonly object _commandPipeSync = new();
     private VmProcedure? _previewProcedure;
     private VmProcedure? _calibrationProcedure;
     private IMVSCalibTransformModuTool? _standaloneTransformModule;
+    private IMVSBlobFindModuTool? _standaloneBlobModule;
     private VmModule? _displayedModule;
     private VmModule? _crosshairModule;
     private NamedPipeServerStream? _activeCommandPipe;
@@ -40,7 +40,6 @@ public partial class MainWindow : Window
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _clickCenterPixelReady;
-    private bool _suppressLivePreviewStart;
     private float _clickCenterPixelX;
     private float _clickCenterPixelY;
     private int _clickImagePixelWidth;
@@ -50,13 +49,11 @@ public partial class MainWindow : Window
     public MainWindow(
         bool embedded,
         string? commandPipeName = null,
-        string? eventPipeName = null,
-        bool startLivePreview = false)
+        string? eventPipeName = null)
     {
         InitializeComponent();
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
         _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
-        _startLivePreview = startLivePreview;
         if (embedded)
         {
             WindowStyle = WindowStyle.None;
@@ -85,50 +82,36 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        StartCommandPipeServer();
+        if (!_sdkAvailable)
+        {
+            return;
+        }
+
         try
         {
-            if (!_sdkAvailable)
-            {
-                return;
-            }
-
             VisionRenderControl.SetRenderToolbarVisible(true);
             CalibrationRenderControl.SetRenderToolbarVisible(true);
-
-            if (!_startLivePreview)
-            {
-                // 主页单拍模式不加载任何 .sol；相机仅在收到拍照命令时由 MVS SDK 临时打开。
-                SetStatus("主页单拍模式已就绪（未加载标定方案）", StatusKind.Ready);
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(_settings.SolutionPath))
-            {
-                return;
-            }
-
-            SolutionPathTextBox.Text = _settings.SolutionPath;
-            if (!File.Exists(_settings.SolutionPath))
-            {
-                SetStatus("上次使用的方案文件不存在，请重新选择。", StatusKind.Error);
-                return;
-            }
-
-            // 只有标定页模式会走到这里：恢复上次方案并启动实时预览。
-            await LoadSolutionAsync(
-                _settings.SolutionPath,
-                autoRestore: true,
-                startLivePreview: _startLivePreview);
         }
         catch (Exception exception)
         {
             ReportSdkInitializationFailure(exception);
+            return;
         }
-        finally
+
+        if (string.IsNullOrWhiteSpace(_settings.SolutionPath))
         {
-            // 等方案和流程选择完成后再开放命令管道，避免父进程抢先发送拍照命令。
-            StartCommandPipeServer();
+            return;
         }
+
+        SolutionPathTextBox.Text = _settings.SolutionPath;
+        if (!File.Exists(_settings.SolutionPath))
+        {
+            SetStatus("上次使用的方案文件不存在，请重新选择。", StatusKind.Error);
+            return;
+        }
+
+        await LoadSolutionAsync(_settings.SolutionPath, autoRestore: true);
     }
 
     private void StartCommandPipeServer()
@@ -230,7 +213,6 @@ public partial class MainWindow : Window
         var parts = command.Split('\t');
         return parts[0] switch
         {
-            "PING" => GetReadyState(),
             "SET_CENTER" => SetCalibrationCenter(parts),
             "PREPARE" => PrepareNinePointCalibration(parts),
             "CAPTURE" => CaptureNinePointCalibration(parts),
@@ -242,17 +224,6 @@ public partial class MainWindow : Window
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
-    }
-
-    /// <summary>
-    /// 区分“命令管道已就绪”和“标定方案已就绪”。首次使用还没有 .sol 时，
-    /// 必须保留嵌入窗口供用户点击“选择方案”，不能把整个宿主当作启动失败关闭。
-    /// </summary>
-    private string GetReadyState()
-    {
-        return _startLivePreview && !_solutionLoaded
-            ? "READY_NO_SOLUTION"
-            : "READY";
     }
 
     /// <summary>
@@ -274,8 +245,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 标定页内由当前实时流程单次拍照；主页则直接用 MVS SDK 单拍，不加载 .sol。
-    /// 两种模式都只分析保存下来的同一张原图，不读取流程内任何 Blob 节点。
+    /// 单次运行当前实时流程触发拍照。流程中有 Blob 模块时复用其结果；没有时由代码
+    /// 创建 Blob 工具分析本次相机图，再取矩形度最高、面积最大的两个有效目标。
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
@@ -289,17 +260,15 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("视觉标定正在执行，暂不允许拍照检测。");
         }
 
-        if (!_startLivePreview)
-        {
-            return RunDirectCameraBlobInspection();
-        }
-
         if (!_solutionLoaded ||
             _previewProcedure is null ||
-            PreviewProcedureComboBox.SelectedItem is not string)
+            PreviewProcedureComboBox.SelectedItem is not string procedureName)
         {
             throw new InvalidOperationException("请先加载视觉方案并选择实时流程。");
         }
+
+        // 实时流程只需要负责相机取图；没有Blob模块时，后面使用纯代码模块分析。
+        var procedureBlobModule = TryResolveBlobFindModule(procedureName);
 
         var previewWasRunning = _previewProcedure.ContinuousRunEnable;
         if (previewWasRunning)
@@ -310,33 +279,56 @@ public partial class MainWindow : Window
 
         try
         {
+            _previewProcedure.Run(true);
+            VisionRenderControl.UpdateVMResultShow();
+            var inspectionImage = SaveInspectionImage();
             try
             {
-                _previewProcedure.Run(true);
-            }
-            catch (Exception exception)
-            {
-                throw new InvalidOperationException("海康相机单次拍照流程执行失败。", exception);
-            }
+                var candidates = procedureBlobModule is null
+                    ? RunStandaloneBlobAnalysis(inspectionImage)
+                    : ReadBlobCandidates(
+                        procedureBlobModule.ModuResult,
+                        inspectionImage.PixelWidth,
+                        inspectionImage.PixelHeight,
+                        excludeFullFrameBlob: false);
+                if (candidates.Count < 2)
+                {
+                    throw new InvalidOperationException(
+                        $"代码Blob分析只找到 {candidates.Count} 个矩形目标，请检查光照和阈值参数。");
+                }
 
-            InspectionImageFile inspectionImage;
-            try
-            {
-                VisionRenderControl.UpdateVMResultShow();
-                inspectionImage = SaveInspectionImage();
-            }
-            catch (Exception exception)
-            {
-                throw new InvalidOperationException("拍照已执行，但读取本次相机原图失败。", exception);
-            }
+                // 先选出最像矩形的两个目标，再按 X、Y 排序，保证矩形1/2编号稳定。
+                var selected = candidates
+                    .OrderByDescending(candidate => candidate.Rectangularity)
+                    .ThenByDescending(candidate => candidate.Area)
+                    .Take(2)
+                    .OrderBy(candidate => candidate.PixelX)
+                    .ThenBy(candidate => candidate.PixelY)
+                    .ToArray();
 
-            try
-            {
-                return BuildBlobInspectionResponse(
-                    inspectionImage,
-                    RunManagedBlobAnalysis(inspectionImage));
+                SetStatus(
+                    $"拍照及代码Blob分析完成：矩形1({selected[0].PixelX:0.###}, {selected[0].PixelY:0.###})，" +
+                    $"矩形2({selected[1].PixelX:0.###}, {selected[1].PixelY:0.###})",
+                    StatusKind.Success);
+                return string.Join(
+                    "\t",
+                    selected[0].PixelX.ToString("R", CultureInfo.InvariantCulture),
+                    selected[0].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                    selected[0].Left.ToString(CultureInfo.InvariantCulture),
+                    selected[0].Top.ToString(CultureInfo.InvariantCulture),
+                    selected[0].Width.ToString(CultureInfo.InvariantCulture),
+                    selected[0].Height.ToString(CultureInfo.InvariantCulture),
+                    selected[1].PixelX.ToString("R", CultureInfo.InvariantCulture),
+                    selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                    selected[1].Left.ToString(CultureInfo.InvariantCulture),
+                    selected[1].Top.ToString(CultureInfo.InvariantCulture),
+                    selected[1].Width.ToString(CultureInfo.InvariantCulture),
+                    selected[1].Height.ToString(CultureInfo.InvariantCulture),
+                    inspectionImage.PixelWidth.ToString(CultureInfo.InvariantCulture),
+                    inspectionImage.PixelHeight.ToString(CultureInfo.InvariantCulture),
+                    inspectionImage.FilePath);
             }
-            catch (Exception exception)
+            catch
             {
                 try
                 {
@@ -346,104 +338,18 @@ public partial class MainWindow : Window
                 {
                 }
 
-                throw new InvalidOperationException("本次原图的 Blob 矩形分析失败。", exception);
+                throw;
             }
         }
         finally
         {
-            try
+            if (previewWasRunning && !_closed)
             {
-                if (previewWasRunning && !_closed)
-                {
-                    _previewProcedure.ContinuousRunEnable = true;
-                }
-            }
-            catch
-            {
-                // 恢复标定页预览失败不能覆盖本次拍照或分析的真实错误。
+                _previewProcedure.ContinuousRunEnable = true;
             }
 
             UpdateCommandState();
         }
-    }
-
-    /// <summary>
-    /// 主页模式绕过 VisionMaster 方案，直接独占打开海康相机拍一帧，关闭相机后再分析。
-    /// </summary>
-    private string RunDirectCameraBlobInspection()
-    {
-        HikCameraFrame frame;
-        try
-        {
-            frame = HikCameraSingleShot.CaptureBmp();
-        }
-        catch (Exception exception)
-        {
-            throw new InvalidOperationException("主页海康相机单次拍照失败。", exception);
-        }
-
-        var inspectionImage = new InspectionImageFile(
-            frame.FilePath,
-            frame.Width,
-            frame.Height);
-        try
-        {
-            return BuildBlobInspectionResponse(
-                inspectionImage,
-                RunManagedBlobAnalysis(inspectionImage));
-        }
-        catch (Exception exception)
-        {
-            try
-            {
-                File.Delete(inspectionImage.FilePath);
-            }
-            catch
-            {
-            }
-
-            throw new InvalidOperationException("本次原图的 Blob 矩形分析失败。", exception);
-        }
-    }
-
-    private string BuildBlobInspectionResponse(
-        InspectionImageFile inspectionImage,
-        IReadOnlyCollection<RectangleBlobCandidate> candidates)
-    {
-        if (candidates.Count < 2)
-        {
-            throw new InvalidOperationException(
-                $"代码Blob分析只找到 {candidates.Count} 个矩形目标，请检查光照和目标对比度。");
-        }
-
-        // 先按矩形度和面积综合评分，再按 X、Y 排序，保证矩形1/2编号稳定。
-        var selected = candidates
-            .OrderByDescending(ScoreBlobCandidate)
-            .Take(2)
-            .OrderBy(candidate => candidate.PixelX)
-            .ThenBy(candidate => candidate.PixelY)
-            .ToArray();
-        SetStatus(
-            $"单次拍照及代码Blob完成：矩形1({selected[0].PixelX:0.###}, {selected[0].PixelY:0.###})，" +
-            $"矩形2({selected[1].PixelX:0.###}, {selected[1].PixelY:0.###})",
-            StatusKind.Success);
-        return string.Join(
-            "\t",
-            selected[0].PixelX.ToString("R", CultureInfo.InvariantCulture),
-            selected[0].PixelY.ToString("R", CultureInfo.InvariantCulture),
-            selected[0].Left.ToString(CultureInfo.InvariantCulture),
-            selected[0].Top.ToString(CultureInfo.InvariantCulture),
-            selected[0].Width.ToString(CultureInfo.InvariantCulture),
-            selected[0].Height.ToString(CultureInfo.InvariantCulture),
-            selected[1].PixelX.ToString("R", CultureInfo.InvariantCulture),
-            selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture),
-            selected[1].Left.ToString(CultureInfo.InvariantCulture),
-            selected[1].Top.ToString(CultureInfo.InvariantCulture),
-            selected[1].Width.ToString(CultureInfo.InvariantCulture),
-            selected[1].Height.ToString(CultureInfo.InvariantCulture),
-            inspectionImage.PixelWidth.ToString(CultureInfo.InvariantCulture),
-            inspectionImage.PixelHeight.ToString(CultureInfo.InvariantCulture),
-            inspectionImage.FilePath);
     }
 
     /// <summary>
@@ -495,31 +401,168 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 不依赖 VisionMaster 流程中的 Blob 节点，使用托管代码对本次相机图执行
-    /// Otsu 自动阈值、8 邻域连通域和矩形度筛选。
+    /// 不依赖 VisionMaster 流程中的 Blob 节点，直接创建 SDK Blob 工具分析本次相机图。
+    /// 自动阈值分别尝试“暗目标/亮背景”和“亮目标/暗背景”，选择矩形质量更好的一组。
     /// </summary>
-    private static List<RectangleBlobCandidate> RunManagedBlobAnalysis(InspectionImageFile image)
+    private List<RectangleBlobCandidate> RunStandaloneBlobAnalysis(InspectionImageFile image)
     {
-        return ManagedBlobAnalyzer.Analyze(
-                image.FilePath,
-                image.PixelWidth,
-                image.PixelHeight)
-            .Select(candidate => new RectangleBlobCandidate(
-                candidate.CenterX,
-                candidate.CenterY,
-                candidate.Rectangularity,
-                candidate.Area,
-                candidate.Left,
-                candidate.Top,
-                candidate.Width,
-                candidate.Height))
-            .ToList();
+        _standaloneBlobModule ??= new IMVSBlobFindModuTool();
+        using var bitmap = new System.Drawing.Bitmap(image.FilePath);
+        var inputImage = new ImageBaseData(bitmap);
+        try
+        {
+            var parameters = _standaloneBlobModule.ModuParams
+                ?? throw new InvalidOperationException("无法初始化海康代码Blob分析参数。");
+            var pixelCount = (long)image.PixelWidth * image.PixelHeight;
+            var minimumArea = (int)Math.Min(5000L, Math.Max(20L, pixelCount / 100000L));
+            var maximumArea = (int)Math.Min(
+                int.MaxValue,
+                Math.Max(minimumArea + 1L, pixelCount / 2L));
+            var candidateSets = new List<List<RectangleBlobCandidate>>();
+            Exception? lastRunException = null;
+
+            foreach (var polarity in new[]
+                     {
+                         BlobFindParam.PolarityEnum.DarkOnBright,
+                         BlobFindParam.PolarityEnum.BrightOnDark
+                     })
+            {
+                try
+                {
+                    parameters.InputImage = inputImage;
+                    parameters.ThresholdType = BlobFindParam.ThresholdTypeEnum.AutoThreshold;
+                    parameters.Polarity = polarity;
+                    parameters.FindNum = 100;
+                    parameters.SelectByArea = true;
+                    parameters.MinArea = minimumArea;
+                    parameters.MaxArea = maximumArea;
+                    parameters.SelectByRectangularity = false;
+                    parameters.SortFeature = BlobFindParam.SortFeatureEnum.SortFeatureRect;
+                    parameters.SortMode = BlobFindParam.SortModeEnum.SortModeDecend;
+                    parameters.Connectivity = BlobFindParam.ConnectivityEnum.Connected_8;
+                    parameters.BlobNumLimitEnable = false;
+                    parameters.OKWhenNumIsZero = false;
+                    parameters.BolbOutLineEnable = true;
+                    _standaloneBlobModule.Run();
+
+                    var result = _standaloneBlobModule.ModuResult;
+                    if (result.ModuStatus != 1)
+                    {
+                        continue;
+                    }
+
+                    candidateSets.Add(ReadBlobCandidates(
+                        result,
+                        image.PixelWidth,
+                        image.PixelHeight,
+                        excludeFullFrameBlob: true));
+                }
+                catch (Exception exception)
+                {
+                    lastRunException = exception;
+                }
+            }
+
+            if (candidateSets.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "海康代码Blob分析执行失败，请检查当前相机图是否有效。",
+                    lastRunException);
+            }
+
+            return candidateSets
+                .OrderByDescending(ScoreBlobCandidateSet)
+                .ThenByDescending(set => set.Count)
+                .First();
+        }
+        finally
+        {
+            inputImage.Dispose();
+        }
     }
 
-    private static double ScoreBlobCandidate(RectangleBlobCandidate candidate)
+    private static double ScoreBlobCandidateSet(IReadOnlyCollection<RectangleBlobCandidate> candidates)
     {
-        return Math.Max(0d, Math.Min(1d, candidate.Rectangularity)) *
-            Math.Log10(Math.Max(10d, candidate.Area));
+        return candidates
+            .OrderByDescending(candidate => candidate.Rectangularity)
+            .ThenByDescending(candidate => candidate.Area)
+            .Take(2)
+            .Sum(candidate =>
+                Math.Max(0d, Math.Min(1d, candidate.Rectangularity)) * 1000d +
+                Math.Log10(Math.Max(1d, candidate.Area)));
+    }
+
+    private static List<RectangleBlobCandidate> ReadBlobCandidates(
+        BlobFindResult result,
+        int imageWidth,
+        int imageHeight,
+        bool excludeFullFrameBlob)
+    {
+        if (result.ModuStatus != 1)
+        {
+            throw new InvalidOperationException("Blob分析返回NG，请检查相机图和阈值参数。");
+        }
+
+        var candidates = new List<RectangleBlobCandidate>();
+        var points = result.CentroidPoint;
+        if (points is null)
+        {
+            return candidates;
+        }
+
+        var candidateCount = Math.Min(result.BlobNum, points.Count);
+        for (var index = 0; index < candidateCount; index++)
+        {
+            var point = points[index];
+            if (float.IsNaN(point.X) || float.IsInfinity(point.X) ||
+                float.IsNaN(point.Y) || float.IsInfinity(point.Y))
+            {
+                continue;
+            }
+
+            var rectangularity = result.Rectangularity is not null && index < result.Rectangularity.Count
+                ? result.Rectangularity[index]
+                : 0f;
+            var area = result.Area is not null && index < result.Area.Count
+                ? result.Area[index]
+                : 0f;
+            if (float.IsNaN(rectangularity) || float.IsInfinity(rectangularity))
+            {
+                rectangularity = 0f;
+            }
+
+            if (float.IsNaN(area) || float.IsInfinity(area))
+            {
+                area = 0f;
+            }
+
+            var blobRect = result.BlobRect is not null && index < result.BlobRect.Count
+                ? result.BlobRect[index]
+                : null;
+            var left = blobRect?.RectPoint.X ?? (int)Math.Round(point.X);
+            var top = blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y);
+            var width = Math.Max(1, blobRect?.RectWidth ?? 1);
+            var height = Math.Max(1, blobRect?.RectHeight ?? 1);
+            if (excludeFullFrameBlob &&
+                left <= 1 && top <= 1 &&
+                left + width >= imageWidth - 1 &&
+                top + height >= imageHeight - 1)
+            {
+                continue;
+            }
+
+            candidates.Add(new RectangleBlobCandidate(
+                point.X,
+                point.Y,
+                rectangularity,
+                area,
+                left,
+                top,
+                width,
+                height));
+        }
+
+        return candidates;
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -543,11 +586,6 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("视觉标定正在执行，暂不允许像素坐标转换。");
         }
 
-        if (!_startLivePreview)
-        {
-            return TransformPixelWithoutSolution(pixelX, pixelY, fullPath);
-        }
-
         if (!_solutionLoaded)
         {
             throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
@@ -561,27 +599,6 @@ public partial class MainWindow : Window
 
         try
         {
-            if (!_clickCenterPixelReady)
-            {
-                if (_previewProcedure is null)
-                {
-                    throw new InvalidOperationException("当前没有可用于读取图像尺寸的实时流程。");
-                }
-
-                try
-                {
-                    // 主页手动坐标换算同样不启动连续预览；仅拍一帧取得真实图像宽高。
-                    _previewProcedure.Run(true);
-                    VisionRenderControl.UpdateVMResultShow();
-                }
-                catch (Exception exception)
-                {
-                    throw new InvalidOperationException(
-                        "读取相机图像尺寸所需的单次拍照失败。",
-                        exception);
-                }
-            }
-
             var (centerPixelX, centerPixelY) = GetClickCenterPixel();
             if (pixelX >= _clickImagePixelWidth || pixelY >= _clickImagePixelHeight)
             {
@@ -627,173 +644,6 @@ public partial class MainWindow : Window
 
             UpdateCommandState();
         }
-    }
-
-    /// <summary>
-    /// 主页坐标换算直接读取标定 XML 的 3×3 变换矩阵，并通过 MVS 单帧取得图像尺寸；
-    /// 整个过程不加载 VisionMaster 方案。
-    /// </summary>
-    private string TransformPixelWithoutSolution(
-        double pixelX,
-        double pixelY,
-        string calibrationPath)
-    {
-        HikCameraFrame frame;
-        try
-        {
-            frame = HikCameraSingleShot.CaptureBmp();
-        }
-        catch (Exception exception)
-        {
-            throw new InvalidOperationException("读取相机图像尺寸失败。", exception);
-        }
-
-        try
-        {
-            if (pixelX >= frame.Width || pixelY >= frame.Height)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(pixelX),
-                    $"像素坐标超出当前图像范围：宽{frame.Width}，高{frame.Height}。");
-            }
-
-            var matrix = ReadCalibrationMatrix(calibrationPath);
-            var centerPixelX = (frame.Width - 1) / 2d;
-            var centerPixelY = (frame.Height - 1) / 2d;
-            var transformedPoint = ApplyCalibrationMatrix(matrix, pixelX, pixelY);
-            var transformedCenter = ApplyCalibrationMatrix(matrix, centerPixelX, centerPixelY);
-            return string.Join(
-                "\t",
-                transformedPoint.X.ToString("R", CultureInfo.InvariantCulture),
-                transformedPoint.Y.ToString("R", CultureInfo.InvariantCulture),
-                centerPixelX.ToString("R", CultureInfo.InvariantCulture),
-                centerPixelY.ToString("R", CultureInfo.InvariantCulture),
-                transformedCenter.X.ToString("R", CultureInfo.InvariantCulture),
-                transformedCenter.Y.ToString("R", CultureInfo.InvariantCulture));
-        }
-        finally
-        {
-            try
-            {
-                File.Delete(frame.FilePath);
-            }
-            catch
-            {
-            }
-        }
-    }
-
-    private static double[] ReadCalibrationMatrix(string calibrationPath)
-    {
-        XDocument document;
-        try
-        {
-            document = XDocument.Load(calibrationPath);
-        }
-        catch (Exception exception)
-        {
-            throw new InvalidDataException("无法读取九点标定 XML。", exception);
-        }
-
-        ValidateNPointCalibration(document);
-
-        var matrixElement = document
-            .Descendants()
-            .FirstOrDefault(element =>
-                string.Equals(
-                    element.Name.LocalName,
-                    "CalibFloatListParam",
-                    StringComparison.Ordinal) &&
-                string.Equals(
-                    (string?)element.Attribute("ParamName"),
-                    "CalibMatrix",
-                    StringComparison.Ordinal));
-        var values = matrixElement?
-            .Elements()
-            .Where(element =>
-                string.Equals(element.Name.LocalName, "ParamValue", StringComparison.Ordinal))
-            .Select(element =>
-            {
-                if (!double.TryParse(
-                        element.Value,
-                        NumberStyles.Float,
-                        CultureInfo.InvariantCulture,
-                        out var value) ||
-                    double.IsNaN(value) ||
-                    double.IsInfinity(value))
-                {
-                    throw new InvalidDataException("标定矩阵中包含无效数值。");
-                }
-
-                return value;
-            })
-            .ToArray();
-        if (values is not { Length: 9 })
-        {
-            throw new InvalidDataException("九点标定 XML 中未找到完整的 3×3 CalibMatrix。");
-        }
-
-        var determinant =
-            values[0] * (values[4] * values[8] - values[5] * values[7]) -
-            values[1] * (values[3] * values[8] - values[5] * values[6]) +
-            values[2] * (values[3] * values[7] - values[4] * values[6]);
-        if (double.IsNaN(determinant) ||
-            double.IsInfinity(determinant) ||
-            Math.Abs(determinant) < 1e-12)
-        {
-            throw new InvalidDataException("九点标定矩阵无效或已退化，禁止用于坐标换算。");
-        }
-
-        return values;
-    }
-
-    private static void ValidateNPointCalibration(XDocument document)
-    {
-        var calibrationType = ReadCalibrationParameter(document, "CalibType");
-        if (!string.Equals(calibrationType, "NPointCalib", StringComparison.Ordinal))
-        {
-            throw new InvalidDataException("导入文件不是有效的 N 点标定结果。");
-        }
-
-        var errorStatus = ReadCalibrationParameter(document, "CalibErrStatus");
-        if (!string.Equals(errorStatus, "0", StringComparison.Ordinal))
-        {
-            throw new InvalidDataException(
-                "九点标定文件的 CalibErrStatus 不是 0，禁止用于坐标换算。");
-        }
-    }
-
-    private static string? ReadCalibrationParameter(XDocument document, string parameterName)
-    {
-        return document
-            .Descendants()
-            .FirstOrDefault(element =>
-                string.Equals(element.Name.LocalName, "CalibParam", StringComparison.Ordinal) &&
-                string.Equals(
-                    (string?)element.Attribute("ParamName"),
-                    parameterName,
-                    StringComparison.Ordinal))?
-            .Elements()
-            .FirstOrDefault(element =>
-                string.Equals(element.Name.LocalName, "ParamValue", StringComparison.Ordinal))?
-            .Value
-            .Trim();
-    }
-
-    private static (double X, double Y) ApplyCalibrationMatrix(
-        IReadOnlyList<double> matrix,
-        double pixelX,
-        double pixelY)
-    {
-        var denominator = matrix[6] * pixelX + matrix[7] * pixelY + matrix[8];
-        if (Math.Abs(denominator) < 1e-12)
-        {
-            throw new InvalidDataException("标定矩阵无法转换当前像素点。");
-        }
-
-        return (
-            (matrix[0] * pixelX + matrix[1] * pixelY + matrix[2]) / denominator,
-            (matrix[3] * pixelX + matrix[4] * pixelY + matrix[5]) / denominator);
     }
 
     private string SetClickMoveMode(IReadOnlyList<string> parts)
@@ -1215,8 +1065,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 优先复用流程里已有的标定转换模块；没有时把临时转换模块注册到当前方案，
-    /// 让海康 SDK 为它分配有效节点后再读取导入的 XML。宿主退出时会释放该临时节点。
+    /// 优先复用流程里已有的标定转换模块；没有时使用独立模块读取导入的 XML。
+    /// 独立模块只负责坐标换算，不参与或修改用户的 VisionMaster 流程。
     /// </summary>
     private IMVSCalibTransformModuTool GetCalibrationTransformModule()
     {
@@ -1232,10 +1082,55 @@ public partial class MainWindow : Window
             }
         }
 
-        var ownerProcedure = _calibrationProcedure ?? _previewProcedure
-            ?? throw new InvalidOperationException("当前没有可承载标定转换工具的视觉流程。");
-        return _standaloneTransformModule ??=
-            new IMVSCalibTransformModuTool((object)ownerProcedure);
+        return _standaloneTransformModule ??= new IMVSCalibTransformModuTool();
+    }
+
+    /// <summary>
+    /// 在当前实时流程中定位海康 Blob分析模块。显示名和模块类型名都参与匹配，
+    /// 以兼容用户给模块改名以及不同 VisionMaster 方案的命名方式。
+    /// </summary>
+    private static IMVSBlobFindModuTool? TryResolveBlobFindModule(string procedureName)
+    {
+        var procedure = VmSolution.Instance[procedureName] as VmProcedure;
+        if (procedure is null)
+        {
+            return null;
+        }
+        var moduleList = procedure.GetProcedureModuleList();
+        for (var index = 0; index < moduleList.nNum; index++)
+        {
+            var info = moduleList.astModuleInfo[index];
+            var displayName = info.strDisplayName?.Trim() ?? "";
+            var moduleName = info.strModuleName?.Trim() ?? "";
+            if (!string.Equals(moduleName, "IMVSBlobFindModu", StringComparison.Ordinal) &&
+                !displayName.Contains("Blob分析"))
+            {
+                continue;
+            }
+
+            foreach (var candidate in new[]
+                     {
+                         $"{procedureName}.{displayName}",
+                         $"{procedureName}.{moduleName}",
+                         displayName,
+                         moduleName
+                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
+            {
+                try
+                {
+                    if (VmSolution.Instance[candidate] is IMVSBlobFindModuTool module)
+                    {
+                        return module;
+                    }
+                }
+                catch
+                {
+                    // 部分 SDK 模块类型名不是可查询路径，继续尝试下一个候选名。
+                }
+            }
+        }
+
+        return null;
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
@@ -1545,15 +1440,11 @@ public partial class MainWindow : Window
         await LoadSolutionAsync(dialog.FileName, autoRestore: false);
     }
 
-    private async Task LoadSolutionAsync(
-        string solutionPath,
-        bool autoRestore,
-        bool startLivePreview = true)
+    private async Task LoadSolutionAsync(string solutionPath, bool autoRestore)
     {
         if (!File.Exists(solutionPath))
         {
             SetStatus("请选择有效的 VisionMaster .sol 方案文件。", StatusKind.Error);
-            await NotifySolutionStateAsync(false, "选择的 VisionMaster .sol 方案文件不存在。");
             return;
         }
 
@@ -1563,7 +1454,6 @@ public partial class MainWindow : Window
             System.Windows.Threading.DispatcherPriority.Background);
 
         var previousSolutionClosed = false;
-        var solutionStateMessage = "标定方案尚未加载。";
         try
         {
             CloseCurrentSolution();
@@ -1581,18 +1471,10 @@ public partial class MainWindow : Window
             SolutionPathTextBox.Text = _settings.SolutionPath;
             PreviewProcedureComboBox.ItemsSource = procedureNames;
             CalibrationProcedureComboBox.ItemsSource = procedureNames;
-            _suppressLivePreviewStart = !startLivePreview;
-            try
-            {
-                CalibrationProcedureComboBox.SelectedItem =
-                    SelectPreferredCalibrationProcedure(procedureNames);
-                PreviewProcedureComboBox.SelectedItem =
-                    SelectPreferredPreviewProcedure(procedureNames);
-            }
-            finally
-            {
-                _suppressLivePreviewStart = false;
-            }
+            CalibrationProcedureComboBox.SelectedItem =
+                SelectPreferredCalibrationProcedure(procedureNames);
+            PreviewProcedureComboBox.SelectedItem =
+                SelectPreferredPreviewProcedure(procedureNames);
             SaveSettingsNoThrow();
             UpdateCommandState();
             if (_previewProcedure?.ContinuousRunEnable == true)
@@ -1603,8 +1485,6 @@ public partial class MainWindow : Window
                         : $"方案已加载：{Path.GetFileName(solutionPath)}；实时与标定流程已分离",
                     StatusKind.Success);
             }
-
-            solutionStateMessage = $"标定方案已加载：{Path.GetFileName(solutionPath)}";
         }
         catch (Exception exception)
         {
@@ -1613,29 +1493,13 @@ public partial class MainWindow : Window
                 CloseCurrentSolutionNoThrow();
             }
 
-            solutionStateMessage =
-                $"{(autoRestore ? "自动加载" : "加载")}失败：{FormatException(exception)}";
-            SetStatus(solutionStateMessage, StatusKind.Error);
+            SetStatus(
+                $"{(autoRestore ? "自动加载" : "加载")}失败：{FormatException(exception)}",
+                StatusKind.Error);
         }
         finally
         {
             SetBusy(false);
-            await NotifySolutionStateAsync(_solutionLoaded, solutionStateMessage);
-        }
-    }
-
-    private async Task NotifySolutionStateAsync(bool ready, string message)
-    {
-        try
-        {
-            await SendHostEventAsync(
-                ready
-                    ? "SOLUTION_READY"
-                    : $"SOLUTION_NOT_READY\t{Convert.ToBase64String(Encoding.UTF8.GetBytes(message))}");
-        }
-        catch
-        {
-            // 外层状态通知失败不应覆盖方案加载本身的结果；父进程还会通过 PING 复核。
         }
     }
 
@@ -1654,14 +1518,6 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = procedureName;
             PopulateImageSteps(procedureName, _previewProcedure);
             SaveSettingsNoThrow();
-            if (_suppressLivePreviewStart)
-            {
-                _previewProcedure.ContinuousRunEnable = false;
-                UpdateCommandState();
-                SetStatus($"{procedureName} 已按主页单拍模式加载（连续预览未启动）", StatusKind.Ready);
-                return;
-            }
-
             if (TryStartLivePreview(out var previewError))
             {
                 SetStatus($"{procedureName} 实时预览已启动", StatusKind.Success);
@@ -1941,7 +1797,6 @@ public partial class MainWindow : Window
         _clickMoveEnabled = false;
         StopPreviewProcedureNoThrow();
         ClearRenderer();
-        DisposeStandaloneTransformNoThrow();
 
         if (_solutionLoaded)
         {
@@ -1963,7 +1818,6 @@ public partial class MainWindow : Window
         _clickMoveEnabled = false;
         StopPreviewProcedureNoThrow();
         ClearRenderer();
-        DisposeStandaloneTransformNoThrow();
         try
         {
             VmSolution.Instance?.CloseSolution();
@@ -1979,19 +1833,6 @@ public partial class MainWindow : Window
         CalibrationProcedureComboBox.ItemsSource = null;
         ImageStepComboBox.ItemsSource = null;
         UpdateCommandState();
-    }
-
-    private void DisposeStandaloneTransformNoThrow()
-    {
-        try
-        {
-            _standaloneTransformModule?.Dispose();
-        }
-        catch
-        {
-        }
-
-        _standaloneTransformModule = null;
     }
 
     private void ClearRenderer()
@@ -2227,17 +2068,10 @@ public partial class MainWindow : Window
 
     private static string FormatException(Exception exception)
     {
-        var vmException = FindVmException(exception);
-        if (vmException is null)
-        {
-            return exception.Message;
-        }
-
-        var vmMessage = $"{vmException.Message}（错误码 0x{vmException.errorCode:X8}）";
-        return ReferenceEquals(exception, vmException) ||
-               string.Equals(exception.Message, vmException.Message, StringComparison.Ordinal)
-            ? vmMessage
-            : $"{exception.Message}；{vmMessage}";
+        var vmException = FindVmException(exception) ?? VmSolution.GetVmException(exception);
+        return vmException is null
+            ? exception.Message
+            : $"{vmException.Message}（错误码 0x{vmException.errorCode:X8}）";
     }
 
     private static VmException? FindVmException(Exception exception)
@@ -2277,7 +2111,23 @@ public partial class MainWindow : Window
         }
 
         StopPreviewProcedureNoThrow();
-        DisposeStandaloneTransformNoThrow();
+        try
+        {
+            _standaloneTransformModule?.Dispose();
+            _standaloneTransformModule = null;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _standaloneBlobModule?.Dispose();
+            _standaloneBlobModule = null;
+        }
+        catch
+        {
+        }
 
         try
         {
