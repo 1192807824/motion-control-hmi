@@ -267,15 +267,8 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("请先加载视觉方案并选择实时流程。");
         }
 
-        IMVSBlobFindModuTool? procedureBlobModule = null;
-        try
-        {
-            procedureBlobModule = ResolveBlobFindModule(procedureName);
-        }
-        catch (InvalidOperationException)
-        {
-            // 实时流程只需要负责相机取图；没有Blob模块时，后面使用纯代码模块分析。
-        }
+        // 实时流程只需要负责相机取图；没有Blob模块时，后面使用纯代码模块分析。
+        var procedureBlobModule = TryResolveBlobFindModule(procedureName);
 
         var previewWasRunning = _previewProcedure.ContinuousRunEnable;
         if (previewWasRunning)
@@ -1096,10 +1089,13 @@ public partial class MainWindow : Window
     /// 在当前实时流程中定位海康 Blob分析模块。显示名和模块类型名都参与匹配，
     /// 以兼容用户给模块改名以及不同 VisionMaster 方案的命名方式。
     /// </summary>
-    private static IMVSBlobFindModuTool ResolveBlobFindModule(string procedureName)
+    private static IMVSBlobFindModuTool? TryResolveBlobFindModule(string procedureName)
     {
-        var procedure = VmSolution.Instance[procedureName] as VmProcedure
-            ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
+        var procedure = VmSolution.Instance[procedureName] as VmProcedure;
+        if (procedure is null)
+        {
+            return null;
+        }
         var moduleList = procedure.GetProcedureModuleList();
         for (var index = 0; index < moduleList.nNum; index++)
         {
@@ -1134,8 +1130,7 @@ public partial class MainWindow : Window
             }
         }
 
-        throw new InvalidOperationException(
-            "当前实时流程中未找到“Blob分析”模块，请先在 VisionMaster 流程中添加并配置图像采集和Blob分析。");
+        return null;
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
