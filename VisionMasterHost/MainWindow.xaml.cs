@@ -289,7 +289,18 @@ public partial class MainWindow : Window
                 var area = result.Area is not null && index < result.Area.Count
                     ? result.Area[index]
                     : 0f;
-                candidates.Add(new RectangleBlobCandidate(point.X, point.Y, rectangularity, area));
+                var blobRect = result.BlobRect is not null && index < result.BlobRect.Count
+                    ? result.BlobRect[index]
+                    : null;
+                candidates.Add(new RectangleBlobCandidate(
+                    point.X,
+                    point.Y,
+                    rectangularity,
+                    area,
+                    blobRect?.RectPoint.X ?? (int)Math.Round(point.X),
+                    blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y),
+                    blobRect?.RectWidth ?? 1,
+                    blobRect?.RectHeight ?? 1));
             }
 
             if (candidates.Count < 2)
@@ -306,17 +317,30 @@ public partial class MainWindow : Window
                 .ThenBy(candidate => candidate.PixelY)
                 .ToArray();
 
+            // 保存本次相机原图。主程序会在主页加载它，并使用下面返回的 Blob 框和质心
+            // 叠加检测标记；这样无需把同一个 VisionMaster 窗口嵌入两个页面。
+            var inspectionImage = SaveInspectionImage();
             SetStatus(
                 $"拍照及Blob分析完成：矩形1({selected[0].PixelX:0.###}, {selected[0].PixelY:0.###})，" +
                 $"矩形2({selected[1].PixelX:0.###}, {selected[1].PixelY:0.###})",
                 StatusKind.Success);
-
             return string.Join(
                 "\t",
                 selected[0].PixelX.ToString("R", CultureInfo.InvariantCulture),
                 selected[0].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                selected[0].Left.ToString(CultureInfo.InvariantCulture),
+                selected[0].Top.ToString(CultureInfo.InvariantCulture),
+                selected[0].Width.ToString(CultureInfo.InvariantCulture),
+                selected[0].Height.ToString(CultureInfo.InvariantCulture),
                 selected[1].PixelX.ToString("R", CultureInfo.InvariantCulture),
-                selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture));
+                selected[1].PixelY.ToString("R", CultureInfo.InvariantCulture),
+                selected[1].Left.ToString(CultureInfo.InvariantCulture),
+                selected[1].Top.ToString(CultureInfo.InvariantCulture),
+                selected[1].Width.ToString(CultureInfo.InvariantCulture),
+                selected[1].Height.ToString(CultureInfo.InvariantCulture),
+                inspectionImage.PixelWidth.ToString(CultureInfo.InvariantCulture),
+                inspectionImage.PixelHeight.ToString(CultureInfo.InvariantCulture),
+                inspectionImage.FilePath);
         }
         finally
         {
@@ -326,6 +350,54 @@ public partial class MainWindow : Window
             }
 
             UpdateCommandState();
+        }
+    }
+
+    /// <summary>
+    /// 将当前结果对应的原始相机图保存到共享临时目录，并读取 BMP 像素尺寸。
+    /// 文件由主程序成功加载到内存后删除。
+    /// </summary>
+    private InspectionImageFile SaveInspectionImage()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ControlHubVision");
+        Directory.CreateDirectory(directory);
+        var imagePath = Path.Combine(directory, $"blob-{Guid.NewGuid():N}.bmp");
+        try
+        {
+            VisionRenderControl.SaveOriginalImage(imagePath);
+            using var stream = new FileStream(
+                imagePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            using var reader = new BinaryReader(stream);
+            if (stream.Length < 26 || reader.ReadUInt16() != 0x4D42)
+            {
+                throw new InvalidDataException("VisionMaster 保存的Blob检测图不是有效 BMP 图像。");
+            }
+
+            stream.Position = 18;
+            var pixelWidth = Math.Abs((long)reader.ReadInt32());
+            var pixelHeight = Math.Abs((long)reader.ReadInt32());
+            if (pixelWidth <= 0 || pixelHeight <= 0 ||
+                pixelWidth > int.MaxValue || pixelHeight > int.MaxValue)
+            {
+                throw new InvalidDataException("VisionMaster 保存的Blob检测图尺寸无效。");
+            }
+
+            return new InspectionImageFile(imagePath, (int)pixelWidth, (int)pixelHeight);
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(imagePath);
+            }
+            catch
+            {
+            }
+
+            throw;
         }
     }
 
@@ -1921,12 +1993,24 @@ public partial class MainWindow : Window
 
     private sealed class RectangleBlobCandidate
     {
-        public RectangleBlobCandidate(float pixelX, float pixelY, float rectangularity, float area)
+        public RectangleBlobCandidate(
+            float pixelX,
+            float pixelY,
+            float rectangularity,
+            float area,
+            int left,
+            int top,
+            int width,
+            int height)
         {
             PixelX = pixelX;
             PixelY = pixelY;
             Rectangularity = rectangularity;
             Area = area;
+            Left = left;
+            Top = top;
+            Width = Math.Max(1, width);
+            Height = Math.Max(1, height);
         }
 
         public float PixelX { get; }
@@ -1936,6 +2020,30 @@ public partial class MainWindow : Window
         public float Rectangularity { get; }
 
         public float Area { get; }
+
+        public int Left { get; }
+
+        public int Top { get; }
+
+        public int Width { get; }
+
+        public int Height { get; }
+    }
+
+    private sealed class InspectionImageFile
+    {
+        public InspectionImageFile(string filePath, int pixelWidth, int pixelHeight)
+        {
+            FilePath = filePath;
+            PixelWidth = pixelWidth;
+            PixelHeight = pixelHeight;
+        }
+
+        public string FilePath { get; }
+
+        public int PixelWidth { get; }
+
+        public int PixelHeight { get; }
     }
 
     private enum StatusKind

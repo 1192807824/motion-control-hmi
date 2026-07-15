@@ -380,8 +380,90 @@
                     </Border>
                 </Grid>
 
-                <!-- Reserved for a future production overview. Intentionally empty for now. -->
-                <Border Grid.Row="3" Style="{StaticResource Panel}" />
+                <!-- 本次海康拍照及 Blob 分析结果显示区。 -->
+                <Border Grid.Row="3" Style="{StaticResource Panel}" Padding="12,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="36" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="4" Height="20" Background="#49D17D" CornerRadius="2" Margin="0,0,9,0" />
+                                <TextBlock Text="海康 Blob 检测画面"
+                                           Foreground="{StaticResource TextPrimary}"
+                                           FontSize="14"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Background="#173852"
+                                    BorderBrush="#316C95"
+                                    BorderThickness="1"
+                                    CornerRadius="3"
+                                    Padding="9,3"
+                                    VerticalAlignment="Center">
+                                <TextBlock x:Name="BlobInspectionImageStatusText"
+                                           Text="等待检测"
+                                           Foreground="{StaticResource PrimaryBlueLight}"
+                                           FontSize="10"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
+
+                        <Border Grid.Row="1"
+                                Background="#07131D"
+                                BorderBrush="#29465C"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                ClipToBounds="True">
+                            <Grid>
+                                <Viewbox x:Name="BlobInspectionImageViewbox"
+                                         Stretch="Uniform"
+                                         StretchDirection="Both"
+                                         Visibility="Collapsed">
+                                    <Grid x:Name="BlobInspectionImageSurface"
+                                          Width="1"
+                                          Height="1"
+                                          Background="Black">
+                                        <Image x:Name="BlobInspectionImage"
+                                               Stretch="Fill"
+                                               SnapsToDevicePixels="True" />
+                                        <Canvas x:Name="BlobInspectionOverlayCanvas"
+                                                Width="1"
+                                                Height="1"
+                                                IsHitTestVisible="False" />
+                                    </Grid>
+                                </Viewbox>
+
+                                <StackPanel x:Name="BlobInspectionImagePlaceholder"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Text="◫"
+                                               Foreground="#42657E"
+                                               FontSize="32"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="等待海康相机拍照"
+                                               Foreground="#8FA6B7"
+                                               FontSize="13"
+                                               FontWeight="Bold"
+                                               Margin="0,5,0,0"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="Blob分析完成后在此显示矩形框与质心"
+                                               Foreground="#607D91"
+                                               FontSize="10"
+                                               Margin="0,4,0,0"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
 
                 <Grid Grid.Row="3" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>

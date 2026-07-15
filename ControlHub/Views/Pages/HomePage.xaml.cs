@@ -1,9 +1,13 @@
 using System.Globalization;
 using System.IO;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ControlHub.Services.Vision;
 using ControlHub.Views.Controls;
+using ShapeLine = System.Windows.Shapes.Line;
+using ShapeRectangle = System.Windows.Shapes.Rectangle;
 
 namespace ControlHub.Views.Pages;
 
@@ -383,6 +387,12 @@ public partial class HomePage : UserControl
     {
         BlobRectangle1CenterText.Text = "矩形1质心(px)：X = —　Y = —";
         BlobRectangle2CenterText.Text = "矩形2质心(px)：X = —　Y = —";
+        BlobInspectionImage.Source = null;
+        BlobInspectionOverlayCanvas.Children.Clear();
+        BlobInspectionImageViewbox.Visibility = Visibility.Collapsed;
+        BlobInspectionImagePlaceholder.Visibility = Visibility.Visible;
+        BlobInspectionImageStatusText.Text = "等待拍照";
+        BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(98, 181, 255));
     }
 
     private void SetBlobInspectionResult(VisionRectangleBlobResult result)
@@ -391,6 +401,148 @@ public partial class HomePage : UserControl
             $"矩形1质心(px)：X = {result.Rectangle1.X:0.###}　Y = {result.Rectangle1.Y:0.###}";
         BlobRectangle2CenterText.Text =
             $"矩形2质心(px)：X = {result.Rectangle2.X:0.###}　Y = {result.Rectangle2.Y:0.###}";
+        ShowBlobInspectionImage(result);
+    }
+
+    /// <summary>
+    /// 加载 VisionMaster 本次保存的相机图，并在同一像素坐标系中叠加两个 Blob 框和质心。
+    /// BitmapCacheOption.OnLoad 会把文件完整读入内存，因此加载后即可删除临时文件。
+    /// </summary>
+    private void ShowBlobInspectionImage(VisionRectangleBlobResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.ImagePath) || !File.Exists(result.ImagePath))
+        {
+            throw new FileNotFoundException("VisionMaster 本次Blob检测图不存在。", result.ImagePath);
+        }
+
+        BitmapImage bitmap;
+        try
+        {
+            using var stream = new FileStream(
+                result.ImagePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+            bitmap.StreamSource = stream;
+            bitmap.EndInit();
+            bitmap.Freeze();
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(result.ImagePath);
+            }
+            catch
+            {
+                // 图片已经完整载入内存；临时文件清理失败不影响本次结果显示。
+            }
+        }
+
+        var imageWidth = bitmap.PixelWidth > 0 ? bitmap.PixelWidth : result.ImageWidth;
+        var imageHeight = bitmap.PixelHeight > 0 ? bitmap.PixelHeight : result.ImageHeight;
+        if (imageWidth <= 0 || imageHeight <= 0)
+        {
+            throw new InvalidDataException("VisionMaster 本次Blob检测图尺寸无效。");
+        }
+
+        BlobInspectionImageSurface.Width = imageWidth;
+        BlobInspectionImageSurface.Height = imageHeight;
+        BlobInspectionOverlayCanvas.Width = imageWidth;
+        BlobInspectionOverlayCanvas.Height = imageHeight;
+        BlobInspectionImage.Source = bitmap;
+        BlobInspectionOverlayCanvas.Children.Clear();
+        DrawBlobOverlay(result.Rectangle1, 1, Color.FromRgb(0, 230, 118), imageWidth, imageHeight);
+        DrawBlobOverlay(result.Rectangle2, 2, Color.FromRgb(64, 196, 255), imageWidth, imageHeight);
+
+        BlobInspectionImagePlaceholder.Visibility = Visibility.Collapsed;
+        BlobInspectionImageViewbox.Visibility = Visibility.Visible;
+        BlobInspectionImageStatusText.Text = $"已检测 · {imageWidth}×{imageHeight}";
+        BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
+    }
+
+    private void DrawBlobOverlay(
+        VisionBlobRectangle blob,
+        int number,
+        Color color,
+        double imageWidth,
+        double imageHeight)
+    {
+        var left = Math.Clamp(blob.Left, 0d, Math.Max(0d, imageWidth - 1d));
+        var top = Math.Clamp(blob.Top, 0d, Math.Max(0d, imageHeight - 1d));
+        var width = Math.Clamp(blob.Width, 1d, Math.Max(1d, imageWidth - left));
+        var height = Math.Clamp(blob.Height, 1d, Math.Max(1d, imageHeight - top));
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        var strokeThickness = Math.Max(2d, Math.Min(imageWidth, imageHeight) / 500d);
+
+        var rectangle = new ShapeRectangle
+        {
+            Width = width,
+            Height = height,
+            Stroke = brush,
+            StrokeThickness = strokeThickness
+        };
+        Canvas.SetLeft(rectangle, left);
+        Canvas.SetTop(rectangle, top);
+        BlobInspectionOverlayCanvas.Children.Add(rectangle);
+
+        var crosshairRadius = Math.Max(8d, Math.Min(imageWidth, imageHeight) / 80d);
+        AddBlobCrosshairLine(
+            blob.X - crosshairRadius,
+            blob.Y,
+            blob.X + crosshairRadius,
+            blob.Y,
+            brush,
+            strokeThickness);
+        AddBlobCrosshairLine(
+            blob.X,
+            blob.Y - crosshairRadius,
+            blob.X,
+            blob.Y + crosshairRadius,
+            brush,
+            strokeThickness);
+
+        var label = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(190, 5, 20, 30)),
+            BorderBrush = brush,
+            BorderThickness = new Thickness(strokeThickness),
+            Padding = new Thickness(5d, 2d, 5d, 2d),
+            Child = new TextBlock
+            {
+                Text = $"矩形{number}  X={blob.X:0.0}  Y={blob.Y:0.0}",
+                Foreground = brush,
+                FontSize = Math.Max(12d, Math.Min(imageWidth, imageHeight) / 55d),
+                FontWeight = FontWeights.Bold
+            }
+        };
+        Canvas.SetLeft(label, left);
+        Canvas.SetTop(label, Math.Max(0d, top - Math.Min(imageWidth, imageHeight) / 28d));
+        BlobInspectionOverlayCanvas.Children.Add(label);
+    }
+
+    private void AddBlobCrosshairLine(
+        double x1,
+        double y1,
+        double x2,
+        double y2,
+        Brush brush,
+        double strokeThickness)
+    {
+        BlobInspectionOverlayCanvas.Children.Add(new ShapeLine
+        {
+            X1 = x1,
+            Y1 = y1,
+            X2 = x2,
+            Y2 = y2,
+            Stroke = brush,
+            StrokeThickness = strokeThickness
+        });
     }
 
     /// <summary>

@@ -316,23 +316,46 @@ public sealed class VisionMasterProcessHost : HwndHost
     {
         var response = await SendCalibrationCommandAsync("RUN_RECTANGLE_BLOB", cancellationToken);
         var parts = response.Split('\t');
-        if (parts.Length != 4 ||
+        if (parts.Length != 15 ||
             !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstX) ||
             !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstY) ||
-            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondX) ||
-            !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondY) ||
+            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstLeft) ||
+            !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstTop) ||
+            !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstWidth) ||
+            !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstHeight) ||
+            !double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondX) ||
+            !double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondY) ||
+            !double.TryParse(parts[8], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondLeft) ||
+            !double.TryParse(parts[9], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondTop) ||
+            !double.TryParse(parts[10], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondWidth) ||
+            !double.TryParse(parts[11], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondHeight) ||
+            !int.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out var imageWidth) ||
+            !int.TryParse(parts[13], NumberStyles.Integer, CultureInfo.InvariantCulture, out var imageHeight) ||
             !double.IsFinite(firstX) ||
             !double.IsFinite(firstY) ||
+            !double.IsFinite(firstLeft) ||
+            !double.IsFinite(firstTop) ||
+            !double.IsFinite(firstWidth) ||
+            !double.IsFinite(firstHeight) ||
             !double.IsFinite(secondX) ||
             !double.IsFinite(secondY) ||
-            firstX < 0 || firstY < 0 || secondX < 0 || secondY < 0)
+            !double.IsFinite(secondLeft) ||
+            !double.IsFinite(secondTop) ||
+            !double.IsFinite(secondWidth) ||
+            !double.IsFinite(secondHeight) ||
+            firstX < 0 || firstY < 0 || secondX < 0 || secondY < 0 ||
+            firstWidth <= 0 || firstHeight <= 0 || secondWidth <= 0 || secondHeight <= 0 ||
+            imageWidth <= 0 || imageHeight <= 0 || string.IsNullOrWhiteSpace(parts[14]))
         {
-            throw new InvalidDataException("VisionMaster 返回的两个矩形质心坐标无效。");
+            throw new InvalidDataException("VisionMaster 返回的Blob检测图或矩形结果无效。");
         }
 
         return new VisionRectangleBlobResult(
-            new VisionPixelPoint(firstX, firstY),
-            new VisionPixelPoint(secondX, secondY));
+            new VisionBlobRectangle(firstX, firstY, firstLeft, firstTop, firstWidth, firstHeight),
+            new VisionBlobRectangle(secondX, secondY, secondLeft, secondTop, secondWidth, secondHeight),
+            parts[14],
+            imageWidth,
+            imageHeight);
     }
 
     public async Task AbortNinePointCalibrationAsync()
@@ -989,8 +1012,17 @@ public sealed record VisionPixelTransformResult(
     double CenterTransformedX,
     double CenterTransformedY);
 
-public sealed record VisionPixelPoint(double X, double Y);
+public sealed record VisionBlobRectangle(
+    double X,
+    double Y,
+    double Left,
+    double Top,
+    double Width,
+    double Height);
 
 public sealed record VisionRectangleBlobResult(
-    VisionPixelPoint Rectangle1,
-    VisionPixelPoint Rectangle2);
+    VisionBlobRectangle Rectangle1,
+    VisionBlobRectangle Rectangle2,
+    string ImagePath,
+    int ImageWidth,
+    int ImageHeight);
