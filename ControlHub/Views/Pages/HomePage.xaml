@@ -829,7 +829,7 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
                                 <TextBlock x:Name="StartProductionHintText"
-                                           Text="XY回初始中心 → 找芯片/流程1 → 显示XY"
+                                           Text="回初始中心 → Blob识别 → 分配双吸嘴"
                                            Foreground="#D7F4E5"
                                            FontSize="11"
                                            Margin="0,3,0,0"
@@ -839,15 +839,26 @@
                     </Button>
 
                     <Button Grid.Row="6"
+                            x:Name="MoveAssignedNozzleButton"
                             Style="{StaticResource OperationButton}"
                             Background="#315873"
-                            BorderBrush="#527993">
+                            BorderBrush="#527993"
+                            IsEnabled="False"
+                            Click="MoveAssignedNozzle_Click">
                         <Grid Margin="20,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="50" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="28" Height="28" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="设备复位" Foreground="White" FontSize="19" FontWeight="Bold" />
-                                <TextBlock Text="清除状态并返回初始位" Foreground="#D5E1E9" FontSize="11" Margin="0,2,0,0" />
+                                <TextBlock x:Name="MoveAssignedNozzleTitleText"
+                                           Text="吸嘴顺序对位"
+                                           Foreground="White"
+                                           FontSize="19"
+                                           FontWeight="Bold" />
+                                <TextBlock x:Name="MoveAssignedNozzleHintText"
+                                           Text="等待Blob识别与目标分配"
+                                           Foreground="#D5E1E9"
+                                           FontSize="11"
+                                           Margin="0,2,0,0" />
                             </StackPanel>
                         </Grid>
                     </Button>

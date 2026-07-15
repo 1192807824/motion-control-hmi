@@ -22,6 +22,10 @@ public partial class HomePage : UserControl
     private VisualCalibrationPage? _visualCalibrationController;
     private bool _coordinateTransformRunning;
     private bool _startSequenceRunning;
+    private bool _assignedNozzleMoveRunning;
+    private VisionMotionTarget? _blob1Nozzle1Target;
+    private VisionMotionTarget? _blob2Nozzle2Target;
+    private int _nextAssignedNozzleMoveStep;
 
     public HomePage()
     {
@@ -105,7 +109,7 @@ public partial class HomePage : UserControl
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_startSequenceRunning || _coordinateTransformRunning)
+        if (_startSequenceRunning || _coordinateTransformRunning || _assignedNozzleMoveRunning)
         {
             return;
         }
@@ -130,6 +134,7 @@ public partial class HomePage : UserControl
             _startSequenceRunning = true;
             UpdateHomeCommandState();
             ClearBlobInspectionResult();
+            ClearAssignedNozzleTargets();
             SetStartProductionStatus("步骤1/2：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
 
             var center = ReadFirstSetCalibrationCenter(calibrationFile.FilePath);
@@ -181,9 +186,28 @@ public partial class HomePage : UserControl
                 _visionCalibration.Save();
             }
 
-            SetStartProductionStatus(
-                "完成：流程1已执行，Blob分析1的两组像素质心 X、Y 已显示",
-                Color.FromRgb(73, 209, 125));
+            try
+            {
+                // 两个目标必须在本次拍照位置立即换算并缓存。后续吸嘴1移动后，
+                // 不能再用已经变化的当前轴位置去计算吸嘴2，否则第二个绝对目标会产生偏差。
+                var assignedTargets = CalculateAssignedNozzleTargets(
+                    blobResult,
+                    calibrationFile.FilePath,
+                    actual.ActualX,
+                    actual.ActualY);
+                SetAssignedNozzleTargets(assignedTargets);
+                SetStartProductionStatus(
+                    "完成：Blob已显示并完成分配；请点击“吸嘴1 → 物体1”",
+                    Color.FromRgb(73, 209, 125));
+            }
+            catch (Exception exception)
+            {
+                ClearAssignedNozzleTargets();
+                SetCoordinateTransformStatus($"吸嘴分配失败：{exception.Message}", false);
+                SetStartProductionStatus(
+                    $"Blob已显示；吸嘴目标换算失败：{exception.Message}",
+                    Color.FromRgb(242, 181, 68));
+            }
         }
         catch (OperationCanceledException exception)
         {
@@ -446,6 +470,251 @@ public partial class HomePage : UserControl
             CalculateVisionTarget(cameraTargetX, cameraTargetY, VisionTargetTool.Nozzle2));
     }
 
+    /// <summary>
+    /// 把 Blob结果1 固定分配给吸嘴1、Blob结果2 固定分配给吸嘴2。
+    /// 计算基准使用拍照完成时的轴绝对位置，而不是后续可能已经移动过的当前位置。
+    /// </summary>
+    private DualNozzleMechanicalTargets CalculateAssignedNozzleTargets(
+        VisionRectangleBlobResult blobResult,
+        string calibrationFilePath,
+        double captureX,
+        double captureY)
+    {
+        _ = EnsureFirstSetToolsReady();
+        if (blobResult.ImageWidth <= 0 || blobResult.ImageHeight <= 0)
+        {
+            throw new InvalidOperationException("本次Blob结果没有有效图像尺寸，无法计算吸嘴目标。");
+        }
+
+        ValidateBlobPixel(blobResult.Rectangle1, blobResult.ImageWidth, blobResult.ImageHeight, "Blob结果1");
+        ValidateBlobPixel(blobResult.Rectangle2, blobResult.ImageWidth, blobResult.ImageHeight, "Blob结果2");
+
+        var calibrationMatrix = ReadCalibrationMatrix(calibrationFilePath);
+        var imageCenterX = (blobResult.ImageWidth - 1d) / 2d;
+        var imageCenterY = (blobResult.ImageHeight - 1d) / 2d;
+        var centerWorld = TransformCalibrationPoint(calibrationMatrix, imageCenterX, imageCenterY);
+
+        VisionMotionTarget CalculateTarget(VisionBlobRectangle blob, VisionTargetTool tool)
+        {
+            var blobWorld = TransformCalibrationPoint(calibrationMatrix, blob.X, blob.Y);
+            var cameraTargetX = captureX +
+                (centerWorld.X - blobWorld.X) * VisionCalibrationService.PulsesPerVisionUnit;
+            var cameraTargetY = captureY +
+                (centerWorld.Y - blobWorld.Y) * VisionCalibrationService.PulsesPerVisionUnit;
+            return CalculateVisionTarget(cameraTargetX, cameraTargetY, tool);
+        }
+
+        return new DualNozzleMechanicalTargets(
+            CalculateTarget(blobResult.Rectangle1, VisionTargetTool.Nozzle1),
+            CalculateTarget(blobResult.Rectangle2, VisionTargetTool.Nozzle2));
+    }
+
+    private static void ValidateBlobPixel(
+        VisionBlobRectangle blob,
+        int imageWidth,
+        int imageHeight,
+        string name)
+    {
+        if (!double.IsFinite(blob.X) ||
+            !double.IsFinite(blob.Y) ||
+            blob.X < 0 ||
+            blob.Y < 0 ||
+            blob.X >= imageWidth ||
+            blob.Y >= imageHeight)
+        {
+            throw new InvalidOperationException($"{name}的像素质心超出当前图像范围。");
+        }
+    }
+
+    private static double[] ReadCalibrationMatrix(string calibrationFilePath)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Load(calibrationFilePath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            throw new InvalidDataException("第一套 XY 标定文件无法读取。", exception);
+        }
+
+        var matrixElement = document
+            .Descendants()
+            .FirstOrDefault(element =>
+                string.Equals(element.Name.LocalName, "CalibFloatListParam", StringComparison.Ordinal) &&
+                string.Equals(
+                    element.Attributes().FirstOrDefault(attribute =>
+                        string.Equals(attribute.Name.LocalName, "ParamName", StringComparison.Ordinal))?.Value,
+                    "CalibMatrix",
+                    StringComparison.Ordinal));
+        if (matrixElement is null)
+        {
+            throw new InvalidDataException("第一套 XY 标定文件中未找到 CalibMatrix。");
+        }
+
+        var values = matrixElement
+            .Descendants()
+            .Where(element => string.Equals(element.Name.LocalName, "ParamValue", StringComparison.Ordinal))
+            .Select(element =>
+            {
+                if (!double.TryParse(
+                        element.Value,
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out var value) ||
+                    !double.IsFinite(value))
+                {
+                    throw new InvalidDataException("第一套 XY 标定矩阵包含无效数值。");
+                }
+
+                return value;
+            })
+            .ToArray();
+        if (values.Length != 9)
+        {
+            throw new InvalidDataException("第一套 XY 标定矩阵不是有效的3×3矩阵。");
+        }
+
+        return values;
+    }
+
+    private static (double X, double Y) TransformCalibrationPoint(
+        IReadOnlyList<double> matrix,
+        double pixelX,
+        double pixelY)
+    {
+        var denominator = matrix[6] * pixelX + matrix[7] * pixelY + matrix[8];
+        if (!double.IsFinite(denominator) || Math.Abs(denominator) < 1e-12)
+        {
+            throw new InvalidOperationException("第一套 XY 标定矩阵无法转换当前像素坐标。");
+        }
+
+        var worldX = (matrix[0] * pixelX + matrix[1] * pixelY + matrix[2]) / denominator;
+        var worldY = (matrix[3] * pixelX + matrix[4] * pixelY + matrix[5]) / denominator;
+        if (!double.IsFinite(worldX) || !double.IsFinite(worldY))
+        {
+            throw new InvalidOperationException("第一套 XY 标定矩阵返回了无效机械坐标。");
+        }
+
+        return (worldX, worldY);
+    }
+
+    private void SetAssignedNozzleTargets(DualNozzleMechanicalTargets targets)
+    {
+        _blob1Nozzle1Target = targets.Nozzle1;
+        _blob2Nozzle2Target = targets.Nozzle2;
+        _nextAssignedNozzleMoveStep = 1;
+        Nozzle1MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle1);
+        Nozzle2MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle2);
+        SetCoordinateTransformStatus(
+            "已分配：Blob结果1 → 吸嘴1，Blob结果2 → 吸嘴2；等待第一次点击。",
+            true);
+        UpdateAssignedNozzleButtonText();
+        UpdateHomeCommandState();
+    }
+
+    private void ClearAssignedNozzleTargets()
+    {
+        _blob1Nozzle1Target = null;
+        _blob2Nozzle2Target = null;
+        _nextAssignedNozzleMoveStep = 0;
+        Nozzle1MechanicalCoordinateText.Text = "X = —　Y = —";
+        Nozzle2MechanicalCoordinateText.Text = "X = —　Y = —";
+        UpdateAssignedNozzleButtonText();
+        UpdateHomeCommandState();
+    }
+
+    /// <summary>
+    /// 同一个按钮分两次执行：第一次让吸嘴1对位Blob结果1，第二次让吸嘴2对位Blob结果2。
+    /// 此处只移动第一套XY，不控制Z轴、真空或取料动作。
+    /// </summary>
+    private async void MoveAssignedNozzle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_assignedNozzleMoveRunning || _coordinateTransformRunning || _startSequenceRunning)
+        {
+            return;
+        }
+
+        var step = _nextAssignedNozzleMoveStep;
+        var target = step switch
+        {
+            1 => _blob1Nozzle1Target,
+            2 => _blob2Nozzle2Target,
+            _ => null
+        };
+        if (target is null)
+        {
+            SetCoordinateTransformStatus("请先点击“开始运行”完成Blob识别和吸嘴分配。", false);
+            return;
+        }
+
+        var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
+        var objectName = step == 1 ? "物体1" : "物体2";
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
+            }
+
+            _assignedNozzleMoveRunning = true;
+            UpdateHomeCommandState();
+            MoveAssignedNozzleTitleText.Text = $"{nozzleName}移动中";
+            MoveAssignedNozzleHintText.Text = $"正在对位{objectName}…";
+            SetCoordinateTransformStatus(
+                $"正在移动{nozzleName}到{objectName}：X={target.Value.X:0.###}，Y={target.Value.Y:0.###}",
+                true);
+
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
+            var timeoutMilliseconds = CalculateStartMoveTimeout(
+                current.ActualX,
+                current.ActualY,
+                target.Value.X,
+                target.Value.Y,
+                velocity);
+            var actual = await motionController.MoveCalibrationAxesToAsync(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo,
+                target.Value.X,
+                target.Value.Y,
+                velocity,
+                positionTolerance: 10d,
+                moveTimeoutMilliseconds: timeoutMilliseconds,
+                cancellationToken: CancellationToken.None);
+
+            if (step == 1)
+            {
+                _nextAssignedNozzleMoveStep = 2;
+                SetCoordinateTransformStatus(
+                    $"吸嘴1已到物体1({actual.ActualX:0.###}, {actual.ActualY:0.###})；请再点一次移动吸嘴2。",
+                    true);
+            }
+            else
+            {
+                _nextAssignedNozzleMoveStep = 3;
+                SetCoordinateTransformStatus(
+                    $"吸嘴2已到物体2({actual.ActualX:0.###}, {actual.ActualY:0.###})；两次顺序对位完成。",
+                    true);
+            }
+        }
+        catch (Exception exception)
+        {
+            SetCoordinateTransformStatus($"{nozzleName}对位失败：{exception.Message}", false);
+        }
+        finally
+        {
+            _assignedNozzleMoveRunning = false;
+            UpdateAssignedNozzleButtonText();
+            UpdateHomeCommandState();
+        }
+    }
+
     private void VisionCalibration_Changed(object? sender, EventArgs e)
     {
         if (!Dispatcher.CheckAccess())
@@ -507,6 +776,8 @@ public partial class HomePage : UserControl
             var pixelY = ParsePixelCoordinate(PixelYTextBox.Text, "像素 Y");
 
             _coordinateTransformRunning = true;
+            // 手工换算会覆盖右侧坐标显示，因此同时取消上一轮Blob的顺序移动目标。
+            ClearAssignedNozzleTargets();
             UpdateHomeCommandState();
             SetCoordinateTransformStatus($"正在换算像素({pixelX}, {pixelY})…", true);
 
@@ -562,7 +833,9 @@ public partial class HomePage : UserControl
 
     private void UpdateHomeCommandState()
     {
-        if (ConvertBothNozzlesButton is null || StartProductionButton is null)
+        if (ConvertBothNozzlesButton is null ||
+            StartProductionButton is null ||
+            MoveAssignedNozzleButton is null)
         {
             return;
         }
@@ -570,11 +843,47 @@ public partial class HomePage : UserControl
         var controllersReady =
             _motionController is not null &&
             _visualCalibrationController is not null;
-        var commandsIdle = !_coordinateTransformRunning && !_startSequenceRunning;
+        var commandsIdle =
+            !_coordinateTransformRunning &&
+            !_startSequenceRunning &&
+            !_assignedNozzleMoveRunning;
         ConvertBothNozzlesButton.IsEnabled = controllersReady && commandsIdle;
         StartProductionButton.IsEnabled = controllersReady && commandsIdle;
+        MoveAssignedNozzleButton.IsEnabled =
+            controllersReady &&
+            commandsIdle &&
+            ((_nextAssignedNozzleMoveStep == 1 && _blob1Nozzle1Target is not null) ||
+             (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
         PixelXTextBox.IsEnabled = commandsIdle;
         PixelYTextBox.IsEnabled = commandsIdle;
+    }
+
+    private void UpdateAssignedNozzleButtonText()
+    {
+        if (MoveAssignedNozzleTitleText is null || MoveAssignedNozzleHintText is null)
+        {
+            return;
+        }
+
+        switch (_nextAssignedNozzleMoveStep)
+        {
+            case 1:
+                MoveAssignedNozzleTitleText.Text = "吸嘴1 → 物体1";
+                MoveAssignedNozzleHintText.Text = "第一次点击：移动到Blob结果1";
+                break;
+            case 2:
+                MoveAssignedNozzleTitleText.Text = "吸嘴2 → 物体2";
+                MoveAssignedNozzleHintText.Text = "第二次点击：移动到Blob结果2";
+                break;
+            case 3:
+                MoveAssignedNozzleTitleText.Text = "顺序对位完成";
+                MoveAssignedNozzleHintText.Text = "重新开始识别后可再次执行";
+                break;
+            default:
+                MoveAssignedNozzleTitleText.Text = "吸嘴顺序对位";
+                MoveAssignedNozzleHintText.Text = "等待Blob识别与目标分配";
+                break;
+        }
     }
 
     private void SetStartProductionStatus(string message, Color color)
