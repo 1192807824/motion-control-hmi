@@ -204,6 +204,8 @@
                     <RowDefinition Height="176" />
                     <RowDefinition Height="8" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="8" />
+                    <RowDefinition Height="180" />
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Margin="2,0">
@@ -378,11 +380,146 @@
                     </Border>
                 </Grid>
 
-                <Border Grid.Row="3" Style="{StaticResource Panel}">
+                <Grid Grid.Row="3">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.3*" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="0.7*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource Panel}" Padding="16,14">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="46" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="68" />
+                            </Grid.RowDefinitions>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="当前生产任务" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock Text="工单 WO-20260715-0128" Style="{StaticResource MutedLabel}" Margin="0,3,0,0" />
+                                </StackPanel>
+                                <Border Grid.Column="1"
+                                        Background="#173852"
+                                        BorderBrush="#316C95"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        Padding="10,4"
+                                        VerticalAlignment="Top">
+                                    <TextBlock Text="执行中" Foreground="{StaticResource PrimaryBlueLight}" FontSize="11" FontWeight="Bold" />
+                                </Border>
+                            </Grid>
+
+                            <Grid Grid.Row="1" Margin="0,10,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.25*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="产品名称" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock Text="产品 A · 芯片测试" Foreground="{StaticResource TextPrimary}" FontSize="22" FontWeight="Bold" Margin="0,6,0,0" />
+                                    <TextBlock Text="当前产品：SN-0000728" Foreground="#B7C5CF" FontFamily="Consolas" FontSize="12" Margin="0,12,0,0" />
+                                </StackPanel>
+                                <Grid Grid.Column="1">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="92" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="当前配方" Style="{StaticResource MutedLabel}" />
+                                        <TextBlock Grid.Column="1" Text="产品A_20240520" Foreground="#DCE5EB" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid Grid.Row="1">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="92" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="计划数量" Style="{StaticResource MutedLabel}" />
+                                        <TextBlock Grid.Column="1" Text="1,500 件" Foreground="#DCE5EB" FontFamily="Consolas" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid Grid.Row="2">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="92" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="任务状态" Style="{StaticResource MutedLabel}" />
+                                        <TextBlock Grid.Column="1" Text="正常生产" Foreground="{StaticResource SuccessGreen}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+
+                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="12,8">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="10" />
+                                        <RowDefinition Height="12" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="任务进度" Style="{StaticResource MutedLabel}" />
+                                        <TextBlock Grid.Column="1" Text="1,280 / 1,500" Foreground="#DDE8EF" FontFamily="Consolas" FontSize="13" FontWeight="Bold" />
+                                    </Grid>
+                                    <Grid Grid.Row="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="85*" />
+                                            <ColumnDefinition Width="15*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.ColumnSpan="2" Background="#29465B" CornerRadius="6" />
+                                        <Border Grid.Column="0" Background="{StaticResource PrimaryBlue}" CornerRadius="6" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="16,14">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="46" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="整机产量" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="当前班次" Style="{StaticResource MutedLabel}" Margin="0,3,0,0" />
+                            </StackPanel>
+                            <Grid Grid.Row="1" Margin="0,10,0,0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="已完成" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock Text="1,280" Foreground="{StaticResource TextPrimary}" FontFamily="Consolas" FontSize="27" FontWeight="Bold" Margin="0,5,0,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="合格" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock Text="1,264" Foreground="{StaticResource SuccessGreen}" FontFamily="Consolas" FontSize="27" FontWeight="Bold" Margin="0,5,0,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" VerticalAlignment="Center">
+                                    <TextBlock Text="不良" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock Text="16" Foreground="#FF747B" FontFamily="Consolas" FontSize="27" FontWeight="Bold" Margin="0,5,0,0" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="综合良率" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock Text="98.75%" Foreground="{StaticResource PrimaryBlueLight}" FontFamily="Consolas" FontSize="27" FontWeight="Bold" Margin="0,5,0,0" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Border Grid.Row="5" Style="{StaticResource Panel}">
                     <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="50" />
-                            <RowDefinition Height="36" />
+                            <RowDefinition Height="42" />
+                            <RowDefinition Height="32" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
@@ -394,7 +531,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="报警列表" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="最近报警" Style="{StaticResource SectionTitle}" />
                                 <TextBlock Text="最近 24 小时" Style="{StaticResource MutedLabel}" Margin="10,1,0,0" />
                             </StackPanel>
                             <Border Grid.Column="1" Background="#153B35" BorderBrush="#28725C" BorderThickness="1" CornerRadius="3" Padding="10,4" VerticalAlignment="Center">
@@ -440,9 +577,6 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
                             <Border Grid.Row="0" Style="{StaticResource AlarmRow}">
@@ -478,7 +612,7 @@
                                     <TextBlock Grid.Column="5" Text="已确认" Foreground="#B8C6D0" FontSize="12" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
-                            <Border Grid.Row="3" Style="{StaticResource AlarmRow}" Background="#193247">
+                            <Border Grid.Row="3" Style="{StaticResource AlarmRow}" Background="#193247" Visibility="Collapsed">
                                 <Grid Margin="12,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="102" /><ColumnDefinition Width="82" /><ColumnDefinition Width="98" /><ColumnDefinition Width="92" /><ColumnDefinition Width="*" /><ColumnDefinition Width="90" /></Grid.ColumnDefinitions>
                                     <TextBlock Text="08:56:04" Style="{StaticResource TableText}" FontFamily="Consolas" />
@@ -489,7 +623,7 @@
                                     <TextBlock Grid.Column="5" Text="已记录" Foreground="#93A8B8" FontSize="12" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
-                            <Border Grid.Row="4" Style="{StaticResource AlarmRow}">
+                            <Border Grid.Row="4" Style="{StaticResource AlarmRow}" Visibility="Collapsed">
                                 <Grid Margin="12,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="102" /><ColumnDefinition Width="82" /><ColumnDefinition Width="98" /><ColumnDefinition Width="92" /><ColumnDefinition Width="*" /><ColumnDefinition Width="90" /></Grid.ColumnDefinitions>
                                     <TextBlock Text="08:34:17" Style="{StaticResource TableText}" FontFamily="Consolas" />
@@ -500,7 +634,7 @@
                                     <TextBlock Grid.Column="5" Text="已恢复" Foreground="#8FB5A2" FontSize="12" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
-                            <Border Grid.Row="5" Style="{StaticResource AlarmRow}" Background="#193247" BorderThickness="0">
+                            <Border Grid.Row="5" Style="{StaticResource AlarmRow}" Background="#193247" BorderThickness="0" Visibility="Collapsed">
                                 <Grid Margin="12,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="102" /><ColumnDefinition Width="82" /><ColumnDefinition Width="98" /><ColumnDefinition Width="92" /><ColumnDefinition Width="*" /><ColumnDefinition Width="90" /></Grid.ColumnDefinitions>
                                     <TextBlock Text="08:01:05" Style="{StaticResource TableText}" FontFamily="Consolas" />
