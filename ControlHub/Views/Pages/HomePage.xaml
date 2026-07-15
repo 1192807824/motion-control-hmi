@@ -380,7 +380,10 @@
                     </Border>
                 </Grid>
 
-                <Grid Grid.Row="3">
+                <!-- Reserved for a future production overview. Intentionally empty for now. -->
+                <Border Grid.Row="3" Style="{StaticResource Panel}" />
+
+                <Grid Grid.Row="3" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.3*" />
                         <ColumnDefinition Width="8" />
@@ -759,12 +762,134 @@
                         </Grid>
                     </Button>
 
-                    <TextBlock Grid.Row="7"
-                               Text="紧急情况请使用下方急停"
-                               Foreground="#9FB1BF"
-                               FontSize="11"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center" />
+                    <Border Grid.Row="7"
+                            Margin="0,8,0,8"
+                            Padding="9,7"
+                            Background="#12283A"
+                            BorderBrush="#2D4A61"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="24" />
+                                <RowDefinition Height="20" />
+                                <RowDefinition Height="48" />
+                                <RowDefinition Height="32" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="76" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="第一套 XY 吸嘴测试"
+                                           Foreground="#EAF2F7"
+                                           FontSize="12"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <Button Grid.Column="1"
+                                        x:Name="LoadFirstSetCalibrationButton"
+                                        Content="加载标定"
+                                        Height="23"
+                                        Foreground="White"
+                                        Background="#294A64"
+                                        BorderBrush="#527993"
+                                        Cursor="Hand"
+                                        Click="LoadFirstSetCalibration_Click" />
+                            </Grid>
+
+                            <TextBlock Grid.Row="1"
+                                       x:Name="FirstSetCalibrationDetailsText"
+                                       Text="标定信息尚未加载"
+                                       Foreground="#8FB2C9"
+                                       FontSize="10"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+
+                            <Grid Grid.Row="2" Margin="0,3,0,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="像素 X（px）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="TestCameraTargetXTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="像素 Y（px）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="TestCameraTargetYTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="速度（pulse/s）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="TestMoveVelocityTextBox"
+                                             Height="25"
+                                             Text="100000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Grid.Row="3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="68" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="TestNozzle1MoveButton"
+                                        Content="测试吸嘴1"
+                                        Foreground="White"
+                                        Background="#1674D1"
+                                        BorderBrush="#62B5FF"
+                                        Cursor="Hand"
+                                        Click="TestNozzle1Move_Click" />
+                                <Button Grid.Column="2"
+                                        x:Name="TestNozzle2MoveButton"
+                                        Content="测试吸嘴2"
+                                        Foreground="White"
+                                        Background="#1674D1"
+                                        BorderBrush="#62B5FF"
+                                        Cursor="Hand"
+                                        Click="TestNozzle2Move_Click" />
+                                <Button Grid.Column="4"
+                                        x:Name="StopNozzleTestButton"
+                                        Content="停止"
+                                        Foreground="White"
+                                        Background="#A83238"
+                                        BorderBrush="#E45A61"
+                                        IsEnabled="False"
+                                        Cursor="Hand"
+                                        Click="StopNozzleTest_Click" />
+                            </Grid>
+
+                            <TextBlock Grid.Row="4"
+                                       x:Name="NozzleTestStatusText"
+                                       Text="输入相机拍摄图像的像素坐标后选择吸嘴测试"
+                                       Foreground="#9FB1BF"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
 
                     <Button Grid.Row="8"
                             Style="{StaticResource OperationButton}"

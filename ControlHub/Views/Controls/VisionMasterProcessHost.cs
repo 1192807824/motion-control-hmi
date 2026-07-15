@@ -258,6 +258,56 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public async Task<VisionPixelTransformResult> TransformPixelAsync(
+        double pixelX,
+        double pixelY,
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        if (!double.IsFinite(pixelX) || !double.IsFinite(pixelY) || pixelX < 0 || pixelY < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pixelX), "像素坐标不能小于0。");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath));
+        var response = await SendCalibrationCommandAsync(
+            string.Join(
+                "\t",
+                "TRANSFORM_PIXEL",
+                pixelX.ToString("R", CultureInfo.InvariantCulture),
+                pixelY.ToString("R", CultureInfo.InvariantCulture),
+                encodedPath),
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 6 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var transformedX) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var transformedY) ||
+            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerPixelX) ||
+            !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerPixelY) ||
+            !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerTransformedX) ||
+            !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerTransformedY) ||
+            !double.IsFinite(transformedX) ||
+            !double.IsFinite(transformedY) ||
+            !double.IsFinite(centerPixelX) ||
+            !double.IsFinite(centerPixelY) ||
+            !double.IsFinite(centerTransformedX) ||
+            !double.IsFinite(centerTransformedY))
+        {
+            throw new InvalidDataException("VisionMaster 返回的像素标定转换结果无效。");
+        }
+
+        return new VisionPixelTransformResult(
+            pixelX,
+            pixelY,
+            transformedX,
+            transformedY,
+            centerPixelX,
+            centerPixelY,
+            centerTransformedX,
+            centerTransformedY);
+    }
+
     public async Task AbortNinePointCalibrationAsync()
     {
         try
@@ -901,3 +951,13 @@ public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
 {
     public string Message { get; } = message;
 }
+
+public sealed record VisionPixelTransformResult(
+    double PixelX,
+    double PixelY,
+    double TransformedX,
+    double TransformedY,
+    double CenterPixelX,
+    double CenterPixelY,
+    double CenterTransformedX,
+    double CenterTransformedY);

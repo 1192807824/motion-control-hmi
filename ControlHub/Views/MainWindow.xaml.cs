@@ -21,6 +21,7 @@ public partial class MainWindow : Window
 
         VisualCalibrationContent.AttachMotionController(MotionPage);
         HomeContent.AttachMotionController(MotionPage);
+        HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
 
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;

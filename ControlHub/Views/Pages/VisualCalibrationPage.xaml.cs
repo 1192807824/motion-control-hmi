@@ -78,6 +78,26 @@ public partial class VisualCalibrationPage : UserControl
         await VisionHost.StartAsync();
     }
 
+    public async Task<VisionPixelTransformResult> TransformPixelAsync(
+        double pixelX,
+        double pixelY,
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        await EnsureStartedAsync();
+        if (!_hostReady)
+        {
+            throw new InvalidOperationException(
+                "视觉组件尚未就绪，请先进入视觉标定页确认实时相机和标定流程已启动。");
+        }
+
+        return await VisionHost.TransformPixelAsync(
+            pixelX,
+            pixelY,
+            calibrationFilePath,
+            cancellationToken);
+    }
+
     public void Shutdown()
     {
         if (_shutdown)

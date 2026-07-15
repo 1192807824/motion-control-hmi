@@ -216,8 +216,104 @@ public partial class MainWindow : Window
             "COMPLETE" => CompleteNinePointCalibration(),
             "ABORT" => AbortNinePointCalibration(),
             "SET_CLICK_MODE" => SetClickMoveMode(parts),
+            "TRANSFORM_PIXEL" => TransformPixel(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
+    }
+
+    private string TransformPixel(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 4)
+        {
+            throw new InvalidDataException("像素坐标转换参数不正确。");
+        }
+
+        var pixelX = ParseFiniteDouble(parts[1], "像素X");
+        var pixelY = ParseFiniteDouble(parts[2], "像素Y");
+        if (pixelX < 0 || pixelY < 0)
+        {
+            throw new InvalidDataException("像素坐标不能小于0。");
+        }
+
+        string calibrationPath;
+        try
+        {
+            calibrationPath = Encoding.UTF8.GetString(Convert.FromBase64String(parts[3]));
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException("标定文件路径格式不正确。", exception);
+        }
+
+        if (_busy || _calibrationSession is not null)
+        {
+            throw new InvalidOperationException("视觉标定正在执行，暂不允许像素坐标转换。");
+        }
+
+        if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        {
+            throw new InvalidOperationException("请先加载视觉方案并选择标定流程。");
+        }
+
+        var fullPath = Path.GetFullPath(calibrationPath);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("标定文件不存在。", fullPath);
+        }
+
+        var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
+        if (previewWasRunning)
+        {
+            _previewProcedure!.ContinuousRunEnable = false;
+        }
+
+        try
+        {
+            var (centerPixelX, centerPixelY) = GetClickCenterPixel();
+            if (pixelX >= _clickImagePixelWidth || pixelY >= _clickImagePixelHeight)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(pixelX),
+                    $"像素坐标超出当前图像范围：宽{_clickImagePixelWidth}，高{_clickImagePixelHeight}。");
+            }
+
+            var transformModule = ResolveCalibrationTransformModule(procedureName);
+            transformModule.ModuParams.LoadCalibPath = fullPath;
+            transformModule.ModuParams.InputPoint =
+            [
+                new VM.PlatformSDKCS.PointF { X = (float)pixelX, Y = (float)pixelY },
+                new VM.PlatformSDKCS.PointF { X = centerPixelX, Y = centerPixelY }
+            ];
+            transformModule.Run();
+            var result = transformModule.ModuResult;
+            if (result.ModuStatus != 1 || result.TransPoint is null || result.TransPoint.Count < 2)
+            {
+                throw new InvalidOperationException("标定转换模块未返回像素点和图像中心的机械坐标。");
+            }
+
+            var transformedPoint = result.TransPoint[0];
+            var transformedCenter = result.TransPoint[1];
+            SetStatus(
+                $"像素({pixelX}, {pixelY})已按{Path.GetFileName(fullPath)}完成标定转换。",
+                StatusKind.Success);
+            return string.Join(
+                "\t",
+                transformedPoint.X.ToString("R", CultureInfo.InvariantCulture),
+                transformedPoint.Y.ToString("R", CultureInfo.InvariantCulture),
+                centerPixelX.ToString("R", CultureInfo.InvariantCulture),
+                centerPixelY.ToString("R", CultureInfo.InvariantCulture),
+                transformedCenter.X.ToString("R", CultureInfo.InvariantCulture),
+                transformedCenter.Y.ToString("R", CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            if (previewWasRunning && _previewProcedure is not null)
+            {
+                _previewProcedure.ContinuousRunEnable = true;
+            }
+
+            UpdateCommandState();
+        }
     }
 
     private string SetClickMoveMode(IReadOnlyList<string> parts)
