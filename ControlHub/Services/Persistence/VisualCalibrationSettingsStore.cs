@@ -66,6 +66,8 @@ public sealed class VisualCalibrationSettings
 
     public string CalibrationFilePath { get; set; } = "";
 
+    public string CalibrationProfilePath { get; set; } = "";
+
     public bool NozzleOffsetCalibrated { get; set; }
 
     public double NozzleOffsetXPulses { get; set; }

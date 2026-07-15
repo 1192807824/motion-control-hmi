@@ -16,11 +16,11 @@
         <Style x:Key="PanelLabel" TargetType="TextBlock">
             <Setter Property="Foreground" Value="#AFC0CD" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="Margin" Value="0,0,0,2" />
             <Setter Property="TextAlignment" Value="Center" />
         </Style>
         <Style x:Key="PanelInput" TargetType="TextBox">
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Height" Value="27" />
             <Setter Property="Padding" Value="6,0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="TextAlignment" Value="Center" />
@@ -29,7 +29,7 @@
             <Setter Property="BorderBrush" Value="#668198" />
         </Style>
         <Style x:Key="PanelComboBox" TargetType="ComboBox">
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Height" Value="27" />
             <Setter Property="Padding" Value="6,0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -38,7 +38,7 @@
             <Setter Property="BorderBrush" Value="#668198" />
         </Style>
         <Style x:Key="PanelButton" TargetType="Button">
-            <Setter Property="Height" Value="32" />
+            <Setter Property="Height" Value="29" />
             <Setter Property="Padding" Value="10,0" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Background" Value="#0D6EE8" />
@@ -49,8 +49,8 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style x:Key="SectionCard" TargetType="Border">
-            <Setter Property="Padding" Value="10" />
-            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="Margin" Value="0,0,0,6" />
             <Setter Property="Background" Value="#10283C" />
             <Setter Property="CornerRadius" Value="4" />
         </Style>
@@ -118,10 +118,8 @@
                     BorderBrush="#345269"
                     BorderThickness="1"
                     CornerRadius="5">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
-                        <Grid Margin="0,0,0,8">
+                        <Grid Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -140,7 +138,7 @@
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="1　记录中心" Style="{StaticResource SectionTitle}" />
-                                <Grid Margin="0,7,0,0">
+                                <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="8" />
@@ -148,7 +146,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="轴1 X（pulse）" Style="{StaticResource PanelLabel}" />
-                                        <Border Height="29" Background="#243E52" CornerRadius="2">
+                                        <Border Height="27" Background="#243E52" CornerRadius="2">
                                             <TextBlock x:Name="CenterXPulseText"
                                                        Text="未记录"
                                                        Foreground="#F4F8FB"
@@ -158,7 +156,7 @@
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">
                                         <TextBlock Text="轴2 Y（pulse）" Style="{StaticResource PanelLabel}" />
-                                        <Border Height="29" Background="#243E52" CornerRadius="2">
+                                        <Border Height="27" Background="#243E52" CornerRadius="2">
                                             <TextBlock x:Name="CenterYPulseText"
                                                        Text="未记录"
                                                        Foreground="#F4F8FB"
@@ -168,7 +166,7 @@
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock x:Name="CenterVmText"
-                                           Margin="0,6"
+                                           Margin="0,4"
                                            Text="基准点 X：--　Y：--"
                                            Foreground="#49D17D"
                                            FontSize="12"
@@ -184,7 +182,7 @@
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="2　九点参数" Style="{StaticResource SectionTitle}" />
-                                <Grid Margin="0,7,0,0">
+                                <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="8" />
@@ -206,7 +204,7 @@
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock x:Name="OffsetVmText"
-                                           Margin="0,5,0,7"
+                                           Margin="0,3,0,4"
                                            Text="VisionMaster：X 10　Y 10"
                                            Foreground="#49D17D"
                                            FontSize="11"
@@ -235,7 +233,7 @@
                                                  TextChanged="CalibrationSetting_Changed" />
                                     </StackPanel>
                                 </Grid>
-                                <Grid Margin="0,7,0,0">
+                                <Grid Margin="0,4,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="8" />
@@ -256,7 +254,7 @@
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
                                 <TextBlock Text="3　标定文件" Style="{StaticResource SectionTitle}" />
-                                <Grid Margin="0,7,0,0">
+                                <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="6" />
@@ -275,16 +273,47 @@
                                             BorderBrush="#45647A"
                                             Click="ChooseCalibrationFile_Click" />
                                 </Grid>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="74" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="CalibrationProfilePathText"
+                                               Text="配置：完成双吸嘴后自动生成"
+                                               Foreground="#8FB2C9"
+                                               FontSize="10"
+                                               TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" />
+                                    <Button Grid.Column="2"
+                                            x:Name="LoadCalibrationProfileButton"
+                                            Content="加载配置"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="10"
+                                            Click="LoadCalibrationProfile_Click" />
+                                </Grid>
+                                <Button x:Name="SaveCalibrationProfileButton"
+                                        Margin="0,4,0,0"
+                                        Content="保存第一套XY标定配置"
+                                        Style="{StaticResource PanelButton}"
+                                        Background="#17834A"
+                                        BorderBrush="#12683A"
+                                        IsEnabled="False"
+                                        Visibility="Collapsed"
+                                        ToolTip="需完成双吸嘴对位，并分别通过吸嘴1、吸嘴2点击移动验证"
+                                        Click="SaveCalibrationProfile_Click" />
                                 <ProgressBar x:Name="CalibrationProgressBar"
-                                             Margin="0,8,0,0"
-                                             Height="6"
+                                             Margin="0,5,0,0"
+                                             Height="5"
                                              Minimum="0"
                                              Maximum="9"
                                              Value="0" />
                                 <TextBlock x:Name="WorkflowStatusText"
-                                           Margin="0,6,0,8"
-                                           MinHeight="30"
-                                           MaxHeight="48"
+                                           Margin="0,4,0,4"
+                                           MinHeight="20"
+                                           MaxHeight="30"
                                            Text="请先记录中心坐标"
                                            Foreground="#D8E4EC"
                                            FontSize="11"
@@ -320,32 +349,26 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="112" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="4　吸嘴对位"
                                                Style="{StaticResource SectionTitle}"
                                                VerticalAlignment="Center" />
-                                    <ComboBox Grid.Column="1"
-                                              x:Name="NozzleTeachComboBox"
-                                              Style="{StaticResource PanelComboBox}"
-                                              SelectedIndex="0">
-                                        <ComboBoxItem Content="标定吸嘴1" Tag="Nozzle1" />
-                                        <ComboBoxItem Content="标定吸嘴2" Tag="Nozzle2" />
-                                    </ComboBox>
+                                    <TextBlock Grid.Column="1"
+                                               x:Name="NozzleTeachStepText"
+                                               Text="等待记录十字"
+                                               Foreground="#49D17D"
+                                               FontSize="10"
+                                               VerticalAlignment="Center" />
                                 </Grid>
-                                <TextBlock Margin="0,5,0,7"
-                                           Text="同一标记：先十字对准，再手动让吸嘴对准"
-                                           Foreground="#8FB2C9"
-                                           FontSize="10"
-                                           TextAlignment="Center" />
-                                <Grid>
+                                <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="7" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <Button x:Name="RecordCameraToolPointButton"
-                                            Content="1 记录十字位置"
+                                            Content="1 记录十字"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
@@ -353,7 +376,7 @@
                                             Click="RecordCameraToolPoint_Click" />
                                     <Button Grid.Column="2"
                                             x:Name="RecordNozzleToolPointButton"
-                                            Content="2 记录吸嘴位置"
+                                            Content="2 记录吸嘴1"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
@@ -362,8 +385,9 @@
                                             Click="RecordNozzleToolPoint_Click" />
                                 </Grid>
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
-                                           Margin="0,6,0,0"
-                                           Text="吸嘴偏移：未标定"
+                                           Margin="0,4,0,0"
+                                           MaxHeight="30"
+                                           Text="记录一次十字，再依次记录吸嘴1、吸嘴2"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
                                            TextAlignment="Center"
@@ -373,7 +397,7 @@
 
                         <Border Style="{StaticResource SectionCard}" Margin="0">
                             <StackPanel>
-                                <Grid Margin="0,0,0,7">
+                                <Grid Margin="0,0,0,4">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="8" />
@@ -413,8 +437,8 @@
                                             Click="StopClickMove_Click" />
                                 </Grid>
                                 <TextBlock x:Name="ClickMoveStatusText"
-                                           Margin="0,6,0,0"
-                                           MaxHeight="34"
+                                           Margin="0,4,0,0"
+                                           MaxHeight="24"
                                            Text="未启用"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
@@ -423,7 +447,6 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
-                </ScrollViewer>
             </Border>
 
             <Border Grid.Column="2"

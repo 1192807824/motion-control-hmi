@@ -779,24 +779,16 @@
                             </Grid.RowDefinitions>
 
                             <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="76" />
-                                </Grid.ColumnDefinitions>
                                 <TextBlock Text="第一套 XY 吸嘴测试"
                                            Foreground="#EAF2F7"
                                            FontSize="12"
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
-                                <Button Grid.Column="1"
-                                        x:Name="LoadFirstSetCalibrationButton"
-                                        Content="加载标定"
-                                        Height="23"
-                                        Foreground="White"
-                                        Background="#294A64"
-                                        BorderBrush="#527993"
-                                        Cursor="Hand"
-                                        Click="LoadFirstSetCalibration_Click" />
+                                <TextBlock Text="标定页自动同步"
+                                           Foreground="#49D17D"
+                                           FontSize="10"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" />
                             </Grid>
 
                             <TextBlock Grid.Row="1"

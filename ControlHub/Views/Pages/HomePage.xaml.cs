@@ -12,7 +12,6 @@ public partial class HomePage : UserControl
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
-    private VisionCalibrationSnapshot? _firstSetCalibration;
     private CancellationTokenSource? _nozzleTestCancellation;
     private bool _nozzleTestRunning;
 
@@ -42,8 +41,6 @@ public partial class HomePage : UserControl
     /// </summary>
     public VisionCalibrationSnapshot VisionCalibration => _visionCalibration.GetSnapshot();
 
-    public VisionCalibrationSnapshot? LoadedFirstSetCalibration => _firstSetCalibration;
-
     /// <summary>
     /// 将视觉计算出的相机轴坐标转换为相机/吸嘴1/吸嘴2的实际轴目标。
     /// </summary>
@@ -58,7 +55,7 @@ public partial class HomePage : UserControl
     /// <summary>
     /// 从视觉标定页的共享配置中加载第一套 XY 标定文件和两个吸嘴偏移。
     /// </summary>
-    public VisionCalibrationSnapshot LoadFirstSetCalibration()
+    private VisionCalibrationSnapshot GetFirstSetCalibrationSnapshot()
     {
         var snapshot = _visionCalibration.GetSnapshot();
         if (string.IsNullOrWhiteSpace(snapshot.CalibrationFilePath))
@@ -73,7 +70,13 @@ public partial class HomePage : UserControl
                 snapshot.CalibrationFilePath);
         }
 
-        _firstSetCalibration = snapshot;
+        if (!snapshot.CalibrationProfileExists)
+        {
+            throw new FileNotFoundException(
+                "第一套 XY 配置尚未保存，请先在视觉标定页完成双吸嘴验证并保存配置。",
+                snapshot.CalibrationProfilePath);
+        }
+
         return snapshot;
     }
 
@@ -168,6 +171,11 @@ public partial class HomePage : UserControl
             statusText = "标定文件缺失";
             statusColor = Color.FromRgb(242, 122, 128);
         }
+        else if (!snapshot.CalibrationProfileExists)
+        {
+            statusText = "第一套XY配置未保存";
+            statusColor = Color.FromRgb(242, 181, 68);
+        }
         else if (snapshot.Nozzle1Calibrated && snapshot.Nozzle2Calibrated)
         {
             statusText = "双吸嘴标定就绪";
@@ -186,25 +194,6 @@ public partial class HomePage : UserControl
 
         VisionCalibrationStatusText.Text = statusText;
         VisionCalibrationStatusIndicator.Fill = new SolidColorBrush(statusColor);
-    }
-
-    private void LoadFirstSetCalibration_Click(object sender, System.Windows.RoutedEventArgs e)
-    {
-        try
-        {
-            var snapshot = LoadFirstSetCalibration();
-            RefreshFirstSetCalibrationDetails();
-            SetNozzleTestStatus(
-                $"加载完成：嘴1({snapshot.Nozzle1OffsetX:0.###}, {snapshot.Nozzle1OffsetY:0.###})，" +
-                $"嘴2({snapshot.Nozzle2OffsetX:0.###}, {snapshot.Nozzle2OffsetY:0.###}) pulse。",
-                true);
-        }
-        catch (Exception exception)
-        {
-            _firstSetCalibration = null;
-            RefreshFirstSetCalibrationDetails();
-            SetNozzleTestStatus(exception.Message, false);
-        }
     }
 
     private async void TestNozzle1Move_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -316,7 +305,7 @@ public partial class HomePage : UserControl
 
     private VisionCalibrationSnapshot EnsureFirstSetToolReady(VisionTargetTool tool)
     {
-        var snapshot = LoadFirstSetCalibration();
+        var snapshot = GetFirstSetCalibrationSnapshot();
         var calibrated = tool switch
         {
             VisionTargetTool.Nozzle1 => snapshot.Nozzle1Calibrated,
@@ -340,15 +329,15 @@ public partial class HomePage : UserControl
         }
 
         var snapshot = _visionCalibration.GetSnapshot();
-        _firstSetCalibration = snapshot.CalibrationFileExists ? snapshot : null;
-        var fileName = string.IsNullOrWhiteSpace(snapshot.CalibrationFilePath)
-            ? "未设置文件"
-            : Path.GetFileName(snapshot.CalibrationFilePath);
+        var profileName = snapshot.CalibrationProfileExists
+            ? Path.GetFileName(snapshot.CalibrationProfilePath)
+            : "配置未保存";
         var nozzle1 = snapshot.Nozzle1Calibrated ? "嘴1√" : "嘴1×";
         var nozzle2 = snapshot.Nozzle2Calibrated ? "嘴2√" : "嘴2×";
-        FirstSetCalibrationDetailsText.Text = $"轴1=X / 轴2=Y　{fileName}　{nozzle1}　{nozzle2}";
+        FirstSetCalibrationDetailsText.Text = $"轴1=X / 轴2=Y　{profileName}　{nozzle1}　{nozzle2}";
         FirstSetCalibrationDetailsText.ToolTip =
             $"标定文件：{snapshot.CalibrationFilePath}\n" +
+            $"XY配置：{snapshot.CalibrationProfilePath}\n" +
             $"吸嘴1偏移：X={snapshot.Nozzle1OffsetX:0.###}，Y={snapshot.Nozzle1OffsetY:0.###} pulse\n" +
             $"吸嘴2偏移：X={snapshot.Nozzle2OffsetX:0.###}，Y={snapshot.Nozzle2OffsetY:0.###} pulse";
     }
@@ -364,7 +353,6 @@ public partial class HomePage : UserControl
             !_nozzleTestRunning &&
             _motionController is not null &&
             _visualCalibrationController is not null;
-        LoadFirstSetCalibrationButton.IsEnabled = !_nozzleTestRunning;
         TestNozzle1MoveButton.IsEnabled = canStart;
         TestNozzle2MoveButton.IsEnabled = canStart;
         StopNozzleTestButton.IsEnabled = _nozzleTestRunning;

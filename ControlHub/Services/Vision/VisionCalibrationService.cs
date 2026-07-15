@@ -18,6 +18,8 @@ public readonly record struct VisionMotionTarget(
 public sealed record VisionCalibrationSnapshot(
     string CalibrationFilePath,
     bool CalibrationFileExists,
+    string CalibrationProfilePath,
+    bool CalibrationProfileExists,
     bool Nozzle1Calibrated,
     double Nozzle1OffsetX,
     double Nozzle1OffsetY,
@@ -54,9 +56,12 @@ public sealed class VisionCalibrationService
     public VisionCalibrationSnapshot GetSnapshot()
     {
         var path = Settings.CalibrationFilePath?.Trim() ?? "";
+        var profilePath = Settings.CalibrationProfilePath?.Trim() ?? "";
         return new VisionCalibrationSnapshot(
             path,
             !string.IsNullOrWhiteSpace(path) && File.Exists(path),
+            profilePath,
+            !string.IsNullOrWhiteSpace(profilePath) && File.Exists(profilePath),
             Settings.NozzleOffsetCalibrated,
             Settings.NozzleOffsetXPulses,
             Settings.NozzleOffsetYPulses,
