@@ -364,6 +364,11 @@ public sealed class RealtimeVisionProcessHost : HwndHost
             process.Exited -= ChildProcess_Exited;
             if (!process.HasExited)
             {
+                if (childWindow == IntPtr.Zero)
+                {
+                    childWindow = FindVisibleTopLevelWindow(process.Id);
+                }
+
                 if (childWindow != IntPtr.Zero && IsWindow(childWindow))
                 {
                     _ = PostMessage(childWindow, WmClose, IntPtr.Zero, IntPtr.Zero);
@@ -412,9 +417,15 @@ public sealed class RealtimeVisionProcessHost : HwndHost
                     throw new InvalidOperationException($"实时画面进程已提前退出（代码 {process.ExitCode}）。");
                 }
 
-                if (process.MainWindowHandle != IntPtr.Zero)
+                var windowHandle = process.MainWindowHandle;
+                if (windowHandle == IntPtr.Zero)
                 {
-                    return process.MainWindowHandle;
+                    windowHandle = FindVisibleTopLevelWindow(process.Id);
+                }
+
+                if (windowHandle != IntPtr.Zero)
+                {
+                    return windowHandle;
                 }
 
                 Thread.Sleep(50);
@@ -422,6 +433,25 @@ public sealed class RealtimeVisionProcessHost : HwndHost
 
             return IntPtr.Zero;
         }, cancellationToken);
+    }
+
+    private static IntPtr FindVisibleTopLevelWindow(int processId)
+    {
+        var result = IntPtr.Zero;
+        _ = EnumWindows(
+            (windowHandle, parameter) =>
+            {
+                _ = GetWindowThreadProcessId(windowHandle, out var windowProcessId);
+                if (windowProcessId != (uint)processId || !IsWindowVisible(windowHandle))
+                {
+                    return true;
+                }
+
+                result = windowHandle;
+                return false;
+            },
+            IntPtr.Zero);
+        return result;
     }
 
     private static bool IsProcessRunning(Process? process)
@@ -509,6 +539,17 @@ public sealed class RealtimeVisionProcessHost : HwndHost
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessage(
         IntPtr window,
         int message,
@@ -523,6 +564,8 @@ public sealed class RealtimeVisionProcessHost : HwndHost
         public int Right;
         public int Bottom;
     }
+
+    private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
 }
 
 public sealed class RealtimeImageClickedEventArgs : EventArgs

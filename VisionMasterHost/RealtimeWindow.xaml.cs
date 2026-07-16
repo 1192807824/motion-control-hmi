@@ -24,6 +24,7 @@ public partial class RealtimeWindow : Window
     private Task? _commandTask;
     private VmProcedure? _procedure;
     private bool _closed;
+    private int _startupSignalSent;
 
     public RealtimeWindow(string? eventPipeName, string? commandPipeName)
     {
@@ -36,7 +37,7 @@ public partial class RealtimeWindow : Window
     {
         var message = FormatException(exception);
         ShowError(message);
-        _ = SendEventAsync($"LIVE_ERROR\t{Encode(message)}");
+        SignalStartupError(message);
     }
 
     private void RealtimeWindow_Loaded(object sender, RoutedEventArgs e)
@@ -70,12 +71,70 @@ public partial class RealtimeWindow : Window
             }
 
             StartContinuousPreview();
-            _ = SendEventAsync("LIVE_READY");
+            _ = WaitForFirstFrameAsync(_commandCancellation.Token);
         }
         catch (Exception exception)
         {
             var message = FormatException(exception);
             ShowError(message);
+            SignalStartupError(message);
+        }
+    }
+
+    private async Task WaitForFirstFrameAsync(CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            var frameReady = await Dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    _ = ReadCurrentImageSize();
+                    RealtimeRenderControl.UpdateVMResultShow();
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            });
+            if (frameReady)
+            {
+                SignalStartupReady();
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            var message = "“实时画面.sol / 流程1 / 图像源1”已启动，但15秒内没有取得有效图像，请检查相机连接和图像源配置。";
+            await Dispatcher.InvokeAsync(() => ShowError(message));
+            SignalStartupError(message);
+        }
+    }
+
+    private void SignalStartupReady()
+    {
+        if (Interlocked.Exchange(ref _startupSignalSent, 1) == 0)
+        {
+            _ = SendEventAsync("LIVE_READY");
+        }
+    }
+
+    private void SignalStartupError(string message)
+    {
+        if (Interlocked.Exchange(ref _startupSignalSent, 1) == 0)
+        {
             _ = SendEventAsync($"LIVE_ERROR\t{Encode(message)}");
         }
     }

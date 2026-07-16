@@ -274,6 +274,9 @@ public partial class MainWindow : Window
         CenterCrosshair.Visibility = Visibility.Collapsed;
         ImagePlaceholder.Visibility = Visibility.Collapsed;
         RealtimePreviewHost.Visibility = Visibility.Visible;
+        await Dispatcher.InvokeAsync(
+            () => RealtimePreviewHost.UpdateLayout(),
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
         try
         {
             await RealtimePreviewHost.StartAsync();

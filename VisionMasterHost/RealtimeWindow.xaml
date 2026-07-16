@@ -8,6 +8,10 @@
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
+        ShowActivated="False"
+        WindowStartupLocation="Manual"
+        Left="-32000"
+        Top="-32000"
         Background="#202427"
         Loaded="RealtimeWindow_Loaded"
         Closing="RealtimeWindow_Closing">
