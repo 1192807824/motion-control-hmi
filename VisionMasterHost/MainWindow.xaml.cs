@@ -1527,6 +1527,12 @@ public partial class MainWindow : Window
                 throw new FileNotFoundException("当前引用的标定文件不存在。", _clickCalibrationPath);
             }
 
+            var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
+            if (previewWasRunning)
+            {
+                _previewProcedure!.ContinuousRunEnable = false;
+            }
+
             VM.PlatformSDKCS.PointF transformedPoint;
             VM.PlatformSDKCS.PointF transformedCenter;
             float centerPixelX;
@@ -1561,6 +1567,11 @@ public partial class MainWindow : Window
             }
             finally
             {
+                if (previewWasRunning && _previewProcedure is not null)
+                {
+                    _previewProcedure.ContinuousRunEnable = true;
+                }
+
                 UpdateCommandState();
             }
 
