@@ -681,9 +681,6 @@
                             <vm:VmRenderControl x:Name="VisionRenderControl"
                                                 CoordinateInfoVisible="False"
                                                 OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
-                            <local:RealtimeVisionProcessHost x:Name="RealtimePreviewHost"
-                                                           Visibility="Collapsed"
-                                                           Panel.ZIndex="10" />
                             <Grid x:Name="CenterCrosshair" IsHitTestVisible="False"
                                   Visibility="Collapsed" Panel.ZIndex="20">
                                 <Border Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#FF00E676" />
