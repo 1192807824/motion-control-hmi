@@ -297,7 +297,7 @@
                              BorderBrush="#35546B"
                              BorderThickness="1"
                              Text="等待加载固定方案"
-                             ToolTip="当前用户桌面的新纳方案.sol" />
+                             ToolTip="优先加载桌面的新纳方案.sol；兼容标定方案.sol" />
                     <Button Grid.Column="1"
                             x:Name="ChooseSolutionButton"
                             Visibility="Collapsed" />
@@ -395,7 +395,7 @@
                             Orientation="Horizontal"
                             HorizontalAlignment="Right">
                     <Button x:Name="RunOnceButton"
-                            Content="运行一次"
+                            Content="采集画面1"
                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
@@ -405,6 +405,7 @@
                             Click="RunOnce_Click" />
                     <Button x:Name="ContinuousRunButton"
                             Content="实时预览"
+                            Visibility="Collapsed"
                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
@@ -412,6 +413,7 @@
                             Click="ContinuousRun_Click" />
                     <Button x:Name="StopRunButton"
                             Content="暂停预览"
+                            Visibility="Collapsed"
                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
@@ -656,7 +658,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#00D77B" />
-                                    <TextBlock Margin="14,0,0,0" Text="实时相机" Foreground="#F4F8FB"
+                                    <TextBlock Margin="14,0,0,0" Text="画面1（实时相机）" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -702,7 +704,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#0D6EE8" />
-                                    <TextBlock Margin="14,0,0,0" Text="标定渲染" Foreground="#F4F8FB"
+                                    <TextBlock Margin="14,0,0,0" Text="标定（标定流程）" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">

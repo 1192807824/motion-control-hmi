@@ -245,6 +245,16 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public Task<string> ActivateCalibrationViewAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("ACTIVATE_CALIBRATION_VIEW", cancellationToken);
+    }
+
+    public Task<string> DeactivateCalibrationViewAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("DEACTIVATE_CALIBRATION_VIEW", cancellationToken);
+    }
+
     public Task<string> CaptureCalibrationPointAsync(
         int pointNumber,
         CancellationToken cancellationToken)
@@ -399,7 +409,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
-    /// 在启动时已加载的固定“新纳方案.sol”中，单次执行
+    /// 在按需加载的固定视觉方案中，单次执行
     /// “找芯片流程 → Blob分析1”，返回结果表前两行的矩形与像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(

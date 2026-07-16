@@ -19,11 +19,11 @@ namespace VisionMasterHost;
 public partial class MainWindow : Window
 {
     private const string FixedSolutionFileName = "新纳方案.sol";
+    private const string FallbackSolutionFileName = "标定方案.sol";
     private const string RealtimeProcedureName = "实时相机";
     private const string InspectionProcedureName = "找芯片流程";
     private const string CalibrationProcedureName = "标定流程";
     private const string InspectionBlobModuleName = "Blob分析1";
-    private const int AlreadyContinuousErrorCode = unchecked((int)0xE0000311);
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly bool _embedded;
@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private bool _sdkAvailable = true;
     private bool _busy;
     private bool _initializingFixedSolution;
+    private bool _calibrationViewActive;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _applyingCalibrationSidebarState;
@@ -229,10 +230,67 @@ public partial class MainWindow : Window
             "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
             "SET_CALIBRATION_SIDEBAR_STATE" => SetCalibrationSidebarState(parts),
+            "ACTIVATE_CALIBRATION_VIEW" => ActivateCalibrationView(),
+            "DEACTIVATE_CALIBRATION_VIEW" => DeactivateCalibrationView(),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
+    }
+
+    private string ActivateCalibrationView()
+    {
+        if (_calibrationViewActive && _previewProcedure is not null && _calibrationProcedure is not null)
+        {
+            return "标定界面已经开启。";
+        }
+
+        if (!_solutionLoaded)
+        {
+            LoadFixedSolution();
+        }
+
+        if (!_solutionLoaded)
+        {
+            throw new InvalidOperationException(
+                $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
+        }
+
+        StopAllContinuousExecutionNoThrow();
+        _previewProcedure = GetRequiredProcedure(RealtimeProcedureName);
+        _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
+        _calibrationViewActive = true;
+
+        PreviewProcedureComboBox.SelectedItem = RealtimeProcedureName;
+        CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
+        PopulateImageSteps(RealtimeProcedureName, _previewProcedure);
+        BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
+
+        if (!TryCapturePreviewFrame(out var previewError))
+        {
+            _calibrationViewActive = false;
+            _previewProcedure = null;
+            _calibrationProcedure = null;
+            throw new InvalidOperationException($"画面1采集失败：{previewError}");
+        }
+
+        UpdateCommandState();
+        SetStatus("标定界面已开启：画面1单次采集完成，标定流程等待单次执行", StatusKind.Success);
+        return "标定界面已开启。";
+    }
+
+    private string DeactivateCalibrationView()
+    {
+        StopAllContinuousExecutionNoThrow();
+        _calibrationSession = null;
+        _calibrationViewActive = false;
+        _previewProcedure = null;
+        _calibrationProcedure = null;
+        ImageStepComboBox.ItemsSource = null;
+        ClearRenderer();
+        UpdateCommandState();
+        SetStatus("标定界面未打开；仅保留找芯片流程待命", StatusKind.Ready);
+        return "标定界面已关闭。";
     }
 
     /// <summary>
@@ -255,7 +313,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 在已加载的固定方案内，单次执行“找芯片流程”，再按 VisionMaster 结果表原顺序
-    /// 读取“Blob分析1”的前两行。找芯片流程独立于实时相机流程，执行后恢复实时预览。
+    /// 读取“Blob分析1”的前两行。所有相机流程均互斥、单次执行。
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
@@ -279,17 +337,13 @@ public partial class MainWindow : Window
         if (!_solutionLoaded || _inspectionProcedure is null)
         {
             throw new InvalidOperationException(
-                $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”。");
+                $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
         }
 
         var procedure = _inspectionProcedure;
         var blobModule = ResolveNamedBlobFindModule(InspectionProcedureName, InspectionBlobModuleName);
-        var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
-        if (previewWasRunning)
-        {
-            // 拍找芯片图时暂停实时相机，确保本次结果只来自找芯片流程。
-            _previewProcedure!.ContinuousRunEnable = false;
-        }
+        // 同一相机不能被两个流程同时占用。找芯片前明确停止方案内的连续执行。
+        StopAllContinuousExecutionNoThrow();
 
         var imageStepBound = TryBindInspectionImageStep(InspectionProcedureName, procedure);
 
@@ -386,9 +440,9 @@ public partial class MainWindow : Window
         {
             if (!_closed)
             {
-                // 找芯片流程始终单次执行；随后恢复固定的实时相机流程。
+                // 找芯片流程始终单次执行；结束后只恢复画面1绑定，不启动连续取流。
                 procedure.ContinuousRunEnable = false;
-                RestoreRealtimePreviewNoThrow(previewWasRunning);
+                RestoreRealtimePreviewNoThrow();
             }
 
             UpdateCommandState();
@@ -816,18 +870,12 @@ public partial class MainWindow : Window
 
         if (!_solutionLoaded)
         {
-            throw new InvalidOperationException("固定视觉方案尚未就绪，请等待实时相机流程启动完成。");
+            throw new InvalidOperationException("固定视觉方案尚未就绪。");
         }
 
-        var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
-        if (previewWasRunning)
-        {
-            _previewProcedure!.ContinuousRunEnable = false;
-        }
-
+        var (centerPixelX, centerPixelY) = GetClickCenterPixel();
         try
         {
-            var (centerPixelX, centerPixelY) = GetClickCenterPixel();
             if (pixelX >= _clickImagePixelWidth || pixelY >= _clickImagePixelHeight)
             {
                 throw new ArgumentOutOfRangeException(
@@ -865,11 +913,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (previewWasRunning && _previewProcedure is not null)
-            {
-                StartLivePreview();
-            }
-
             UpdateCommandState();
         }
     }
@@ -904,7 +947,7 @@ public partial class MainWindow : Window
 
         if (!_solutionLoaded)
         {
-            throw new InvalidOperationException("固定视觉方案尚未就绪，请等待实时相机流程启动完成。");
+            throw new InvalidOperationException("固定视觉方案尚未就绪。");
         }
 
         var fullPath = ValidateCalibrationFilePath(calibrationPath);
@@ -939,12 +982,6 @@ public partial class MainWindow : Window
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
-        var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
-        if (previewWasRunning)
-        {
-            _previewProcedure!.ContinuousRunEnable = false;
-        }
-
         try
         {
             var nPointModule = ResolveNPointCalibrationModule(procedureName);
@@ -968,11 +1005,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (previewWasRunning)
-            {
-                StartLivePreview();
-            }
-
             UpdateCommandState();
         }
     }
@@ -1435,18 +1467,12 @@ public partial class MainWindow : Window
 
             if (!_solutionLoaded)
             {
-                throw new InvalidOperationException("固定视觉方案尚未就绪，请等待实时相机流程启动完成。");
+                throw new InvalidOperationException("固定视觉方案尚未就绪。");
             }
 
             if (string.IsNullOrWhiteSpace(_clickCalibrationPath) || !File.Exists(_clickCalibrationPath))
             {
                 throw new FileNotFoundException("当前引用的标定文件不存在。", _clickCalibrationPath);
-            }
-
-            var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
-            if (previewWasRunning)
-            {
-                _previewProcedure!.ContinuousRunEnable = false;
             }
 
             VM.PlatformSDKCS.PointF transformedPoint;
@@ -1483,11 +1509,6 @@ public partial class MainWindow : Window
             }
             finally
             {
-                if (previewWasRunning && _previewProcedure is not null)
-                {
-                    StartLivePreview();
-                }
-
                 UpdateCommandState();
             }
 
@@ -1856,7 +1877,7 @@ public partial class MainWindow : Window
         if (!File.Exists(solutionPath))
         {
             SetStatus(
-                $"未找到固定视觉方案：{solutionPath}。请将“{FixedSolutionFileName}”放到当前用户桌面。",
+                $"未找到固定视觉方案。请将“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”放到当前用户桌面。",
                 StatusKind.Error);
             return;
         }
@@ -1875,9 +1896,13 @@ public partial class MainWindow : Window
             _solutionLoaded = true;
 
             var procedureNames = GetProcedureNames();
-            _previewProcedure = GetRequiredProcedure(RealtimeProcedureName);
             _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
-            _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
+            _previewProcedure = null;
+            _calibrationProcedure = null;
+            _calibrationViewActive = false;
+
+            // 方案可能保存了“连续运行”状态。主页阶段只保留找芯片流程，标定页打开后再取标定对象。
+            StopAllContinuousExecutionNoThrow();
 
             // 保留隐藏控件仅供现有渲染/标定逻辑读取；用户不能再切换方案或流程。
             PreviewProcedureComboBox.ItemsSource = procedureNames;
@@ -1889,18 +1914,13 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = RealtimeProcedureName;
             _settings.CalibrationProcedureName = CalibrationProcedureName;
             SolutionPathTextBox.Text = _loadedSolutionPath;
-            PopulateImageSteps(RealtimeProcedureName, _previewProcedure);
-            BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
+            ImageStepComboBox.ItemsSource = null;
+            ClearRenderer();
             SaveSettingsNoThrow();
-
-            if (!TryStartLivePreview(out var previewError))
-            {
-                throw new InvalidOperationException($"实时相机流程启动失败：{previewError}");
-            }
 
             UpdateCommandState();
             SetStatus(
-                $"已加载固定方案：{Path.GetFileName(solutionPath)}；实时相机、找芯片和标定流程已就绪",
+                $"已加载固定方案：{Path.GetFileName(solutionPath)}；找芯片流程待命，标定流程尚未开启",
                 StatusKind.Success);
         }
         catch (Exception exception)
@@ -1921,9 +1941,15 @@ public partial class MainWindow : Window
 
     private static string GetFixedSolutionPath()
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            FixedSolutionFileName);
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var preferredPath = Path.Combine(desktop, FixedSolutionFileName);
+        if (File.Exists(preferredPath))
+        {
+            return preferredPath;
+        }
+
+        var fallbackPath = Path.Combine(desktop, FallbackSolutionFileName);
+        return File.Exists(fallbackPath) ? fallbackPath : preferredPath;
     }
 
     private static VmProcedure GetRequiredProcedure(string procedureName)
@@ -1950,13 +1976,13 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = procedureName;
             PopulateImageSteps(procedureName, _previewProcedure);
             SaveSettingsNoThrow();
-            if (TryStartLivePreview(out var previewError))
+            if (TryCapturePreviewFrame(out var previewError))
             {
-                SetStatus($"{procedureName} 实时预览已启动", StatusKind.Success);
+                SetStatus($"{procedureName} 已单次采集到画面1", StatusKind.Success);
             }
             else
             {
-                SetStatus($"流程已加载，但实时预览启动失败：{previewError}", StatusKind.Error);
+                SetStatus($"流程已加载，但画面1采集失败：{previewError}", StatusKind.Error);
             }
         }
         catch (Exception exception)
@@ -2121,16 +2147,15 @@ public partial class MainWindow : Window
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            _previewProcedure!.Run(true);
+            CapturePreviewFrame();
             stopwatch.Stop();
-            VisionRenderControl.UpdateVMResultShow();
             SetStatus(
-                $"运行完成，用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms",
+                $"画面1采集完成，用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms",
                 StatusKind.Success);
         }
         catch (Exception exception)
         {
-            SetStatus($"运行失败：{FormatException(exception)}", StatusKind.Error);
+            SetStatus($"画面1采集失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
@@ -2143,18 +2168,18 @@ public partial class MainWindow : Window
 
         try
         {
-            if (TryStartLivePreview(out var previewError))
+            if (TryCapturePreviewFrame(out var previewError))
             {
-                SetStatus("实时预览已启动", StatusKind.Success);
+                SetStatus("画面1采集完成", StatusKind.Success);
             }
             else
             {
-                SetStatus($"实时预览启动失败：{previewError}", StatusKind.Error);
+                SetStatus($"画面1采集失败：{previewError}", StatusKind.Error);
             }
         }
         catch (Exception exception)
         {
-            SetStatus($"连续运行失败：{FormatException(exception)}", StatusKind.Error);
+            SetStatus($"画面1采集失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
@@ -2167,9 +2192,9 @@ public partial class MainWindow : Window
 
         try
         {
-            _previewProcedure.ContinuousRunEnable = false;
+            StopAllContinuousExecutionNoThrow();
             UpdateCommandState();
-            SetStatus("实时预览已暂停", StatusKind.Ready);
+            SetStatus("相机流程已停止", StatusKind.Ready);
         }
         catch (Exception exception)
         {
@@ -2321,7 +2346,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RestoreRealtimePreviewNoThrow(bool resumePreview)
+    private void RestoreRealtimePreviewNoThrow()
     {
         if (_previewProcedure is null)
         {
@@ -2341,10 +2366,6 @@ public partial class MainWindow : Window
                 BindImageStep(imageOption, persistSelection: false);
             }
 
-            if (resumePreview && !_closed)
-            {
-                StartLivePreview();
-            }
         }
         catch
         {
@@ -2359,52 +2380,24 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("当前 VisionMaster 标定流程已失效。");
         }
 
-        var resumePreview = _previewProcedure?.ContinuousRunEnable == true;
-        if (resumePreview)
-        {
-            _previewProcedure!.ContinuousRunEnable = false;
-        }
-
-        try
-        {
-            _calibrationProcedure.Run(true);
-        }
-        finally
-        {
-            if (resumePreview && !_closed && _previewProcedure is not null)
-            {
-                StartLivePreview();
-            }
-        }
+        // “实时相机”和“标定流程”使用同一相机，只能串行单次执行。
+        StopAllContinuousExecutionNoThrow();
+        _calibrationProcedure.Run(true);
     }
 
-    private void StartLivePreview()
+    private void CapturePreviewFrame()
     {
         if (_previewProcedure is null)
         {
             throw new InvalidOperationException("实时相机流程尚未加载。");
         }
 
-        if (_previewProcedure.ContinuousRunEnable)
-        {
-            return;
-        }
-
-        try
-        {
-            _previewProcedure.ContinuousRunEnable = true;
-        }
-        catch (Exception exception) when (HasVmErrorCode(exception, AlreadyContinuousErrorCode))
-        {
-            // The SDK getter is only a managed cache. If the VisionMaster service is
-            // already running while that cache is false, take ownership by stopping
-            // the server-side run and starting it again so both states are synchronized.
-            _previewProcedure.ContinuousRunEnable = false;
-            _previewProcedure.ContinuousRunEnable = true;
-        }
+        StopAllContinuousExecutionNoThrow();
+        _previewProcedure.Run(true);
+        VisionRenderControl.UpdateVMResultShow();
     }
 
-    private bool TryStartLivePreview(out string errorMessage)
+    private bool TryCapturePreviewFrame(out string errorMessage)
     {
         if (!_solutionLoaded || _previewProcedure is null)
         {
@@ -2418,7 +2411,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var stage = "绑定实时图像";
+        var stage = "绑定画面1";
         try
         {
             if (ImageStepComboBox.SelectedItem is VisionModuleOption option)
@@ -2426,8 +2419,8 @@ public partial class MainWindow : Window
                 BindImageStep(option, persistSelection: false);
             }
 
-            stage = "启动实时相机连续运行";
-            StartLivePreview();
+            stage = "单次运行实时相机流程";
+            CapturePreviewFrame();
             UpdateCommandState();
             errorMessage = "";
             return true;
@@ -2493,7 +2486,7 @@ public partial class MainWindow : Window
         CommandBar.IsEnabled = true;
         var previewReady = _solutionLoaded && _previewProcedure is not null;
         var calibrationReady = _solutionLoaded && _calibrationProcedure is not null;
-        var continuousRunning = previewReady && _previewProcedure!.ContinuousRunEnable;
+        const bool continuousRunning = false;
         ChooseSolutionButton.IsEnabled = false;
         PreviewProcedureComboBox.IsEnabled = false;
         CalibrationProcedureComboBox.IsEnabled = false;
@@ -2504,6 +2497,36 @@ public partial class MainWindow : Window
         if (!calibrationReady && _solutionLoaded)
         {
             CalibrationProcedureComboBox.ToolTip = "固定方案中的标定流程未就绪";
+        }
+    }
+
+    private void StopAllContinuousExecutionNoThrow()
+    {
+        try
+        {
+            if (VmSolution.Instance is not null)
+            {
+                VmSolution.Instance.ContinuousRunEnable = false;
+            }
+        }
+        catch
+        {
+        }
+
+        foreach (var procedure in new[] { _previewProcedure, _inspectionProcedure, _calibrationProcedure })
+        {
+            if (procedure is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                procedure.ContinuousRunEnable = false;
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -2529,12 +2552,6 @@ public partial class MainWindow : Window
             StatusKind.Busy => Color.FromRgb(13, 110, 232),
             _ => Color.FromRgb(224, 162, 26)
         });
-    }
-
-    private static bool HasVmErrorCode(Exception exception, int errorCode)
-    {
-        var vmException = FindVmException(exception) ?? VmSolution.GetVmException(exception);
-        return vmException?.errorCode == errorCode;
     }
 
     private static string FormatException(Exception exception)

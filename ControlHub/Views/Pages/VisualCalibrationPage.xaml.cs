@@ -34,6 +34,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _shutdown;
     private bool _hostReady;
     private bool _hostCanRestart;
+    private bool _calibrationViewRequested;
     private bool _calibrationRunning;
     private bool _centerSyncRunning;
     private bool _clickMoveRunning;
@@ -99,6 +100,41 @@ public partial class VisualCalibrationPage : UserControl
         _hostCanRestart = false;
         UpdateCommandState();
         await VisionHost.StartAsync();
+    }
+
+    public async Task ActivateCalibrationViewAsync()
+    {
+        _calibrationViewRequested = true;
+        await EnsureStartedAsync();
+        if (!_hostReady)
+        {
+            throw new InvalidOperationException("视觉组件尚未就绪，无法开启标定界面。");
+        }
+
+        await VisionHost.ActivateCalibrationViewAsync(CancellationToken.None);
+    }
+
+    public async Task DeactivateCalibrationViewAsync()
+    {
+        if (_calibrationRunning)
+        {
+            return;
+        }
+
+        _calibrationViewRequested = false;
+        if (!_startRequested || !_hostReady)
+        {
+            return;
+        }
+
+        try
+        {
+            await VisionHost.DeactivateCalibrationViewAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // 页面切换不能因视觉进程刚好退出而中断主界面导航。
+        }
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -995,6 +1031,17 @@ public partial class VisualCalibrationPage : UserControl
         SetHostStatus("正在重启视觉组件…", HostStatus.Starting);
         UpdateCommandState();
         await VisionHost.RestartAsync();
+        if (_hostReady && _calibrationViewRequested)
+        {
+            try
+            {
+                await VisionHost.ActivateCalibrationViewAsync(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                SetHostStatus($"标定流程开启失败：{exception.Message}", HostStatus.Error);
+            }
+        }
     }
 
     private async void VisionHost_Started(object? sender, EventArgs e)

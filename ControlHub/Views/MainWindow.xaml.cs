@@ -36,12 +36,11 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // 初始页仍是主页；视觉页保持 Hidden 以便先创建其原生承载窗口。
-        // 视觉宿主启动后会自动加载桌面“新纳方案.sol”及三个固定流程。
+        // 初始页仍是主页；这里只创建原生承载窗口，不启动视觉或标定流程。
+        // 主页找芯片和标定页都按需启动，避免相机流程互相占用。
         await Dispatcher.InvokeAsync(
             () => VisualCalibrationContent.UpdateLayout(),
             DispatcherPriority.ContextIdle);
-        await VisualCalibrationContent.EnsureStartedAsync();
     }
 
     private void PermissionLogin_Click(object sender, RoutedEventArgs e)
@@ -59,24 +58,39 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MotionMenu_Click(object sender, RoutedEventArgs e)
+    private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
+        await VisualCalibrationContent.DeactivateCalibrationViewAsync();
         ShowMotionPage();
     }
 
-    private void HomeMenu_Click(object sender, RoutedEventArgs e)
+    private async void HomeMenu_Click(object sender, RoutedEventArgs e)
     {
+        await VisualCalibrationContent.DeactivateCalibrationViewAsync();
         ShowHomePage();
     }
 
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
         ShowVisualCalibrationPage();
-        await VisualCalibrationContent.EnsureStartedAsync();
+        try
+        {
+            await VisualCalibrationContent.ActivateCalibrationViewAsync();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "标定界面开启失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
-    private void ConnectionMenu_Click(object sender, RoutedEventArgs e)
+    private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
+        await VisualCalibrationContent.DeactivateCalibrationViewAsync();
         ShowConnectionConfigPage();
     }
 
