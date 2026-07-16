@@ -3,10 +3,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
+using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using IMVSBlobFindModuCs;
@@ -972,7 +972,6 @@ public partial class MainWindow : Window
             throw new InvalidOperationException($"实时画面启动失败：{previewError}");
         }
 
-        VisionRenderControl.InitViewSize();
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
         VisionRenderControl.SetRenderToolbarVisible(false);
@@ -1490,55 +1489,93 @@ public partial class MainWindow : Window
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
     {
-        var resolvedPixel = ResolveClickedImagePixel(pixelX, pixelY);
-        await HandleVisionImageClickAsync(resolvedPixel.X, resolvedPixel.Y, null, null);
+        try
+        {
+            var resolvedPixel = ResolveClickedImagePixel(pixelX, pixelY);
+            await HandleVisionImageClickAsync(resolvedPixel.X, resolvedPixel.Y, null, null);
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"点击坐标读取失败：{FormatException(exception)}", StatusKind.Error);
+        }
     }
 
     private (int X, int Y) ResolveClickedImagePixel(int sdkPixelX, int sdkPixelY)
     {
-        if (sdkPixelX != 0 || sdkPixelY != 0 || !_clickCenterPixelReady)
+        if (sdkPixelX != 0 || sdkPixelY != 0)
         {
             return (sdkPixelX, sdkPixelY);
         }
 
-        var controlWidth = VisionRenderControl.ActualWidth;
-        var controlHeight = VisionRenderControl.ActualHeight;
-        if (controlWidth <= 0 || controlHeight <= 0 ||
-            _clickImagePixelWidth <= 0 || _clickImagePixelHeight <= 0)
+        if (TryReadInternalImagePixel(out var imagePixelX, out var imagePixelY))
         {
-            return (sdkPixelX, sdkPixelY);
+            return (imagePixelX, imagePixelY);
         }
 
-        var mousePosition = Mouse.GetPosition(VisionRenderControl);
-        var imageScale = Math.Min(
-            controlWidth / _clickImagePixelWidth,
-            controlHeight / _clickImagePixelHeight);
-        if (double.IsNaN(imageScale) || double.IsInfinity(imageScale) || imageScale <= 0)
+        throw new InvalidOperationException(
+            "VisionMaster 未返回有效点击坐标，无法安全执行点击移动。");
+    }
+
+    private bool TryReadInternalImagePixel(out int pixelX, out int pixelY)
+    {
+        pixelX = 0;
+        pixelY = 0;
+        try
         {
-            return (sdkPixelX, sdkPixelY);
+            var renderControlField = FindInstanceField(
+                VisionRenderControl.GetType(),
+                "RenderControl");
+            var renderControl = renderControlField?.GetValue(VisionRenderControl);
+            var imageView = renderControl?.GetType()
+                .GetProperty("ImageView", BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(renderControl);
+            if (imageView is null)
+            {
+                return false;
+            }
+
+            var imageViewType = imageView.GetType();
+            var pixelXValue = imageViewType
+                .GetProperty("PixelX", BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(imageView);
+            var pixelYValue = imageViewType
+                .GetProperty("PixelY", BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(imageView);
+            if (pixelXValue is not int resolvedX || pixelYValue is not int resolvedY)
+            {
+                return false;
+            }
+
+            if (resolvedX < 0 || resolvedY < 0 ||
+                resolvedX >= _clickImagePixelWidth || resolvedY >= _clickImagePixelHeight)
+            {
+                return false;
+            }
+
+            pixelX = resolvedX;
+            pixelY = resolvedY;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static FieldInfo? FindInstanceField(Type? type, string fieldName)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            var field = current.GetField(
+                fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field is not null)
+            {
+                return field;
+            }
         }
 
-        var displayedWidth = _clickImagePixelWidth * imageScale;
-        var displayedHeight = _clickImagePixelHeight * imageScale;
-        var imageLeft = (controlWidth - displayedWidth) / 2d;
-        var imageTop = (controlHeight - displayedHeight) / 2d;
-        if (mousePosition.X < imageLeft || mousePosition.X >= imageLeft + displayedWidth ||
-            mousePosition.Y < imageTop || mousePosition.Y >= imageTop + displayedHeight)
-        {
-            return (sdkPixelX, sdkPixelY);
-        }
-
-        var mappedX = Math.Max(
-            0,
-            Math.Min(
-                _clickImagePixelWidth - 1,
-                (int)Math.Floor((mousePosition.X - imageLeft) / imageScale)));
-        var mappedY = Math.Max(
-            0,
-            Math.Min(
-                _clickImagePixelHeight - 1,
-                (int)Math.Floor((mousePosition.Y - imageTop) / imageScale)));
-        return (mappedX, mappedY);
+        return null;
     }
 
     private async Task HandleVisionImageClickAsync(
