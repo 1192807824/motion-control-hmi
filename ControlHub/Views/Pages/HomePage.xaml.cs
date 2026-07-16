@@ -129,10 +129,9 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 主页开始按钮只执行两个顺序步骤：
-    /// 1. 第一套 XY 回到九点标定中心；2. 运行固定视觉方案中的“找芯片流程”。
-    /// 流程完成后读取“Blob分析1”结果表的前两行，并在主页显示两组像素质心 X、Y。
-    /// 本阶段仍不执行取料、吸嘴或后续摆盘动作。
+    /// 主页开始按钮依次执行：第一套 XY 回标定中心、Blob识别、
+    /// 吸嘴1对位Blob结果1、吸嘴2对位Blob结果2。
+    /// 本流程只移动第一套XY，不控制Z轴、真空或后续摆盘动作。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -165,7 +164,7 @@ public partial class HomePage : UserControl
             UpdateHomeCommandState();
             ClearBlobInspectionResult();
             ClearAssignedNozzleTargets();
-            SetStartProductionStatus("步骤1/2：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
+            SetStartProductionStatus("步骤1/4：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
 
             var center = ReadFirstSetCalibrationCenter(calibrationFile.FilePath);
             if (calibrationFile.WasSelected)
@@ -186,7 +185,7 @@ public partial class HomePage : UserControl
                 velocity);
 
             SetStartProductionStatus(
-                $"步骤1/2：第一套 XY 正在回初始中心 X={center.X:0.###}，Y={center.Y:0.###}…",
+                $"步骤1/4：第一套 XY 正在回初始中心 X={center.X:0.###}，Y={center.Y:0.###}…",
                 Color.FromRgb(242, 181, 68));
             var actual = await motionController.MoveCalibrationAxesToAsync(
                 VisionCalibrationService.FirstSetXHardwareAxisNo,
@@ -201,7 +200,7 @@ public partial class HomePage : UserControl
             // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
             // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
             SetStartProductionStatus(
-                $"步骤2/2：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+                $"步骤2/4：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                 $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
                 Color.FromRgb(242, 181, 68));
             await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
@@ -210,19 +209,16 @@ public partial class HomePage : UserControl
                 CancellationToken.None);
             SetBlobInspectionResult(blobResult);
 
+            DualNozzleMechanicalTargets assignedTargets;
             try
             {
                 // 两个目标必须在本次拍照位置立即换算并缓存。后续吸嘴1移动后，
                 // 不能再用已经变化的当前轴位置去计算吸嘴2，否则第二个绝对目标会产生偏差。
-                var assignedTargets = CalculateAssignedNozzleTargets(
+                assignedTargets = CalculateAssignedNozzleTargets(
                     blobResult,
                     calibrationFile.FilePath,
                     actual.ActualX,
                     actual.ActualY);
-                SetAssignedNozzleTargets(assignedTargets);
-                SetStartProductionStatus(
-                    "完成：Blob已显示并完成分配；请点击“吸嘴1 → 物体1”",
-                    Color.FromRgb(73, 209, 125));
             }
             catch (Exception exception)
             {
@@ -231,7 +227,23 @@ public partial class HomePage : UserControl
                 SetStartProductionStatus(
                     $"Blob已显示；吸嘴目标换算失败：{exception.Message}",
                     Color.FromRgb(242, 181, 68));
+                return;
             }
+
+            SetAssignedNozzleTargets(assignedTargets);
+            SetStartProductionStatus(
+                "步骤3/4：Blob识别完成，正在让吸嘴1对位物体1…",
+                Color.FromRgb(242, 181, 68));
+            await MoveAssignedNozzleStepAsync(1, CancellationToken.None);
+
+            SetStartProductionStatus(
+                "步骤4/4：吸嘴1已到位，正在让吸嘴2对位物体2…",
+                Color.FromRgb(242, 181, 68));
+            await MoveAssignedNozzleStepAsync(2, CancellationToken.None);
+
+            SetStartProductionStatus(
+                "完成：Blob识别及双吸嘴顺序对位已自动完成",
+                Color.FromRgb(73, 209, 125));
         }
         catch (OperationCanceledException exception)
         {
@@ -248,6 +260,7 @@ public partial class HomePage : UserControl
         finally
         {
             _startSequenceRunning = false;
+            UpdateAssignedNozzleButtonText();
             UpdateHomeCommandState();
         }
     }
@@ -613,7 +626,7 @@ public partial class HomePage : UserControl
         _blob2Nozzle2Target = targets.Nozzle2;
         _nextAssignedNozzleMoveStep = 1;
         SetFirstSetPositionStatus(
-            "已分配：Blob结果1 → 吸嘴1，Blob结果2 → 吸嘴2；等待第一次点击。",
+            "已分配：Blob结果1 → 吸嘴1，Blob结果2 → 吸嘴2；即将自动顺序对位。",
             true);
         UpdateAssignedNozzleButtonText();
         UpdateHomeCommandState();
@@ -629,8 +642,7 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 同一个按钮分两次执行：第一次让吸嘴1对位Blob结果1，第二次让吸嘴2对位Blob结果2。
-    /// 此处只移动第一套XY，不控制Z轴、真空或取料动作。
+    /// 正常生产由“开始运行”自动连续执行两个步骤；此按钮仅用于异常后的当前步骤重试。
     /// </summary>
     private async void MoveAssignedNozzle_Click(object sender, RoutedEventArgs e)
     {
@@ -644,74 +656,21 @@ public partial class HomePage : UserControl
         }
 
         var step = _nextAssignedNozzleMoveStep;
-        var target = step switch
-        {
-            1 => _blob1Nozzle1Target,
-            2 => _blob2Nozzle2Target,
-            _ => null
-        };
-        if (target is null)
+        if (step is not (1 or 2))
         {
             SetFirstSetPositionStatus("请先点击“开始运行”完成Blob识别和吸嘴分配。", false);
             return;
         }
 
-        var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
-        var objectName = step == 1 ? "物体1" : "物体2";
         try
         {
-            var motionController = _motionController
-                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
-            if (!double.IsFinite(velocity) || velocity <= 0)
-            {
-                throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
-            }
-
             _assignedNozzleMoveRunning = true;
             UpdateHomeCommandState();
-            MoveAssignedNozzleTitleText.Text = $"{nozzleName}移动中";
-            MoveAssignedNozzleHintText.Text = $"正在对位{objectName}…";
-            SetFirstSetPositionStatus(
-                $"正在移动{nozzleName}到{objectName}：X={target.Value.X:0.###}，Y={target.Value.Y:0.###}",
-                true);
-
-            var current = motionController.CaptureCalibrationCenter(
-                VisionCalibrationService.FirstSetXHardwareAxisNo,
-                VisionCalibrationService.FirstSetYHardwareAxisNo);
-            var timeoutMilliseconds = CalculateStartMoveTimeout(
-                current.ActualX,
-                current.ActualY,
-                target.Value.X,
-                target.Value.Y,
-                velocity);
-            var actual = await motionController.MoveCalibrationAxesToAsync(
-                VisionCalibrationService.FirstSetXHardwareAxisNo,
-                VisionCalibrationService.FirstSetYHardwareAxisNo,
-                target.Value.X,
-                target.Value.Y,
-                velocity,
-                positionTolerance: 10d,
-                moveTimeoutMilliseconds: timeoutMilliseconds,
-                cancellationToken: CancellationToken.None);
-
-            if (step == 1)
-            {
-                _nextAssignedNozzleMoveStep = 2;
-                SetFirstSetPositionStatus(
-                    $"吸嘴1已到物体1({actual.ActualX:0.###}, {actual.ActualY:0.###})；请再点一次移动吸嘴2。",
-                    true);
-            }
-            else
-            {
-                _nextAssignedNozzleMoveStep = 3;
-                SetFirstSetPositionStatus(
-                    $"吸嘴2已到物体2({actual.ActualX:0.###}, {actual.ActualY:0.###})；两次顺序对位完成。",
-                    true);
-            }
+            await MoveAssignedNozzleStepAsync(step, CancellationToken.None);
         }
         catch (Exception exception)
         {
+            var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
             SetFirstSetPositionStatus($"{nozzleName}对位失败：{exception.Message}", false);
         }
         finally
@@ -720,6 +679,73 @@ public partial class HomePage : UserControl
             UpdateAssignedNozzleButtonText();
             UpdateHomeCommandState();
         }
+    }
+
+    private async Task MoveAssignedNozzleStepAsync(int step, CancellationToken cancellationToken)
+    {
+        var target = step switch
+        {
+            1 => _blob1Nozzle1Target,
+            2 => _blob2Nozzle2Target,
+            _ => null
+        };
+        if (target is null)
+        {
+            throw new InvalidOperationException("当前吸嘴目标尚未由Blob结果生成。");
+        }
+
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+        if (!double.IsFinite(velocity) || velocity <= 0)
+        {
+            throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
+        }
+
+        var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
+        var objectName = step == 1 ? "物体1" : "物体2";
+        MoveAssignedNozzleTitleText.Text = $"{nozzleName}移动中";
+        MoveAssignedNozzleHintText.Text = $"正在自动对位{objectName}…";
+        SetFirstSetPositionStatus(
+            $"正在移动{nozzleName}到{objectName}：X={target.Value.X:0.###}，Y={target.Value.Y:0.###}",
+            true);
+
+        var current = motionController.CaptureCalibrationCenter(
+            VisionCalibrationService.FirstSetXHardwareAxisNo,
+            VisionCalibrationService.FirstSetYHardwareAxisNo);
+        var timeoutMilliseconds = CalculateStartMoveTimeout(
+            current.ActualX,
+            current.ActualY,
+            target.Value.X,
+            target.Value.Y,
+            velocity);
+        var actual = await motionController.MoveCalibrationAxesToAsync(
+            VisionCalibrationService.FirstSetXHardwareAxisNo,
+            VisionCalibrationService.FirstSetYHardwareAxisNo,
+            target.Value.X,
+            target.Value.Y,
+            velocity,
+            positionTolerance: 10d,
+            moveTimeoutMilliseconds: timeoutMilliseconds,
+            cancellationToken: cancellationToken);
+
+        if (step == 1)
+        {
+            _nextAssignedNozzleMoveStep = 2;
+            SetFirstSetPositionStatus(
+                $"吸嘴1已到物体1({actual.ActualX:0.###}, {actual.ActualY:0.###})；即将自动对位吸嘴2。",
+                true);
+        }
+        else
+        {
+            _nextAssignedNozzleMoveStep = 3;
+            SetFirstSetPositionStatus(
+                $"吸嘴2已到物体2({actual.ActualX:0.###}, {actual.ActualY:0.###})；两次顺序对位完成。",
+                true);
+        }
+
+        UpdateAssignedNozzleButtonText();
+        UpdateHomeCommandState();
     }
 
     private async void Axis0Move_Click(object sender, RoutedEventArgs e)
@@ -1181,19 +1207,19 @@ public partial class HomePage : UserControl
         {
             case 1:
                 MoveAssignedNozzleTitleText.Text = "吸嘴1 → 物体1";
-                MoveAssignedNozzleHintText.Text = "第一次点击：移动到Blob结果1";
+                MoveAssignedNozzleHintText.Text = "自动步骤1；失败时可点击重试";
                 break;
             case 2:
                 MoveAssignedNozzleTitleText.Text = "吸嘴2 → 物体2";
-                MoveAssignedNozzleHintText.Text = "第二次点击：移动到Blob结果2";
+                MoveAssignedNozzleHintText.Text = "自动步骤2；失败时可点击重试";
                 break;
             case 3:
                 MoveAssignedNozzleTitleText.Text = "顺序对位完成";
                 MoveAssignedNozzleHintText.Text = "重新开始识别后可再次执行";
                 break;
             default:
-                MoveAssignedNozzleTitleText.Text = "吸嘴顺序对位";
-                MoveAssignedNozzleHintText.Text = "等待Blob识别与目标分配";
+                MoveAssignedNozzleTitleText.Text = "自动顺序对位";
+                MoveAssignedNozzleHintText.Text = "开始运行后自动执行";
                 break;
         }
     }

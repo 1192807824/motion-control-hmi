@@ -841,7 +841,7 @@
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
                                     <TextBlock x:Name="StartProductionHintText"
-                                               Text="回初始中心 → Blob识别 → 分配双吸嘴"
+                                               Text="回初始中心 → Blob识别 → 双吸嘴自动对位"
                                                Foreground="#D7F4E5"
                                                FontSize="11"
                                                Margin="0,3,0,0"
@@ -886,13 +886,13 @@
                                 <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock x:Name="MoveAssignedNozzleTitleText"
-                                               Text="吸嘴顺序对位"
+                                               Text="自动顺序对位"
                                                Foreground="White"
                                                FontSize="16"
                                                FontWeight="Bold"
                                                TextTrimming="CharacterEllipsis" />
                                     <TextBlock x:Name="MoveAssignedNozzleHintText"
-                                               Text="等待Blob识别与目标分配"
+                                               Text="开始运行后自动执行"
                                                Foreground="#D5E1E9"
                                                FontSize="9"
                                                Margin="0,2,0,0"
