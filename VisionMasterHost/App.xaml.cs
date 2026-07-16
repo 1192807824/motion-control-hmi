@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -27,35 +26,12 @@ public partial class App : Application
             base.OnStartup(e);
             var embedded = e.Args.Any(
                 argument => string.Equals(argument, "--embedded", StringComparison.OrdinalIgnoreCase));
-            var liveOnly = e.Args.Any(
-                argument => string.Equals(argument, "--live-only", StringComparison.OrdinalIgnoreCase));
             var parentProcessId = ParseParentProcessId(e.Args);
             var pipeName = ParseArgumentValue(e.Args, "--pipe-name");
             var eventPipeName = ParseArgumentValue(e.Args, "--event-pipe-name");
-            if (liveOnly)
-            {
-                var liveEventPipeName = ParseArgumentValue(e.Args, "--live-event-pipe-name");
-                var liveCommandPipeName = ParseArgumentValue(e.Args, "--live-command-pipe-name");
-                var liveParentWindow = ParseWindowHandle(e.Args, "--live-parent-hwnd");
-                var liveWindow = new RealtimeWindow(
-                    liveEventPipeName,
-                    liveCommandPipeName,
-                    liveParentWindow);
-                MainWindow = liveWindow;
-                if (!liveWindow.PrepareForDisplay())
-                {
-                    Shutdown(-1);
-                    return;
-                }
-
-                liveWindow.Show();
-            }
-            else
-            {
-                var window = new MainWindow(embedded, pipeName, eventPipeName);
-                MainWindow = window;
-                window.Show();
-            }
+            var window = new MainWindow(embedded, pipeName, eventPipeName);
+            MainWindow = window;
+            window.Show();
 
             if (parentProcessId.HasValue)
             {
@@ -86,12 +62,6 @@ public partial class App : Application
             && MainWindow is MainWindow mainWindow)
         {
             mainWindow.ReportSdkInitializationFailure(e.Exception);
-            e.Handled = true;
-        }
-        else if (ContainsVmException(e.Exception)
-                 && MainWindow is RealtimeWindow realtimeWindow)
-        {
-            realtimeWindow.ReportSdkInitializationFailure(e.Exception);
             e.Handled = true;
         }
     }
@@ -149,23 +119,6 @@ public partial class App : Application
         }
 
         return null;
-    }
-
-    private static IntPtr ParseWindowHandle(IReadOnlyList<string> arguments, string optionName)
-    {
-        var value = ParseArgumentValue(arguments, optionName);
-        if (value is null)
-        {
-            return IntPtr.Zero;
-        }
-
-        if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var handle)
-            || handle <= 0)
-        {
-            throw new ArgumentException($"{optionName} requires a positive window handle.");
-        }
-
-        return new IntPtr(handle);
     }
 
     private void StartParentProcessMonitor(int parentProcessId)
