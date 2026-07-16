@@ -23,6 +23,9 @@ public partial class MainWindow : Window
     private const string FallbackSolutionFileName = "标定方案.sol";
     private const string InspectionProcedureName = "找芯片流程";
     private const string CalibrationProcedureName = "标定流程";
+    private const string CalibrationImageSourceName = "图像源1";
+    private const string NPointCalibrationModuleName = "N点标定1";
+    private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
@@ -1287,8 +1290,7 @@ public partial class MainWindow : Window
             var info = moduleList.astModuleInfo[index];
             var displayName = info.strDisplayName?.Trim() ?? "";
             var moduleName = info.strModuleName?.Trim() ?? "";
-            if (!string.Equals(moduleName, "IMVSNPointCalibModu", StringComparison.Ordinal) &&
-                !displayName.Contains("N点标定"))
+            if (!string.Equals(displayName, NPointCalibrationModuleName, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -1314,7 +1316,8 @@ public partial class MainWindow : Window
             }
         }
 
-        throw new InvalidOperationException("当前流程中未找到“N点标定”模块。");
+        throw new InvalidOperationException(
+            $"流程“{procedureName}”中未找到“{NPointCalibrationModuleName}”。");
     }
 
     private static IMVSCalibTransformModuTool ResolveCalibrationTransformModule(string procedureName)
@@ -1327,8 +1330,7 @@ public partial class MainWindow : Window
             var info = moduleList.astModuleInfo[index];
             var displayName = info.strDisplayName?.Trim() ?? "";
             var moduleName = info.strModuleName?.Trim() ?? "";
-            if (!string.Equals(moduleName, "IMVSCalibTransformModu", StringComparison.Ordinal) &&
-                !displayName.Contains("标定转换"))
+            if (!string.Equals(displayName, CalibrationTransformModuleName, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -1354,7 +1356,8 @@ public partial class MainWindow : Window
             }
         }
 
-        throw new InvalidOperationException("当前标定流程中未找到“标定转换”模块。");
+        throw new InvalidOperationException(
+            $"流程“{procedureName}”中未找到“{CalibrationTransformModuleName}”。");
     }
 
     /// <summary>
@@ -2194,17 +2197,10 @@ public partial class MainWindow : Window
     {
         var options = GetImageStepOptions(procedureName, procedure);
         ImageStepComboBox.ItemsSource = options;
-        ImageStepComboBox.SelectedItem =
-            options.FirstOrDefault(option =>
-                string.Equals(option.DisplayName, "图像源1", StringComparison.Ordinal))
-            ?? options.FirstOrDefault(option => option.IsImageSource)
-            ?? options.FirstOrDefault(option =>
-                option.DisplayName.Contains("图像采集"))
-            ?? options.FirstOrDefault(option =>
-                string.Equals(option.ModuleKey, _settings.ImageModuleKey, StringComparison.Ordinal))
-            ?? options.FirstOrDefault(option => option.DisplayName.Contains("N点标定"))
-            ?? options.FirstOrDefault(option => option.DisplayName.Contains("标定"))
-            ?? options.LastOrDefault();
+        ImageStepComboBox.SelectedItem = options.FirstOrDefault(option =>
+            string.Equals(option.DisplayName, CalibrationImageSourceName, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"流程“{procedureName}”中未找到“{CalibrationImageSourceName}”。");
     }
 
     private static IReadOnlyList<VisionModuleOption> GetImageStepOptions(
@@ -2525,9 +2521,7 @@ public partial class MainWindow : Window
             var options = GetImageStepOptions(CalibrationProcedureName, _previewProcedure);
             ImageStepComboBox.ItemsSource = options;
             var imageOption = options.FirstOrDefault(option =>
-                string.Equals(option.DisplayName, "图像源1", StringComparison.Ordinal))
-                ?? options.FirstOrDefault(option => option.IsImageSource)
-                ?? options.FirstOrDefault();
+                string.Equals(option.DisplayName, CalibrationImageSourceName, StringComparison.Ordinal));
             if (imageOption is not null)
             {
                 BindImageStep(imageOption, persistSelection: false);

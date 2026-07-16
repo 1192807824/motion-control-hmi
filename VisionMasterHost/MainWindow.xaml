@@ -706,7 +706,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#0D6EE8" />
-                                    <TextBlock Margin="14,0,0,0" Text="标定（标定流程）" Foreground="#F4F8FB"
+                                    <TextBlock Margin="14,0,0,0" Text="标定结果（标定流程 / N点标定1）" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
