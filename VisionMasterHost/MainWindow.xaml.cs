@@ -6,6 +6,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using IMVSBlobFindModuCs;
@@ -971,6 +972,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException($"实时画面启动失败：{previewError}");
         }
 
+        VisionRenderControl.InitViewSize();
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
         VisionRenderControl.SetRenderToolbarVisible(false);
@@ -1488,7 +1490,55 @@ public partial class MainWindow : Window
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
     {
-        await HandleVisionImageClickAsync(pixelX, pixelY, null, null);
+        var resolvedPixel = ResolveClickedImagePixel(pixelX, pixelY);
+        await HandleVisionImageClickAsync(resolvedPixel.X, resolvedPixel.Y, null, null);
+    }
+
+    private (int X, int Y) ResolveClickedImagePixel(int sdkPixelX, int sdkPixelY)
+    {
+        if (sdkPixelX != 0 || sdkPixelY != 0 || !_clickCenterPixelReady)
+        {
+            return (sdkPixelX, sdkPixelY);
+        }
+
+        var controlWidth = VisionRenderControl.ActualWidth;
+        var controlHeight = VisionRenderControl.ActualHeight;
+        if (controlWidth <= 0 || controlHeight <= 0 ||
+            _clickImagePixelWidth <= 0 || _clickImagePixelHeight <= 0)
+        {
+            return (sdkPixelX, sdkPixelY);
+        }
+
+        var mousePosition = Mouse.GetPosition(VisionRenderControl);
+        var imageScale = Math.Min(
+            controlWidth / _clickImagePixelWidth,
+            controlHeight / _clickImagePixelHeight);
+        if (double.IsNaN(imageScale) || double.IsInfinity(imageScale) || imageScale <= 0)
+        {
+            return (sdkPixelX, sdkPixelY);
+        }
+
+        var displayedWidth = _clickImagePixelWidth * imageScale;
+        var displayedHeight = _clickImagePixelHeight * imageScale;
+        var imageLeft = (controlWidth - displayedWidth) / 2d;
+        var imageTop = (controlHeight - displayedHeight) / 2d;
+        if (mousePosition.X < imageLeft || mousePosition.X >= imageLeft + displayedWidth ||
+            mousePosition.Y < imageTop || mousePosition.Y >= imageTop + displayedHeight)
+        {
+            return (sdkPixelX, sdkPixelY);
+        }
+
+        var mappedX = Math.Max(
+            0,
+            Math.Min(
+                _clickImagePixelWidth - 1,
+                (int)Math.Floor((mousePosition.X - imageLeft) / imageScale)));
+        var mappedY = Math.Max(
+            0,
+            Math.Min(
+                _clickImagePixelHeight - 1,
+                (int)Math.Floor((mousePosition.Y - imageTop) / imageScale)));
+        return (mappedX, mappedY);
     }
 
     private async Task HandleVisionImageClickAsync(
