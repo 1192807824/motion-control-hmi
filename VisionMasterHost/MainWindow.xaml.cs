@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private float _clickCenterPixelY;
     private int _clickImagePixelWidth;
     private int _clickImagePixelHeight;
+    private int _clickCenterInitializationQueued;
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
     private bool _showingCalibrationRender;
@@ -973,9 +974,8 @@ public partial class MainWindow : Window
         VisionRenderControl.SetRenderToolbarVisible(false);
         _clickMoveEnabled = true;
         CenterCrosshair.Visibility = Visibility.Collapsed;
-        _ = GetClickCenterPixel();
         AttachCrosshairModule();
-        DrawImageCenterCrosshair();
+        QueueClickCenterInitialization();
         UpdateCommandState();
         SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
         return $"已引用标定文件：{fullPath}。点击图像后将把该点移到绿色十字中心。";
@@ -1762,7 +1762,49 @@ public partial class MainWindow : Window
 
     private void CrosshairModule_ModuleResultCallBackArrived(object? sender, EventArgs e)
     {
-        QueueImageCenterCrosshair();
+        if (_clickCenterPixelReady)
+        {
+            QueueImageCenterCrosshair();
+        }
+        else
+        {
+            QueueClickCenterInitialization();
+        }
+    }
+
+    private void QueueClickCenterInitialization()
+    {
+        if (!_clickMoveEnabled || _closed)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _clickCenterInitializationQueued, 1) != 0)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                if (!_clickMoveEnabled || _clickCenterPixelReady || _closed)
+                {
+                    return;
+                }
+
+                _ = GetClickCenterPixel();
+                DrawImageCenterCrosshair();
+            }
+            catch
+            {
+                // The next realtime frame callback retries initialization.
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _clickCenterInitializationQueued, 0);
+            }
+        }, DispatcherPriority.Render);
     }
 
     private async Task SendHostEventAsync(string message)
@@ -2583,9 +2625,8 @@ public partial class MainWindow : Window
             : Visibility.Visible;
         if (_clickMoveEnabled)
         {
-            _ = GetClickCenterPixel();
             AttachCrosshairModule();
-            DrawImageCenterCrosshair();
+            QueueClickCenterInitialization();
         }
         if (!persistSelection)
         {
