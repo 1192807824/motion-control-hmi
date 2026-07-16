@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
+using ControlHub.Services.Persistence;
 using ControlHub.Services.Vision;
 using ControlHub.Views.Controls;
 using Microsoft.Win32;
@@ -18,6 +19,8 @@ public partial class HomePage : UserControl
     private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionBlobModuleName = "Blob分析1";
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
+    private readonly HomePageSettingsStore _homeSettingsStore = new();
+    private HomePageSettings _homeSettings = new();
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
     private bool _presetPositionMoveRunning;
@@ -28,10 +31,12 @@ public partial class HomePage : UserControl
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
     private int _nextAssignedNozzleMoveStep;
+    private bool _loadingPresetPositions = true;
 
     public HomePage()
     {
         InitializeComponent();
+        LoadPresetPositions();
         _visionCalibration.Changed += VisionCalibration_Changed;
         RefreshVisionCalibrationStatus();
     }
@@ -671,7 +676,7 @@ public partial class HomePage : UserControl
                 $"正在移动{nozzleName}到{objectName}：X={target.Value.X:0.###}，Y={target.Value.Y:0.###}",
                 true);
 
-            var current = motionController.CaptureCalibrationFeedback(
+            var current = motionController.CaptureCalibrationCenter(
                 VisionCalibrationService.FirstSetXHardwareAxisNo,
                 VisionCalibrationService.FirstSetYHardwareAxisNo);
             var timeoutMilliseconds = CalculateStartMoveTimeout(
@@ -883,6 +888,15 @@ public partial class HomePage : UserControl
             MovePresetPosition1Button);
     }
 
+    private void RecordPresetPosition1_Click(object sender, RoutedEventArgs e)
+    {
+        RecordPresetPosition(
+            1,
+            "位置 1",
+            PresetPosition1XTextBox,
+            PresetPosition1YTextBox);
+    }
+
     private async void MovePresetPosition2_Click(object sender, RoutedEventArgs e)
     {
         await MovePresetPositionAsync(
@@ -890,6 +904,61 @@ public partial class HomePage : UserControl
             PresetPosition2XTextBox,
             PresetPosition2YTextBox,
             MovePresetPosition2Button);
+    }
+
+    private void RecordPresetPosition2_Click(object sender, RoutedEventArgs e)
+    {
+        RecordPresetPosition(
+            2,
+            "位置 2",
+            PresetPosition2XTextBox,
+            PresetPosition2YTextBox);
+    }
+
+    private void RecordPresetPosition(
+        int positionNumber,
+        string positionName,
+        TextBox xInput,
+        TextBox yInput)
+    {
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
+
+            _loadingPresetPositions = true;
+            xInput.Text = current.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
+            yInput.Text = current.ActualY.ToString("0.###", CultureInfo.CurrentCulture);
+            _loadingPresetPositions = false;
+
+            if (positionNumber == 1)
+            {
+                _homeSettings.PresetPosition1X = current.ActualX;
+                _homeSettings.PresetPosition1Y = current.ActualY;
+            }
+            else
+            {
+                _homeSettings.PresetPosition2X = current.ActualX;
+                _homeSettings.PresetPosition2Y = current.ActualY;
+            }
+
+            _homeSettingsStore.Save(_homeSettings);
+            SetFirstSetPositionStatus(
+                $"{positionName}已记录并保存：X={current.ActualX:0.###}，Y={current.ActualY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            _loadingPresetPositions = false;
+            SetFirstSetPositionStatus($"{positionName}记录失败：{exception.Message}", false);
+        }
+        finally
+        {
+            UpdateHomeCommandState();
+        }
     }
 
     private async Task MovePresetPositionAsync(
@@ -962,7 +1031,65 @@ public partial class HomePage : UserControl
 
     private void PresetPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        SavePresetPositionsFromInputs();
         UpdateHomeCommandState();
+    }
+
+    private void LoadPresetPositions()
+    {
+        _homeSettings = _homeSettingsStore.Load();
+        _loadingPresetPositions = true;
+        PresetPosition1XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1X);
+        PresetPosition1YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1Y);
+        PresetPosition2XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2X);
+        PresetPosition2YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2Y);
+        _loadingPresetPositions = false;
+    }
+
+    private void SavePresetPositionsFromInputs()
+    {
+        if (_loadingPresetPositions ||
+            PresetPosition1XTextBox is null ||
+            PresetPosition1YTextBox is null ||
+            PresetPosition2XTextBox is null ||
+            PresetPosition2YTextBox is null ||
+            !TryParseOptionalCoordinate(PresetPosition1XTextBox.Text, out var position1X) ||
+            !TryParseOptionalCoordinate(PresetPosition1YTextBox.Text, out var position1Y) ||
+            !TryParseOptionalCoordinate(PresetPosition2XTextBox.Text, out var position2X) ||
+            !TryParseOptionalCoordinate(PresetPosition2YTextBox.Text, out var position2Y))
+        {
+            return;
+        }
+
+        _homeSettings.PresetPosition1X = position1X;
+        _homeSettings.PresetPosition1Y = position1Y;
+        _homeSettings.PresetPosition2X = position2X;
+        _homeSettings.PresetPosition2Y = position2Y;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"保存绝对位置失败：{exception.Message}", false);
+        }
+    }
+
+    private void HomeEmergencyStop_Click(object sender, RoutedEventArgs e)
+    {
+        var motionController = _motionController;
+        if (motionController is null)
+        {
+            HomeEmergencyStopHintText.Text = "运动控制未连接";
+            return;
+        }
+
+        var issued = motionController.EmergencyStopAllAxes("主页操作员请求全轴急停");
+        HomeEmergencyStopHintText.Text = issued
+            ? "急停已下发，正在确认所有轴停止"
+            : "急停下发失败，请立即按硬件急停";
+        HomeEmergencyStopHintText.Foreground = new SolidColorBrush(
+            issued ? Color.FromRgb(255, 220, 220) : Color.FromRgb(255, 188, 93));
     }
 
     private VisionCalibrationSnapshot EnsureFirstSetToolsReady()
@@ -988,8 +1115,11 @@ public partial class HomePage : UserControl
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
+            RecordPresetPosition1Button is null ||
+            RecordPresetPosition2Button is null ||
             MovePresetPosition1Button is null ||
-            MovePresetPosition2Button is null)
+            MovePresetPosition2Button is null ||
+            HomeEmergencyStopButton is null)
         {
             return;
         }
@@ -1013,6 +1143,8 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
+        RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
+        RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         MovePresetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
@@ -1023,6 +1155,7 @@ public partial class HomePage : UserControl
             commandsIdle &&
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
+        HomeEmergencyStopButton.IsEnabled = _motionController is not null;
         Axis0PulseTextBox.IsEnabled = commandsIdle;
         Axis0MoveButton.IsEnabled =
             _motionController is not null &&
@@ -1358,5 +1491,30 @@ public partial class HomePage : UserControl
                     CultureInfo.InvariantCulture,
                     out parsed)) &&
                double.IsFinite(parsed);
+    }
+
+    private static string FormatPresetCoordinate(double? value)
+    {
+        return value is { } coordinate && double.IsFinite(coordinate)
+            ? coordinate.ToString("0.###", CultureInfo.CurrentCulture)
+            : string.Empty;
+    }
+
+    private static bool TryParseOptionalCoordinate(string? value, out double? parsed)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            parsed = null;
+            return true;
+        }
+
+        if (TryParseCoordinate(value, out var coordinate))
+        {
+            parsed = coordinate;
+            return true;
+        }
+
+        parsed = null;
+        return false;
     }
 }

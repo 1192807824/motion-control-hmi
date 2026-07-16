@@ -2764,9 +2764,14 @@ public partial class MotionControlPage : UserControl
 
     private void StopAll_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryIssueGlobalEmergencyStop("操作员请求全轴急停", "EMERGENCY-STOP-FAILED"))
+        _ = EmergencyStopAllAxes("操作员请求全轴急停");
+    }
+
+    public bool EmergencyStopAllAxes(string reason)
+    {
+        if (!TryIssueGlobalEmergencyStop(reason, "EMERGENCY-STOP-FAILED"))
         {
-            return;
+            return false;
         }
 
         _homeSequenceCancellation?.Cancel();
@@ -2787,6 +2792,7 @@ public partial class MotionControlPage : UserControl
         _emergencyStopPendingAxisNos.Clear();
         ClearAllHomeTracking();
         _positionMoveCancellation?.Cancel();
+        _calibrationMotionCancellation?.Cancel();
 
         ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
         foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
@@ -2800,6 +2806,7 @@ public partial class MotionControlPage : UserControl
                 ? "全轴急停重试已下发，安全锁保持至重启"
                 : "全轴急停，等待确认");
         PollMotionState();
+        return true;
     }
 
     private void ClearAlarm_Click(object sender, RoutedEventArgs e)

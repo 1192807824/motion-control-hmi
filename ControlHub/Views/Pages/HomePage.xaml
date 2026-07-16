@@ -823,27 +823,56 @@
                         </Grid>
                     </Border>
 
-                    <Button Grid.Row="4"
-                            x:Name="StartProductionButton"
-                            Style="{StaticResource OperationButton}"
-                            Background="#168B50"
-                            BorderBrush="#38B979"
-                            IsEnabled="False"
-                            Click="StartProduction_Click">
-                        <Grid Margin="20,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="50" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <Image Width="31" Height="31" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
-                                <TextBlock x:Name="StartProductionHintText"
-                                           Text="回初始中心 → Blob识别 → 分配双吸嘴"
-                                           Foreground="#D7F4E5"
-                                           FontSize="11"
-                                           Margin="0,3,0,0"
-                                           TextTrimming="CharacterEllipsis" />
+                    <Grid Grid.Row="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="132" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="StartProductionButton"
+                                Style="{StaticResource OperationButton}"
+                                Background="#168B50"
+                                BorderBrush="#38B979"
+                                IsEnabled="False"
+                                Click="StartProduction_Click">
+                            <Grid Margin="14,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="42" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Image Width="31" Height="31" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
+                                    <TextBlock x:Name="StartProductionHintText"
+                                               Text="回初始中心 → Blob识别 → 分配双吸嘴"
+                                               Foreground="#D7F4E5"
+                                               FontSize="11"
+                                               Margin="0,3,0,0"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+                        <Button Grid.Column="2"
+                                x:Name="HomeEmergencyStopButton"
+                                Style="{StaticResource OperationButton}"
+                                Background="#B51623"
+                                BorderBrush="#FF626E"
+                                IsEnabled="False"
+                                Click="HomeEmergencyStop_Click"
+                                ToolTip="立即调用运动控制的全轴急停">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="全轴急停"
+                                           Foreground="White"
+                                           FontSize="17"
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock x:Name="HomeEmergencyStopHintText"
+                                           Text="立即停止所有轴"
+                                           Foreground="#FFD8DC"
+                                           FontSize="9"
+                                           Margin="0,4,0,0"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
-                        </Grid>
-                    </Button>
+                        </Button>
+                    </Grid>
 
                     <Button Grid.Row="6"
                             x:Name="MoveAssignedNozzleButton"
@@ -908,7 +937,7 @@
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="116" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="位置 1"
                                            Foreground="#62B5FF"
@@ -942,15 +971,32 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="6">
                                     <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <Button x:Name="MovePresetPosition1Button"
-                                            Height="25"
-                                            Content="移动"
-                                            Foreground="White"
-                                            Background="#1674D1"
-                                            BorderBrush="#62B5FF"
-                                            Cursor="Hand"
-                                            IsEnabled="False"
-                                            Click="MovePresetPosition1_Click" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="RecordPresetPosition1Button"
+                                                Height="25"
+                                                Content="记录"
+                                                Foreground="White"
+                                                Background="#166A52"
+                                                BorderBrush="#49D17D"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="RecordPresetPosition1_Click" />
+                                        <Button Grid.Column="2"
+                                                x:Name="MovePresetPosition1Button"
+                                                Height="25"
+                                                Content="移动"
+                                                Foreground="White"
+                                                Background="#1674D1"
+                                                BorderBrush="#62B5FF"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="MovePresetPosition1_Click" />
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
 
@@ -962,7 +1008,7 @@
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="116" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="位置 2"
                                            Foreground="#62B5FF"
@@ -996,21 +1042,38 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="6">
                                     <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <Button x:Name="MovePresetPosition2Button"
-                                            Height="25"
-                                            Content="移动"
-                                            Foreground="White"
-                                            Background="#1674D1"
-                                            BorderBrush="#62B5FF"
-                                            Cursor="Hand"
-                                            IsEnabled="False"
-                                            Click="MovePresetPosition2_Click" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="RecordPresetPosition2Button"
+                                                Height="25"
+                                                Content="记录"
+                                                Foreground="White"
+                                                Background="#166A52"
+                                                BorderBrush="#49D17D"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="RecordPresetPosition2_Click" />
+                                        <Button Grid.Column="2"
+                                                x:Name="MovePresetPosition2Button"
+                                                Height="25"
+                                                Content="移动"
+                                                Foreground="White"
+                                                Background="#1674D1"
+                                                BorderBrush="#62B5FF"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="MovePresetPosition2_Click" />
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
 
                             <TextBlock Grid.Row="3"
                                        x:Name="PresetPositionStatusText"
-                                       Text="预留两套 XY 绝对脉冲位置；点击“移动”后直接移动轴，不做坐标换算。"
+                                       Text="“记录”读取当前轴1/轴2位置并永久保存；“移动”直传绝对脉冲。"
                                        Foreground="#9FB1BF"
                                        FontSize="10"
                                        TextWrapping="Wrap"
