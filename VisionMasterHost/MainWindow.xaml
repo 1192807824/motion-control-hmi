@@ -679,7 +679,7 @@
                         </Border>
                         <Grid Grid.Row="1">
                             <vm:VmRenderControl x:Name="VisionRenderControl"
-                                                CoordinateInfoVisible="False"
+                                                CoordinateInfoVisible="True"
                                                 OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
                             <Grid x:Name="CenterCrosshair" IsHitTestVisible="False"
                                   Visibility="Collapsed" Panel.ZIndex="20">
@@ -724,7 +724,7 @@
                             </Grid>
                         </Border>
                         <Grid Grid.Row="1">
-                            <vm:VmRenderControl x:Name="CalibrationRenderControl" CoordinateInfoVisible="False" />
+                            <vm:VmRenderControl x:Name="CalibrationRenderControl" CoordinateInfoVisible="True" />
                             <StackPanel x:Name="CalibrationImagePlaceholder" HorizontalAlignment="Center"
                                         VerticalAlignment="Center" IsHitTestVisible="False">
                                 <TextBlock Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"

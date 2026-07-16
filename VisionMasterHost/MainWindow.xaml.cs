@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -1489,93 +1488,7 @@ public partial class MainWindow : Window
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
     {
-        try
-        {
-            var resolvedPixel = ResolveClickedImagePixel(pixelX, pixelY);
-            await HandleVisionImageClickAsync(resolvedPixel.X, resolvedPixel.Y, null, null);
-        }
-        catch (Exception exception)
-        {
-            SetStatus($"点击坐标读取失败：{FormatException(exception)}", StatusKind.Error);
-        }
-    }
-
-    private (int X, int Y) ResolveClickedImagePixel(int sdkPixelX, int sdkPixelY)
-    {
-        if (sdkPixelX != 0 || sdkPixelY != 0)
-        {
-            return (sdkPixelX, sdkPixelY);
-        }
-
-        if (TryReadInternalImagePixel(out var imagePixelX, out var imagePixelY))
-        {
-            return (imagePixelX, imagePixelY);
-        }
-
-        throw new InvalidOperationException(
-            "VisionMaster 未返回有效点击坐标，无法安全执行点击移动。");
-    }
-
-    private bool TryReadInternalImagePixel(out int pixelX, out int pixelY)
-    {
-        pixelX = 0;
-        pixelY = 0;
-        try
-        {
-            var renderControlField = FindInstanceField(
-                VisionRenderControl.GetType(),
-                "RenderControl");
-            var renderControl = renderControlField?.GetValue(VisionRenderControl);
-            var imageView = renderControl?.GetType()
-                .GetProperty("ImageView", BindingFlags.Public | BindingFlags.Instance)
-                ?.GetValue(renderControl);
-            if (imageView is null)
-            {
-                return false;
-            }
-
-            var imageViewType = imageView.GetType();
-            var pixelXValue = imageViewType
-                .GetProperty("PixelX", BindingFlags.Public | BindingFlags.Instance)
-                ?.GetValue(imageView);
-            var pixelYValue = imageViewType
-                .GetProperty("PixelY", BindingFlags.Public | BindingFlags.Instance)
-                ?.GetValue(imageView);
-            if (pixelXValue is not int resolvedX || pixelYValue is not int resolvedY)
-            {
-                return false;
-            }
-
-            if (resolvedX < 0 || resolvedY < 0 ||
-                resolvedX >= _clickImagePixelWidth || resolvedY >= _clickImagePixelHeight)
-            {
-                return false;
-            }
-
-            pixelX = resolvedX;
-            pixelY = resolvedY;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static FieldInfo? FindInstanceField(Type? type, string fieldName)
-    {
-        for (var current = type; current is not null; current = current.BaseType)
-        {
-            var field = current.GetField(
-                fieldName,
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field is not null)
-            {
-                return field;
-            }
-        }
-
-        return null;
+        await HandleVisionImageClickAsync(pixelX, pixelY, null, null);
     }
 
     private async Task HandleVisionImageClickAsync(
