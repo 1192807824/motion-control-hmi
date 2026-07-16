@@ -638,7 +638,7 @@ public partial class VisualCalibrationPage : UserControl
         {
             var path = SaveCurrentCalibrationProfile();
             SetWorkflowStatus(
-                $"第一套XY标定配置已保存：{Path.GetFileName(path)}",
+                $"双吸嘴标定配置已保存：{path}",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)
@@ -669,6 +669,9 @@ public partial class VisualCalibrationPage : UserControl
                 break;
             case CalibrationToolbarAction.LoadProfile:
                 LoadCalibrationProfile_Click(this, new RoutedEventArgs());
+                break;
+            case CalibrationToolbarAction.SaveProfile:
+                SaveCalibrationProfile_Click(this, new RoutedEventArgs());
                 break;
         }
     }
@@ -911,6 +914,7 @@ public partial class VisualCalibrationPage : UserControl
             _clickMoveRunning = false;
             UpdateCommandState();
         }
+
     }
 
     private async void VisionHost_ClickTargetReceived(object? sender, VisionClickTargetEventArgs e)
@@ -925,6 +929,7 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
+        var finishNozzleVerification = false;
         try
         {
             var motionController = _motionController
@@ -978,11 +983,16 @@ public partial class VisualCalibrationPage : UserControl
                 _nozzle2ClickVerified = true;
             }
 
+            finishNozzleVerification =
+                targetTool != VisionTargetTool.Camera &&
+                _nozzle1ClickVerified &&
+                _nozzle2ClickVerified;
+
             var verificationMessage = targetTool switch
             {
                 VisionTargetTool.Camera => "相机中心已对准目标，请点击“记录十字”。",
-                _ when _nozzle1ClickVerified && _nozzle2ClickVerified =>
-                    "双吸嘴验证完成，请关闭点击移动后保存配置。",
+                _ when finishNozzleVerification =>
+                    "双吸嘴验证完成，正在退出点击移动。",
                 _ when _nozzle1ClickVerified => "请继续验证吸嘴2。",
                 _ => "请继续验证吸嘴1。"
             };
@@ -1012,6 +1022,17 @@ public partial class VisualCalibrationPage : UserControl
             _clickMoveCancellation = null;
             _clickMoveRunning = false;
             UpdateCommandState();
+        }
+
+        if (finishNozzleVerification)
+        {
+            SetClickMoveCheckedNoEvent(false);
+            if (await ConfigureClickMoveModeAsync(false))
+            {
+                SetClickMoveStatus(
+                    "双吸嘴验证完成，请点击顶部“保存配置”。",
+                    WorkflowStatus.Success);
+            }
         }
     }
 
@@ -1592,6 +1613,7 @@ public partial class VisualCalibrationPage : UserControl
                         ChooseCalibrationFileButton.IsEnabled,
                         ImportCalibrationFileButton.IsEnabled,
                         LoadCalibrationProfileButton.IsEnabled,
+                        SaveCalibrationProfileButton.IsEnabled,
                         CancellationToken.None);
                 }
                 catch

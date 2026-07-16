@@ -298,6 +298,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         bool chooseEnabled,
         bool importEnabled,
         bool loadProfileEnabled,
+        bool saveProfileEnabled,
         CancellationToken cancellationToken)
     {
         var encodedPath = Convert.ToBase64String(
@@ -310,7 +311,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 pathEnabled ? "1" : "0",
                 chooseEnabled ? "1" : "0",
                 importEnabled ? "1" : "0",
-                loadProfileEnabled ? "1" : "0"),
+                loadProfileEnabled ? "1" : "0",
+                saveProfileEnabled ? "1" : "0"),
             cancellationToken);
     }
 
@@ -1268,7 +1270,8 @@ public enum CalibrationToolbarAction
 {
     SaveLocation,
     Import,
-    LoadProfile
+    LoadProfile,
+    SaveProfile
 }
 
 public sealed class CalibrationToolbarActionEventArgs(CalibrationToolbarAction action) : EventArgs

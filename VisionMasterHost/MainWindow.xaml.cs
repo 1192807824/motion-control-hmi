@@ -463,7 +463,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationToolbarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 6)
+        if (parts.Count != 7)
         {
             throw new InvalidDataException("标定文件菜单状态参数不正确。");
         }
@@ -486,6 +486,7 @@ public partial class MainWindow : Window
         ChooseCalibrationToolbarButton.IsEnabled = parts[3] == "1";
         ImportCalibrationToolbarButton.IsEnabled = parts[4] == "1";
         LoadCalibrationProfileToolbarButton.IsEnabled = parts[5] == "1";
+        SaveCalibrationProfileToolbarButton.IsEnabled = parts[6] == "1";
         return "标定文件菜单状态已更新。";
     }
 

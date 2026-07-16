@@ -388,6 +388,18 @@
                             Background="#0B2235"
                             BorderBrush="#0D6EE8"
                             Click="CalibrationToolbarAction_Click" />
+                    <Button x:Name="SaveCalibrationProfileToolbarButton"
+                            Content="保存配置"
+                            Tag="SaveProfile"
+                            Style="{StaticResource PrimaryButton}"
+                            MinWidth="68"
+                            Padding="8,0"
+                            Margin="6,0,0,0"
+                            Background="#0B2B24"
+                            BorderBrush="#00A965"
+                            Foreground="#1EEA86"
+                            ToolTip="保存当前九点标定和双吸嘴对位配置"
+                            Click="CalibrationToolbarAction_Click" />
                 </StackPanel>
 
                 <Border Grid.Column="13" Width="1" Height="34" Background="#345269" />
