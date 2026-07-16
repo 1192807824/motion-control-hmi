@@ -26,12 +26,25 @@ public partial class App : Application
             base.OnStartup(e);
             var embedded = e.Args.Any(
                 argument => string.Equals(argument, "--embedded", StringComparison.OrdinalIgnoreCase));
+            var liveOnly = e.Args.Any(
+                argument => string.Equals(argument, "--live-only", StringComparison.OrdinalIgnoreCase));
             var parentProcessId = ParseParentProcessId(e.Args);
             var pipeName = ParseArgumentValue(e.Args, "--pipe-name");
             var eventPipeName = ParseArgumentValue(e.Args, "--event-pipe-name");
-            var window = new MainWindow(embedded, pipeName, eventPipeName);
-            MainWindow = window;
-            window.Show();
+            if (liveOnly)
+            {
+                var liveEventPipeName = ParseArgumentValue(e.Args, "--live-event-pipe-name");
+                var liveCommandPipeName = ParseArgumentValue(e.Args, "--live-command-pipe-name");
+                var liveWindow = new RealtimeWindow(liveEventPipeName, liveCommandPipeName);
+                MainWindow = liveWindow;
+                liveWindow.Show();
+            }
+            else
+            {
+                var window = new MainWindow(embedded, pipeName, eventPipeName);
+                MainWindow = window;
+                window.Show();
+            }
 
             if (parentProcessId.HasValue)
             {
@@ -62,6 +75,12 @@ public partial class App : Application
             && MainWindow is MainWindow mainWindow)
         {
             mainWindow.ReportSdkInitializationFailure(e.Exception);
+            e.Handled = true;
+        }
+        else if (ContainsVmException(e.Exception)
+                 && MainWindow is RealtimeWindow realtimeWindow)
+        {
+            realtimeWindow.ReportSdkInitializationFailure(e.Exception);
             e.Handled = true;
         }
     }

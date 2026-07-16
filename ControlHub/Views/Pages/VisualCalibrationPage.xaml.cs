@@ -112,19 +112,24 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         await VisionHost.ActivateCalibrationViewAsync(CancellationToken.None);
+        if (EnableClickMoveCheckBox.IsChecked == true)
+        {
+            await ConfigureClickMoveModeAsync(true);
+        }
     }
 
-    public async Task DeactivateCalibrationViewAsync()
+    public async Task<bool> DeactivateCalibrationViewAsync()
     {
         if (_calibrationRunning)
         {
-            return;
+            SetWorkflowStatus("九点标定正在执行，请先停止标定再切换菜单。", WorkflowStatus.Error);
+            return false;
         }
 
         _calibrationViewRequested = false;
         if (!_startRequested || !_hostReady)
         {
-            return;
+            return true;
         }
 
         try
@@ -135,6 +140,8 @@ public partial class VisualCalibrationPage : UserControl
         {
             // 页面切换不能因视觉进程刚好退出而中断主界面导航。
         }
+
+        return true;
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -1035,7 +1042,7 @@ public partial class VisualCalibrationPage : UserControl
         {
             try
             {
-                await VisionHost.ActivateCalibrationViewAsync(CancellationToken.None);
+                await ActivateCalibrationViewAsync();
             }
             catch (Exception exception)
             {
@@ -1044,7 +1051,7 @@ public partial class VisualCalibrationPage : UserControl
         }
     }
 
-    private async void VisionHost_Started(object? sender, EventArgs e)
+    private void VisionHost_Started(object? sender, EventArgs e)
     {
         _hostReady = true;
         _hostCanRestart = true;
@@ -1052,10 +1059,6 @@ public partial class VisualCalibrationPage : UserControl
         RestartHostButton.IsEnabled = true;
         SetHostStatus("视觉组件已启动", HostStatus.Ready);
         UpdateCommandState();
-        if (EnableClickMoveCheckBox.IsChecked == true)
-        {
-            await ConfigureClickMoveModeAsync(true);
-        }
     }
 
     private void VisionHost_Failed(object? sender, VisionMasterHostFailedEventArgs e)

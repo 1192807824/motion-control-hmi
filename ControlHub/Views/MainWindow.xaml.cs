@@ -60,13 +60,19 @@ public partial class MainWindow : Window
 
     private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
-        await VisualCalibrationContent.DeactivateCalibrationViewAsync();
+        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        {
+            return;
+        }
         ShowMotionPage();
     }
 
     private async void HomeMenu_Click(object sender, RoutedEventArgs e)
     {
-        await VisualCalibrationContent.DeactivateCalibrationViewAsync();
+        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        {
+            return;
+        }
         ShowHomePage();
     }
 
@@ -90,7 +96,10 @@ public partial class MainWindow : Window
 
     private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
-        await VisualCalibrationContent.DeactivateCalibrationViewAsync();
+        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        {
+            return;
+        }
         ShowConnectionConfigPage();
     }
 

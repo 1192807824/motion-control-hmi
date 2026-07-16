@@ -68,6 +68,8 @@ public partial class MainWindow : Window
         _embedded = embedded;
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
         _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
+        RealtimePreviewHost.ImageClicked += RealtimePreviewHost_ImageClicked;
+        RealtimePreviewHost.Failed += RealtimePreviewHost_Failed;
         if (embedded)
         {
             WindowStyle = WindowStyle.None;
@@ -119,7 +121,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        LoadFixedSolution();
+        SetStatus("视觉方案按需加载：主页找芯片或进入视觉标定时才打开", StatusKind.Ready);
     }
 
     private void StartCommandPipeServer()
@@ -172,8 +174,9 @@ public partial class MainWindow : Window
                         continue;
                     }
 
-                    var response = await Dispatcher.InvokeAsync(
-                        () => ExecuteCalibrationCommandSafely(command));
+                    var responseTask = await Dispatcher.InvokeAsync(
+                        () => ExecuteCalibrationCommandSafelyAsync(command));
+                    var response = await responseTask.ConfigureAwait(false);
                     await writer.WriteLineAsync(response).ConfigureAwait(false);
                 }
             }
@@ -204,11 +207,18 @@ public partial class MainWindow : Window
         }
     }
 
-    private string ExecuteCalibrationCommandSafely(string command)
+    private async Task<string> ExecuteCalibrationCommandSafelyAsync(string command)
     {
         try
         {
-            return EncodePipeResponse(success: true, ExecuteCalibrationCommand(command));
+            var commandName = command.Split('\t')[0];
+            var result = commandName switch
+            {
+                "ACTIVATE_CALIBRATION_VIEW" => await ActivateCalibrationViewAsync(),
+                "DEACTIVATE_CALIBRATION_VIEW" => await DeactivateCalibrationViewAsync(),
+                _ => ExecuteCalibrationCommand(command)
+            };
+            return EncodePipeResponse(success: true, result);
         }
         catch (Exception exception)
         {
@@ -230,17 +240,15 @@ public partial class MainWindow : Window
             "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
             "SET_CALIBRATION_SIDEBAR_STATE" => SetCalibrationSidebarState(parts),
-            "ACTIVATE_CALIBRATION_VIEW" => ActivateCalibrationView(),
-            "DEACTIVATE_CALIBRATION_VIEW" => DeactivateCalibrationView(),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
     }
 
-    private string ActivateCalibrationView()
+    private async Task<string> ActivateCalibrationViewAsync()
     {
-        if (_calibrationViewActive && _previewProcedure is not null && _calibrationProcedure is not null)
+        if (_calibrationViewActive && _calibrationProcedure is not null && RealtimePreviewHost.IsRunning)
         {
             return "标定界面已经开启。";
         }
@@ -257,39 +265,48 @@ public partial class MainWindow : Window
         }
 
         StopAllContinuousExecutionNoThrow();
-        _previewProcedure = GetRequiredProcedure(RealtimeProcedureName);
         _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
         _calibrationViewActive = true;
 
-        PreviewProcedureComboBox.SelectedItem = RealtimeProcedureName;
         CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
-        PopulateImageSteps(RealtimeProcedureName, _previewProcedure);
         BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
-
-        if (!TryCapturePreviewFrame(out var previewError))
+        VisionRenderControl.Visibility = Visibility.Collapsed;
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        ImagePlaceholder.Visibility = Visibility.Collapsed;
+        RealtimePreviewHost.Visibility = Visibility.Visible;
+        try
         {
+            await RealtimePreviewHost.StartAsync();
+        }
+        catch
+        {
+            await RealtimePreviewHost.StopAsync();
+            RealtimePreviewHost.Visibility = Visibility.Collapsed;
+            VisionRenderControl.Visibility = Visibility.Visible;
             _calibrationViewActive = false;
-            _previewProcedure = null;
             _calibrationProcedure = null;
-            throw new InvalidOperationException($"画面1采集失败：{previewError}");
+            throw;
         }
 
         UpdateCommandState();
-        SetStatus("标定界面已开启：画面1单次采集完成，标定流程等待单次执行", StatusKind.Success);
+        SetStatus("标定界面已开启：实时画面.sol / 流程1 / 图像源1 连续显示，标定流程已就绪", StatusKind.Success);
         return "标定界面已开启。";
     }
 
-    private string DeactivateCalibrationView()
+    private async Task<string> DeactivateCalibrationViewAsync()
     {
+        await RealtimePreviewHost.StopAsync();
+        RealtimePreviewHost.Visibility = Visibility.Collapsed;
+        VisionRenderControl.Visibility = Visibility.Visible;
+        _clickMoveEnabled = false;
+        _clickCenterPixelReady = false;
+        DetachCrosshairModule();
         StopAllContinuousExecutionNoThrow();
         _calibrationSession = null;
         _calibrationViewActive = false;
-        _previewProcedure = null;
-        _calibrationProcedure = null;
-        ImageStepComboBox.ItemsSource = null;
-        ClearRenderer();
+        CloseCurrentSolutionNoThrow();
         UpdateCommandState();
-        SetStatus("标定界面未打开；仅保留找芯片流程待命", StatusKind.Ready);
+        SetStatus("已离开视觉标定：实时画面和新纳方案均已关闭", StatusKind.Ready);
         return "标定界面已关闭。";
     }
 
@@ -955,12 +972,19 @@ public partial class MainWindow : Window
         transformModule.ModuParams.LoadCalibPath = fullPath;
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
-        _ = GetClickCenterPixel();
         VisionRenderControl.SetRenderToolbarVisible(false);
         _clickMoveEnabled = true;
         CenterCrosshair.Visibility = Visibility.Collapsed;
-        AttachCrosshairModule();
-        DrawImageCenterCrosshair();
+        if (RealtimePreviewHost.IsRunning)
+        {
+            DetachCrosshairModule();
+        }
+        else
+        {
+            _ = GetClickCenterPixel();
+            AttachCrosshairModule();
+            DrawImageCenterCrosshair();
+        }
         UpdateCommandState();
         SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
         return $"已引用标定文件：{fullPath}。点击图像后将把该点移到绿色十字中心。";
@@ -1452,6 +1476,25 @@ public partial class MainWindow : Window
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
     {
+        await HandleVisionImageClickAsync(pixelX, pixelY, null, null);
+    }
+
+    private async void RealtimePreviewHost_ImageClicked(object? sender, RealtimeImageClickedEventArgs e)
+    {
+        await HandleVisionImageClickAsync(e.PixelX, e.PixelY, e.ImageWidth, e.ImageHeight);
+    }
+
+    private void RealtimePreviewHost_Failed(object? sender, RealtimePreviewFailedEventArgs e)
+    {
+        SetStatus($"实时画面失败：{e.Message}", StatusKind.Error);
+    }
+
+    private async Task HandleVisionImageClickAsync(
+        int pixelX,
+        int pixelY,
+        int? imageWidth,
+        int? imageHeight)
+    {
         if (!_clickMoveEnabled || _clickTransformBusy || _closed)
         {
             return;
@@ -1460,6 +1503,15 @@ public partial class MainWindow : Window
         _clickTransformBusy = true;
         try
         {
+            if (imageWidth is > 0 && imageHeight is > 0)
+            {
+                _clickImagePixelWidth = imageWidth.Value;
+                _clickImagePixelHeight = imageHeight.Value;
+                _clickCenterPixelX = (float)((imageWidth.Value - 1) / 2d);
+                _clickCenterPixelY = (float)((imageHeight.Value - 1) / 2d);
+                _clickCenterPixelReady = true;
+            }
+
             if (_busy || _calibrationSession is not null)
             {
                 throw new InvalidOperationException("视觉标定正在执行，暂不允许点击移动。");
@@ -1726,7 +1778,7 @@ public partial class MainWindow : Window
         await writer.WriteLineAsync(message).ConfigureAwait(false);
     }
 
-    private void RenderToolButton_Click(object sender, RoutedEventArgs e)
+    private async void RenderToolButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string tag })
         {
@@ -1740,6 +1792,33 @@ public partial class MainWindow : Window
         }
 
         var target = parts[0];
+        if (string.Equals(target, "Live", StringComparison.Ordinal) &&
+            RealtimePreviewHost.IsRunning &&
+            !string.Equals(parts[1], "Fullscreen", StringComparison.Ordinal))
+        {
+            try
+            {
+                switch (parts[1])
+                {
+                    case "ZoomIn":
+                        await RealtimePreviewHost.ZoomInAsync();
+                        break;
+                    case "ZoomOut":
+                        await RealtimePreviewHost.ZoomOutAsync();
+                        break;
+                    case "Actual":
+                        await RealtimePreviewHost.ActualSizeAsync();
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                SetStatus($"实时画面工具操作失败：{exception.Message}", StatusKind.Error);
+            }
+
+            return;
+        }
+
         var renderControl = string.Equals(target, "Live", StringComparison.Ordinal)
             ? VisionRenderControl
             : CalibrationRenderControl;
@@ -2244,6 +2323,7 @@ public partial class MainWindow : Window
         _previewProcedure = null;
         _inspectionProcedure = null;
         _calibrationProcedure = null;
+        _calibrationViewActive = false;
         _loadedSolutionPath = "";
         _solutionLoaded = false;
         PreviewProcedureComboBox.ItemsSource = null;
@@ -2269,6 +2349,7 @@ public partial class MainWindow : Window
         _previewProcedure = null;
         _inspectionProcedure = null;
         _calibrationProcedure = null;
+        _calibrationViewActive = false;
         _loadedSolutionPath = "";
         _solutionLoaded = false;
         PreviewProcedureComboBox.ItemsSource = null;
@@ -2380,7 +2461,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("当前 VisionMaster 标定流程已失效。");
         }
 
-        // “实时相机”和“标定流程”使用同一相机，只能串行单次执行。
+        // 新纳方案内部的相机流程保持互斥；左侧实时画面位于独立子进程。
         StopAllContinuousExecutionNoThrow();
         _calibrationProcedure.Run(true);
     }

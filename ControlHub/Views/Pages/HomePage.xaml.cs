@@ -146,7 +146,7 @@ public partial class HomePage : UserControl
             }
 
             // 标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
-            // 视觉方案由视觉组件启动时固定加载桌面的“新纳方案.sol”，主页不再切换方案。
+            // 主页需要找芯片时按需加载桌面的“新纳方案.sol”，标定页离开后方案会关闭。
             var calibrationFile = GetOrSelectFirstSetCalibrationFile();
 
             _startSequenceRunning = true;

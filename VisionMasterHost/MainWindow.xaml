@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:VMControls.WPF.Release;assembly=VMControls.WPF.Release"
+        xmlns:local="clr-namespace:VisionMasterHost"
         mc:Ignorable="d"
         Title="VisionMaster 视觉标定"
         Width="1540"
@@ -305,9 +306,9 @@
 
                 <Border Grid.Column="2" Width="1" Height="34" Background="#345269" />
 
-                <TextBlock Grid.Column="3" Text="实时流程" Style="{StaticResource FieldLabel}" />
+                <TextBlock Grid.Column="3" Text="实时方案" Style="{StaticResource FieldLabel}" />
                 <TextBlock Grid.Column="4"
-                           Text="实时相机"
+                           Text="实时画面.sol / 流程1"
                            VerticalAlignment="Center"
                            Foreground="#EDF4F9"
                            FontWeight="SemiBold" />
@@ -396,6 +397,7 @@
                             HorizontalAlignment="Right">
                     <Button x:Name="RunOnceButton"
                             Content="采集画面1"
+                            Visibility="Collapsed"
                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
@@ -435,7 +437,7 @@
                 <Ellipse x:Name="StatusIndicator" Width="9" Height="9" Fill="#E0A21A" />
                 <TextBlock x:Name="StatusTextBlock"
                            Margin="8,0,0,0"
-                           Text="正在加载桌面“新纳方案.sol”与固定流程…"
+                           Text="视觉方案尚未加载；进入标定页或主页找芯片时按需开启"
                            Foreground="#D8E4EC"
                            FontSize="12"
                            FontWeight="SemiBold"
@@ -658,7 +660,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#00D77B" />
-                                    <TextBlock Margin="14,0,0,0" Text="画面1（实时相机）" Foreground="#F4F8FB"
+                                    <TextBlock Margin="14,0,0,0" Text="实时画面（流程1 / 图像源1）" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -679,6 +681,9 @@
                             <vm:VmRenderControl x:Name="VisionRenderControl"
                                                 CoordinateInfoVisible="False"
                                                 OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
+                            <local:RealtimeVisionProcessHost x:Name="RealtimePreviewHost"
+                                                           Visibility="Collapsed"
+                                                           Panel.ZIndex="10" />
                             <Grid x:Name="CenterCrosshair" IsHitTestVisible="False"
                                   Visibility="Collapsed" Panel.ZIndex="20">
                                 <Border Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#FF00E676" />
