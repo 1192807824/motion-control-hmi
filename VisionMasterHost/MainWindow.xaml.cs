@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private bool _closed;
     private bool _sdkAvailable = true;
     private bool _busy;
+    private bool _initializingFixedSolution;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _applyingCalibrationSidebarState;
@@ -1859,6 +1860,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _initializingFixedSolution = true;
         SetBusy(true);
         SetStatus("正在加载固定视觉方案…", StatusKind.Busy);
 
@@ -1911,6 +1913,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _initializingFixedSolution = false;
             SetBusy(false);
         }
     }
@@ -1931,7 +1934,9 @@ public partial class MainWindow : Window
 
     private void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_solutionLoaded || PreviewProcedureComboBox.SelectedItem is not string procedureName)
+        if (_initializingFixedSolution ||
+            !_solutionLoaded ||
+            PreviewProcedureComboBox.SelectedItem is not string procedureName)
         {
             return;
         }
@@ -1965,7 +1970,9 @@ public partial class MainWindow : Window
 
     private void CalibrationProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_solutionLoaded || CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        if (_initializingFixedSolution ||
+            !_solutionLoaded ||
+            CalibrationProcedureComboBox.SelectedItem is not string procedureName)
         {
             return;
         }
@@ -2384,6 +2391,15 @@ public partial class MainWindow : Window
 
         try
         {
+            // VisionMaster returns 0xE0000311 when continuous execution is already active.
+            // A startup retry is therefore a successful no-op, not an error.
+            if (_previewProcedure.ContinuousRunEnable)
+            {
+                UpdateCommandState();
+                errorMessage = "";
+                return true;
+            }
+
             if (ImageStepComboBox.SelectedItem is VisionModuleOption option)
             {
                 BindImageStep(option, persistSelection: false);
