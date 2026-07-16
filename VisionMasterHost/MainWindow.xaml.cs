@@ -59,6 +59,7 @@ public partial class MainWindow : Window
     private int _clickImagePixelHeight;
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
+    private bool _showingCalibrationRender;
 
     public MainWindow(
         bool embedded,
@@ -270,10 +271,14 @@ public partial class MainWindow : Window
         _calibrationViewActive = true;
 
         CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
-        ApplySplitRenderLayout();
+        ApplyLiveRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
         BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
+        if (!TryStartLivePreview(out var previewError))
+        {
+            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
+        }
         await RefreshRenderLayoutAsync();
 
         UpdateCommandState();
@@ -957,6 +962,12 @@ public partial class MainWindow : Window
         var fullPath = ValidateCalibrationFilePath(calibrationPath);
         var transformModule = GetCalibrationTransformModule();
         transformModule.ModuParams.LoadCalibPath = fullPath;
+        ApplyLiveRenderLayout();
+        if (!TryStartLivePreview(out var previewError))
+        {
+            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
+        }
+
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
         VisionRenderControl.SetRenderToolbarVisible(false);
@@ -983,6 +994,12 @@ public partial class MainWindow : Window
         }
 
         const string procedureName = CalibrationProcedureName;
+
+        StopAllContinuousExecutionNoThrow();
+        ApplyCalibrationRenderLayout();
+        ClearCalibrationRenderer();
+        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
+        RefreshRenderLayout();
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
@@ -1056,7 +1073,8 @@ public partial class MainWindow : Window
         var calibrationDirectory = Path.GetDirectoryName(calibrationPath)
             ?? throw new InvalidDataException("无法确定标定文件的保存目录。");
 
-        ApplySplitRenderLayout();
+        StopAllContinuousExecutionNoThrow();
+        ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
 
         var nPointModule = ResolveNPointCalibrationModule(procedureName);
@@ -1164,11 +1182,16 @@ public partial class MainWindow : Window
         }
 
         session.Module.ModuParams.DoSaveFile(session.CalibrationPath);
-        BindCalibrationModule(session.Module);
+        StopAllContinuousExecutionNoThrow();
+        ClearCalibrationRenderer();
         _calibrationSession = null;
+        ApplyLiveRenderLayout();
+        var previewRestored = TryStartLivePreview(out var previewError);
+        RefreshRenderLayout();
         var message =
             $"九点标定成功，像素精度 {result.PixelPrecision:0.######}，" +
-            $"标定文件：{session.CalibrationPath}；N点标定1结果已显示在右侧";
+            $"标定文件：{session.CalibrationPath}" +
+            (previewRestored ? "；实时画面已恢复" : $"；实时画面恢复失败：{previewError}");
         SetBusy(false);
         SetStatus(message, StatusKind.Success);
         return Task.FromResult(message);
@@ -1183,6 +1206,10 @@ public partial class MainWindow : Window
         }
 
         ClearCalibrationRenderer();
+        StopAllContinuousExecutionNoThrow();
+        ApplyLiveRenderLayout();
+        _ = TryStartLivePreview(out _);
+        RefreshRenderLayout();
         var message = "九点标定已取消，本次未完成的标定点已清空。";
         SetBusy(false);
         SetStatus(message, StatusKind.Ready);
@@ -1791,21 +1818,16 @@ public partial class MainWindow : Window
     {
         if (string.Equals(_fullscreenRenderTarget, target, StringComparison.Ordinal))
         {
-            if (_calibrationViewActive)
+            if (_showingCalibrationRender)
             {
-                ApplySplitRenderLayout();
+                ApplyCalibrationRenderLayout();
             }
             else
             {
-                ApplySplitRenderLayout();
+                ApplyLiveRenderLayout();
             }
 
             RefreshRenderLayout();
-            return;
-        }
-
-        if (_calibrationViewActive && string.Equals(target, "Live", StringComparison.Ordinal))
-        {
             return;
         }
 
@@ -1837,6 +1859,32 @@ public partial class MainWindow : Window
         Grid.SetColumnSpan(LiveRenderPanel, 1);
         Grid.SetColumn(CalibrationRenderPanel, 2);
         Grid.SetColumnSpan(CalibrationRenderPanel, 1);
+        LiveFullscreenButton.Content = "\uE740";
+        CalibrationFullscreenButton.Content = "\uE740";
+    }
+
+    private void ApplyLiveRenderLayout()
+    {
+        ApplySingleRenderLayout(showLive: true);
+    }
+
+    private void ApplyCalibrationRenderLayout()
+    {
+        ApplySingleRenderLayout(showLive: false);
+    }
+
+    private void ApplySingleRenderLayout(bool showLive)
+    {
+        _showingCalibrationRender = !showLive;
+        _fullscreenRenderTarget = null;
+        WorkspaceSidebarColumn.Width = new GridLength(320);
+        WorkspaceGapColumn.Width = new GridLength(10);
+        CalibrationSidebar.Visibility = Visibility.Visible;
+        LiveRenderPanel.Visibility = showLive ? Visibility.Visible : Visibility.Collapsed;
+        CalibrationRenderPanel.Visibility = showLive ? Visibility.Collapsed : Visibility.Visible;
+        var visiblePanel = showLive ? LiveRenderPanel : CalibrationRenderPanel;
+        Grid.SetColumn(visiblePanel, 0);
+        Grid.SetColumnSpan(visiblePanel, 3);
         LiveFullscreenButton.Content = "\uE740";
         CalibrationFullscreenButton.Content = "\uE740";
     }
@@ -1958,8 +2006,8 @@ public partial class MainWindow : Window
 
             var procedureNames = GetProcedureNames();
             _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
-            _previewProcedure = null;
-            _calibrationProcedure = null;
+            _previewProcedure = GetRequiredProcedure(RealtimeProcedureName);
+            _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
             _calibrationViewActive = false;
 
             // 方案可能保存了“连续运行”状态。主页阶段只保留找芯片流程，标定页打开后再取标定对象。
@@ -1975,8 +2023,12 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = RealtimeProcedureName;
             _settings.CalibrationProcedureName = CalibrationProcedureName;
             SolutionPathTextBox.Text = _loadedSolutionPath;
-            ImageStepComboBox.ItemsSource = null;
-            ClearRenderer();
+            PopulateImageSteps(RealtimeProcedureName, _previewProcedure);
+            ApplyLiveRenderLayout();
+            if (!TryStartLivePreview(out var previewError))
+            {
+                throw new InvalidOperationException($"实时画面启动失败：{previewError}");
+            }
             SaveSettingsNoThrow();
 
             UpdateCommandState();
@@ -2037,7 +2089,7 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = procedureName;
             PopulateImageSteps(procedureName, _previewProcedure);
             SaveSettingsNoThrow();
-            if (TryCapturePreviewFrame(out var previewError))
+            if (TryStartLivePreview(out var previewError))
             {
                 SetStatus($"{procedureName} 已单次采集到画面1", StatusKind.Success);
             }
@@ -2229,7 +2281,7 @@ public partial class MainWindow : Window
 
         try
         {
-            if (TryCapturePreviewFrame(out var previewError))
+            if (TryStartLivePreview(out var previewError))
             {
                 SetStatus("画面1采集完成", StatusKind.Success);
             }
@@ -2443,24 +2495,9 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("当前 VisionMaster 标定流程已失效。");
         }
 
-        // 与 e470d6b4 保持一致：标定运行时只临时暂停实时流程，结束后恢复。
-        var resumePreview = _previewProcedure?.ContinuousRunEnable == true;
-        if (resumePreview)
-        {
-            _previewProcedure!.ContinuousRunEnable = false;
-        }
-
-        try
-        {
-            _calibrationProcedure.Run(true);
-        }
-        finally
-        {
-            if (resumePreview && !_closed && _previewProcedure is not null)
-            {
-                _previewProcedure.ContinuousRunEnable = true;
-            }
-        }
+        // The camera belongs exclusively to the calibration flow until all nine points finish.
+        StopPreviewProcedureNoThrow();
+        _calibrationProcedure.Run(true);
     }
 
     private void CapturePreviewFrame()
@@ -2475,7 +2512,7 @@ public partial class MainWindow : Window
         VisionRenderControl.UpdateVMResultShow();
     }
 
-    private bool TryCapturePreviewFrame(out string errorMessage)
+    private bool TryStartLivePreview(out string errorMessage)
     {
         if (!_solutionLoaded || _previewProcedure is null)
         {
@@ -2489,7 +2526,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var stage = "绑定画面1";
+        var stage = "绑定实时画面";
         try
         {
             if (ImageStepComboBox.SelectedItem is VisionModuleOption option)
@@ -2497,8 +2534,9 @@ public partial class MainWindow : Window
                 BindImageStep(option, persistSelection: false);
             }
 
-            stage = "单次运行实时相机流程";
-            CapturePreviewFrame();
+            stage = "启动实时相机流程";
+            StopAllContinuousExecutionNoThrow();
+            _previewProcedure.ContinuousRunEnable = true;
             UpdateCommandState();
             errorMessage = "";
             return true;
@@ -2564,7 +2602,7 @@ public partial class MainWindow : Window
         CommandBar.IsEnabled = true;
         var previewReady = _solutionLoaded && _previewProcedure is not null;
         var calibrationReady = _solutionLoaded && _calibrationProcedure is not null;
-        const bool continuousRunning = false;
+        var continuousRunning = previewReady && _previewProcedure!.ContinuousRunEnable;
         ChooseSolutionButton.IsEnabled = false;
         PreviewProcedureComboBox.IsEnabled = false;
         CalibrationProcedureComboBox.IsEnabled = false;

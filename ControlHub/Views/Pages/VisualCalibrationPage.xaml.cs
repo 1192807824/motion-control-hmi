@@ -476,7 +476,6 @@ public partial class VisualCalibrationPage : UserControl
 
         if (calibrationCompleted)
         {
-            SetClickMoveCheckedNoEvent(false);
             _uiSettings.NozzleOffsetCalibrated = false;
             _uiSettings.Nozzle2OffsetCalibrated = false;
             _uiSettings.CalibrationProfilePath = "";
@@ -485,6 +484,13 @@ public partial class VisualCalibrationPage : UserControl
             _visionCalibration.Save();
             UpdateCalibrationProfilePathDisplay();
             UpdateNozzleCalibrationDisplay();
+
+            SelectClickTargetTool(VisionTargetTool.Camera);
+            SetClickMoveCheckedNoEvent(true);
+            if (!await ConfigureClickMoveModeAsync(true))
+            {
+                SetClickMoveCheckedNoEvent(false);
+            }
         }
     }
 
