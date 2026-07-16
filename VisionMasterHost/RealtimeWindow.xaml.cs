@@ -3,8 +3,10 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Interop;
 using VM.Core;
 using VM.PlatformSDKCS;
 using VMControls.Interface;
@@ -16,21 +18,37 @@ public partial class RealtimeWindow : Window
     private const string SolutionFileName = "实时画面.sol";
     private const string ProcedureName = "流程1";
     private const string ImageSourceName = "图像源1";
-    private const int AlreadyContinuousErrorCode = unchecked((int)0xE0000311);
+    private const int ContinuousExecutionInProgressErrorCode = unchecked((int)0xE0000311);
+    private const int GwlStyle = -16;
+    private const int SwpNoActivate = 0x0010;
+    private const int SwpFrameChanged = 0x0020;
+    private const int WsChild = 0x40000000;
+    private const int WsClipSiblings = 0x04000000;
+    private const int WsClipChildren = 0x02000000;
+    private const int WsCaption = 0x00C00000;
+    private const int WsThickFrame = 0x00040000;
+    private const int WsPopup = unchecked((int)0x80000000);
 
     private readonly string? _eventPipeName;
     private readonly string? _commandPipeName;
+    private readonly IntPtr _parentWindow;
     private readonly CancellationTokenSource _commandCancellation = new();
     private Task? _commandTask;
+    private Task? _windowReadySignalTask;
     private VmProcedure? _procedure;
     private bool _closed;
+    private bool _embeddingFailed;
     private int _startupSignalSent;
 
-    public RealtimeWindow(string? eventPipeName, string? commandPipeName)
+    public RealtimeWindow(
+        string? eventPipeName,
+        string? commandPipeName,
+        IntPtr parentWindow)
     {
         InitializeComponent();
         _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
+        _parentWindow = parentWindow;
     }
 
     public void ReportSdkInitializationFailure(Exception exception)
@@ -40,11 +58,43 @@ public partial class RealtimeWindow : Window
         SignalStartupError(message);
     }
 
-    private void RealtimeWindow_Loaded(object sender, RoutedEventArgs e)
+    public bool PrepareForDisplay()
+    {
+        try
+        {
+            var windowHandle = new WindowInteropHelper(this).EnsureHandle();
+            EmbedIntoParent(windowHandle);
+            _windowReadySignalTask = SendEventAsync(
+                $"LIVE_WINDOW\t{windowHandle.ToInt64().ToString(CultureInfo.InvariantCulture)}");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            _embeddingFailed = true;
+            var message = $"实时画面窗口嵌入失败：{exception.Message}";
+            ShowError(message);
+            Interlocked.Exchange(ref _startupSignalSent, 1);
+            _windowReadySignalTask = SendEventAsync($"LIVE_WINDOW_ERROR\t{Encode(message)}");
+            _windowReadySignalTask.GetAwaiter().GetResult();
+            return false;
+        }
+    }
+
+    private async void RealtimeWindow_Loaded(object sender, RoutedEventArgs e)
     {
         StartCommandServer();
         try
         {
+            if (_windowReadySignalTask is not null)
+            {
+                await _windowReadySignalTask;
+            }
+
+            if (_closed || _embeddingFailed)
+            {
+                return;
+            }
+
             RealtimeRenderControl.SetRenderToolbarVisible(false);
             RealtimeRenderControl.ChangeImageComboBoxVisibility(false);
 
@@ -78,6 +128,55 @@ public partial class RealtimeWindow : Window
             var message = FormatException(exception);
             ShowError(message);
             SignalStartupError(message);
+        }
+    }
+
+    private void EmbedIntoParent(IntPtr windowHandle)
+    {
+        if (_parentWindow == IntPtr.Zero || !IsWindow(_parentWindow))
+        {
+            throw new InvalidOperationException("实时画面承载窗口句柄无效。");
+        }
+
+        if (windowHandle == IntPtr.Zero || !IsWindow(windowHandle))
+        {
+            throw new InvalidOperationException("实时画面窗口句柄无效。");
+        }
+
+        var style = GetWindowLong(windowHandle, GwlStyle);
+        if (style == 0)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取实时画面窗口样式。");
+        }
+
+        _ = SetParent(windowHandle, _parentWindow);
+        style &= ~(WsPopup | WsCaption | WsThickFrame);
+        style |= WsChild | WsClipChildren | WsClipSiblings;
+        if (SetWindowLong(windowHandle, GwlStyle, style) == 0)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法设置实时画面窗口样式。");
+        }
+
+        if (GetParent(windowHandle) != _parentWindow)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法建立实时画面窗口的父子关系。");
+        }
+
+        if (!GetClientRect(_parentWindow, out var bounds))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取实时画面承载区域。");
+        }
+
+        if (!SetWindowPos(
+                windowHandle,
+                IntPtr.Zero,
+                0,
+                0,
+                Math.Max(1, bounds.Right - bounds.Left),
+                Math.Max(1, bounds.Bottom - bounds.Top),
+                SwpNoActivate | SwpFrameChanged))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法设置实时画面窗口尺寸。");
         }
     }
 
@@ -187,9 +286,9 @@ public partial class RealtimeWindow : Window
         {
             _procedure.ContinuousRunEnable = true;
         }
-        catch (Exception exception) when (HasVmErrorCode(exception, AlreadyContinuousErrorCode))
+        catch (Exception exception) when (HasVmErrorCode(exception, ContinuousExecutionInProgressErrorCode))
         {
-            // 方案保存时已经处于连续运行，视为启动成功。
+            // VisionMaster ErrorCodeDefine.h: IMVS_EC_MODULE_CONTINUE_EXECUTE（正在连续执行）。
         }
     }
 
@@ -394,5 +493,45 @@ public partial class RealtimeWindow : Window
         }
 
         return null;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetParent(IntPtr child, IntPtr newParent);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr window, int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr window, int index, int newStyle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr window,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        int flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr window, out NativeRect rectangle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr window);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 }

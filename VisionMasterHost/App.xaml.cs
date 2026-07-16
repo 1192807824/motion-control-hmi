@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -35,8 +36,18 @@ public partial class App : Application
             {
                 var liveEventPipeName = ParseArgumentValue(e.Args, "--live-event-pipe-name");
                 var liveCommandPipeName = ParseArgumentValue(e.Args, "--live-command-pipe-name");
-                var liveWindow = new RealtimeWindow(liveEventPipeName, liveCommandPipeName);
+                var liveParentWindow = ParseWindowHandle(e.Args, "--live-parent-hwnd");
+                var liveWindow = new RealtimeWindow(
+                    liveEventPipeName,
+                    liveCommandPipeName,
+                    liveParentWindow);
                 MainWindow = liveWindow;
+                if (!liveWindow.PrepareForDisplay())
+                {
+                    Shutdown(-1);
+                    return;
+                }
+
                 liveWindow.Show();
             }
             else
@@ -138,6 +149,23 @@ public partial class App : Application
         }
 
         return null;
+    }
+
+    private static IntPtr ParseWindowHandle(IReadOnlyList<string> arguments, string optionName)
+    {
+        var value = ParseArgumentValue(arguments, optionName);
+        if (value is null)
+        {
+            return IntPtr.Zero;
+        }
+
+        if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var handle)
+            || handle <= 0)
+        {
+            throw new ArgumentException($"{optionName} requires a positive window handle.");
+        }
+
+        return new IntPtr(handle);
     }
 
     private void StartParentProcessMonitor(int parentProcessId)

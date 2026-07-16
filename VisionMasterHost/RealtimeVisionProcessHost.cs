@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
@@ -34,7 +35,7 @@ public sealed class RealtimeVisionProcessHost : HwndHost
     private Process? _process;
     private CancellationTokenSource? _startCancellation;
     private Task? _eventTask;
-    private TaskCompletionSource<string>? _readySignal;
+    private TaskCompletionSource<IntPtr>? _windowSignal;
     private IntPtr _hostWindow;
     private IntPtr _childWindow;
     private bool _disposed;
@@ -42,6 +43,8 @@ public sealed class RealtimeVisionProcessHost : HwndHost
     public bool IsRunning => IsProcessRunning(_process) && _childWindow != IntPtr.Zero;
 
     public event EventHandler<RealtimeImageClickedEventArgs>? ImageClicked;
+
+    public event EventHandler? Ready;
 
     public event EventHandler<RealtimePreviewFailedEventArgs>? Failed;
 
@@ -66,7 +69,7 @@ public sealed class RealtimeVisionProcessHost : HwndHost
             }
 
             StartEventServer();
-            _readySignal = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _windowSignal = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
             _startCancellation?.Dispose();
             _startCancellation = new CancellationTokenSource();
             var cancellationToken = _startCancellation.Token;
@@ -80,6 +83,7 @@ public sealed class RealtimeVisionProcessHost : HwndHost
                     FileName = executablePath,
                     Arguments =
                         $"--live-only --parent-pid {Process.GetCurrentProcess().Id} " +
+                        $"--live-parent-hwnd {_hostWindow.ToInt64().ToString(CultureInfo.InvariantCulture)} " +
                         $"--live-event-pipe-name {_eventPipeName} --live-command-pipe-name {_commandPipeName}",
                     WorkingDirectory = Path.GetDirectoryName(executablePath)!,
                     UseShellExecute = false,
@@ -97,25 +101,20 @@ public sealed class RealtimeVisionProcessHost : HwndHost
             _process = process;
             try
             {
-                var windowHandle = await WaitForMainWindowAsync(process, cancellationToken);
+                var windowHandle = await WaitForEmbeddedWindowAsync(_windowSignal.Task, cancellationToken);
                 if (windowHandle == IntPtr.Zero)
                 {
                     throw new TimeoutException("等待实时画面窗口超时。");
                 }
 
-                AttachChildWindow(windowHandle);
-                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
-                var completed = await Task.WhenAny(_readySignal.Task, timeoutTask);
-                if (completed != _readySignal.Task)
+                _ = GetWindowThreadProcessId(windowHandle, out var windowProcessId);
+                if (windowProcessId != (uint)process.Id)
                 {
-                    throw new TimeoutException("等待“实时画面.sol”出图超时。");
+                    throw new InvalidOperationException("实时画面窗口不属于已启动的实时画面进程。");
                 }
 
-                var error = await _readySignal.Task;
-                if (!string.IsNullOrWhiteSpace(error))
-                {
-                    throw new InvalidOperationException(error);
-                }
+                AttachChildWindow(windowHandle);
+                _windowSignal = null;
             }
             catch
             {
@@ -131,6 +130,14 @@ public sealed class RealtimeVisionProcessHost : HwndHost
 
     public async Task StopAsync()
     {
+        try
+        {
+            _startCancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -250,16 +257,32 @@ public sealed class RealtimeVisionProcessHost : HwndHost
     private void DispatchEvent(string message)
     {
         var parts = message.Split('\t');
+        if (parts.Length == 2
+            && parts[0] == "LIVE_WINDOW"
+            && long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var handleValue)
+            && handleValue > 0)
+        {
+            _windowSignal?.TrySetResult(new IntPtr(handleValue));
+            return;
+        }
+
         if (parts.Length == 1 && parts[0] == "LIVE_READY")
         {
-            _readySignal?.TrySetResult("");
+            _ = Dispatcher.BeginInvoke(() => Ready?.Invoke(this, EventArgs.Empty));
             return;
         }
 
         if (parts.Length == 2 && parts[0] == "LIVE_ERROR")
         {
             var error = Decode(parts[1]);
-            _readySignal?.TrySetResult(error);
+            _ = Dispatcher.BeginInvoke(() => Failed?.Invoke(this, new RealtimePreviewFailedEventArgs(error)));
+            return;
+        }
+
+        if (parts.Length == 2 && parts[0] == "LIVE_WINDOW_ERROR")
+        {
+            var error = Decode(parts[1]);
+            _windowSignal?.TrySetException(new InvalidOperationException(error));
             _ = Dispatcher.BeginInvoke(() => Failed?.Invoke(this, new RealtimePreviewFailedEventArgs(error)));
             return;
         }
@@ -310,29 +333,55 @@ public sealed class RealtimeVisionProcessHost : HwndHost
         }
 
         var style = GetWindowLong(windowHandle, GwlStyle);
+        if (style == 0)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取实时画面窗口样式。");
+        }
+
+        var previousParent = GetParent(windowHandle);
         _ = SetParent(windowHandle, _hostWindow);
         style &= ~(WsPopup | WsCaption | WsThickFrame);
         style |= WsChild | WsVisible | WsClipChildren | WsClipSiblings;
-        _ = SetWindowLong(windowHandle, GwlStyle, style);
+        if (SetWindowLong(windowHandle, GwlStyle, style) == 0)
+        {
+            _ = SetParent(windowHandle, previousParent);
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法设置实时画面嵌入窗口样式。");
+        }
+
         if (GetParent(windowHandle) != _hostWindow)
         {
+            _ = SetParent(windowHandle, previousParent);
             throw new Win32Exception("实时画面窗口嵌入失败。");
         }
 
         _childWindow = windowHandle;
         _ = ShowWindow(windowHandle, SwShow);
-        ResizeChildWindow();
+        ResizeChildWindow(throwOnFailure: true);
     }
 
-    private void ResizeChildWindow()
+    private void ResizeChildWindow(bool throwOnFailure = false)
     {
-        if (_hostWindow == IntPtr.Zero || _childWindow == IntPtr.Zero ||
-            !GetClientRect(_hostWindow, out var bounds))
+        if (_hostWindow == IntPtr.Zero || _childWindow == IntPtr.Zero)
         {
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException("实时画面承载窗口尚未准备完成。");
+            }
+
             return;
         }
 
-        _ = SetWindowPos(
+        if (!GetClientRect(_hostWindow, out var bounds))
+        {
+            if (throwOnFailure)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取实时画面承载区域。");
+            }
+
+            return;
+        }
+
+        var resized = SetWindowPos(
             _childWindow,
             IntPtr.Zero,
             0,
@@ -340,6 +389,10 @@ public sealed class RealtimeVisionProcessHost : HwndHost
             Math.Max(1, bounds.Right - bounds.Left),
             Math.Max(1, bounds.Bottom - bounds.Top),
             SwpNoActivate | SwpFrameChanged | SwpShowWindow);
+        if (!resized && throwOnFailure)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法调整实时画面嵌入窗口大小。");
+        }
     }
 
     private void StopCore()
@@ -347,9 +400,8 @@ public sealed class RealtimeVisionProcessHost : HwndHost
         _startCancellation?.Cancel();
         _startCancellation?.Dispose();
         _startCancellation = null;
-        _readySignal?.TrySetCanceled();
-        _readySignal = null;
-
+        _windowSignal?.TrySetCanceled();
+        _windowSignal = null;
         var process = _process;
         _process = null;
         var childWindow = _childWindow;
@@ -364,11 +416,6 @@ public sealed class RealtimeVisionProcessHost : HwndHost
             process.Exited -= ChildProcess_Exited;
             if (!process.HasExited)
             {
-                if (childWindow == IntPtr.Zero)
-                {
-                    childWindow = FindVisibleTopLevelWindow(process.Id);
-                }
-
                 if (childWindow != IntPtr.Zero && IsWindow(childWindow))
                 {
                     _ = PostMessage(childWindow, WmClose, IntPtr.Zero, IntPtr.Zero);
@@ -392,66 +439,43 @@ public sealed class RealtimeVisionProcessHost : HwndHost
 
     private void ChildProcess_Exited(object? sender, EventArgs e)
     {
-        if (_disposed)
+        if (_disposed || sender is not Process process || !ReferenceEquals(process, _process))
         {
             return;
         }
 
+        var message = "实时画面进程已退出。";
+        try
+        {
+            message = $"实时画面进程已退出（代码 {process.ExitCode}）。";
+        }
+        catch
+        {
+        }
+
+        _process = null;
         _childWindow = IntPtr.Zero;
-        _readySignal?.TrySetResult("实时画面进程已退出。");
+        _windowSignal?.TrySetException(new InvalidOperationException(message));
+        _windowSignal = null;
+        process.Exited -= ChildProcess_Exited;
+        process.Dispose();
+        _ = Dispatcher.BeginInvoke(
+            () => Failed?.Invoke(this, new RealtimePreviewFailedEventArgs(message)));
     }
 
-    private static async Task<IntPtr> WaitForMainWindowAsync(
-        Process process,
+    private static async Task<IntPtr> WaitForEmbeddedWindowAsync(
+        Task<IntPtr> windowTask,
         CancellationToken cancellationToken)
     {
-        return await Task.Run(() =>
+        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+        var completedTask = await Task.WhenAny(windowTask, timeoutTask);
+        if (completedTask == windowTask)
         {
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (DateTime.UtcNow < deadline)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                process.Refresh();
-                if (process.HasExited)
-                {
-                    throw new InvalidOperationException($"实时画面进程已提前退出（代码 {process.ExitCode}）。");
-                }
+            return await windowTask;
+        }
 
-                var windowHandle = process.MainWindowHandle;
-                if (windowHandle == IntPtr.Zero)
-                {
-                    windowHandle = FindVisibleTopLevelWindow(process.Id);
-                }
-
-                if (windowHandle != IntPtr.Zero)
-                {
-                    return windowHandle;
-                }
-
-                Thread.Sleep(50);
-            }
-
-            return IntPtr.Zero;
-        }, cancellationToken);
-    }
-
-    private static IntPtr FindVisibleTopLevelWindow(int processId)
-    {
-        var result = IntPtr.Zero;
-        _ = EnumWindows(
-            (windowHandle, parameter) =>
-            {
-                _ = GetWindowThreadProcessId(windowHandle, out var windowProcessId);
-                if (windowProcessId != (uint)processId || !IsWindowVisible(windowHandle))
-                {
-                    return true;
-                }
-
-                result = windowHandle;
-                return false;
-            },
-            IntPtr.Zero);
-        return result;
+        cancellationToken.ThrowIfCancellationRequested();
+        return IntPtr.Zero;
     }
 
     private static bool IsProcessRunning(Process? process)
@@ -537,16 +561,8 @@ public sealed class RealtimeVisionProcessHost : HwndHost
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(IntPtr window);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
-
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindowVisible(IntPtr window);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -564,8 +580,6 @@ public sealed class RealtimeVisionProcessHost : HwndHost
         public int Right;
         public int Bottom;
     }
-
-    private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
 }
 
 public sealed class RealtimeImageClickedEventArgs : EventArgs

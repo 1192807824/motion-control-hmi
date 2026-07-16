@@ -69,6 +69,7 @@ public partial class MainWindow : Window
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
         _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
         RealtimePreviewHost.ImageClicked += RealtimePreviewHost_ImageClicked;
+        RealtimePreviewHost.Ready += RealtimePreviewHost_Ready;
         RealtimePreviewHost.Failed += RealtimePreviewHost_Failed;
         if (embedded)
         {
@@ -292,7 +293,7 @@ public partial class MainWindow : Window
         }
 
         UpdateCommandState();
-        SetStatus("标定界面已开启：实时画面.sol / 流程1 / 图像源1 连续显示，标定流程已就绪", StatusKind.Success);
+        SetStatus("标定界面已开启：实时窗口已嵌入，正在等待图像源1首帧；标定流程已就绪", StatusKind.Busy);
         return "标定界面已开启。";
     }
 
@@ -1489,7 +1490,22 @@ public partial class MainWindow : Window
 
     private void RealtimePreviewHost_Failed(object? sender, RealtimePreviewFailedEventArgs e)
     {
+        if (!_calibrationViewActive)
+        {
+            return;
+        }
+
         SetStatus($"实时画面失败：{e.Message}", StatusKind.Error);
+    }
+
+    private void RealtimePreviewHost_Ready(object? sender, EventArgs e)
+    {
+        if (!_calibrationViewActive || !RealtimePreviewHost.IsRunning)
+        {
+            return;
+        }
+
+        SetStatus("实时画面.sol / 流程1 / 图像源1 已连续出图；标定流程已就绪", StatusKind.Success);
     }
 
     private async Task HandleVisionImageClickAsync(
