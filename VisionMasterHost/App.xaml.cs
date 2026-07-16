@@ -13,8 +13,6 @@ public partial class App : Application
 {
     private CancellationTokenSource? _parentProcessMonitorCancellation;
     private Task? _parentProcessMonitorTask;
-    private bool _visionMasterInitializationPending;
-
     public App()
     {
         DispatcherUnhandledException += App_DispatcherUnhandledException;
@@ -33,8 +31,6 @@ public partial class App : Application
             var eventPipeName = ParseArgumentValue(e.Args, "--event-pipe-name");
             var window = new MainWindow(embedded, pipeName, eventPipeName);
             MainWindow = window;
-            _visionMasterInitializationPending = true;
-            window.ContentRendered += MainWindow_ContentRendered;
             window.Show();
 
             if (parentProcessId.HasValue)
@@ -55,22 +51,14 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    private void MainWindow_ContentRendered(object? sender, EventArgs e)
-    {
-        _visionMasterInitializationPending = false;
-        if (sender is Window window)
-        {
-            window.ContentRendered -= MainWindow_ContentRendered;
-        }
-    }
-
     private void App_DispatcherUnhandledException(
         object sender,
         DispatcherUnhandledExceptionEventArgs e)
     {
         WriteCrashLog(e.Exception);
-        if (_visionMasterInitializationPending
-            && ContainsVmException(e.Exception)
+        // VM 控件的 Loaded/Rendered 回调可能发生在 ContentRendered 之后。
+        // 对 SDK 初始化或授权异常统一转为宿主界面的可见错误，不能让嵌入进程崩溃。
+        if (ContainsVmException(e.Exception)
             && MainWindow is MainWindow mainWindow)
         {
             mainWindow.ReportSdkInitializationFailure(e.Exception);
