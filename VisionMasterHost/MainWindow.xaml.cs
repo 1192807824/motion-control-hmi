@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private const string InspectionProcedureName = "找芯片流程";
     private const string CalibrationProcedureName = "标定流程";
     private const string InspectionBlobModuleName = "Blob分析1";
+    private const int AlreadyContinuousErrorCode = unchecked((int)0xE0000311);
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly bool _embedded;
@@ -866,7 +867,7 @@ public partial class MainWindow : Window
         {
             if (previewWasRunning && _previewProcedure is not null)
             {
-                _previewProcedure.ContinuousRunEnable = true;
+                StartLivePreview();
             }
 
             UpdateCommandState();
@@ -969,7 +970,7 @@ public partial class MainWindow : Window
         {
             if (previewWasRunning)
             {
-                _previewProcedure!.ContinuousRunEnable = true;
+                StartLivePreview();
             }
 
             UpdateCommandState();
@@ -1484,7 +1485,7 @@ public partial class MainWindow : Window
             {
                 if (previewWasRunning && _previewProcedure is not null)
                 {
-                    _previewProcedure.ContinuousRunEnable = true;
+                    StartLivePreview();
                 }
 
                 UpdateCommandState();
@@ -2091,7 +2092,9 @@ public partial class MainWindow : Window
 
     private void ImageStepComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_solutionLoaded || ImageStepComboBox.SelectedItem is not VisionModuleOption option)
+        if (_initializingFixedSolution ||
+            !_solutionLoaded ||
+            ImageStepComboBox.SelectedItem is not VisionModuleOption option)
         {
             return;
         }
@@ -2340,7 +2343,7 @@ public partial class MainWindow : Window
 
             if (resumePreview && !_closed)
             {
-                _previewProcedure.ContinuousRunEnable = true;
+                StartLivePreview();
             }
         }
         catch
@@ -2370,8 +2373,34 @@ public partial class MainWindow : Window
         {
             if (resumePreview && !_closed && _previewProcedure is not null)
             {
-                _previewProcedure.ContinuousRunEnable = true;
+                StartLivePreview();
             }
+        }
+    }
+
+    private void StartLivePreview()
+    {
+        if (_previewProcedure is null)
+        {
+            throw new InvalidOperationException("实时相机流程尚未加载。");
+        }
+
+        if (_previewProcedure.ContinuousRunEnable)
+        {
+            return;
+        }
+
+        try
+        {
+            _previewProcedure.ContinuousRunEnable = true;
+        }
+        catch (Exception exception) when (HasVmErrorCode(exception, AlreadyContinuousErrorCode))
+        {
+            // The SDK getter is only a managed cache. If the VisionMaster service is
+            // already running while that cache is false, take ownership by stopping
+            // the server-side run and starting it again so both states are synchronized.
+            _previewProcedure.ContinuousRunEnable = false;
+            _previewProcedure.ContinuousRunEnable = true;
         }
     }
 
@@ -2389,23 +2418,16 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var stage = "绑定实时图像";
         try
         {
-            // VisionMaster returns 0xE0000311 when continuous execution is already active.
-            // A startup retry is therefore a successful no-op, not an error.
-            if (_previewProcedure.ContinuousRunEnable)
-            {
-                UpdateCommandState();
-                errorMessage = "";
-                return true;
-            }
-
             if (ImageStepComboBox.SelectedItem is VisionModuleOption option)
             {
                 BindImageStep(option, persistSelection: false);
             }
 
-            _previewProcedure.ContinuousRunEnable = true;
+            stage = "启动实时相机连续运行";
+            StartLivePreview();
             UpdateCommandState();
             errorMessage = "";
             return true;
@@ -2413,7 +2435,7 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             UpdateCommandState();
-            errorMessage = FormatException(exception);
+            errorMessage = $"{stage}失败：{FormatException(exception)}";
             return false;
         }
     }
@@ -2507,6 +2529,12 @@ public partial class MainWindow : Window
             StatusKind.Busy => Color.FromRgb(13, 110, 232),
             _ => Color.FromRgb(224, 162, 26)
         });
+    }
+
+    private static bool HasVmErrorCode(Exception exception, int errorCode)
+    {
+        var vmException = FindVmException(exception) ?? VmSolution.GetVmException(exception);
+        return vmException?.errorCode == errorCode;
     }
 
     private static string FormatException(Exception exception)
