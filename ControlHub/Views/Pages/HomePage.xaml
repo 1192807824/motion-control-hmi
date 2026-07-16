@@ -839,9 +839,13 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="42" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                 <Image Width="31" Height="31" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
+                                    <TextBlock x:Name="StartProductionTitleText"
+                                               Text="开始运行"
+                                               Foreground="White"
+                                               FontSize="21"
+                                               FontWeight="Bold" />
                                     <TextBlock x:Name="StartProductionHintText"
-                                               Text="Blob对位 → 位置1/2 → DD马达"
+                                               Text="连续循环 · DD马达每轮转动两次"
                                                Foreground="#D7F4E5"
                                                FontSize="11"
                                                Margin="0,3,0,0"

@@ -59,6 +59,7 @@ public partial class MainWindow : Window
 
     private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
+        await HomeContent.DeactivateProductionAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -77,6 +78,7 @@ public partial class MainWindow : Window
 
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
+        await HomeContent.DeactivateProductionAsync();
         ShowVisualCalibrationPage();
         try
         {
@@ -95,6 +97,7 @@ public partial class MainWindow : Window
 
     private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
+        await HomeContent.DeactivateProductionAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -134,6 +137,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        HomeContent.RequestProductionStopNoWait();
         if (!_motionShutdownPrepared && !MotionPage.TryShutdown(out var failureMessage))
         {
             e.Cancel = true;

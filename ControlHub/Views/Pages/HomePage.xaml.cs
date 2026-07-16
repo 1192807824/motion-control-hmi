@@ -28,6 +28,9 @@ public partial class HomePage : UserControl
     private bool _assignedNozzleMoveRunning;
     private bool _ddMoveRunning;
     private bool _axis13To15MoveRunning;
+    private CancellationTokenSource? _productionCancellation;
+    private TaskCompletionSource<bool>? _productionCompletion;
+    private bool _productionStopRequested;
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
     private int _nextAssignedNozzleMoveStep;
@@ -52,6 +55,23 @@ public partial class HomePage : UserControl
         _visualCalibrationController = visualCalibrationController
             ?? throw new ArgumentNullException(nameof(visualCalibrationController));
         UpdateHomeCommandState();
+    }
+
+    public async Task DeactivateProductionAsync()
+    {
+        var completion = _productionCompletion;
+        if (!_startSequenceRunning || completion is null)
+        {
+            return;
+        }
+
+        _ = RequestProductionStop();
+        await completion.Task;
+    }
+
+    public void RequestProductionStopNoWait()
+    {
+        _ = RequestProductionStop();
     }
 
     public async void RefreshVisionInspectionDisplay(VisualCalibrationPage visualCalibrationController)
@@ -129,14 +149,18 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 主页开始按钮依次执行：第一套 XY 回标定中心、Blob识别、双吸嘴对位、
-    /// XY位置1、XY位置2、DD马达相对转动。
-    /// 本流程只移动第一套XY，不控制Z轴、真空或后续摆盘动作。
+    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴对位、XY位置1、XY位置2，
+    /// 最后让DD马达按同一相对脉冲连续转动两次，然后回中心进入下一轮。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_startSequenceRunning ||
-            _presetPositionMoveRunning ||
+        if (_startSequenceRunning)
+        {
+            _ = RequestProductionStop();
+            return;
+        }
+
+        if (_presetPositionMoveRunning ||
             _assignedNozzleMoveRunning ||
             _ddMoveRunning ||
             _axis13To15MoveRunning)
@@ -170,13 +194,6 @@ public partial class HomePage : UserControl
             // 标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
             // 主页需要找芯片时按需加载桌面的“新纳方案.sol”，标定页离开后方案会关闭。
             var calibrationFile = GetOrSelectFirstSetCalibrationFile();
-
-            _startSequenceRunning = true;
-            UpdateHomeCommandState();
-            ClearBlobInspectionResult();
-            ClearAssignedNozzleTargets();
-            SetStartProductionStatus("步骤1/7：正在读取第一套 XY 标定中心…", Color.FromRgb(242, 181, 68));
-
             var center = ReadFirstSetCalibrationCenter(calibrationFile.FilePath);
             if (calibrationFile.WasSelected)
             {
@@ -184,106 +201,128 @@ public partial class HomePage : UserControl
                 _visionCalibration.Save();
             }
 
-            // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
-            var current = motionController.CaptureCalibrationFeedback(
-                VisionCalibrationService.FirstSetXHardwareAxisNo,
-                VisionCalibrationService.FirstSetYHardwareAxisNo);
-            var timeoutMilliseconds = CalculateStartMoveTimeout(
-                current.ActualX,
-                current.ActualY,
-                center.X,
-                center.Y,
-                velocity);
+            _productionCancellation = new CancellationTokenSource();
+            _productionCompletion = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _productionStopRequested = false;
+            _startSequenceRunning = true;
+            UpdateHomeCommandState();
 
-            SetStartProductionStatus(
-                $"步骤1/7：第一套 XY 正在回初始中心 X={center.X:0.###}，Y={center.Y:0.###}…",
-                Color.FromRgb(242, 181, 68));
-            var actual = await motionController.MoveCalibrationAxesToAsync(
-                VisionCalibrationService.FirstSetXHardwareAxisNo,
-                VisionCalibrationService.FirstSetYHardwareAxisNo,
-                center.X,
-                center.Y,
-                velocity,
-                positionTolerance: 10d,
-                moveTimeoutMilliseconds: timeoutMilliseconds,
-                cancellationToken: CancellationToken.None);
-
-            // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
-            // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
-            SetStartProductionStatus(
-                $"步骤2/7：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
-                $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
-                Color.FromRgb(242, 181, 68));
-            await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
-
-            var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
-                CancellationToken.None);
-            SetBlobInspectionResult(blobResult);
-
-            DualNozzleMechanicalTargets assignedTargets;
-            try
+            var cycleNumber = 0;
+            while (true)
             {
-                // 两个目标必须在本次拍照位置立即换算并缓存。后续吸嘴1移动后，
-                // 不能再用已经变化的当前轴位置去计算吸嘴2，否则第二个绝对目标会产生偏差。
-                assignedTargets = CalculateAssignedNozzleTargets(
-                    blobResult,
-                    calibrationFile.FilePath,
-                    actual.ActualX,
-                    actual.ActualY);
-            }
-            catch (Exception exception)
-            {
+                _productionCancellation.Token.ThrowIfCancellationRequested();
+                cycleNumber++;
+                ClearBlobInspectionResult();
                 ClearAssignedNozzleTargets();
-                SetFirstSetPositionStatus($"吸嘴分配失败：{exception.Message}", false);
+
+                // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
+                var current = motionController.CaptureCalibrationFeedback(
+                    VisionCalibrationService.FirstSetXHardwareAxisNo,
+                    VisionCalibrationService.FirstSetYHardwareAxisNo);
+                var timeoutMilliseconds = CalculateStartMoveTimeout(
+                    current.ActualX,
+                    current.ActualY,
+                    center.X,
+                    center.Y,
+                    velocity);
+
                 SetStartProductionStatus(
-                    $"Blob已显示；吸嘴目标换算失败：{exception.Message}",
+                    $"第{cycleNumber}轮 1/8：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
-                return;
+                var actual = await motionController.MoveCalibrationAxesToAsync(
+                    VisionCalibrationService.FirstSetXHardwareAxisNo,
+                    VisionCalibrationService.FirstSetYHardwareAxisNo,
+                    center.X,
+                    center.Y,
+                    velocity,
+                    positionTolerance: 10d,
+                    moveTimeoutMilliseconds: timeoutMilliseconds,
+                    cancellationToken: _productionCancellation.Token);
+
+                // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
+                // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 2/8：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+                    $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
+                    Color.FromRgb(242, 181, 68));
+                await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
+
+                var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
+                    _productionCancellation.Token);
+                SetBlobInspectionResult(blobResult);
+
+                DualNozzleMechanicalTargets assignedTargets;
+                try
+                {
+                    // 两个目标必须在本次拍照位置立即换算并缓存。后续吸嘴1移动后，
+                    // 不能再用已经变化的当前轴位置去计算吸嘴2，否则第二个绝对目标会产生偏差。
+                    assignedTargets = CalculateAssignedNozzleTargets(
+                        blobResult,
+                        calibrationFile.FilePath,
+                        actual.ActualX,
+                        actual.ActualY);
+                }
+                catch (Exception exception)
+                {
+                    ClearAssignedNozzleTargets();
+                    SetFirstSetPositionStatus($"吸嘴分配失败：{exception.Message}", false);
+                    SetStartProductionStatus(
+                        $"Blob已显示；吸嘴目标换算失败：{exception.Message}",
+                        Color.FromRgb(242, 181, 68));
+                    return;
+                }
+
+                SetAssignedNozzleTargets(assignedTargets);
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 3/8：Blob识别完成，吸嘴1正在对位物体1…",
+                    Color.FromRgb(242, 181, 68));
+                await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 4/8：吸嘴1已到位，吸嘴2正在对位物体2…",
+                    Color.FromRgb(242, 181, 68));
+                await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 5/8：XY正在移动到位置1({position1X:0.###}, {position1Y:0.###})…",
+                    Color.FromRgb(242, 181, 68));
+                await MovePresetPositionCoreAsync(
+                    "位置 1",
+                    position1X,
+                    position1Y,
+                    _productionCancellation.Token);
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 6/8：XY正在移动到位置2({position2X:0.###}, {position2Y:0.###})…",
+                    Color.FromRgb(242, 181, 68));
+                await MovePresetPositionCoreAsync(
+                    "位置 2",
+                    position2X,
+                    position2Y,
+                    _productionCancellation.Token);
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 7/8：DD马达第1次转动 {axis0PulseDistance:0.###} pulse…",
+                    Color.FromRgb(242, 181, 68));
+                await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 8/8：DD马达第2次转动 {axis0PulseDistance:0.###} pulse…",
+                    Color.FromRgb(242, 181, 68));
+                await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮完成，正在回初始点开始下一轮…",
+                    Color.FromRgb(73, 209, 125));
+                await Task.Yield();
             }
-
-            SetAssignedNozzleTargets(assignedTargets);
-            SetStartProductionStatus(
-                "步骤3/7：Blob识别完成，正在让吸嘴1对位物体1…",
-                Color.FromRgb(242, 181, 68));
-            await MoveAssignedNozzleStepAsync(1, CancellationToken.None);
-
-            SetStartProductionStatus(
-                "步骤4/7：吸嘴1已到位，正在让吸嘴2对位物体2…",
-                Color.FromRgb(242, 181, 68));
-            await MoveAssignedNozzleStepAsync(2, CancellationToken.None);
-
-            SetStartProductionStatus(
-                $"步骤5/7：双吸嘴对位完成，XY正在移动到位置1({position1X:0.###}, {position1Y:0.###})…",
-                Color.FromRgb(242, 181, 68));
-            await MovePresetPositionCoreAsync(
-                "位置 1",
-                position1X,
-                position1Y,
-                CancellationToken.None);
-
-            SetStartProductionStatus(
-                $"步骤6/7：位置1已到位，XY正在移动到位置2({position2X:0.###}, {position2Y:0.###})…",
-                Color.FromRgb(242, 181, 68));
-            await MovePresetPositionCoreAsync(
-                "位置 2",
-                position2X,
-                position2Y,
-                CancellationToken.None);
-
-            SetStartProductionStatus(
-                $"步骤7/7：位置2已到位，DD马达正在转动 {axis0PulseDistance:0.###} pulse…",
-                Color.FromRgb(242, 181, 68));
-            await MoveAxis0RelativeCoreAsync(axis0PulseDistance, CancellationToken.None);
-
-            SetStartProductionStatus(
-                "完成：Blob双吸嘴对位、位置1/2及DD马达动作已全部完成",
-                Color.FromRgb(73, 209, 125));
         }
-        catch (OperationCanceledException exception)
+        catch (OperationCanceledException)
         {
             SetStartProductionStatus(
-                exception.Message,
-                Color.FromRgb(242, 181, 68));
+                "连续运行已停止。",
+                Color.FromRgb(73, 209, 125));
         }
         catch (Exception exception)
         {
@@ -294,12 +333,32 @@ public partial class HomePage : UserControl
         finally
         {
             _startSequenceRunning = false;
+            _productionStopRequested = false;
+            _productionCancellation?.Dispose();
+            _productionCancellation = null;
+            var productionCompletion = _productionCompletion;
+            _productionCompletion = null;
             MovePresetPosition1Button.Content = "移动";
             MovePresetPosition2Button.Content = "移动";
             Axis0MoveButton.Content = "转动";
             UpdateAssignedNozzleButtonText();
             UpdateHomeCommandState();
+            productionCompletion?.TrySetResult(true);
         }
+    }
+
+    private bool RequestProductionStop()
+    {
+        if (!_startSequenceRunning || _productionStopRequested)
+        {
+            return false;
+        }
+
+        _productionStopRequested = true;
+        _productionCancellation?.Cancel();
+        SetStartProductionStatus("正在停止循环，请等待当前轴确认停止…", Color.FromRgb(242, 181, 68));
+        UpdateHomeCommandState();
+        return true;
     }
 
     /// <summary>
@@ -1206,6 +1265,7 @@ public partial class HomePage : UserControl
 
     private void HomeEmergencyStop_Click(object sender, RoutedEventArgs e)
     {
+        _ = RequestProductionStop();
         var motionController = _motionController;
         if (motionController is null)
         {
@@ -1235,6 +1295,7 @@ public partial class HomePage : UserControl
     private void UpdateHomeCommandState()
     {
         if (StartProductionButton is null ||
+            StartProductionTitleText is null ||
             MoveAssignedNozzleButton is null ||
             Axis0PulseTextBox is null ||
             RecordAxis0PulseButton is null ||
@@ -1263,7 +1324,16 @@ public partial class HomePage : UserControl
             !_assignedNozzleMoveRunning &&
             !_ddMoveRunning &&
             !_axis13To15MoveRunning;
-        StartProductionButton.IsEnabled = visionControllersReady && commandsIdle;
+        StartProductionButton.IsEnabled =
+            visionControllersReady &&
+            (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
+        StartProductionTitleText.Text = _startSequenceRunning
+            ? (_productionStopRequested ? "正在停止" : "停止循环")
+            : "开始运行";
+        StartProductionButton.Background = new SolidColorBrush(
+            _startSequenceRunning ? Color.FromRgb(181, 22, 35) : Color.FromRgb(22, 139, 80));
+        StartProductionButton.BorderBrush = new SolidColorBrush(
+            _startSequenceRunning ? Color.FromRgb(255, 98, 110) : Color.FromRgb(56, 185, 121));
         MoveAssignedNozzleButton.IsEnabled =
             visionControllersReady &&
             commandsIdle &&
