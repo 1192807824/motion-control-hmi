@@ -476,6 +476,8 @@ public partial class VisualCalibrationPage : UserControl
 
         if (calibrationCompleted)
         {
+            _nozzleTeachCameraPosition = null;
+            _nozzleTeachTool = null;
             _uiSettings.NozzleOffsetCalibrated = false;
             _uiSettings.Nozzle2OffsetCalibrated = false;
             _uiSettings.CalibrationProfilePath = "";
@@ -483,6 +485,7 @@ public partial class VisualCalibrationPage : UserControl
             _nozzle2ClickVerified = false;
             _visionCalibration.Save();
             UpdateCalibrationProfilePathDisplay();
+            UpdateNozzleTeachUi();
             UpdateNozzleCalibrationDisplay();
 
             SelectClickTargetTool(VisionTargetTool.Camera);
@@ -975,11 +978,21 @@ public partial class VisualCalibrationPage : UserControl
                 _nozzle2ClickVerified = true;
             }
 
-            var verificationMessage = _nozzle1ClickVerified && _nozzle2ClickVerified
-                ? "双吸嘴验证完成，请关闭点击移动后保存配置。"
-                : _nozzle1ClickVerified
-                    ? "请继续验证吸嘴2。"
-                    : "请继续验证吸嘴1。";
+            var verificationMessage = targetTool switch
+            {
+                VisionTargetTool.Camera => "相机中心已对准目标，请点击“记录十字”。",
+                _ when _nozzle1ClickVerified && _nozzle2ClickVerified =>
+                    "双吸嘴验证完成，请关闭点击移动后保存配置。",
+                _ when _nozzle1ClickVerified => "请继续验证吸嘴2。",
+                _ => "请继续验证吸嘴1。"
+            };
+            if (targetTool == VisionTargetTool.Camera)
+            {
+                SetNozzleCalibrationStatus(
+                    "相机中心已对准目标，请记录十字位置，再手动移动吸嘴1对准同一目标。",
+                    WorkflowStatus.Running);
+            }
+
             SetClickMoveStatus(
                 $"{targetName}验证完成：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###}；" +
                 verificationMessage,
@@ -1517,7 +1530,6 @@ public partial class VisualCalibrationPage : UserControl
             !_centerSyncRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
-            EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null;
         RecordNozzleToolPointButton.IsEnabled =
             !_calibrationRunning &&
