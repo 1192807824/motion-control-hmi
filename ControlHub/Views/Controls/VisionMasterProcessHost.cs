@@ -93,16 +93,24 @@ public sealed class VisionMasterProcessHost : HwndHost
             return;
         }
 
+        Process? exitedProcess;
         lock (_syncRoot)
         {
-            if (_process is { HasExited: false })
+            if (IsProcessRunning(_process))
             {
                 return;
             }
 
+            // 已退出的旧进程仍可能触发 Exited 事件；先脱离并清理它，
+            // 再创建新的监控对象，避免启动等待线程读取到已释放的 Process。
+            exitedProcess = _process;
+            _process = null;
+            _visionWindow = IntPtr.Zero;
             _startCancellation?.Dispose();
             _startCancellation = new CancellationTokenSource();
         }
+
+        DisposeProcessNoThrow(exitedProcess);
 
         var cancellationToken = _startCancellation.Token;
 
@@ -502,7 +510,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         {
             lock (_syncRoot)
             {
-                if (_process is not { HasExited: false })
+                if (!IsProcessRunning(_process))
                 {
                     throw new InvalidOperationException("视觉组件尚未启动。");
                 }
@@ -806,22 +814,39 @@ public sealed class VisionMasterProcessHost : HwndHost
             while (DateTime.UtcNow < deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (process.HasExited)
+                try
+                {
+                    process.Refresh();
+                    if (process.HasExited)
+                    {
+                        throw new InvalidOperationException(
+                            $"VisionMasterHost 已提前退出（代码 {process.ExitCode}）。");
+                    }
+
+                    var windowHandle = process.MainWindowHandle;
+                    if (windowHandle == IntPtr.Zero)
+                    {
+                        windowHandle = FindVisibleTopLevelWindow(process.Id);
+                    }
+
+                    if (windowHandle != IntPtr.Zero)
+                    {
+                        return windowHandle;
+                    }
+                }
+                catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+                catch (ObjectDisposedException exception)
                 {
                     throw new InvalidOperationException(
-                        $"VisionMasterHost 已提前退出（代码 {process.ExitCode}）。");
+                        "VisionMasterHost 启动期间进程句柄已失效。",
+                        exception);
                 }
-
-                process.Refresh();
-                var windowHandle = process.MainWindowHandle;
-                if (windowHandle == IntPtr.Zero)
+                catch (InvalidOperationException) when (cancellationToken.IsCancellationRequested)
                 {
-                    windowHandle = FindVisibleTopLevelWindow(process.Id);
-                }
-
-                if (windowHandle != IntPtr.Zero)
-                {
-                    return windowHandle;
+                    throw new OperationCanceledException(cancellationToken);
                 }
 
                 Thread.Sleep(50);
@@ -1040,17 +1065,54 @@ public sealed class VisionMasterProcessHost : HwndHost
                 return;
             }
 
-            _process = null;
             _visionWindow = IntPtr.Zero;
             shouldNotify = !_disposed;
         }
 
-        process.Exited -= VisionProcess_Exited;
-        process.Dispose();
-
         if (shouldNotify)
         {
             _ = Dispatcher.BeginInvoke(() => Exited?.Invoke(this, EventArgs.Empty));
+        }
+    }
+
+    private static bool IsProcessRunning(Process? process)
+    {
+        if (process is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return !process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private void DisposeProcessNoThrow(Process? process)
+    {
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            process.Exited -= VisionProcess_Exited;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            process.Dispose();
+        }
+        catch
+        {
         }
     }
 
