@@ -7,6 +7,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSNPointCalibModuCs;
@@ -48,7 +49,6 @@ public partial class MainWindow : Window
     private bool _busy;
     private bool _initializingFixedSolution;
     private bool _calibrationViewActive;
-    private bool _restoreRealtimePreviewAfterCalibration;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _applyingCalibrationSidebarState;
@@ -274,12 +274,14 @@ public partial class MainWindow : Window
         _calibrationViewActive = true;
 
         CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
-        BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
-        CenterCrosshair.Visibility = Visibility.Collapsed;
-        ImagePlaceholder.Visibility = Visibility.Collapsed;
         await RealtimePreviewHost.StopAsync();
         RealtimePreviewHost.Visibility = Visibility.Collapsed;
-        ActivateCalibrationPreviewFrame();
+        ClearLiveRenderForCalibration();
+        ApplyCalibrationRenderLayout();
+        await RefreshRenderLayoutAsync();
+        ClearCalibrationRenderer();
+        BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
+        await RefreshRenderLayoutAsync();
 
         UpdateCommandState();
         SetStatus("标定界面已开启：使用标定流程图像源，标定流程已就绪。", StatusKind.Success);
@@ -290,7 +292,8 @@ public partial class MainWindow : Window
     {
         await RealtimePreviewHost.StopAsync();
         RealtimePreviewHost.Visibility = Visibility.Collapsed;
-        VisionRenderControl.Visibility = Visibility.Visible;
+        ApplySplitRenderLayout();
+        await RefreshRenderLayoutAsync();
         _clickMoveEnabled = false;
         _clickCenterPixelReady = false;
         DetachCrosshairModule();
@@ -1069,7 +1072,11 @@ public partial class MainWindow : Window
         var calibrationDirectory = Path.GetDirectoryName(calibrationPath)
             ?? throw new InvalidDataException("无法确定标定文件的保存目录。");
 
-        await PauseRealtimePreviewForCalibrationAsync();
+        await RealtimePreviewHost.StopAsync();
+        RealtimePreviewHost.Visibility = Visibility.Collapsed;
+        ClearLiveRenderForCalibration();
+        ApplyCalibrationRenderLayout();
+        await RefreshRenderLayoutAsync();
 
         var nPointModule = ResolveNPointCalibrationModule(procedureName);
         try
@@ -1109,7 +1116,6 @@ public partial class MainWindow : Window
             _calibrationSession = null;
             ClearCalibrationRenderer();
             SetBusy(false);
-            await RestoreRealtimePreviewForCalibrationAsync();
             throw;
         }
     }
@@ -1155,7 +1161,7 @@ public partial class MainWindow : Window
         return $"第 {pointNumber}/9 点 VisionMaster 流程执行完成。";
     }
 
-    private async Task<string> CompleteNinePointCalibrationAsync()
+    private Task<string> CompleteNinePointCalibrationAsync()
     {
         var session = _calibrationSession
             ?? throw new InvalidOperationException("尚未准备九点标定参数。");
@@ -1184,11 +1190,10 @@ public partial class MainWindow : Window
             $"标定文件：{session.CalibrationPath}；N点标定1结果已显示在右侧";
         SetBusy(false);
         SetStatus(message, StatusKind.Success);
-        await RestoreRealtimePreviewForCalibrationAsync();
-        return message;
+        return Task.FromResult(message);
     }
 
-    private async Task<string> AbortNinePointCalibrationAsync()
+    private Task<string> AbortNinePointCalibrationAsync()
     {
         if (_calibrationSession is { } session)
         {
@@ -1200,8 +1205,7 @@ public partial class MainWindow : Window
         var message = "九点标定已取消，本次未完成的标定点已清空。";
         SetBusy(false);
         SetStatus(message, StatusKind.Ready);
-        await RestoreRealtimePreviewForCalibrationAsync();
-        return message;
+        return Task.FromResult(message);
     }
 
     private static double ParseFiniteDouble(string value, string name)
@@ -1857,18 +1861,21 @@ public partial class MainWindow : Window
     {
         if (string.Equals(_fullscreenRenderTarget, target, StringComparison.Ordinal))
         {
-            _fullscreenRenderTarget = null;
-            WorkspaceSidebarColumn.Width = new GridLength(320);
-            WorkspaceGapColumn.Width = new GridLength(10);
-            CalibrationSidebar.Visibility = Visibility.Visible;
-            LiveRenderPanel.Visibility = Visibility.Visible;
-            CalibrationRenderPanel.Visibility = Visibility.Visible;
-            Grid.SetColumn(LiveRenderPanel, 0);
-            Grid.SetColumnSpan(LiveRenderPanel, 1);
-            Grid.SetColumn(CalibrationRenderPanel, 2);
-            Grid.SetColumnSpan(CalibrationRenderPanel, 1);
-            LiveFullscreenButton.Content = "\uE740";
-            CalibrationFullscreenButton.Content = "\uE740";
+            if (_calibrationViewActive)
+            {
+                ApplyCalibrationRenderLayout();
+            }
+            else
+            {
+                ApplySplitRenderLayout();
+            }
+
+            RefreshRenderLayout();
+            return;
+        }
+
+        if (_calibrationViewActive && string.Equals(target, "Live", StringComparison.Ordinal))
+        {
             return;
         }
 
@@ -1885,6 +1892,62 @@ public partial class MainWindow : Window
         Grid.SetColumnSpan(visiblePanel, 3);
         LiveFullscreenButton.Content = showLive ? "\uE73F" : "\uE740";
         CalibrationFullscreenButton.Content = showLive ? "\uE740" : "\uE73F";
+        RefreshRenderLayout();
+    }
+
+    private void ApplyCalibrationRenderLayout()
+    {
+        _fullscreenRenderTarget = null;
+        WorkspaceSidebarColumn.Width = new GridLength(320);
+        WorkspaceGapColumn.Width = new GridLength(0);
+        CalibrationSidebar.Visibility = Visibility.Visible;
+        LiveRenderPanel.Visibility = Visibility.Collapsed;
+        CalibrationRenderPanel.Visibility = Visibility.Visible;
+        Grid.SetColumn(LiveRenderPanel, 0);
+        Grid.SetColumnSpan(LiveRenderPanel, 1);
+        Grid.SetColumn(CalibrationRenderPanel, 0);
+        Grid.SetColumnSpan(CalibrationRenderPanel, 3);
+        LiveFullscreenButton.Content = "\uE740";
+        CalibrationFullscreenButton.Content = "\uE740";
+    }
+
+    private void ApplySplitRenderLayout()
+    {
+        _fullscreenRenderTarget = null;
+        WorkspaceSidebarColumn.Width = new GridLength(320);
+        WorkspaceGapColumn.Width = new GridLength(10);
+        CalibrationSidebar.Visibility = Visibility.Visible;
+        LiveRenderPanel.Visibility = Visibility.Visible;
+        CalibrationRenderPanel.Visibility = Visibility.Visible;
+        Grid.SetColumn(LiveRenderPanel, 0);
+        Grid.SetColumnSpan(LiveRenderPanel, 1);
+        Grid.SetColumn(CalibrationRenderPanel, 2);
+        Grid.SetColumnSpan(CalibrationRenderPanel, 1);
+        LiveFullscreenButton.Content = "\uE740";
+        CalibrationFullscreenButton.Content = "\uE740";
+    }
+
+    private void ClearLiveRenderForCalibration()
+    {
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        VisionRenderControl.ModuleSource = null;
+        VisionRenderControl.ClearDisplayView();
+        ImagePlaceholder.Visibility = Visibility.Visible;
+    }
+
+    private void RefreshRenderLayout()
+    {
+        RenderGrid.UpdateLayout();
+        LiveRenderPanel.UpdateLayout();
+        CalibrationRenderPanel.UpdateLayout();
+        VisionRenderControl.UpdateLayout();
+        CalibrationRenderControl.UpdateLayout();
+    }
+
+    private async Task RefreshRenderLayoutAsync()
+    {
+        RefreshRenderLayout();
+        await Dispatcher.InvokeAsync(RefreshRenderLayout, DispatcherPriority.Loaded);
     }
 
     private async void CalibrationToolbarAction_Click(object sender, RoutedEventArgs e)
@@ -2465,86 +2528,6 @@ public partial class MainWindow : Window
         {
             // Blob 结果已经取得；恢复实时画面失败不能改变本次检测结果。
         }
-    }
-
-    private async Task PauseRealtimePreviewForCalibrationAsync()
-    {
-        if (!RealtimePreviewHost.IsRunning)
-        {
-            _restoreRealtimePreviewAfterCalibration = false;
-            return;
-        }
-
-        _restoreRealtimePreviewAfterCalibration = _calibrationViewActive;
-        await RealtimePreviewHost.StopAsync();
-    }
-
-    private async Task RestoreRealtimePreviewForCalibrationAsync()
-    {
-        if (!_restoreRealtimePreviewAfterCalibration)
-        {
-            return;
-        }
-
-        _restoreRealtimePreviewAfterCalibration = false;
-        if (!_calibrationViewActive || _closed)
-        {
-            return;
-        }
-
-        try
-        {
-            await RealtimePreviewHost.StartAsync();
-        }
-        catch (Exception exception)
-        {
-            SetStatus($"实时画面恢复失败：{FormatException(exception)}", StatusKind.Error);
-        }
-    }
-
-    private void ActivateCalibrationPreviewFrame()
-    {
-        VisionRenderControl.Visibility = Visibility.Visible;
-        ImagePlaceholder.Visibility = Visibility.Collapsed;
-        CenterCrosshair.Visibility = _clickMoveEnabled
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-
-        if (_calibrationProcedure is null)
-        {
-            SetStatus("标定流程尚未就绪。", StatusKind.Error);
-            return;
-        }
-
-        try
-        {
-            var options = GetImageStepOptions(CalibrationProcedureName, _calibrationProcedure);
-            ImageStepComboBox.ItemsSource = options;
-            var imageOption = options.FirstOrDefault(option => option.IsImageSource)
-                ?? options.FirstOrDefault(option => option.DisplayName.Contains("图像源"))
-                ?? options.FirstOrDefault();
-            if (imageOption is null)
-            {
-                ClearRenderer();
-                SetStatus("标定流程中未找到图像源。", StatusKind.Error);
-                return;
-            }
-
-            BindImageStep(imageOption, persistSelection: false);
-            RunVisionModule(imageOption.Module);
-            VisionRenderControl.UpdateVMResultShow();
-            SetStatus("标定界面已开启：使用标定流程图像源，标定流程已就绪。", StatusKind.Success);
-        }
-        catch (Exception exception)
-        {
-            SetStatus($"标定界面已开启；标定流程图像源取图失败：{FormatException(exception)}", StatusKind.Error);
-        }
-    }
-
-    private static void RunVisionModule(IVmModule module)
-    {
-        var runMethod = module.GetType().GetMethod("Run", Type.EmptyTypes);
-        runMethod?.Invoke(module, null);
     }
 
     private void RunCalibrationProcedureOnce()
