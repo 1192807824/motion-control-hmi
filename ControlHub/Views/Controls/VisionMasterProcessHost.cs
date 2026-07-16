@@ -250,6 +250,11 @@ public sealed class VisionMasterProcessHost : HwndHost
         return SendCalibrationCommandAsync("ACTIVATE_CALIBRATION_VIEW", cancellationToken);
     }
 
+    public Task<string> ActivateInspectionViewAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("ACTIVATE_INSPECTION_VIEW", cancellationToken);
+    }
+
     public Task<string> DeactivateCalibrationViewAsync(CancellationToken cancellationToken)
     {
         return SendCalibrationCommandAsync("DEACTIVATE_CALIBRATION_VIEW", cancellationToken);
@@ -313,6 +318,18 @@ public sealed class VisionMasterProcessHost : HwndHost
                 importEnabled ? "1" : "0",
                 loadProfileEnabled ? "1" : "0",
                 saveProfileEnabled ? "1" : "0"),
+            cancellationToken);
+    }
+
+    public Task<string> ShowCalibrationSaveFeedbackAsync(
+        bool success,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        var encodedMessage = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(message?.Trim() ?? string.Empty));
+        return SendCalibrationCommandAsync(
+            $"SET_CALIBRATION_SAVE_FEEDBACK\t{(success ? "1" : "0")}\t{encodedMessage}",
             cancellationToken);
     }
 

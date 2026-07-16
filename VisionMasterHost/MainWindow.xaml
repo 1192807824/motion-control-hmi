@@ -246,10 +246,10 @@
         </Style>
     </Window.Resources>
 
-    <Grid Background="#111D29">
+    <Grid x:Name="RootGrid" Background="#111D29">
         <Grid.RowDefinitions>
-            <RowDefinition Height="64" />
-            <RowDefinition Height="34" />
+            <RowDefinition x:Name="CommandBarRow" Height="64" />
+            <RowDefinition x:Name="StatusBarRow" Height="34" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -439,7 +439,8 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="1"
+        <Border x:Name="StatusBar"
+                Grid.Row="1"
                 Margin="330,0,8,0"
                 Padding="8,0"
                 Background="#071D2F"
@@ -665,10 +666,14 @@
                         BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                     <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="48" />
+                            <RowDefinition x:Name="LiveRenderHeaderRow" Height="48" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Border Padding="18,0,10,0" Background="#0B263A" BorderBrush="#345269" BorderThickness="0,0,0,1">
+                        <Border x:Name="LiveRenderHeader"
+                                Padding="18,0,10,0"
+                                Background="#0B263A"
+                                BorderBrush="#345269"
+                                BorderThickness="0,0,0,1">
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#00D77B" />
@@ -698,11 +703,16 @@
                                 <Border Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#FF00E676" />
                                 <Border Height="1" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="#FF00E676" />
                             </Grid>
-                            <StackPanel x:Name="ImagePlaceholder" HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" IsHitTestVisible="False">
-                                <TextBlock Text="等待实时图像" Foreground="#D9E0E5" FontSize="20"
-                                           FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            </StackPanel>
+                            <Grid x:Name="ImagePlaceholder"
+                                  Background="#202427"
+                                  IsHitTestVisible="False"
+                                  Panel.ZIndex="30">
+                                <TextBlock x:Name="ImagePlaceholderText"
+                                           Text="等待实时图像" Foreground="#D9E0E5" FontSize="20"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Grid>
                         </Grid>
                     </Grid>
                 </Border>
@@ -737,11 +747,15 @@
                         </Border>
                         <Grid Grid.Row="1">
                             <vm:VmRenderControl x:Name="CalibrationRenderControl" CoordinateInfoVisible="True" />
-                            <StackPanel x:Name="CalibrationImagePlaceholder" HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Grid x:Name="CalibrationImagePlaceholder"
+                                  Background="#202427"
+                                  IsHitTestVisible="False"
+                                  Panel.ZIndex="30">
                                 <TextBlock Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"
-                                           FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            </StackPanel>
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Grid>
                         </Grid>
                     </Grid>
                 </Border>

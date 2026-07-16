@@ -22,7 +22,6 @@ public partial class MainWindow : Window
         VisualCalibrationContent.AttachMotionController(MotionPage);
         HomeContent.AttachMotionController(MotionPage);
         HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
-        HomeContent.ShowVisionInspectionDisplayAsync = ShowVisionInspectionDisplayAsync;
 
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;
@@ -101,12 +100,6 @@ public partial class MainWindow : Window
             return;
         }
         ShowConnectionConfigPage();
-    }
-
-    private async Task ShowVisionInspectionDisplayAsync()
-    {
-        ShowVisualCalibrationPage();
-        await VisualCalibrationContent.EnsureStartedAsync();
     }
 
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e)

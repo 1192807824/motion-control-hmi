@@ -218,6 +218,7 @@ public partial class MainWindow : Window
             var result = commandName switch
             {
                 "ACTIVATE_CALIBRATION_VIEW" => await ActivateCalibrationViewAsync(),
+                "ACTIVATE_INSPECTION_VIEW" => await ActivateInspectionViewAsync(),
                 "DEACTIVATE_CALIBRATION_VIEW" => await DeactivateCalibrationViewAsync(),
                 "PREPARE" => await PrepareNinePointCalibrationAsync(command.Split('\t')),
                 "COMPLETE" => await CompleteNinePointCalibrationAsync(),
@@ -245,6 +246,7 @@ public partial class MainWindow : Window
             "SET_CLICK_MODE" => SetClickMoveMode(parts),
             "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
+            "SET_CALIBRATION_SAVE_FEEDBACK" => SetCalibrationSaveFeedback(parts),
             "SET_CALIBRATION_SIDEBAR_STATE" => SetCalibrationSidebarState(parts),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
@@ -254,6 +256,7 @@ public partial class MainWindow : Window
 
     private async Task<string> ActivateCalibrationViewAsync()
     {
+        ApplyCalibrationShellLayout();
         if (_calibrationViewActive && _calibrationProcedure is not null)
         {
             return "标定界面已经开启。";
@@ -303,6 +306,19 @@ public partial class MainWindow : Window
         UpdateCommandState();
         SetStatus("已离开视觉标定：实时画面和新纳方案均已关闭", StatusKind.Ready);
         return "标定界面已关闭。";
+    }
+
+    private async Task<string> ActivateInspectionViewAsync()
+    {
+        StopAllContinuousExecutionNoThrow();
+        CloseCurrentSolutionNoThrow();
+        _calibrationViewActive = false;
+        _clickMoveEnabled = false;
+        _clickCenterPixelReady = false;
+        ApplyInspectionShellLayout();
+        await RefreshRenderLayoutAsync();
+        SetStatus("主页检测待命：仅显示找芯片流程 / Blob分析1", StatusKind.Ready);
+        return "主页 Blob 检测显示已开启。";
     }
 
     /// <summary>
@@ -357,7 +373,7 @@ public partial class MainWindow : Window
         // 同一相机不能被两个流程同时占用。找芯片前明确停止方案内的连续执行。
         StopAllContinuousExecutionNoThrow();
 
-        var imageStepBound = TryBindInspectionImageStep(InspectionProcedureName, procedure);
+        BindInspectionBlobModule(blobModule);
 
         InspectionImageFile? inspectionImage = null;
         try
@@ -397,18 +413,16 @@ public partial class MainWindow : Window
             var second = ReadBlobResultRow(blobResult, 1);
 
             var imageWarning = "";
-            if (imageStepBound)
+            try
             {
-                try
-                {
-                    VisionRenderControl.UpdateVMResultShow();
-                    inspectionImage = SaveInspectionImage();
-                }
-                catch (Exception exception)
-                {
-                    // X/Y 是本次生产步骤的必要结果；检测图保存失败时仍然把坐标返回主页。
-                    imageWarning = $"；检测图未返回：{FormatException(exception)}";
-                }
+                VisionRenderControl.UpdateVMResultShow();
+                ImagePlaceholder.Visibility = Visibility.Collapsed;
+                inspectionImage = SaveInspectionImage();
+            }
+            catch (Exception exception)
+            {
+                // X/Y 是本次生产步骤的必要结果；检测图保存失败时仍然把坐标返回主页。
+                imageWarning = $"；检测图未返回：{FormatException(exception)}";
             }
 
             SetStatus(
@@ -452,9 +466,8 @@ public partial class MainWindow : Window
         {
             if (!_closed)
             {
-                // 找芯片流程始终单次执行；结束后只恢复画面1绑定，不启动连续取流。
-                procedure.ContinuousRunEnable = false;
-                RestoreRealtimePreviewNoThrow();
+                // 找芯片流程保持单次执行；停止全部连续流程即可释放相机，同时保留Blob结果图。
+                StopAllContinuousExecutionNoThrow();
             }
 
             UpdateCommandState();
@@ -487,7 +500,50 @@ public partial class MainWindow : Window
         ImportCalibrationToolbarButton.IsEnabled = parts[4] == "1";
         LoadCalibrationProfileToolbarButton.IsEnabled = parts[5] == "1";
         SaveCalibrationProfileToolbarButton.IsEnabled = parts[6] == "1";
+        if (!SaveCalibrationProfileToolbarButton.IsEnabled)
+        {
+            ResetCalibrationSaveFeedback();
+        }
         return "标定文件菜单状态已更新。";
+    }
+
+    private string SetCalibrationSaveFeedback(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 3 || (parts[1] != "0" && parts[1] != "1"))
+        {
+            throw new InvalidDataException("保存配置反馈参数不正确。");
+        }
+
+        string message;
+        try
+        {
+            message = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException("保存配置反馈文本格式不正确。", exception);
+        }
+
+        var success = parts[1] == "1";
+        SaveCalibrationProfileToolbarButton.Content = success ? "保存成功" : "保存失败";
+        SaveCalibrationProfileToolbarButton.ToolTip = message;
+        SaveCalibrationProfileToolbarButton.Background = new SolidColorBrush(
+            success ? Color.FromRgb(11, 73, 55) : Color.FromRgb(91, 24, 33));
+        SaveCalibrationProfileToolbarButton.BorderBrush = new SolidColorBrush(
+            success ? Color.FromRgb(0, 199, 120) : Color.FromRgb(217, 13, 22));
+        SaveCalibrationProfileToolbarButton.Foreground = new SolidColorBrush(
+            success ? Color.FromRgb(30, 234, 134) : Color.FromRgb(255, 128, 137));
+        SetStatus(message, success ? StatusKind.Success : StatusKind.Error);
+        return "保存配置反馈已显示。";
+    }
+
+    private void ResetCalibrationSaveFeedback()
+    {
+        SaveCalibrationProfileToolbarButton.Content = "保存配置";
+        SaveCalibrationProfileToolbarButton.ToolTip = "保存当前九点标定和双吸嘴对位配置";
+        SaveCalibrationProfileToolbarButton.Background = new SolidColorBrush(Color.FromRgb(11, 43, 36));
+        SaveCalibrationProfileToolbarButton.BorderBrush = new SolidColorBrush(Color.FromRgb(0, 169, 101));
+        SaveCalibrationProfileToolbarButton.Foreground = new SolidColorBrush(Color.FromRgb(30, 234, 134));
     }
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
@@ -592,23 +648,16 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 将找芯片流程的图像源绑定到渲染控件，以便把本次执行图显示到主页预留区域。
-    /// 绑定本身不会启动连续运行，也不会触发相机提前采图。
+    /// 与参考程序一致，直接把指定执行模块绑定到 VmRenderControl。
+    /// 主页只显示“Blob分析1”的模块结果，不显示方案工具栏或标定模块。
     /// </summary>
-    private bool TryBindInspectionImageStep(string procedureName, VmProcedure procedure)
+    private void BindInspectionBlobModule(IMVSBlobFindModuTool blobModule)
     {
-        var options = GetImageStepOptions(procedureName, procedure);
-        ImageStepComboBox.ItemsSource = options;
-        var imageOption = options.FirstOrDefault(option =>
-            string.Equals(option.DisplayName, "图像源1", StringComparison.Ordinal));
-        if (imageOption is null)
-        {
-            ClearRenderer();
-            return false;
-        }
-
-        BindImageStep(imageOption, persistSelection: false);
-        return true;
+        DetachCrosshairModule();
+        _displayedModule = null;
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        VisionRenderControl.ModuleSource = blobModule;
     }
 
     /// <summary>
@@ -1156,6 +1205,7 @@ public partial class MainWindow : Window
                 $"第 {pointNumber} 点 N点标定模块返回 NG，请检查相机取像和圆查找结果。");
         }
 
+        CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
         session.NextPointNumber++;
         SetStatus(
             $"第 {pointNumber}/9 点已采集，流程用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms",
@@ -1765,6 +1815,9 @@ public partial class MainWindow : Window
 
     private void CrosshairModule_ModuleResultCallBackArrived(object? sender, EventArgs e)
     {
+        _ = Dispatcher.BeginInvoke(
+            () => ImagePlaceholder.Visibility = Visibility.Collapsed,
+            DispatcherPriority.Render);
         if (_clickCenterPixelReady)
         {
             QueueImageCenterCrosshair();
@@ -1919,6 +1972,41 @@ public partial class MainWindow : Window
         CalibrationFullscreenButton.Content = "\uE740";
     }
 
+    private void ApplyCalibrationShellLayout()
+    {
+        MinWidth = 1024;
+        MinHeight = 640;
+        CommandBarRow.Height = new GridLength(64);
+        StatusBarRow.Height = new GridLength(34);
+        CommandBar.Visibility = Visibility.Visible;
+        StatusBar.Visibility = Visibility.Visible;
+        WorkspaceGrid.Margin = new Thickness(0, 0, 8, 8);
+        LiveRenderHeaderRow.Height = new GridLength(48);
+        LiveRenderHeader.Visibility = Visibility.Visible;
+        ImagePlaceholderText.Text = "等待实时图像";
+    }
+
+    private void ApplyInspectionShellLayout()
+    {
+        MinWidth = 1;
+        MinHeight = 1;
+        CommandBarRow.Height = new GridLength(0);
+        StatusBarRow.Height = new GridLength(0);
+        CommandBar.Visibility = Visibility.Collapsed;
+        StatusBar.Visibility = Visibility.Collapsed;
+        WorkspaceGrid.Margin = new Thickness(0);
+        WorkspaceSidebarColumn.Width = new GridLength(0);
+        WorkspaceGapColumn.Width = new GridLength(0);
+        CalibrationSidebar.Visibility = Visibility.Collapsed;
+        LiveRenderHeaderRow.Height = new GridLength(0);
+        LiveRenderHeader.Visibility = Visibility.Collapsed;
+        ImagePlaceholderText.Text = "等待 Blob分析1";
+        LiveRenderPanel.Visibility = Visibility.Visible;
+        CalibrationRenderPanel.Visibility = Visibility.Collapsed;
+        Grid.SetColumn(LiveRenderPanel, 0);
+        Grid.SetColumnSpan(LiveRenderPanel, 3);
+    }
+
     private void ApplyLiveRenderLayout()
     {
         ApplySingleRenderLayout(showLive: true);
@@ -1969,10 +2057,22 @@ public partial class MainWindow : Window
 
         try
         {
+            if (string.Equals(action, "SaveProfile", StringComparison.Ordinal))
+            {
+                SaveCalibrationProfileToolbarButton.Content = "保存中...";
+                SaveCalibrationProfileToolbarButton.IsEnabled = false;
+                SetStatus("正在保存双吸嘴标定配置...", StatusKind.Busy);
+            }
+
             await SendHostEventAsync($"CALIBRATION_TOOLBAR_ACTION\t{action}");
         }
         catch (Exception exception)
         {
+            if (string.Equals(action, "SaveProfile", StringComparison.Ordinal))
+            {
+                ResetCalibrationSaveFeedback();
+            }
+
             SetStatus($"标定文件菜单操作失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
@@ -2080,11 +2180,6 @@ public partial class MainWindow : Window
             _settings.CalibrationProcedureName = CalibrationProcedureName;
             SolutionPathTextBox.Text = _loadedSolutionPath;
             PopulateImageSteps(CalibrationProcedureName, _previewProcedure);
-            ApplyLiveRenderLayout();
-            if (!TryStartLivePreview(out var previewError))
-            {
-                throw new InvalidOperationException($"实时画面启动失败：{previewError}");
-            }
             SaveSettingsNoThrow();
 
             UpdateCommandState();
@@ -2395,7 +2490,7 @@ public partial class MainWindow : Window
     {
         DetachCrosshairModule();
         _clickMoveEnabled = false;
-        StopPreviewProcedureNoThrow();
+        StopAllContinuousExecutionNoThrow();
         ClearRenderer();
 
         if (_solutionLoaded)
@@ -2419,7 +2514,7 @@ public partial class MainWindow : Window
     {
         DetachCrosshairModule();
         _clickMoveEnabled = false;
-        StopPreviewProcedureNoThrow();
+        StopAllContinuousExecutionNoThrow();
         ClearRenderer();
         try
         {
@@ -2481,6 +2576,7 @@ public partial class MainWindow : Window
 
     private void BindCalibrationModule(IMVSNPointCalibModuTool module)
     {
+        CalibrationImagePlaceholder.Visibility = Visibility.Visible;
         CalibrationRenderControl.ModuleSource = module;
         try
         {
@@ -2491,7 +2587,6 @@ public partial class MainWindow : Window
             // The module has no render result until the first calibration capture.
         }
 
-        CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
     }
 
     private void StopPreviewProcedureNoThrow()
@@ -2543,7 +2638,7 @@ public partial class MainWindow : Window
         }
 
         // The camera belongs exclusively to the calibration flow until all nine points finish.
-        StopPreviewProcedureNoThrow();
+        StopAllContinuousExecutionNoThrow();
         _calibrationProcedure.Run(true);
     }
 
@@ -2603,6 +2698,7 @@ public partial class MainWindow : Window
         _clickImagePixelWidth = 0;
         _clickImagePixelHeight = 0;
         _displayedModule = option.Module as VmModule;
+        ImagePlaceholder.Visibility = Visibility.Visible;
         VisionRenderControl.ModuleSource = option.Module;
         try
         {
@@ -2613,7 +2709,6 @@ public partial class MainWindow : Window
             // A newly loaded image source may not have a render result until its first frame.
         }
 
-        ImagePlaceholder.Visibility = Visibility.Collapsed;
         CenterCrosshair.Visibility = Visibility.Collapsed;
         AttachCrosshairModule();
         QueueClickCenterInitialization();
@@ -2755,7 +2850,7 @@ public partial class MainWindow : Window
             _activeCommandPipe = null;
         }
 
-        StopPreviewProcedureNoThrow();
+        StopAllContinuousExecutionNoThrow();
         try
         {
             _standaloneTransformModule?.Dispose();

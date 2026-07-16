@@ -79,6 +79,25 @@ public partial class VisualCalibrationPage : UserControl
         VisionHost.AttachDisplayHost(displayHostWindow);
     }
 
+    public async Task ActivateInspectionViewAsync(IntPtr displayHostWindow)
+    {
+        if (displayHostWindow == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("主页 Blob 显示区域尚未创建。");
+        }
+
+        _calibrationViewRequested = false;
+        VisionHost.AttachDisplayHost(displayHostWindow);
+        await EnsureStartedAsync();
+        if (!_hostReady)
+        {
+            throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
+        }
+
+        await VisionHost.ActivateInspectionViewAsync(CancellationToken.None);
+        VisionHost.RefreshDisplayHost();
+    }
+
     public void UseDefaultVisionDisplay()
     {
         VisionHost.UseDefaultDisplayHost();
@@ -134,6 +153,12 @@ public partial class VisualCalibrationPage : UserControl
 
         try
         {
+            if (EnableClickMoveCheckBox.IsChecked == true)
+            {
+                SetClickMoveCheckedNoEvent(false);
+                await ConfigureClickMoveModeAsync(false);
+            }
+
             await VisionHost.DeactivateCalibrationViewAsync(CancellationToken.None);
         }
         catch
@@ -632,21 +657,38 @@ public partial class VisualCalibrationPage : UserControl
         UpdateCommandState();
     }
 
-    private void SaveCalibrationProfile_Click(object sender, RoutedEventArgs e)
+    private async void SaveCalibrationProfile_Click(object sender, RoutedEventArgs e)
     {
+        var success = false;
+        string feedbackMessage;
         try
         {
             var path = SaveCurrentCalibrationProfile();
-            SetWorkflowStatus(
-                $"双吸嘴标定配置已保存：{path}",
-                WorkflowStatus.Success);
+            success = true;
+            feedbackMessage = $"双吸嘴标定配置已保存：{path}";
+            SetWorkflowStatus(feedbackMessage, WorkflowStatus.Success);
         }
         catch (Exception exception)
         {
-            SetWorkflowStatus($"保存配置失败：{exception.Message}", WorkflowStatus.Error);
+            feedbackMessage = $"保存配置失败：{exception.Message}";
+            SetWorkflowStatus(feedbackMessage, WorkflowStatus.Error);
         }
 
         UpdateCommandState();
+        if (_hostReady)
+        {
+            try
+            {
+                await VisionHost.ShowCalibrationSaveFeedbackAsync(
+                    success,
+                    feedbackMessage,
+                    CancellationToken.None);
+            }
+            catch
+            {
+                // 配置保存结果已经显示在主界面；Host 刚好退出时无需改变保存结果。
+            }
+        }
     }
 
     private void CalibrationFilePath_Changed(object sender, TextChangedEventArgs e)

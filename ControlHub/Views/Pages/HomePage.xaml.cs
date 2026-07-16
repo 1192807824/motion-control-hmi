@@ -29,8 +29,6 @@ public partial class HomePage : UserControl
     private VisionMotionTarget? _blob2Nozzle2Target;
     private int _nextAssignedNozzleMoveStep;
 
-    public Func<Task>? ShowVisionInspectionDisplayAsync { get; set; }
-
     public HomePage()
     {
         InitializeComponent();
@@ -51,7 +49,7 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
-    public void RefreshVisionInspectionDisplay(VisualCalibrationPage visualCalibrationController)
+    public async void RefreshVisionInspectionDisplay(VisualCalibrationPage visualCalibrationController)
     {
         if (BlobInspectionVisionDisplayHost.Visibility != Visibility.Visible ||
             BlobInspectionVisionDisplayHost.HostWindow == IntPtr.Zero)
@@ -59,8 +57,17 @@ public partial class HomePage : UserControl
             return;
         }
 
-        visualCalibrationController.AttachInspectionDisplayHost(BlobInspectionVisionDisplayHost.HostWindow);
-        visualCalibrationController.RefreshVisionDisplay();
+        try
+        {
+            await visualCalibrationController.ActivateInspectionViewAsync(
+                BlobInspectionVisionDisplayHost.HostWindow);
+        }
+        catch (Exception exception)
+        {
+            BlobInspectionImageStatusText.Text = $"VM显示恢复失败：{exception.Message}";
+            BlobInspectionImageStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        }
     }
 
     /// <summary>
@@ -1086,26 +1093,19 @@ public partial class HomePage : UserControl
         BlobInspectionImageViewbox.Visibility = Visibility.Collapsed;
         BlobInspectionImagePlaceholder.Visibility = Visibility.Collapsed;
         BlobInspectionVisionDisplayHost.Visibility = Visibility.Visible;
+        BlobInspectionImageStatusText.Text = "正在运行 Blob分析1";
+        BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(98, 181, 255));
 
         await Dispatcher.InvokeAsync(
             () => BlobInspectionVisionDisplayHost.UpdateLayout(),
             System.Windows.Threading.DispatcherPriority.Loaded);
-
         var displayHostWindow = BlobInspectionVisionDisplayHost.HostWindow;
-        if (displayHostWindow != IntPtr.Zero)
+        if (displayHostWindow == IntPtr.Zero)
         {
-            visualCalibrationController.AttachInspectionDisplayHost(displayHostWindow);
-            visualCalibrationController.RefreshVisionDisplay();
-            BlobInspectionImageStatusText.Text = "海康组件显示";
-            BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
-            return;
+            throw new InvalidOperationException("主页 Blob 显示区域尚未创建。");
         }
 
-        BlobInspectionVisionDisplayHost.Visibility = Visibility.Hidden;
-        if (ShowVisionInspectionDisplayAsync is not null)
-        {
-            await ShowVisionInspectionDisplayAsync();
-        }
+        await visualCalibrationController.ActivateInspectionViewAsync(displayHostWindow);
     }
 
     private void BlobInspectionVisionDisplayHost_HostSizeChanged(object? sender, EventArgs e)
@@ -1141,8 +1141,18 @@ public partial class HomePage : UserControl
 
         if (BlobInspectionVisionDisplayHost.Visibility == Visibility.Visible)
         {
-            BlobInspectionImageStatusText.Text = $"海康组件显示 · {result.ImageWidth}×{result.ImageHeight}";
-            BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
+            try
+            {
+                File.Delete(result.ImagePath);
+            }
+            catch
+            {
+            }
+
+            BlobInspectionImageStatusText.Text =
+                $"VM组件 · Blob分析1 · {result.ImageWidth}×{result.ImageHeight}";
+            BlobInspectionImageStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(73, 209, 125));
             return;
         }
 
