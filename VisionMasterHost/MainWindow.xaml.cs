@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private bool _busy;
     private bool _initializingFixedSolution;
     private bool _calibrationViewActive;
+    private bool _restoreRealtimePreviewAfterCalibration;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _applyingCalibrationSidebarState;
@@ -217,6 +218,9 @@ public partial class MainWindow : Window
             {
                 "ACTIVATE_CALIBRATION_VIEW" => await ActivateCalibrationViewAsync(),
                 "DEACTIVATE_CALIBRATION_VIEW" => await DeactivateCalibrationViewAsync(),
+                "PREPARE" => await PrepareNinePointCalibrationAsync(command.Split('\t')),
+                "COMPLETE" => await CompleteNinePointCalibrationAsync(),
+                "ABORT" => await AbortNinePointCalibrationAsync(),
                 _ => ExecuteCalibrationCommand(command)
             };
             return EncodePipeResponse(success: true, result);
@@ -233,10 +237,10 @@ public partial class MainWindow : Window
         return parts[0] switch
         {
             "SET_CENTER" => SetCalibrationCenter(parts),
-            "PREPARE" => PrepareNinePointCalibration(parts),
+            "PREPARE" => throw new InvalidOperationException("PREPARE must be executed asynchronously."),
             "CAPTURE" => CaptureNinePointCalibration(parts),
-            "COMPLETE" => CompleteNinePointCalibration(),
-            "ABORT" => AbortNinePointCalibration(),
+            "COMPLETE" => throw new InvalidOperationException("COMPLETE must be executed asynchronously."),
+            "ABORT" => throw new InvalidOperationException("ABORT must be executed asynchronously."),
             "SET_CLICK_MODE" => SetClickMoveMode(parts),
             "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
@@ -1037,7 +1041,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private string PrepareNinePointCalibration(IReadOnlyList<string> parts)
+    private async Task<string> PrepareNinePointCalibrationAsync(IReadOnlyList<string> parts)
     {
         if (parts.Count != 7)
         {
@@ -1080,6 +1084,8 @@ public partial class MainWindow : Window
         var calibrationDirectory = Path.GetDirectoryName(calibrationPath)
             ?? throw new InvalidDataException("无法确定标定文件的保存目录。");
 
+        await PauseRealtimePreviewForCalibrationAsync();
+
         var nPointModule = ResolveNPointCalibrationModule(procedureName);
         try
         {
@@ -1118,6 +1124,7 @@ public partial class MainWindow : Window
             _calibrationSession = null;
             ClearCalibrationRenderer();
             SetBusy(false);
+            await RestoreRealtimePreviewForCalibrationAsync();
             throw;
         }
     }
@@ -1163,7 +1170,7 @@ public partial class MainWindow : Window
         return $"第 {pointNumber}/9 点 VisionMaster 流程执行完成。";
     }
 
-    private string CompleteNinePointCalibration()
+    private async Task<string> CompleteNinePointCalibrationAsync()
     {
         var session = _calibrationSession
             ?? throw new InvalidOperationException("尚未准备九点标定参数。");
@@ -1192,10 +1199,11 @@ public partial class MainWindow : Window
             $"标定文件：{session.CalibrationPath}；N点标定1结果已显示在右侧";
         SetBusy(false);
         SetStatus(message, StatusKind.Success);
+        await RestoreRealtimePreviewForCalibrationAsync();
         return message;
     }
 
-    private string AbortNinePointCalibration()
+    private async Task<string> AbortNinePointCalibrationAsync()
     {
         if (_calibrationSession is { } session)
         {
@@ -1207,6 +1215,7 @@ public partial class MainWindow : Window
         var message = "九点标定已取消，本次未完成的标定点已清空。";
         SetBusy(false);
         SetStatus(message, StatusKind.Ready);
+        await RestoreRealtimePreviewForCalibrationAsync();
         return message;
     }
 
@@ -2470,6 +2479,41 @@ public partial class MainWindow : Window
         catch
         {
             // Blob 结果已经取得；恢复实时画面失败不能改变本次检测结果。
+        }
+    }
+
+    private async Task PauseRealtimePreviewForCalibrationAsync()
+    {
+        if (!RealtimePreviewHost.IsRunning)
+        {
+            _restoreRealtimePreviewAfterCalibration = false;
+            return;
+        }
+
+        _restoreRealtimePreviewAfterCalibration = _calibrationViewActive;
+        await RealtimePreviewHost.StopAsync();
+    }
+
+    private async Task RestoreRealtimePreviewForCalibrationAsync()
+    {
+        if (!_restoreRealtimePreviewAfterCalibration)
+        {
+            return;
+        }
+
+        _restoreRealtimePreviewAfterCalibration = false;
+        if (!_calibrationViewActive || _closed)
+        {
+            return;
+        }
+
+        try
+        {
+            await RealtimePreviewHost.StartAsync();
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"实时画面恢复失败：{FormatException(exception)}", StatusKind.Error);
         }
     }
 
