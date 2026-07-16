@@ -21,7 +21,6 @@ public partial class MainWindow : Window
 {
     private const string FixedSolutionFileName = "新纳方案.sol";
     private const string FallbackSolutionFileName = "标定方案.sol";
-    private const string RealtimeProcedureName = "实时相机";
     private const string InspectionProcedureName = "找芯片流程";
     private const string CalibrationProcedureName = "标定流程";
     private const string InspectionBlobModuleName = "Blob分析1";
@@ -2058,9 +2057,9 @@ public partial class MainWindow : Window
             _solutionLoaded = true;
 
             var procedureNames = GetProcedureNames();
-            _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
-            _previewProcedure = GetRequiredProcedure(RealtimeProcedureName);
             _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
+            _previewProcedure = _calibrationProcedure;
+            _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
             _calibrationViewActive = false;
 
             // 方案可能保存了“连续运行”状态。主页阶段只保留找芯片流程，标定页打开后再取标定对象。
@@ -2069,14 +2068,14 @@ public partial class MainWindow : Window
             // 保留隐藏控件仅供现有渲染/标定逻辑读取；用户不能再切换方案或流程。
             PreviewProcedureComboBox.ItemsSource = procedureNames;
             CalibrationProcedureComboBox.ItemsSource = procedureNames;
-            PreviewProcedureComboBox.SelectedItem = RealtimeProcedureName;
+            PreviewProcedureComboBox.SelectedItem = CalibrationProcedureName;
             CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
 
             _settings.SolutionPath = _loadedSolutionPath;
-            _settings.PreviewProcedureName = RealtimeProcedureName;
+            _settings.PreviewProcedureName = CalibrationProcedureName;
             _settings.CalibrationProcedureName = CalibrationProcedureName;
             SolutionPathTextBox.Text = _loadedSolutionPath;
-            PopulateImageSteps(RealtimeProcedureName, _previewProcedure);
+            PopulateImageSteps(CalibrationProcedureName, _previewProcedure);
             ApplyLiveRenderLayout();
             if (!TryStartLivePreview(out var previewError))
             {
@@ -2523,7 +2522,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var options = GetImageStepOptions(RealtimeProcedureName, _previewProcedure);
+            var options = GetImageStepOptions(CalibrationProcedureName, _previewProcedure);
             ImageStepComboBox.ItemsSource = options;
             var imageOption = options.FirstOrDefault(option =>
                 string.Equals(option.DisplayName, "图像源1", StringComparison.Ordinal))

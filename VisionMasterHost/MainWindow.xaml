@@ -660,7 +660,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#00D77B" />
-                                    <TextBlock Margin="14,0,0,0" Text="实时画面（流程1 / 图像源1）" Foreground="#F4F8FB"
+                                    <TextBlock Margin="14,0,0,0" Text="实时画面（标定流程 / 图像源1）" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
