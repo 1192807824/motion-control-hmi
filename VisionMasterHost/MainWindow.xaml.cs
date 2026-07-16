@@ -942,11 +942,11 @@ public partial class MainWindow : Window
         if (!enabled)
         {
             _clickMoveEnabled = false;
-            DetachCrosshairModule();
-            _clickCenterPixelReady = false;
             _clickCalibrationPath = calibrationPath;
             VisionRenderControl.SetRenderToolbarVisible(false);
-            CenterCrosshair.Visibility = Visibility.Visible;
+            CenterCrosshair.Visibility = Visibility.Collapsed;
+            AttachCrosshairModule();
+            QueueClickCenterInitialization();
             UpdateCommandState();
             SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
             return "点击视觉移动已关闭。";
@@ -1668,7 +1668,7 @@ public partial class MainWindow : Window
 
     private void DrawImageCenterCrosshair()
     {
-        if (!_clickMoveEnabled || !_clickCenterPixelReady || _closed)
+        if (!_clickCenterPixelReady || _closed)
         {
             return;
         }
@@ -1697,7 +1697,7 @@ public partial class MainWindow : Window
 
     private void QueueImageCenterCrosshair()
     {
-        if (!_clickMoveEnabled || !_clickCenterPixelReady || _closed)
+        if (!_clickCenterPixelReady || _closed)
         {
             return;
         }
@@ -1776,7 +1776,7 @@ public partial class MainWindow : Window
 
     private void QueueClickCenterInitialization()
     {
-        if (!_clickMoveEnabled || _closed)
+        if (_closed)
         {
             return;
         }
@@ -1790,7 +1790,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (!_clickMoveEnabled || _clickCenterPixelReady || _closed)
+                if (_clickCenterPixelReady || _closed)
                 {
                     return;
                 }
@@ -2613,14 +2613,9 @@ public partial class MainWindow : Window
         }
 
         ImagePlaceholder.Visibility = Visibility.Collapsed;
-        CenterCrosshair.Visibility = _clickMoveEnabled
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        if (_clickMoveEnabled)
-        {
-            AttachCrosshairModule();
-            QueueClickCenterInitialization();
-        }
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        AttachCrosshairModule();
+        QueueClickCenterInitialization();
         if (!persistSelection)
         {
             return;
