@@ -253,7 +253,7 @@ public partial class MainWindow : Window
 
     private async Task<string> ActivateCalibrationViewAsync()
     {
-        if (_calibrationViewActive && _calibrationProcedure is not null && RealtimePreviewHost.IsRunning)
+        if (_calibrationViewActive && _calibrationProcedure is not null)
         {
             return "标定界面已经开启。";
         }
@@ -275,29 +275,14 @@ public partial class MainWindow : Window
 
         CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
         BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
-        VisionRenderControl.Visibility = Visibility.Collapsed;
         CenterCrosshair.Visibility = Visibility.Collapsed;
         ImagePlaceholder.Visibility = Visibility.Collapsed;
-        RealtimePreviewHost.Visibility = Visibility.Visible;
-        await Dispatcher.InvokeAsync(
-            () => RealtimePreviewHost.UpdateLayout(),
-            System.Windows.Threading.DispatcherPriority.ContextIdle);
-        try
-        {
-            await RealtimePreviewHost.StartAsync();
-        }
-        catch
-        {
-            await RealtimePreviewHost.StopAsync();
-            RealtimePreviewHost.Visibility = Visibility.Collapsed;
-            VisionRenderControl.Visibility = Visibility.Visible;
-            _calibrationViewActive = false;
-            _calibrationProcedure = null;
-            throw;
-        }
+        await RealtimePreviewHost.StopAsync();
+        RealtimePreviewHost.Visibility = Visibility.Collapsed;
+        ActivateCalibrationPreviewFrame();
 
         UpdateCommandState();
-        SetStatus("标定界面已开启：实时窗口已嵌入，正在等待图像源1首帧；标定流程已就绪", StatusKind.Busy);
+        SetStatus("标定界面已开启：使用标定流程图像源，标定流程已就绪。", StatusKind.Success);
         return "标定界面已开启。";
     }
 
@@ -2515,6 +2500,51 @@ public partial class MainWindow : Window
         {
             SetStatus($"实时画面恢复失败：{FormatException(exception)}", StatusKind.Error);
         }
+    }
+
+    private void ActivateCalibrationPreviewFrame()
+    {
+        VisionRenderControl.Visibility = Visibility.Visible;
+        ImagePlaceholder.Visibility = Visibility.Collapsed;
+        CenterCrosshair.Visibility = _clickMoveEnabled
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        if (_calibrationProcedure is null)
+        {
+            SetStatus("标定流程尚未就绪。", StatusKind.Error);
+            return;
+        }
+
+        try
+        {
+            var options = GetImageStepOptions(CalibrationProcedureName, _calibrationProcedure);
+            ImageStepComboBox.ItemsSource = options;
+            var imageOption = options.FirstOrDefault(option => option.IsImageSource)
+                ?? options.FirstOrDefault(option => option.DisplayName.Contains("图像源"))
+                ?? options.FirstOrDefault();
+            if (imageOption is null)
+            {
+                ClearRenderer();
+                SetStatus("标定流程中未找到图像源。", StatusKind.Error);
+                return;
+            }
+
+            BindImageStep(imageOption, persistSelection: false);
+            RunVisionModule(imageOption.Module);
+            VisionRenderControl.UpdateVMResultShow();
+            SetStatus("标定界面已开启：使用标定流程图像源，标定流程已就绪。", StatusKind.Success);
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"标定界面已开启；标定流程图像源取图失败：{FormatException(exception)}", StatusKind.Error);
+        }
+    }
+
+    private static void RunVisionModule(IVmModule module)
+    {
+        var runMethod = module.GetType().GetMethod("Run", Type.EmptyTypes);
+        runMethod?.Invoke(module, null);
     }
 
     private void RunCalibrationProcedureOnce()
