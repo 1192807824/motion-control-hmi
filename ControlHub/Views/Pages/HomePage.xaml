@@ -841,7 +841,7 @@
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock Text="开始运行" Foreground="White" FontSize="21" FontWeight="Bold" />
                                     <TextBlock x:Name="StartProductionHintText"
-                                               Text="回初始中心 → Blob识别 → 双吸嘴自动对位"
+                                               Text="Blob对位 → 位置1/2 → DD马达"
                                                Foreground="#D7F4E5"
                                                FontSize="11"
                                                Margin="0,3,0,0"
@@ -1102,7 +1102,9 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="6" />
-                                    <ColumnDefinition Width="60" />
+                                    <ColumnDefinition Width="52" />
+                                    <ColumnDefinition Width="6" />
+                                    <ColumnDefinition Width="52" />
                                 </Grid.ColumnDefinitions>
                                 <TextBox x:Name="Axis0PulseTextBox"
                                          Height="25"
@@ -1114,6 +1116,16 @@
                                          ToolTip="输入相对移动脉冲：正数正转，负数反转"
                                          TextChanged="Axis0PulseTextBox_TextChanged" />
                                 <Button Grid.Column="2"
+                                        x:Name="RecordAxis0PulseButton"
+                                        Height="25"
+                                        Content="记录"
+                                        Foreground="White"
+                                        Background="#166A52"
+                                        BorderBrush="#49D17D"
+                                        Cursor="Hand"
+                                        IsEnabled="False"
+                                        Click="RecordAxis0Pulse_Click" />
+                                <Button Grid.Column="4"
                                         x:Name="Axis0MoveButton"
                                         Height="25"
                                         Content="转动"
@@ -1126,7 +1138,7 @@
                             </Grid>
                             <TextBlock Grid.Row="2"
                                        x:Name="Axis0MoveStatusText"
-                                       Text="正数正转，负数反转"
+                                       Text="记录后重启仍保留；正数正转，负数反转"
                                        Foreground="#9FB1BF"
                                        FontSize="9"
                                        TextTrimming="CharacterEllipsis"

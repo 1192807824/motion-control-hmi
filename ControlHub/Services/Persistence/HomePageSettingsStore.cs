@@ -62,4 +62,6 @@ public sealed class HomePageSettings
     public double? PresetPosition2X { get; set; }
 
     public double? PresetPosition2Y { get; set; }
+
+    public double? Axis0RelativePulse { get; set; }
 }
