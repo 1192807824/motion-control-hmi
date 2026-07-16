@@ -1,3 +1,4 @@
+using System.Text;
 using System.Windows;
 
 namespace ControlHub;
@@ -7,4 +8,8 @@ namespace ControlHub;
 /// </summary>
 public partial class App : Application
 {
+    public App()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
 }

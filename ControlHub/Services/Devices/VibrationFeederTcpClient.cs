@@ -5,12 +5,13 @@ namespace ControlHub.Services.Devices;
 
 public sealed class VibrationFeederTcpClient : IDisposable
 {
+    private const int TimeoutMilliseconds = 2_000;
     private readonly object _syncRoot = new();
     private TcpClient? _client;
     private NetworkStream? _stream;
     private CancellationTokenSource? _connectCancellation;
     private CancellationTokenSource? _receiveCancellation;
-    private int _writeTimeoutMs = 500;
+    private int _writeTimeoutMs = TimeoutMilliseconds;
 
     public event Action<byte[]>? DataReceived;
 
@@ -45,11 +46,11 @@ public sealed class VibrationFeederTcpClient : IDisposable
         var client = new TcpClient
         {
             NoDelay = true,
-            SendTimeout = Math.Max(50, settings.WriteTimeoutMs)
+            SendTimeout = TimeoutMilliseconds
         };
 
         var connectCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        connectCancellation.CancelAfter(Math.Max(100, settings.ConnectTimeoutMs));
+        connectCancellation.CancelAfter(TimeoutMilliseconds);
 
         lock (_syncRoot)
         {
@@ -74,7 +75,7 @@ public sealed class VibrationFeederTcpClient : IDisposable
                     _client = client;
                     _stream = stream;
                     _receiveCancellation = receiveCancellation;
-                    _writeTimeoutMs = Math.Max(50, settings.WriteTimeoutMs);
+                    _writeTimeoutMs = TimeoutMilliseconds;
                     connectionAccepted = true;
                 }
             }

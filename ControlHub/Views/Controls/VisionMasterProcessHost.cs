@@ -41,6 +41,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     private Task? _eventPipeTask;
     private IntPtr _hostWindow;
     private IntPtr _visionWindow;
+    private IntPtr _activeDisplayWindow;
     private bool _disposed;
 
     public event EventHandler? Started;
@@ -52,6 +53,10 @@ public sealed class VisionMasterProcessHost : HwndHost
     public event EventHandler<VisionClickTargetEventArgs>? ClickTargetReceived;
 
     public event EventHandler<VisionClickTargetFailedEventArgs>? ClickTargetFailed;
+
+    public event EventHandler<CalibrationToolbarActionEventArgs>? CalibrationToolbarActionRequested;
+
+    public event EventHandler<CalibrationSidebarActionEventArgs>? CalibrationSidebarActionRequested;
 
     public async Task StartAsync()
     {
@@ -75,14 +80,14 @@ public sealed class VisionMasterProcessHost : HwndHost
 
         StartEventPipeServer();
 
-        if (_hostWindow == IntPtr.Zero)
+        if (GetActiveDisplayWindow() == IntPtr.Zero)
         {
             await Dispatcher.InvokeAsync(
                 () => { },
                 System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
-        if (_hostWindow == IntPtr.Zero)
+        if (GetActiveDisplayWindow() == IntPtr.Zero)
         {
             RaiseFailed("嵌入窗口尚未创建。 ");
             return;
@@ -269,6 +274,72 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public Task<string> SetCalibrationToolbarStateAsync(
+        string calibrationFilePath,
+        bool pathEnabled,
+        bool chooseEnabled,
+        bool importEnabled,
+        bool loadProfileEnabled,
+        CancellationToken cancellationToken)
+    {
+        var encodedPath = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(calibrationFilePath?.Trim() ?? string.Empty));
+        return SendCalibrationCommandAsync(
+            string.Join(
+                "\t",
+                "SET_CALIBRATION_TOOLBAR_STATE",
+                encodedPath,
+                pathEnabled ? "1" : "0",
+                chooseEnabled ? "1" : "0",
+                importEnabled ? "1" : "0",
+                loadProfileEnabled ? "1" : "0"),
+            cancellationToken);
+    }
+
+    public Task<string> SetCalibrationSidebarStateAsync(
+        CalibrationSidebarState state,
+        CancellationToken cancellationToken)
+    {
+        static string Encode(string? value)
+        {
+            return Convert.ToBase64String(Encoding.UTF8.GetBytes(value ?? string.Empty));
+        }
+
+        return SendCalibrationCommandAsync(
+            string.Join(
+                "\t",
+                "SET_CALIBRATION_SIDEBAR_STATE",
+                Encode(state.CenterXPulse),
+                Encode(state.CenterYPulse),
+                Encode(state.CenterVm),
+                Encode(state.StepX),
+                Encode(state.StepY),
+                Encode(state.MovePriority),
+                Encode(state.Velocity),
+                Encode(state.SettleMilliseconds),
+                Encode(state.NozzleTeachStep),
+                Encode(state.RecordNozzleContent),
+                Encode(state.NozzleStatus),
+                Encode(state.ClickTarget),
+                state.ClickMoveChecked ? "1" : "0",
+                Encode(state.ClickMoveStatus),
+                state.RecordCenterEnabled ? "1" : "0",
+                state.StartCalibrationEnabled ? "1" : "0",
+                state.CalibrationRunning ? "1" : "0",
+                state.ParameterInputsEnabled ? "1" : "0",
+                state.RecordCameraEnabled ? "1" : "0",
+                state.RecordNozzleEnabled ? "1" : "0",
+                state.ClickTargetEnabled ? "1" : "0",
+                state.EnableClickMoveEnabled ? "1" : "0",
+                state.ReturnCameraCenterEnabled ? "1" : "0",
+                state.StopClickMoveEnabled ? "1" : "0",
+                Encode(state.CenterVmColor),
+                Encode(state.NozzleStatusColor),
+                Encode(state.ClickMoveStatusColor),
+                Encode(state.WorkflowStatus)),
+            cancellationToken);
+    }
+
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
         double pixelX,
         double pixelY,
@@ -320,28 +391,14 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
-    /// 加载“找芯片”方案并单次执行其中的“流程1 → Blob分析1”，
-    /// 返回 VisionMaster 结果表前两行的矩形与像素质心。
+    /// 在启动时已加载的固定“新纳方案.sol”中，单次执行
+    /// “找芯片流程 → Blob分析1”，返回结果表前两行的矩形与像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
-        string solutionPath,
         CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(solutionPath);
-        var fullPath = Path.GetFullPath(solutionPath);
-        if (!string.Equals(Path.GetExtension(fullPath), ".sol", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException("找芯片方案必须使用 .sol 扩展名。");
-        }
-
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException("找芯片方案文件不存在。", fullPath);
-        }
-
-        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(fullPath));
         var response = await SendCalibrationCommandAsync(
-            $"RUN_RECTANGLE_BLOB\t{encodedPath}",
+            "RUN_RECTANGLE_BLOB",
             cancellationToken);
         var parts = response.Split('\t');
         if (parts.Length != 15 ||
@@ -385,6 +442,43 @@ public sealed class VisionMasterProcessHost : HwndHost
             parts[14],
             imageWidth,
             imageHeight);
+    }
+
+    public void AttachDisplayHost(IntPtr displayHostWindow)
+    {
+        if (_disposed || displayHostWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _activeDisplayWindow = displayHostWindow;
+        if (_visionWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        ReparentVisionWindow(displayHostWindow);
+        ResizeVisionWindow();
+    }
+
+    public void UseDefaultDisplayHost()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _activeDisplayWindow = IntPtr.Zero;
+        if (_hostWindow != IntPtr.Zero && _visionWindow != IntPtr.Zero)
+        {
+            ReparentVisionWindow(_hostWindow);
+            ResizeVisionWindow();
+        }
+    }
+
+    public void RefreshDisplayHost()
+    {
+        ResizeVisionWindow();
     }
 
     public async Task AbortNinePointCalibrationAsync()
@@ -564,6 +658,37 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void DispatchHostEvent(string message)
     {
         var parts = message.Split('\t');
+        if (parts.Length == 3 &&
+            string.Equals(parts[0], "CALIBRATION_SIDEBAR_ACTION", StringComparison.Ordinal))
+        {
+            string value;
+            try
+            {
+                value = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
+            }
+            catch (FormatException)
+            {
+                value = string.Empty;
+            }
+
+            _ = Dispatcher.BeginInvoke(
+                () => CalibrationSidebarActionRequested?.Invoke(
+                    this,
+                    new CalibrationSidebarActionEventArgs(parts[1], value)));
+            return;
+        }
+
+        if (parts.Length == 2 &&
+            string.Equals(parts[0], "CALIBRATION_TOOLBAR_ACTION", StringComparison.Ordinal) &&
+            Enum.TryParse<CalibrationToolbarAction>(parts[1], ignoreCase: false, out var toolbarAction))
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => CalibrationToolbarActionRequested?.Invoke(
+                    this,
+                    new CalibrationToolbarActionEventArgs(toolbarAction)));
+            return;
+        }
+
         if (parts.Length == 9 &&
             string.Equals(parts[0], "CLICK_TARGET", StringComparison.Ordinal) &&
             int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pixelX) &&
@@ -727,7 +852,7 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     private void AttachVisionWindow(IntPtr windowHandle)
     {
-        if (_hostWindow == IntPtr.Zero || windowHandle == IntPtr.Zero)
+        if (GetActiveDisplayWindow() == IntPtr.Zero || windowHandle == IntPtr.Zero)
         {
             throw new InvalidOperationException("VisionMaster 嵌入窗口句柄无效。 ");
         }
@@ -745,8 +870,9 @@ public sealed class VisionMasterProcessHost : HwndHost
             throw new Win32Exception(getStyleError, "无法读取 VisionMaster 窗口样式。 ");
         }
 
+        var displayHostWindow = GetActiveDisplayWindow();
         Marshal.SetLastPInvokeError(0);
-        var previousParent = SetParent(windowHandle, _hostWindow);
+        var previousParent = SetParent(windowHandle, displayHostWindow);
         var setParentError = Marshal.GetLastPInvokeError();
         if (previousParent == IntPtr.Zero && setParentError != 0)
         {
@@ -765,7 +891,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             throw new Win32Exception(setStyleError, "无法设置 VisionMaster 嵌入窗口样式。 ");
         }
 
-        if (GetParent(windowHandle) != _hostWindow)
+        if (GetParent(windowHandle) != displayHostWindow)
         {
             _ = SetParent(windowHandle, previousParent);
             throw new Win32Exception("VisionMaster 窗口父子关系验证失败。 ");
@@ -778,7 +904,8 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     private void ResizeVisionWindow(bool throwOnFailure = false)
     {
-        if (_hostWindow == IntPtr.Zero || _visionWindow == IntPtr.Zero)
+        var displayHostWindow = GetActiveDisplayWindow();
+        if (displayHostWindow == IntPtr.Zero || _visionWindow == IntPtr.Zero)
         {
             if (throwOnFailure)
             {
@@ -788,7 +915,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             return;
         }
 
-        if (!GetClientRect(_hostWindow, out var bounds))
+        if (!GetClientRect(displayHostWindow, out var bounds))
         {
             if (throwOnFailure)
             {
@@ -812,6 +939,40 @@ public sealed class VisionMasterProcessHost : HwndHost
         {
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "无法调整 VisionMaster 嵌入窗口大小。 ");
         }
+    }
+
+    private IntPtr GetActiveDisplayWindow()
+    {
+        return _activeDisplayWindow != IntPtr.Zero ? _activeDisplayWindow : _hostWindow;
+    }
+
+    private void ReparentVisionWindow(IntPtr displayHostWindow)
+    {
+        if (_visionWindow == IntPtr.Zero || displayHostWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (!IsWindow(_visionWindow))
+        {
+            throw new Win32Exception("VisionMaster 窗口句柄已经失效。");
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        var previousParent = SetParent(_visionWindow, displayHostWindow);
+        var setParentError = Marshal.GetLastPInvokeError();
+        if (previousParent == IntPtr.Zero && setParentError != 0)
+        {
+            throw new Win32Exception(setParentError, "无法切换 VisionMaster 显示承载窗口。");
+        }
+
+        if (GetParent(_visionWindow) != displayHostWindow)
+        {
+            _ = SetParent(_visionWindow, previousParent);
+            throw new Win32Exception("VisionMaster 显示承载窗口验证失败。");
+        }
+
+        _ = ShowWindow(_visionWindow, SwShow);
     }
 
     private void StopProcess()
@@ -1030,6 +1191,55 @@ public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
 {
     public string Message { get; } = message;
 }
+
+public enum CalibrationToolbarAction
+{
+    SaveLocation,
+    Import,
+    LoadProfile
+}
+
+public sealed class CalibrationToolbarActionEventArgs(CalibrationToolbarAction action) : EventArgs
+{
+    public CalibrationToolbarAction Action { get; } = action;
+}
+
+public sealed class CalibrationSidebarActionEventArgs(string action, string value) : EventArgs
+{
+    public string Action { get; } = action;
+
+    public string Value { get; } = value;
+}
+
+public sealed record CalibrationSidebarState(
+    string CenterXPulse,
+    string CenterYPulse,
+    string CenterVm,
+    string StepX,
+    string StepY,
+    string MovePriority,
+    string Velocity,
+    string SettleMilliseconds,
+    string NozzleTeachStep,
+    string RecordNozzleContent,
+    string NozzleStatus,
+    string ClickTarget,
+    bool ClickMoveChecked,
+    string ClickMoveStatus,
+    bool RecordCenterEnabled,
+    bool StartCalibrationEnabled,
+    bool CalibrationRunning,
+    bool ParameterInputsEnabled,
+    bool RecordCameraEnabled,
+    bool RecordNozzleEnabled,
+    bool ClickTargetEnabled,
+    bool EnableClickMoveEnabled,
+    bool ReturnCameraCenterEnabled,
+    bool StopClickMoveEnabled,
+    string CenterVmColor,
+    string NozzleStatusColor,
+    string ClickMoveStatusColor,
+    string WorkflowStatus);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

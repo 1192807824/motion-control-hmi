@@ -9,14 +9,14 @@
              Loaded="ConnectionConfigPage_Loaded"
              Unloaded="ConnectionConfigPage_Unloaded">
     <UserControl.Resources>
-        <SolidColorBrush x:Key="PanelBorder" Color="#BAC4CF" />
-        <SolidColorBrush x:Key="PanelFill" Color="#F7F9FC" />
-        <SolidColorBrush x:Key="PanelHeader" Color="#EDF2F7" />
-        <SolidColorBrush x:Key="AccentBlue" Color="#1F5F9F" />
-        <SolidColorBrush x:Key="AccentGreen" Color="#168500" />
-        <SolidColorBrush x:Key="AccentRed" Color="#BC100B" />
-        <SolidColorBrush x:Key="MutedText" Color="#64748B" />
-        <SolidColorBrush x:Key="DarkText" Color="#101827" />
+        <SolidColorBrush x:Key="PanelBorder" Color="#345269" />
+        <SolidColorBrush x:Key="PanelFill" Color="#163047" />
+        <SolidColorBrush x:Key="PanelHeader" Color="#1B374F" />
+        <SolidColorBrush x:Key="AccentBlue" Color="#0D6EE8" />
+        <SolidColorBrush x:Key="AccentGreen" Color="#1B8F4D" />
+        <SolidColorBrush x:Key="AccentRed" Color="#D90D16" />
+        <SolidColorBrush x:Key="MutedText" Color="#AAB9C6" />
+        <SolidColorBrush x:Key="DarkText" Color="#F4F8FB" />
 
         <Style x:Key="Panel" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource PanelFill}" />
@@ -26,7 +26,7 @@
         </Style>
 
         <Style x:Key="PanelTitle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#0F3554" />
+            <Setter Property="Foreground" Value="#F4F8FB" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -35,7 +35,7 @@
         <Style x:Key="FieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#475569" />
+            <Setter Property="Foreground" Value="#AAB9C6" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,8,0" />
         </Style>
@@ -44,18 +44,10 @@
             <Setter Property="Height" Value="32" />
             <Setter Property="Padding" Value="8,0" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="BorderBrush" Value="#B9C1CB" />
+            <Setter Property="BorderBrush" Value="#45647A" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Background" Value="#FFFFFF" />
-            <Setter Property="Foreground" Value="{StaticResource DarkText}" />
-        </Style>
-
-        <Style x:Key="ConfigCombo" TargetType="ComboBox">
-            <Setter Property="Height" Value="32" />
-            <Setter Property="Padding" Value="5,0" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="BorderBrush" Value="#B9C1CB" />
-            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="Background" Value="#132B40" />
+            <Setter Property="Foreground" Value="#F4F8FB" />
         </Style>
 
         <Style x:Key="PrimaryButton" TargetType="Button">
@@ -65,7 +57,7 @@
             <Setter Property="Padding" Value="14,0" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Background" Value="{StaticResource AccentBlue}" />
-            <Setter Property="BorderBrush" Value="#174E83" />
+            <Setter Property="BorderBrush" Value="#0B5CC2" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -96,24 +88,24 @@
         </Style>
 
         <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
-            <Setter Property="Foreground" Value="#17324A" />
-            <Setter Property="Background" Value="#E8EEF5" />
-            <Setter Property="BorderBrush" Value="#AEB9C5" />
+            <Setter Property="Foreground" Value="#F4F8FB" />
+            <Setter Property="Background" Value="#294A64" />
+            <Setter Property="BorderBrush" Value="#45647A" />
         </Style>
 
         <Style x:Key="ConnectionItem" TargetType="Border">
             <Setter Property="Height" Value="74" />
             <Setter Property="Margin" Value="0,0,0,8" />
             <Setter Property="Padding" Value="12,9" />
-            <Setter Property="Background" Value="#F8FAFC" />
-            <Setter Property="BorderBrush" Value="#CED7E2" />
+            <Setter Property="Background" Value="#1B374F" />
+            <Setter Property="BorderBrush" Value="#345269" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
         </Style>
 
         <Style x:Key="ActiveConnectionItem" TargetType="Border" BasedOn="{StaticResource ConnectionItem}">
-            <Setter Property="Background" Value="#E9F2FB" />
-            <Setter Property="BorderBrush" Value="#1F5F9F" />
+            <Setter Property="Background" Value="#0C4C88" />
+            <Setter Property="BorderBrush" Value="#0D6EE8" />
             <Setter Property="BorderThickness" Value="2" />
         </Style>
 
@@ -131,7 +123,7 @@
         </Style>
 
         <Style x:Key="ConfigCheckBox" TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#334155" />
+            <Setter Property="Foreground" Value="#D8E4EC" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -141,9 +133,9 @@
             <Setter Property="Width" Value="32" />
             <Setter Property="Height" Value="32" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Foreground" Value="#0F4C81" />
-            <Setter Property="Background" Value="#E6F0FA" />
-            <Setter Property="BorderBrush" Value="#6D91B4" />
+            <Setter Property="Foreground" Value="#62B5FF" />
+            <Setter Property="Background" Value="#294A64" />
+            <Setter Property="BorderBrush" Value="#45647A" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="FontSize" Value="20" />
             <Setter Property="FontWeight" Value="Bold" />
@@ -160,11 +152,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#D4E7F8" />
-                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#1F5F9F" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#365C78" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#0D6EE8" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#B9D8F2" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#0D6EE8" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -181,8 +173,8 @@
                         <Grid Height="36" VerticalAlignment="Center">
                             <Border Height="12"
                                     VerticalAlignment="Center"
-                                    Background="#CBD5E1"
-                                    BorderBrush="#A6B3C2"
+                                    Background="#294A64"
+                                    BorderBrush="#45647A"
                                     BorderThickness="1"
                                     CornerRadius="6" />
                             <Track x:Name="PART_Track"
@@ -197,7 +189,7 @@
                                             <ControlTemplate TargetType="RepeatButton">
                                                 <Border Height="12"
                                                         VerticalAlignment="Center"
-                                                        Background="#1F5F9F"
+                                                        Background="#0D6EE8"
                                                         CornerRadius="6,0,0,6" />
                                             </ControlTemplate>
                                         </RepeatButton.Template>
@@ -219,10 +211,10 @@
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
                                                 <Grid>
-                                                    <Ellipse Fill="#FFFFFF"
-                                                             Stroke="#1F5F9F"
+                                                    <Ellipse Fill="#F7FAFC"
+                                                             Stroke="#0D6EE8"
                                                              StrokeThickness="3" />
-                                                    <Ellipse Width="8" Height="8" Fill="#1F5F9F" />
+                                                    <Ellipse Width="8" Height="8" Fill="#0D6EE8" />
                                                 </Grid>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
@@ -246,7 +238,7 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="10,10,10,8" Background="#E8EDF2">
+    <Grid Margin="10,10,10,8" Background="#10263A">
         <Grid.RowDefinitions>
             <RowDefinition Height="72" />
             <RowDefinition Height="*" />
@@ -254,7 +246,7 @@
 
         <Border Grid.Row="0"
                 Style="{StaticResource Panel}"
-                Background="#F9FBFD"
+                Background="#163047"
                 Padding="16,10">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -265,12 +257,7 @@
                     <TextBlock Text="&#x8FDE;&#x63A5;&#x914D;&#x7F6E;&#x4E2D;&#x5FC3;"
                                FontSize="22"
                                FontWeight="Bold"
-                               Foreground="#0B2238" />
-                    <TextBlock Text="TCP / IO / PLC"
-                               Margin="0,4,0,0"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource MutedText}" />
+                               Foreground="#F4F8FB" />
                 </StackPanel>
 
                 <Border Grid.Column="1"
@@ -278,17 +265,17 @@
                         Padding="12,0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
-                        Background="#ECFDF3"
-                        BorderBrush="#84C78B"
+                        Background="#132B40"
+                        BorderBrush="#345269"
                         BorderThickness="1"
                         CornerRadius="6">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse Width="12" Height="12" Fill="#16A34A" Margin="0,0,10,0" />
+                        <Ellipse Width="12" Height="12" Fill="#39C56B" Margin="0,0,10,0" />
                         <TextBlock Text="{Binding FeederConnectionStatusText}"
                                    Width="286"
                                    FontSize="16"
                                    FontWeight="Bold"
-                                   Foreground="#14532D"
+                                   Foreground="#62B5FF"
                                    TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center" />
                     </StackPanel>
@@ -308,7 +295,6 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="32" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="42" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Text="&#x8FDE;&#x63A5;&#x5BF9;&#x8C61;" Style="{StaticResource PanelTitle}" />
@@ -322,7 +308,7 @@
                                 </Grid.ColumnDefinitions>
                                 <Border Width="34"
                                         Height="34"
-                                        Background="#1F5F9F"
+                                        Background="#0D6EE8"
                                         CornerRadius="4"
                                         VerticalAlignment="Center">
                                     <TextBlock Text="TCP"
@@ -336,11 +322,11 @@
                                     <TextBlock Text="&#x9707;&#x52A8;&#x76D8;"
                                                FontSize="15"
                                                FontWeight="Bold"
-                                               Foreground="#0F172A" />
+                                               Foreground="#F4F8FB" />
                                     <TextBlock Margin="0,4,0,0"
                                                FontSize="12"
                                                FontWeight="SemiBold"
-                                               Foreground="#1F5F9F">
+                                               Foreground="#62B5FF">
                                         <TextBlock.Text>
                                             <MultiBinding StringFormat="TCP  {0}:{1}">
                                                 <Binding Path="FeederSettings.Host" />
@@ -352,77 +338,8 @@
                             </Grid>
                         </Border>
 
-                        <Border Style="{StaticResource ConnectionItem}" Opacity="0.62">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="44" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Width="34"
-                                        Height="34"
-                                        Background="#CBD5E1"
-                                        CornerRadius="4"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Text="TCP"
-                                               Foreground="#334155"
-                                               FontSize="12"
-                                               FontWeight="Bold"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="PLC"
-                                               FontSize="15"
-                                               FontWeight="Bold"
-                                               Foreground="#334155" />
-                                    <TextBlock Text="Modbus TCP"
-                                               Margin="0,4,0,0"
-                                               FontSize="12"
-                                               FontWeight="SemiBold"
-                                               Foreground="#64748B" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Style="{StaticResource ConnectionItem}" Opacity="0.62">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="44" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Width="34"
-                                        Height="34"
-                                        Background="#CBD5E1"
-                                        CornerRadius="4"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Text="USB"
-                                               Foreground="#334155"
-                                               FontSize="12"
-                                               FontWeight="Bold"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center" />
-                                </Border>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="&#x626B;&#x7801;&#x67AA;"
-                                               FontSize="15"
-                                               FontWeight="Bold"
-                                               Foreground="#334155" />
-                                    <TextBlock Text="USB HID / COM"
-                                               Margin="0,4,0,0"
-                                               FontSize="12"
-                                               FontWeight="SemiBold"
-                                               Foreground="#64748B" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
                     </StackPanel>
 
-                    <Button Grid.Row="2"
-                            Content="&#x4FDD;&#x5B58; TCP &#x914D;&#x7F6E;"
-                            Style="{StaticResource SecondaryButton}"
-                            HorizontalAlignment="Stretch"
-                            Margin="0"
-                            Click="SaveSettings_Click" />
                 </Grid>
             </Border>
 
@@ -470,12 +387,12 @@
                             <Button Content="&#x8FDE;&#x63A5;"
                                     Style="{StaticResource PrimaryButton}"
                                     Background="{StaticResource AccentGreen}"
-                                    BorderBrush="#126700"
+                                    BorderBrush="#16723F"
                                     Click="ConnectFeeder_Click" />
                             <Button Content="&#x65AD;&#x5F00;"
                                     Style="{StaticResource PrimaryButton}"
-                                    Background="#5F6B7A"
-                                    BorderBrush="#4B5563"
+                                    Background="#294A64"
+                                    BorderBrush="#45647A"
                                     Margin="0"
                                     Click="DisconnectFeeder_Click" />
                         </StackPanel>
@@ -493,7 +410,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="220" />
                             <RowDefinition Height="10" />
-                            <RowDefinition Height="184" />
+                            <RowDefinition Height="156" />
                             <RowDefinition Height="10" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
@@ -538,20 +455,8 @@
                                              Style="{StaticResource ConfigInput}"
                                              Text="{Binding FeederSettings.Port, UpdateSourceTrigger=LostFocus}" />
 
-                                    <TextBlock Grid.Row="1" Text="&#x8FDE;&#x63A5;&#x8D85;&#x65F6;" Style="{StaticResource FieldLabel}" />
+                                    <TextBlock Grid.Row="1" Text="&#x7ED3;&#x675F;&#x7B26;" Style="{StaticResource FieldLabel}" />
                                     <TextBox Grid.Row="1"
-                                             Grid.Column="1"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding FeederSettings.ConnectTimeoutMs, UpdateSourceTrigger=LostFocus}" />
-
-                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="&#x5199;&#x8D85;&#x65F6;" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Row="1"
-                                             Grid.Column="4"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding FeederSettings.WriteTimeoutMs, UpdateSourceTrigger=LostFocus}" />
-
-                                    <TextBlock Grid.Row="2" Text="&#x7ED3;&#x675F;&#x7B26;" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Row="2"
                                              Grid.Column="1"
                                              Grid.ColumnSpan="4"
                                              Style="{StaticResource ConfigInput}"
@@ -566,7 +471,6 @@
                                 <RowDefinition Height="44" />
                                 <RowDefinition Height="64" />
                                 <RowDefinition Height="48" />
-                                <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Border Background="{StaticResource PanelHeader}"
                                     BorderBrush="{StaticResource PanelBorder}"
@@ -636,41 +540,25 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="&#x62D6;&#x52A8;&#x540E;&#x81EA;&#x52A8;&#x4E0B;&#x53D1;"
-                                           VerticalAlignment="Center"
-                                           Foreground="{StaticResource AccentBlue}"
-                                           FontSize="12"
-                                           FontWeight="SemiBold" />
                                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                    <Button Content="&#x5E94;&#x7528;&#x4EAE;&#x5EA6;"
-                                            Height="34"
-                                            MinWidth="92"
-                                            Style="{StaticResource PrimaryButton}"
-                                            Click="ApplyLightBrightness_Click" />
                                     <Button Content="&#x5149;&#x6E90;&#x5F00;"
                                             Height="34"
                                             MinWidth="76"
                                             Style="{StaticResource PrimaryButton}"
                                             Background="{StaticResource AccentGreen}"
-                                            BorderBrush="#126700"
+                                            BorderBrush="#16723F"
                                             Click="LightOn_Click" />
                                     <Button Content="&#x5149;&#x6E90;&#x5173;"
                                             Height="34"
                                             MinWidth="76"
                                             Style="{StaticResource PrimaryButton}"
                                             Background="{StaticResource AccentRed}"
-                                            BorderBrush="#9E0B08"
+                                            BorderBrush="#A90A12"
                                             Margin="0"
                                             Click="LightOff_Click" />
                                 </StackPanel>
                             </Grid>
 
-                            <TextBlock Grid.Row="3"
-                                       Margin="14,0"
-                                       VerticalAlignment="Center"
-                                       Foreground="{StaticResource MutedText}"
-                                       FontSize="11"
-                                       Text="&#x534F;&#x8BAE; &amp;06,xx$  |  &#x8303;&#x56F4; 00-99  |  &#x4EC5;&#x9002;&#x7528;&#x4E8E;&#x4E0D;&#x5E26;&#x72EC;&#x7ACB;&#x5149;&#x6E90;&#x63A7;&#x5236;&#x5668;&#x7684;&#x632F;&#x76D8;" />
                         </Grid>
                     </Border>
 
@@ -679,7 +567,7 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="92" />
+                                <RowDefinition Height="44" />
                                 <RowDefinition Height="52" />
                             </Grid.RowDefinitions>
                             <Border Background="{StaticResource PanelHeader}"
@@ -696,53 +584,15 @@
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto"
-                                     BorderBrush="#B9C1CB"
-                                     Background="#FFFFFF"
-                                     Foreground="#0F172A"
+                                     BorderBrush="#45647A"
+                                     Background="#132B40"
+                                     Foreground="#F4F8FB"
                                      FontFamily="Consolas"
                                      FontSize="14"
                                      Text="{Binding FeederSettings.ManualSendText, UpdateSourceTrigger=PropertyChanged}" />
 
                             <Grid Grid.Row="2" Margin="14,10,14,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="74" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="74" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="42" />
-                                    <RowDefinition Height="36" />
-                                </Grid.RowDefinitions>
-
-                                <TextBlock Grid.Row="0" Text="&#x53D1;&#x9001;&#x683C;&#x5F0F;" Style="{StaticResource FieldLabel}" />
-                                <ComboBox Grid.Row="0"
-                                          Grid.Column="1"
-                                          Style="{StaticResource ConfigCombo}"
-                                          SelectedValuePath="Content"
-                                          SelectedValue="{Binding FeederSettings.SendFormat, UpdateSourceTrigger=PropertyChanged}">
-                                    <ComboBoxItem Content="ASCII" />
-                                    <ComboBoxItem Content="UTF-8" />
-                                    <ComboBoxItem Content="GB2312" />
-                                    <ComboBoxItem Content="HEX" />
-                                </ComboBox>
-
-                                <TextBlock Grid.Row="0" Grid.Column="3" Text="&#x63A5;&#x6536;&#x683C;&#x5F0F;" Style="{StaticResource FieldLabel}" />
-                                <ComboBox Grid.Row="0"
-                                          Grid.Column="4"
-                                          Style="{StaticResource ConfigCombo}"
-                                          SelectedValuePath="Content"
-                                          SelectedValue="{Binding FeederSettings.ReceiveFormat, UpdateSourceTrigger=PropertyChanged}">
-                                    <ComboBoxItem Content="ASCII" />
-                                    <ComboBoxItem Content="UTF-8" />
-                                    <ComboBoxItem Content="GB2312" />
-                                    <ComboBoxItem Content="HEX" />
-                                </ComboBox>
-
-                                <CheckBox Grid.Row="1"
-                                          Grid.Column="1"
-                                          Grid.ColumnSpan="4"
+                                <CheckBox
                                           Style="{StaticResource ConfigCheckBox}"
                                           Content="&#x53D1;&#x9001;&#x65F6;&#x8FFD;&#x52A0;&#x7ED3;&#x675F;&#x7B26;"
                                           IsChecked="{Binding FeederSettings.AppendNewLine, UpdateSourceTrigger=PropertyChanged}" />
@@ -756,17 +606,17 @@
                                 <Button Content="&#x53D1;&#x9001;"
                                         Style="{StaticResource PrimaryButton}"
                                         Background="{StaticResource AccentGreen}"
-                                        BorderBrush="#126700"
+                                        BorderBrush="#16723F"
                                         Click="SendManualMessage_Click" />
                                 <Button Content="&#x4E00;&#x952E;&#x9707;&#x52A8;"
                                         Style="{StaticResource PrimaryButton}"
                                         Background="{StaticResource AccentBlue}"
-                                        BorderBrush="#174E83"
+                                        BorderBrush="#0B5CC2"
                                         Click="OneKeyVibration_Click" />
                                 <Button Content="&#x505C;&#x6B62;&#x9707;&#x52A8;"
                                         Style="{StaticResource PrimaryButton}"
                                         Background="{StaticResource AccentRed}"
-                                        BorderBrush="#9E0B08"
+                                        BorderBrush="#A90A12"
                                         Click="StopVibration_Click" />
                                 <Button Content="&#x6E05;&#x7A7A;&#x65E5;&#x5FD7;"
                                         Style="{StaticResource SecondaryButton}"
@@ -794,13 +644,13 @@
                                  Grid.Row="1"
                                  ItemsSource="{Binding FeederConnectionLogs}"
                                  BorderThickness="0"
-                                 Background="#FBFCFE"
+                                 Background="#132B40"
                                  Padding="8"
                                  FontSize="13">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding}"
-                                               Foreground="#334155"
+                                               Foreground="#D8E4EC"
                                                TextTrimming="CharacterEllipsis"
                                                Margin="0,2" />
                                 </DataTemplate>

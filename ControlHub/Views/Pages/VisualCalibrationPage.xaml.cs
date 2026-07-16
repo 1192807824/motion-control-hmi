@@ -39,6 +39,10 @@ public partial class VisualCalibrationPage : UserControl
     private bool _clickMoveRunning;
     private bool _clickMoveConfigurationRunning;
     private bool _calibrationFileImporting;
+    private bool _calibrationToolbarSyncRunning;
+    private bool _calibrationToolbarSyncPending;
+    private bool _calibrationSidebarSyncRunning;
+    private bool _calibrationSidebarSyncPending;
     private bool _nozzle1ClickVerified;
     private bool _nozzle2ClickVerified;
     private bool _suppressClickMoveModeEvent;
@@ -67,6 +71,21 @@ public partial class VisualCalibrationPage : UserControl
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
         UpdateCommandState();
+    }
+
+    public void AttachInspectionDisplayHost(IntPtr displayHostWindow)
+    {
+        VisionHost.AttachDisplayHost(displayHostWindow);
+    }
+
+    public void UseDefaultVisionDisplay()
+    {
+        VisionHost.UseDefaultDisplayHost();
+    }
+
+    public void RefreshVisionDisplay()
+    {
+        VisionHost.RefreshDisplayHost();
     }
 
     public async Task EnsureStartedAsync()
@@ -103,10 +122,10 @@ public partial class VisualCalibrationPage : UserControl
     }
 
     /// <summary>
-    /// 加载“找芯片”方案，执行固定的“流程1 → Blob分析1”，返回前两个结果的像素质心。
+    /// 在启动时已加载的固定方案中执行“找芯片流程 → Blob分析1”，
+    /// 返回前两个结果的像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
-        string solutionPath,
         CancellationToken cancellationToken)
     {
         await EnsureStartedAsync();
@@ -116,7 +135,7 @@ public partial class VisualCalibrationPage : UserControl
                 "视觉组件尚未就绪，无法运行找芯片流程。");
         }
 
-        return await VisionHost.RunRectangleBlobInspectionAsync(solutionPath, cancellationToken);
+        return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
     }
 
     public void Shutdown()
@@ -584,6 +603,85 @@ public partial class VisualCalibrationPage : UserControl
         UpdateCommandState();
     }
 
+    private void VisionHost_CalibrationToolbarActionRequested(
+        object? sender,
+        CalibrationToolbarActionEventArgs e)
+    {
+        switch (e.Action)
+        {
+            case CalibrationToolbarAction.SaveLocation:
+                ChooseCalibrationFile_Click(this, new RoutedEventArgs());
+                break;
+            case CalibrationToolbarAction.Import:
+                ImportCalibrationFile_Click(this, new RoutedEventArgs());
+                break;
+            case CalibrationToolbarAction.LoadProfile:
+                LoadCalibrationProfile_Click(this, new RoutedEventArgs());
+                break;
+        }
+    }
+
+    private void VisionHost_CalibrationSidebarActionRequested(
+        object? sender,
+        CalibrationSidebarActionEventArgs e)
+    {
+        switch (e.Action)
+        {
+            case "RecordCenter":
+                RecordCenter_Click(this, new RoutedEventArgs());
+                break;
+            case "StartCalibration":
+                StartCalibration_Click(this, new RoutedEventArgs());
+                break;
+            case "StopCalibration":
+                StopCalibration_Click(this, new RoutedEventArgs());
+                break;
+            case "RecordCamera":
+                RecordCameraToolPoint_Click(this, new RoutedEventArgs());
+                break;
+            case "RecordNozzle":
+                RecordNozzleToolPoint_Click(this, new RoutedEventArgs());
+                break;
+            case "ReturnCameraCenter":
+                ReturnCameraToCenter_Click(this, new RoutedEventArgs());
+                break;
+            case "StopClickMove":
+                StopClickMove_Click(this, new RoutedEventArgs());
+                break;
+            case "StepX":
+                StepXPulsesTextBox.Text = e.Value;
+                break;
+            case "StepY":
+                StepYPulsesTextBox.Text = e.Value;
+                break;
+            case "Velocity":
+                VelocityTextBox.Text = e.Value;
+                break;
+            case "Settle":
+                SettleMillisecondsTextBox.Text = e.Value;
+                break;
+            case "MovePriority":
+                MovePriorityComboBox.SelectedItem = MovePriorityComboBox.Items
+                    .OfType<ComboBoxItem>()
+                    .FirstOrDefault(item => string.Equals(item.Tag as string, e.Value, StringComparison.Ordinal));
+                break;
+            case "ClickTarget":
+                ClickTargetToolComboBox.SelectedItem = ClickTargetToolComboBox.Items
+                    .OfType<ComboBoxItem>()
+                    .FirstOrDefault(item => string.Equals(item.Tag as string, e.Value, StringComparison.Ordinal));
+                break;
+            case "EnableClickMove":
+                var shouldEnable = e.Value == "1";
+                if ((EnableClickMoveCheckBox.IsChecked == true) != shouldEnable)
+                {
+                    EnableClickMoveCheckBox.IsChecked = shouldEnable;
+                }
+                break;
+        }
+
+        ScheduleCalibrationSidebarSync();
+    }
+
     private void CalibrationSetting_Changed(object sender, TextChangedEventArgs e)
     {
         ScheduleCalibrationSettingsSave();
@@ -697,6 +795,72 @@ public partial class VisualCalibrationPage : UserControl
         }
     }
 
+    private async void ReturnCameraToCenter_Click(object sender, RoutedEventArgs e)
+    {
+        if (_clickMoveRunning || _calibrationRunning || _centerSyncRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var center = _recordedCenter
+                ?? throw new InvalidOperationException("请先在第一步记录标定中心点。");
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            var velocity = ParsePositiveDouble(VelocityTextBox.Text, "相机回中速度");
+            var settleMilliseconds = ParseNonNegativeInt(
+                SettleMillisecondsTextBox.Text,
+                "到位稳定等待");
+            var current = motionController.CaptureCalibrationCenter(
+                FirstSetXHardwareAxisNo,
+                FirstSetYHardwareAxisNo);
+            var moveDeltaX = center.ActualX - current.ActualX;
+            var moveDeltaY = center.ActualY - current.ActualY;
+
+            _clickMoveCancellation = new CancellationTokenSource();
+            _clickMoveRunning = true;
+            UpdateCommandState();
+            SetClickMoveStatus(
+                $"相机正在回到标定中心：X={center.ActualX:0.###}、Y={center.ActualY:0.###} pulse…",
+                WorkflowStatus.Running);
+
+            var actual = await motionController.MoveCalibrationAxesToAsync(
+                FirstSetXHardwareAxisNo,
+                FirstSetYHardwareAxisNo,
+                center.ActualX,
+                center.ActualY,
+                velocity,
+                DefaultPositionTolerancePulses,
+                CalculateDirectMoveTimeout(moveDeltaX, moveDeltaY, velocity),
+                _clickMoveCancellation.Token);
+
+            if (settleMilliseconds > 0)
+            {
+                await Task.Delay(settleMilliseconds, _clickMoveCancellation.Token);
+            }
+
+            SetClickMoveStatus(
+                $"相机已回到标定中心：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###} pulse。",
+                WorkflowStatus.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            SetClickMoveStatus("相机回中已停止。", WorkflowStatus.Error);
+        }
+        catch (Exception exception)
+        {
+            SetClickMoveStatus($"相机回中失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _clickMoveCancellation?.Dispose();
+            _clickMoveCancellation = null;
+            _clickMoveRunning = false;
+            UpdateCommandState();
+        }
+    }
+
     private async void VisionHost_ClickTargetReceived(object? sender, VisionClickTargetEventArgs e)
     {
         if (EnableClickMoveCheckBox.IsChecked != true || _clickMoveRunning || _calibrationRunning)
@@ -800,7 +964,7 @@ public partial class VisualCalibrationPage : UserControl
     private void StopClickMove_Click(object sender, RoutedEventArgs e)
     {
         StopClickMoveButton.IsEnabled = false;
-        SetClickMoveStatus("正在停止点击移动…", WorkflowStatus.Running);
+        SetClickMoveStatus("正在停止运动…", WorkflowStatus.Running);
         _clickMoveCancellation?.Cancel();
     }
 
@@ -1324,6 +1488,149 @@ public partial class VisualCalibrationPage : UserControl
             File.Exists(calibrationFilePath);
         StopClickMoveButton.IsEnabled = _clickMoveRunning;
         UpdateNozzleTeachUi();
+        ScheduleCalibrationToolbarSync();
+        ScheduleCalibrationSidebarSync();
+    }
+
+    private void ScheduleCalibrationToolbarSync()
+    {
+        if (!_hostReady || _shutdown)
+        {
+            return;
+        }
+
+        _calibrationToolbarSyncPending = true;
+        if (_calibrationToolbarSyncRunning)
+        {
+            return;
+        }
+
+        _calibrationToolbarSyncRunning = true;
+        _ = SyncCalibrationToolbarLoopAsync();
+    }
+
+    private async Task SyncCalibrationToolbarLoopAsync()
+    {
+        try
+        {
+            while (_calibrationToolbarSyncPending && _hostReady && !_shutdown)
+            {
+                _calibrationToolbarSyncPending = false;
+                try
+                {
+                    await VisionHost.SetCalibrationToolbarStateAsync(
+                        CalibrationFilePathTextBox.Text,
+                        CalibrationFilePathTextBox.IsEnabled,
+                        ChooseCalibrationFileButton.IsEnabled,
+                        ImportCalibrationFileButton.IsEnabled,
+                        LoadCalibrationProfileButton.IsEnabled,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                    if (_hostReady && !_shutdown)
+                    {
+                        _calibrationToolbarSyncPending = true;
+                    }
+
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            _calibrationToolbarSyncRunning = false;
+        }
+    }
+
+    private void ScheduleCalibrationSidebarSync()
+    {
+        if (!_hostReady || _shutdown)
+        {
+            return;
+        }
+
+        _calibrationSidebarSyncPending = true;
+        if (_calibrationSidebarSyncRunning)
+        {
+            return;
+        }
+
+        _calibrationSidebarSyncRunning = true;
+        _ = SyncCalibrationSidebarLoopAsync();
+    }
+
+    private async Task SyncCalibrationSidebarLoopAsync()
+    {
+        try
+        {
+            while (_calibrationSidebarSyncPending && _hostReady && !_shutdown)
+            {
+                _calibrationSidebarSyncPending = false;
+                var movePriority =
+                    (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "X";
+                var clickTarget =
+                    (ClickTargetToolComboBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "Camera";
+                var state = new CalibrationSidebarState(
+                    CenterXPulseText.Text,
+                    CenterYPulseText.Text,
+                    CenterVmText.Text,
+                    StepXPulsesTextBox.Text,
+                    StepYPulsesTextBox.Text,
+                    movePriority,
+                    VelocityTextBox.Text,
+                    SettleMillisecondsTextBox.Text,
+                    NozzleTeachStepText.Text,
+                    RecordNozzleToolPointButton.Content?.ToString() ?? "2 记录吸嘴1",
+                    NozzleCalibrationStatusText.Text,
+                    clickTarget,
+                    EnableClickMoveCheckBox.IsChecked == true,
+                    ClickMoveStatusText.Text,
+                    RecordCenterButton.IsEnabled,
+                    StartCalibrationButton.IsEnabled,
+                    _calibrationRunning,
+                    StepXPulsesTextBox.IsEnabled,
+                    RecordCameraToolPointButton.IsEnabled,
+                    RecordNozzleToolPointButton.IsEnabled,
+                    ClickTargetToolComboBox.IsEnabled,
+                    EnableClickMoveCheckBox.IsEnabled,
+                    _recordedCenter is not null &&
+                    !_calibrationRunning &&
+                    !_centerSyncRunning &&
+                    !_clickMoveRunning &&
+                    !_clickMoveConfigurationRunning &&
+                    _motionController is not null,
+                    StopClickMoveButton.IsEnabled,
+                    GetBrushColor(CenterVmText.Foreground, "#12D879"),
+                    GetBrushColor(NozzleCalibrationStatusText.Foreground, "#AFC0CD"),
+                    GetBrushColor(ClickMoveStatusText.Foreground, "#AFC0CD"),
+                    WorkflowStatusText.Text);
+                try
+                {
+                    await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);
+                }
+                catch
+                {
+                    if (_hostReady && !_shutdown)
+                    {
+                        _calibrationSidebarSyncPending = true;
+                    }
+
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            _calibrationSidebarSyncRunning = false;
+        }
+    }
+
+    private static string GetBrushColor(Brush brush, string fallback)
+    {
+        return brush is SolidColorBrush solidColorBrush
+            ? solidColorBrush.Color.ToString()
+            : fallback;
     }
 
     private void SetHostStatus(string message, HostStatus status)
@@ -1347,6 +1654,7 @@ public partial class VisualCalibrationPage : UserControl
             WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
             _ => Color.FromRgb(216, 228, 236)
         });
+        ScheduleCalibrationSidebarSync();
     }
 
     private void SetClickMoveStatus(string message, WorkflowStatus status)
@@ -1359,6 +1667,7 @@ public partial class VisualCalibrationPage : UserControl
             WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
             _ => Color.FromRgb(143, 178, 201)
         });
+        ScheduleCalibrationSidebarSync();
     }
 
     private void SetNozzleCalibrationStatus(string message, WorkflowStatus status)
@@ -1371,6 +1680,7 @@ public partial class VisualCalibrationPage : UserControl
             WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
             _ => Color.FromRgb(143, 178, 201)
         });
+        ScheduleCalibrationSidebarSync();
     }
 
     private static double ParsePositiveDouble(string? value, string name)

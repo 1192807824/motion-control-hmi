@@ -397,6 +397,346 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 以相对脉冲方式移动指定硬件轴，并在到位或失败停止后返回最终轴快照。
+    /// 该入口使用当前轴的速度与运动曲线配置，且与其它运动、回零、停止流程互斥。
+    /// </summary>
+    public async Task<MotionAxisSnapshot> MoveAxisRelativeAsync(
+        int hardwareAxisNo,
+        double pulseDistance,
+        CancellationToken cancellationToken)
+    {
+        if (hardwareAxisNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        if (!double.IsFinite(pulseDistance) || pulseDistance == 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pulseDistance),
+                "相对移动脉冲必须是非零有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行相对脉冲移动。");
+        }
+
+        if (hardwareAxisNo >= _motionCard.AxisCount)
+        {
+            throw new InvalidOperationException(
+                $"硬件轴 {hardwareAxisNo} 当前不可用，控制卡只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var axis = Axes?.FirstOrDefault(item =>
+                       item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+        var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
+        profile.Validate();
+        if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+        {
+            throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+        }
+
+        var beforeMove = _motionCard.ReadAxis(hardwareAxisNo);
+        ApplySnapshot(axis, beforeMove);
+        EnsureRelativeAxisReady(axis, beforeMove, pulseDistance);
+        var expectedTarget = beforeMove.CommandPosition + pulseDistance;
+        if (!double.IsFinite(expectedTarget))
+        {
+            throw new InvalidOperationException("相对脉冲移动后的目标位置无效。");
+        }
+
+        var estimatedTimeoutMilliseconds = Math.Ceiling(
+            Math.Abs(pulseDistance) / axis.JogSpeed * 1000d + 5000d);
+        var moveTimeoutMilliseconds = (int)Math.Clamp(
+            Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds),
+            10_000d,
+            120_000d);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var commandIssued = false;
+        try
+        {
+            _motionCard.MoveRelative(hardwareAxisNo, pulseDistance, axis.JogSpeed);
+            commandIssued = true;
+            _activePositionAxisNo = hardwareAxisNo;
+            _activePositionTarget = expectedTarget;
+            _activePositionIssuedAtUtc = DateTime.UtcNow;
+            _activePositionDeadlineUtc = _activePositionIssuedAtUtc.Value.AddMilliseconds(moveTimeoutMilliseconds);
+            _activePositionTolerance = profile.CompletionTolerance;
+            _activePositionTimeoutMilliseconds = moveTimeoutMilliseconds;
+            _activePositionObservedMoving = false;
+            _operatorStopRequestedAxisNo = null;
+            _operatorImmediateStopRequested = false;
+            _failedPositionAxisNo = null;
+            axis.Target = expectedTarget;
+            axis.IsMoving = true;
+            axis.State = $"相对脉冲命令已发送：{pulseDistance:0.###} {axis.Unit}";
+            _commandStopwatch = Stopwatch.StartNew();
+            SetCommandStage(CommandStage.Issued, "命令已下发");
+
+            _positionMoveCancellation = linkedCancellation;
+            await WaitForPositionMoveAsync(axis, linkedCancellation.Token);
+
+            var settled = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, settled);
+            EnsureRelativeAxisReady(axis, settled, pulseDistance);
+            if (settled.IsMoving ||
+                Math.Abs(settled.FeedbackPosition - expectedTarget) > profile.CompletionTolerance)
+            {
+                throw new InvalidOperationException(
+                    $"{axis.Name} 未在允许误差内到位：{settled.FeedbackPosition:0.###}/{expectedTarget:0.###}。");
+            }
+
+            return settled;
+        }
+        catch (Exception exception)
+        {
+            if (commandIssued)
+            {
+                _failedPositionAxisNo = hardwareAxisNo;
+                axis.State = "相对脉冲移动异常，正在安全停止";
+                SetCommandStage(CommandStage.Failed, "相对脉冲移动失败，停止确认中");
+                RequestStopAfterPositionFailure(axis);
+            }
+            else
+            {
+                ClearPositionTracking(hardwareAxisNo);
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm($"AXIS-{hardwareAxisNo:00}-EXTERNAL-RELATIVE", FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_positionMoveCancellation, linkedCancellation))
+            {
+                _positionMoveCancellation = null;
+            }
+
+            if (!commandIssued)
+            {
+                ClearPositionTracking(hardwareAxisNo);
+            }
+
+            PollMotionState();
+        }
+    }
+
+    /// <summary>
+    /// 向多根硬件轴同步下发相同的相对脉冲命令，并等待全部轴到位。
+    /// 用于需要同向、同脉冲联动的机构；命令按轴号连续下发，不做坐标换算。
+    /// </summary>
+    public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesRelativeAsync(
+        IReadOnlyCollection<int> hardwareAxisNos,
+        double pulseDistance,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+
+        var axisNumbers = hardwareAxisNos.Distinct().OrderBy(axisNo => axisNo).ToArray();
+        if (axisNumbers.Length == 0 || axisNumbers.Any(axisNo => axisNo < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(hardwareAxisNos));
+        }
+
+        if (!double.IsFinite(pulseDistance) || pulseDistance == 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pulseDistance),
+                "相对移动脉冲必须是非零有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行同步相对脉冲移动。");
+        }
+
+        if (axisNumbers.Any(axisNo => axisNo >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"同步移动包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var moves = new List<(AxisStatus Axis, double Target, double Tolerance)>();
+        var maximumTimeoutMilliseconds = 10_000d;
+        foreach (var hardwareAxisNo in axisNumbers)
+        {
+            var axis = Axes?.FirstOrDefault(item =>
+                           item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+            var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
+            profile.Validate();
+            if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+
+            var beforeMove = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, beforeMove);
+            EnsureRelativeAxisReady(axis, beforeMove, pulseDistance);
+            var target = beforeMove.CommandPosition + pulseDistance;
+            if (!double.IsFinite(target))
+            {
+                throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 的相对脉冲目标无效。");
+            }
+
+            var estimatedTimeoutMilliseconds = Math.Ceiling(
+                Math.Abs(pulseDistance) / axis.JogSpeed * 1000d + 5000d);
+            maximumTimeoutMilliseconds = Math.Max(
+                maximumTimeoutMilliseconds,
+                Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
+            moves.Add((axis, target, profile.CompletionTolerance));
+        }
+
+        var moveTimeoutMilliseconds = (int)Math.Clamp(
+            maximumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var commandedAxes = new List<AxisStatus>();
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            foreach (var move in moves)
+            {
+                _motionCard.MoveRelative(
+                    move.Axis.HardwareAxisNo,
+                    pulseDistance,
+                    move.Axis.JogSpeed);
+                commandedAxes.Add(move.Axis);
+                move.Axis.Target = move.Target;
+                move.Axis.IsMoving = true;
+                move.Axis.State = $"同步相对脉冲命令已发送：{pulseDistance:0.###} {move.Axis.Unit}";
+            }
+
+            _commandStopwatch = Stopwatch.StartNew();
+            SetCommandStage(CommandStage.Issued, "同步相对脉冲命令已下发");
+            var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
+            while (true)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var snapshots = new List<MotionAxisSnapshot>(moves.Count);
+                var allAtTarget = true;
+                foreach (var move in moves)
+                {
+                    var snapshot = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                    ApplySnapshot(move.Axis, snapshot);
+                    if (snapshot.Alarm || snapshot.EmergencyInput)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步移动时发生报警或急停信号：{snapshot.StateText}。");
+                    }
+
+                    if ((pulseDistance > 0 && snapshot.PositiveLimit) ||
+                        (pulseDistance < 0 && snapshot.NegativeLimit))
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步移动时触发了当前运动方向的限位。",
+                            "同步相对脉冲安全检查");
+                    }
+
+                    if (snapshot.StopReason != 0)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步移动未正常到位，停止原因 {snapshot.StopReason}。",
+                            "同步相对脉冲完成检查");
+                    }
+
+                    snapshots.Add(snapshot);
+                    if (snapshot.IsMoving ||
+                        Math.Abs(snapshot.FeedbackPosition - move.Target) > move.Tolerance)
+                    {
+                        allAtTarget = false;
+                    }
+                }
+
+                if (allAtTarget)
+                {
+                    SetCommandStage(CommandStage.Stopped, "同步相对脉冲运动完成");
+                    return snapshots;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        $"同步相对脉冲移动在 {moveTimeoutMilliseconds} ms 内未全部到位。");
+                }
+
+                SetCommandStage(CommandStage.Running, "轴组同步运动中");
+                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+            }
+        }
+        catch (Exception exception)
+        {
+            foreach (var axis in commandedAxes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-RELATIVE",
+                    "同步相对脉冲移动异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisNumbers.Select(axisNo => axisNo.ToString("00")))}-EXTERNAL-RELATIVE",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
     public async Task RunNinePointCalibrationAsync(
         NinePointMotionRequest request,
         Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,
@@ -731,6 +1071,43 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException(
                 $"{coordinateName} 轴存在报警、急停或限位信号：{snapshot.StateText}。 ");
+        }
+    }
+
+    private static void EnsureRelativeAxisReady(
+        AxisStatus axis,
+        MotionAxisSnapshot snapshot,
+        double pulseDistance)
+    {
+        if (!axis.StatusReadHealthy)
+        {
+            throw new InvalidOperationException($"{axis.Name} 状态读取异常，禁止下发运动命令。");
+        }
+
+        if (!snapshot.ServoEnabled)
+        {
+            throw new InvalidOperationException($"{axis.Name} 未使能。");
+        }
+
+        if (snapshot.Alarm || snapshot.EmergencyInput)
+        {
+            throw new InvalidOperationException(
+                $"{axis.Name} 存在报警或急停信号：{snapshot.StateText}。");
+        }
+
+        if (snapshot.IsMoving)
+        {
+            throw new InvalidOperationException($"{axis.Name} 仍在运动。");
+        }
+
+        if (pulseDistance > 0 && snapshot.PositiveLimit)
+        {
+            throw new InvalidOperationException($"{axis.Name} 正限位已触发，禁止继续正向移动。");
+        }
+
+        if (pulseDistance < 0 && snapshot.NegativeLimit)
+        {
+            throw new InvalidOperationException($"{axis.Name} 负限位已触发，禁止继续负向移动。");
         }
     }
 

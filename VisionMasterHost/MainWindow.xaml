@@ -15,36 +15,233 @@
         Loaded="MainWindow_Loaded"
         Closing="MainWindow_Closing">
     <Window.Resources>
+        <ControlTemplate x:Key="DarkButtonTemplate" TargetType="{x:Type Button}">
+            <Border x:Name="ButtonBorder"
+                    Padding="{TemplateBinding Padding}"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="2"
+                    SnapsToDevicePixels="True">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  RecognizesAccessKey="True" />
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.86" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.72" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.48" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <Style x:Key="DarkComboBox" TargetType="{x:Type ComboBox}">
+            <Setter Property="Padding" Value="8,0,28,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="#0B2235" />
+            <Setter Property="Foreground" Value="#EDF4F9" />
+            <Setter Property="BorderBrush" Value="#35546B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ComboBox}">
+                        <Grid>
+                            <Border x:Name="ComboBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="2"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                      IsHitTestVisible="False" />
+                                    <Path Width="8"
+                                          Height="5"
+                                          Margin="0,0,10,0"
+                                          HorizontalAlignment="Right"
+                                          VerticalAlignment="Center"
+                                          Data="M 0 0 L 4 4 L 8 0"
+                                          Stroke="#C9D6DF"
+                                          StrokeThickness="1.5"
+                                          Stretch="None" />
+                                </Grid>
+                            </Border>
+                            <ToggleButton Focusable="False"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                        <Border Background="Transparent" />
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup"
+                                   Placement="Bottom"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   PopupAnimation="Fade">
+                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="300"
+                                        Padding="1"
+                                        Background="#0B2235"
+                                        BorderBrush="#45647A"
+                                        BorderThickness="1">
+                                    <ScrollViewer CanContentScroll="True">
+                                        <StackPanel IsItemsHost="True" />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#0D7DFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ComboBorder" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="Padding" Value="9,6" />
+            <Setter Property="Foreground" Value="#EDF4F9" />
+            <Setter Property="Background" Value="#0B2235" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                        <Border x:Name="ItemBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#164A70" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#0D5DB5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Height" Value="34" />
-            <Setter Property="MinWidth" Value="78" />
-            <Setter Property="Padding" Value="14,0" />
-            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="MinWidth" Value="72" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Margin" Value="6,0,0,0" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Background" Value="#0D6EE8" />
             <Setter Property="BorderBrush" Value="#0B5CC2" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource DarkButtonTemplate}" />
         </Style>
 
-        <Style x:Key="Selector" TargetType="ComboBox">
-            <Setter Property="Height" Value="34" />
-            <Setter Property="Padding" Value="8,0" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Background" Value="#F7FAFC" />
-            <Setter Property="Foreground" Value="#10263A" />
-            <Setter Property="BorderBrush" Value="#668198" />
-            <Setter Property="BorderThickness" Value="1" />
+        <Style x:Key="Selector" TargetType="ComboBox" BasedOn="{StaticResource DarkComboBox}">
+            <Setter Property="Height" Value="40" />
         </Style>
 
         <Style x:Key="FieldLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#AFC0CE" />
+            <Setter Property="Foreground" Value="#D9E5ED" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="14,0,8,0" />
+            <Setter Property="Margin" Value="12,0,8,0" />
+        </Style>
+
+        <Style x:Key="SidebarSection" TargetType="Border">
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="BorderBrush" Value="#29475D" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+
+        <Style x:Key="SidebarTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#F4F8FB" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="SidebarLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#D7E2EA" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="SidebarInput" TargetType="TextBox">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="Background" Value="#0B2235" />
+            <Setter Property="Foreground" Value="#EDF4F9" />
+            <Setter Property="BorderBrush" Value="#35546B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <Style x:Key="SidebarCombo" TargetType="ComboBox" BasedOn="{StaticResource DarkComboBox}">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <Style x:Key="SidebarButton" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Foreground" Value="#EDF4F9" />
+            <Setter Property="Background" Value="#0B4CA3" />
+            <Setter Property="BorderBrush" Value="#0D6EE8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource DarkButtonTemplate}" />
+        </Style>
+
+        <Style x:Key="RenderToolButton" TargetType="Button">
+            <Setter Property="Width" Value="31" />
+            <Setter Property="Height" Value="31" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="#DDE7EE" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template" Value="{StaticResource DarkButtonTemplate}" />
         </Style>
     </Window.Resources>
 
@@ -57,89 +254,169 @@
 
         <Border x:Name="CommandBar"
                 Grid.Row="0"
-                Padding="12,10"
-                Background="#163047"
+                Padding="18,8"
+                Background="#071D2F"
                 BorderBrush="#345269"
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" MinWidth="180" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="145" />
+                    <ColumnDefinition Width="252" />
+                    <ColumnDefinition Width="21" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="145" />
+                    <ColumnDefinition Width="150" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="150" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="160" />
+                    <ColumnDefinition Width="21" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="160" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="21" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Grid Grid.Column="0">
+                <TextBlock Grid.Column="0"
+                           Text="固定方案"
+                           Style="{StaticResource FieldLabel}"
+                           Margin="0,0,8,0" />
+
+                <Grid Grid.Column="1">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="0" />
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="SolutionPathTextBox"
-                             Height="34"
+                             Height="40"
                              Padding="10,0"
                              VerticalContentAlignment="Center"
                              IsReadOnly="True"
-                             Background="#F7FAFC"
-                             Foreground="#263746"
-                             BorderBrush="#668198"
+                             Background="#0B2235"
+                             Foreground="#EDF4F9"
+                             BorderBrush="#35546B"
                              BorderThickness="1"
-                             Text="未选择方案"
-                             ToolTip="当前 VisionMaster .sol 方案" />
+                             Text="等待加载固定方案"
+                             ToolTip="当前用户桌面的新纳方案.sol" />
                     <Button Grid.Column="1"
                             x:Name="ChooseSolutionButton"
-                            Content="选择方案"
-                            Style="{StaticResource PrimaryButton}"
-                            MinWidth="92"
-                            Click="ChooseSolution_Click" />
+                            Visibility="Collapsed" />
                 </Grid>
 
-                <TextBlock Grid.Column="1" Text="实时流程" Style="{StaticResource FieldLabel}" />
-                <ComboBox Grid.Column="2"
-                          x:Name="PreviewProcedureComboBox"
-                          Style="{StaticResource Selector}"
-                          IsEnabled="False"
-                          ToolTip="选择持续采集相机画面的流程"
-                          SelectionChanged="PreviewProcedureComboBox_SelectionChanged" />
+                <Border Grid.Column="2" Width="1" Height="34" Background="#345269" />
 
-                <TextBlock Grid.Column="3" Text="标定流程" Style="{StaticResource FieldLabel}" />
-                <ComboBox Grid.Column="4"
-                          x:Name="CalibrationProcedureComboBox"
-                          Style="{StaticResource Selector}"
-                          IsEnabled="False"
-                          ToolTip="选择包含N点标定1、九点采集时逐次运行的流程"
-                          SelectionChanged="CalibrationProcedureComboBox_SelectionChanged" />
+                <TextBlock Grid.Column="3" Text="实时流程" Style="{StaticResource FieldLabel}" />
+                <TextBlock Grid.Column="4"
+                           Text="实时相机"
+                           VerticalAlignment="Center"
+                           Foreground="#EDF4F9"
+                           FontWeight="SemiBold" />
 
-                <TextBlock Grid.Column="5" Text="预览图像" Style="{StaticResource FieldLabel}" />
-                <ComboBox Grid.Column="6"
-                          x:Name="ImageStepComboBox"
-                          Style="{StaticResource Selector}"
-                          DisplayMemberPath="DisplayName"
-                          IsEnabled="False"
-                          ToolTip="仅显示这个步骤的图像与绘制结果"
-                          SelectionChanged="ImageStepComboBox_SelectionChanged" />
+                <TextBlock Grid.Column="5" Text="找芯片" Style="{StaticResource FieldLabel}" />
+                <TextBlock Grid.Column="6"
+                           Text="找芯片流程"
+                           VerticalAlignment="Center"
+                           Foreground="#EDF4F9"
+                           FontWeight="SemiBold" />
 
-                <StackPanel Grid.Column="7" Orientation="Horizontal">
+                <TextBlock Grid.Column="7" Text="标定流程" Style="{StaticResource FieldLabel}" />
+                <TextBlock Grid.Column="8"
+                           Text="标定流程"
+                           VerticalAlignment="Center"
+                           Foreground="#EDF4F9"
+                           FontWeight="SemiBold" />
+
+                <!-- Fixed workflow internals: kept for renderer and calibration state only. -->
+                <StackPanel Grid.Column="14" Visibility="Collapsed">
+                    <ComboBox x:Name="PreviewProcedureComboBox"
+                              SelectionChanged="PreviewProcedureComboBox_SelectionChanged" />
+                    <ComboBox x:Name="CalibrationProcedureComboBox"
+                              SelectionChanged="CalibrationProcedureComboBox_SelectionChanged" />
+                    <ComboBox x:Name="ImageStepComboBox"
+                              DisplayMemberPath="DisplayName"
+                              SelectionChanged="ImageStepComboBox_SelectionChanged" />
+                </StackPanel>
+
+                <Border Grid.Column="9" Width="1" Height="34" Background="#345269" />
+
+                <StackPanel Grid.Column="10"
+                            x:Name="CalibrationToolbarPanel"
+                            Orientation="Horizontal">
+                    <TextBlock Text="标定文件" Style="{StaticResource FieldLabel}" Margin="0,0,8,0" />
+                </StackPanel>
+                <TextBox Grid.Column="11"
+                         x:Name="CalibrationToolbarPathTextBox"
+                         Height="40"
+                         Padding="8,0"
+                         VerticalContentAlignment="Center"
+                         IsReadOnly="True"
+                         Background="#0B2235"
+                         Foreground="#EDF4F9"
+                         BorderBrush="#35546B"
+                         BorderThickness="1"
+                         ToolTip="当前九点标定文件" />
+                <StackPanel Grid.Column="12" Orientation="Horizontal">
+                    <Button x:Name="ChooseCalibrationToolbarButton"
+                            Content="保存位置"
+                            Tag="SaveLocation"
+                            Style="{StaticResource PrimaryButton}"
+                            MinWidth="68"
+                            Padding="8,0"
+                            Margin="6,0,0,0"
+                            Background="#102A3E"
+                            BorderBrush="#45647A"
+                            Click="CalibrationToolbarAction_Click" />
+                    <Button x:Name="ImportCalibrationToolbarButton"
+                            Content="导入已有"
+                            Tag="Import"
+                            Style="{StaticResource PrimaryButton}"
+                            MinWidth="68"
+                            Padding="8,0"
+                            Margin="6,0,0,0"
+                            Background="#0B2B24"
+                            BorderBrush="#00A965"
+                            Foreground="#1EEA86"
+                            Click="CalibrationToolbarAction_Click" />
+                    <Button x:Name="LoadCalibrationProfileToolbarButton"
+                            Content="加载配置"
+                            Tag="LoadProfile"
+                            Style="{StaticResource PrimaryButton}"
+                            MinWidth="68"
+                            Padding="8,0"
+                            Margin="6,0,0,0"
+                            Background="#0B2235"
+                            BorderBrush="#0D6EE8"
+                            Click="CalibrationToolbarAction_Click" />
+                </StackPanel>
+
+                <Border Grid.Column="13" Width="1" Height="34" Background="#345269" />
+
+                <StackPanel Grid.Column="14"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right">
                     <Button x:Name="RunOnceButton"
                             Content="运行一次"
                             Style="{StaticResource PrimaryButton}"
-                            Background="#17834A"
-                            BorderBrush="#12683A"
+                            MinWidth="76"
+                            Padding="10,0"
+                            Background="#102A3E"
+                            BorderBrush="#45647A"
                             IsEnabled="False"
                             Click="RunOnce_Click" />
                     <Button x:Name="ContinuousRunButton"
                             Content="实时预览"
                             Style="{StaticResource PrimaryButton}"
+                            MinWidth="76"
+                            Padding="10,0"
                             IsEnabled="False"
                             Click="ContinuousRun_Click" />
                     <Button x:Name="StopRunButton"
                             Content="暂停预览"
                             Style="{StaticResource PrimaryButton}"
-                            Background="#D90D16"
-                            BorderBrush="#A90A12"
+                            MinWidth="76"
+                            Padding="10,0"
+                            Background="#102A3E"
+                            BorderBrush="#45647A"
                             IsEnabled="False"
                             Click="StopRun_Click" />
                 </StackPanel>
@@ -147,15 +424,16 @@
         </Border>
 
         <Border Grid.Row="1"
-                Padding="14,0"
-                Background="#13283A"
-                BorderBrush="#345269"
+                Margin="330,0,8,0"
+                Padding="8,0"
+                Background="#071D2F"
+                BorderBrush="#29475D"
                 BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <Ellipse x:Name="StatusIndicator" Width="9" Height="9" Fill="#E0A21A" />
                 <TextBlock x:Name="StatusTextBlock"
                            Margin="8,0,0,0"
-                           Text="请选择方案；加载后将自动开启实时预览"
+                           Text="正在加载桌面“新纳方案.sol”与固定流程…"
                            Foreground="#D8E4EC"
                            FontSize="12"
                            FontWeight="SemiBold"
@@ -163,110 +441,297 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Row="2" Margin="10">
+        <Grid x:Name="WorkspaceGrid" Grid.Row="2" Margin="0,0,8,8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="WorkspaceSidebarColumn" Width="320" />
+                <ColumnDefinition x:Name="WorkspaceGapColumn" Width="10" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0"
-                    Background="#202427"
-                    BorderBrush="#345269"
+            <Border x:Name="CalibrationSidebar"
+                    Grid.Column="0"
+                    Background="#071F32"
+                    BorderBrush="#29475D"
                     BorderThickness="1"
-                    CornerRadius="5"
-                    ClipToBounds="True">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="30" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Border Padding="10,0"
-                            Background="#163047"
-                            BorderBrush="#345269"
-                            BorderThickness="0,0,0,1">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="#39C56B" />
-                            <TextBlock Margin="7,0,0,0"
-                                       Text="实时相机"
-                                       Foreground="#F4F8FB"
-                                       FontSize="12"
-                                       FontWeight="SemiBold" />
+                    CornerRadius="4">
+                <StackPanel>
+                    <Border Style="{StaticResource SidebarSection}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="1" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="记录中心" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                            </StackPanel>
+                            <Grid Margin="26,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="106" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="30" />
+                                    <RowDefinition Height="30" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="轴 1 X（pulse）" Style="{StaticResource SidebarLabel}" />
+                                <Border Grid.Column="1" Height="28" Background="#0B2235"
+                                        BorderBrush="#35546B" BorderThickness="1" CornerRadius="2">
+                                    <TextBlock x:Name="SidebarCenterXPulseText" Text="未记录"
+                                               Foreground="#EDF4F9" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Row="1" Text="轴 2 Y（pulse）" Style="{StaticResource SidebarLabel}" />
+                                <Border Grid.Row="1" Grid.Column="1" Height="28" Background="#0B2235"
+                                        BorderBrush="#35546B" BorderThickness="1" CornerRadius="2">
+                                    <TextBlock x:Name="SidebarCenterYPulseText" Text="未记录"
+                                               Foreground="#EDF4F9" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                            <TextBlock x:Name="SidebarCenterVmText" Text="基准点 X：--　Y：--"
+                                       Margin="26,0,0,6" Foreground="#12D879" FontSize="12"
+                                       FontWeight="SemiBold" TextAlignment="Center" />
+                            <Button x:Name="SidebarRecordCenterButton" Tag="RecordCenter"
+                                    Margin="26,0,0,0" Content="记录当前中心"
+                                    Style="{StaticResource SidebarButton}"
+                                    Click="CalibrationSidebarButton_Click" />
                         </StackPanel>
                     </Border>
-                    <Grid Grid.Row="1">
-                        <vm:VmRenderControl x:Name="VisionRenderControl"
-                                            CoordinateInfoVisible="True"
-                                            OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
-                        <Grid x:Name="CenterCrosshair"
-                              IsHitTestVisible="False"
-                              Visibility="Collapsed"
-                              Panel.ZIndex="20">
-                            <Border Width="1"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Stretch"
-                                    Background="#FF00E676" />
-                            <Border Height="1"
-                                    HorizontalAlignment="Stretch"
-                                    VerticalAlignment="Center"
-                                    Background="#FF00E676" />
-                        </Grid>
-                        <StackPanel x:Name="ImagePlaceholder"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    IsHitTestVisible="False">
-                            <TextBlock Text="等待实时图像"
-                                       Foreground="#AAB9C6"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       HorizontalAlignment="Center" />
+
+                    <Border Style="{StaticResource SidebarSection}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="2" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="九点参数" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                            </StackPanel>
+                            <Grid Margin="26,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="106" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="31" />
+                                    <RowDefinition Height="31" />
+                                    <RowDefinition Height="31" />
+                                    <RowDefinition Height="31" />
+                                    <RowDefinition Height="31" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="间距 X（pulse）" Style="{StaticResource SidebarLabel}" />
+                                <TextBox Grid.Column="1" x:Name="SidebarStepXTextBox" Tag="StepX"
+                                         Text="100000" Style="{StaticResource SidebarInput}"
+                                         TextChanged="CalibrationSidebarInput_TextChanged" />
+                                <TextBlock Grid.Row="1" Text="间距 Y（pulse）" Style="{StaticResource SidebarLabel}" />
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="SidebarStepYTextBox" Tag="StepY"
+                                         Text="100000" Style="{StaticResource SidebarInput}"
+                                         TextChanged="CalibrationSidebarInput_TextChanged" />
+                                <TextBlock Grid.Row="2" Text="移动顺序" Style="{StaticResource SidebarLabel}" />
+                                <ComboBox Grid.Row="2" Grid.Column="1" x:Name="SidebarMovePriorityComboBox"
+                                          Tag="MovePriority" Style="{StaticResource SidebarCombo}"
+                                          SelectionChanged="CalibrationSidebarSelection_Changed">
+                                    <ComboBoxItem Content="X优先" Tag="X" />
+                                    <ComboBoxItem Content="Y优先" Tag="Y" />
+                                </ComboBox>
+                                <TextBlock Grid.Row="3" Text="速度（pulse/s）" Style="{StaticResource SidebarLabel}" />
+                                <TextBox Grid.Row="3" Grid.Column="1" x:Name="SidebarVelocityTextBox" Tag="Velocity"
+                                         Text="100000" Style="{StaticResource SidebarInput}"
+                                         TextChanged="CalibrationSidebarInput_TextChanged" />
+                                <TextBlock Grid.Row="4" Text="到位等待（ms）" Style="{StaticResource SidebarLabel}" />
+                                <TextBox Grid.Row="4" Grid.Column="1" x:Name="SidebarSettleTextBox" Tag="Settle"
+                                         Text="300" Style="{StaticResource SidebarInput}"
+                                         TextChanged="CalibrationSidebarInput_TextChanged" />
+                            </Grid>
+                            <Button x:Name="SidebarStartCalibrationButton" Tag="StartCalibration"
+                                    Margin="0" Content="一键九点标定"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#00A965" BorderBrush="#00C778"
+                                    Click="CalibrationSidebarButton_Click" />
                         </StackPanel>
-                    </Grid>
-                </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource SidebarSection}">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="3" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="1" Text="吸嘴对位" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock Grid.Column="2" x:Name="SidebarNozzleTeachStepText"
+                                           Text="等待记录十字" Foreground="#12D879" FontSize="11"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Margin="26,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="SidebarRecordCameraButton" Tag="RecordCamera"
+                                        Content="1 记录十字" Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E" BorderBrush="#35546B"
+                                        Click="CalibrationSidebarButton_Click" />
+                                <Button Grid.Column="2" x:Name="SidebarRecordNozzleButton" Tag="RecordNozzle"
+                                        Content="2 记录吸嘴1" Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E" BorderBrush="#35546B"
+                                        Click="CalibrationSidebarButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="SidebarNozzleStatusText"
+                                       Margin="26,0,0,0" Text="吸嘴1：未标定&#x0a;吸嘴2：未标定"
+                                       Foreground="#AFC0CD" FontSize="11" LineHeight="22" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource SidebarSection}" BorderThickness="0">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="4" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="1" Text="点击移动" Style="{StaticResource SidebarTitle}" Margin="10,0,10,0" />
+                                <ComboBox Grid.Column="2" x:Name="SidebarClickTargetComboBox" Tag="ClickTarget"
+                                          Style="{StaticResource SidebarCombo}"
+                                          SelectionChanged="CalibrationSidebarSelection_Changed">
+                                    <ComboBoxItem Content="相机中心对准" Tag="Camera" />
+                                    <ComboBoxItem Content="吸嘴1中心对准" Tag="Nozzle1" />
+                                    <ComboBoxItem Content="吸嘴2中心对准" Tag="Nozzle2" />
+                                </ComboBox>
+                            </Grid>
+                            <Button x:Name="SidebarReturnCameraCenterButton"
+                                    Tag="ReturnCameraCenter"
+                                    Margin="26,0,0,6"
+                                    Content="相机回到中心点"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#0B4CA3"
+                                    BorderBrush="#0D6EE8"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <Grid Margin="26,0,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="82" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="SidebarEnableClickMoveCheckBox" Tag="EnableClickMove"
+                                          Content="点击图像移动" Foreground="#EDF4F9"
+                                          VerticalAlignment="Center"
+                                          Checked="CalibrationSidebarClickMove_Changed"
+                                          Unchecked="CalibrationSidebarClickMove_Changed" />
+                                <Button Grid.Column="1" x:Name="SidebarStopClickMoveButton" Tag="StopClickMove"
+                                        Content="停止移动" Style="{StaticResource SidebarButton}"
+                                        Foreground="#FF4B55" Background="#071F32" BorderBrush="#D90D16"
+                                        Click="CalibrationSidebarButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="SidebarClickMoveStatusText" Margin="26,6,0,0"
+                                       Text="未启用" Foreground="#AFC0CD" FontSize="11" TextAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Border>
+
+            <Grid x:Name="RenderGrid" Grid.Column="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border x:Name="LiveRenderPanel" Grid.Column="0" Background="#202427" BorderBrush="#345269"
+                        BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="48" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Padding="18,0,10,0" Background="#0B263A" BorderBrush="#345269" BorderThickness="0,0,0,1">
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Ellipse Width="12" Height="12" Fill="#00D77B" />
+                                    <TextBlock Margin="14,0,0,0" Text="实时相机" Foreground="#F4F8FB"
+                                               FontSize="16" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Tag="Live:ZoomIn" Style="{StaticResource RenderToolButton}"
+                                            ToolTip="放大" Click="RenderToolButton_Click" Content="&#xE8A3;" />
+                                    <Button Tag="Live:ZoomOut" Style="{StaticResource RenderToolButton}"
+                                            ToolTip="缩小" Click="RenderToolButton_Click" Content="&#xE71F;" />
+                                    <Button Tag="Live:Actual" Style="{StaticResource RenderToolButton}"
+                                            ToolTip="1:1" Click="RenderToolButton_Click" FontFamily="Microsoft YaHei UI"
+                                            FontSize="11" FontWeight="SemiBold" Content="1:1" />
+                                    <Button x:Name="LiveFullscreenButton" Tag="Live:Fullscreen"
+                                            Style="{StaticResource RenderToolButton}" ToolTip="全屏"
+                                            Click="RenderToolButton_Click" Content="&#xE740;" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Grid Grid.Row="1">
+                            <vm:VmRenderControl x:Name="VisionRenderControl"
+                                                CoordinateInfoVisible="False"
+                                                OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
+                            <Grid x:Name="CenterCrosshair" IsHitTestVisible="False"
+                                  Visibility="Collapsed" Panel.ZIndex="20">
+                                <Border Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#FF00E676" />
+                                <Border Height="1" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="#FF00E676" />
+                            </Grid>
+                            <StackPanel x:Name="ImagePlaceholder" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" IsHitTestVisible="False">
+                                <TextBlock Text="等待实时图像" Foreground="#D9E0E5" FontSize="20"
+                                           FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="CalibrationRenderPanel" Grid.Column="2" Background="#202427" BorderBrush="#345269"
+                        BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="48" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Padding="18,0,10,0" Background="#0B263A" BorderBrush="#345269" BorderThickness="0,0,0,1">
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Ellipse Width="12" Height="12" Fill="#0D6EE8" />
+                                    <TextBlock Margin="14,0,0,0" Text="标定渲染" Foreground="#F4F8FB"
+                                               FontSize="16" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Tag="Calibration:ZoomIn" Style="{StaticResource RenderToolButton}"
+                                            ToolTip="放大" Click="RenderToolButton_Click" Content="&#xE8A3;" />
+                                    <Button Tag="Calibration:ZoomOut" Style="{StaticResource RenderToolButton}"
+                                            ToolTip="缩小" Click="RenderToolButton_Click" Content="&#xE71F;" />
+                                    <Button Tag="Calibration:Actual" Style="{StaticResource RenderToolButton}"
+                                            ToolTip="1:1" Click="RenderToolButton_Click" FontFamily="Microsoft YaHei UI"
+                                            FontSize="11" FontWeight="SemiBold" Content="1:1" />
+                                    <Button x:Name="CalibrationFullscreenButton" Tag="Calibration:Fullscreen"
+                                            Style="{StaticResource RenderToolButton}" ToolTip="全屏"
+                                            Click="RenderToolButton_Click" Content="&#xE740;" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Grid Grid.Row="1">
+                            <vm:VmRenderControl x:Name="CalibrationRenderControl" CoordinateInfoVisible="False" />
+                            <StackPanel x:Name="CalibrationImagePlaceholder" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" IsHitTestVisible="False">
+                                <TextBlock Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"
+                                           FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
 
             <Border Grid.Column="2"
-                    Background="#202427"
-                    BorderBrush="#345269"
-                    BorderThickness="1"
-                    CornerRadius="5"
-                    ClipToBounds="True">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="30" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Border Padding="10,0"
-                            Background="#163047"
-                            BorderBrush="#345269"
-                            BorderThickness="0,0,0,1">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="#0D6EE8" />
-                            <TextBlock Margin="7,0,0,0"
-                                       Text="标定渲染"
-                                       Foreground="#F4F8FB"
-                                       FontSize="12"
-                                       FontWeight="SemiBold" />
-                        </StackPanel>
-                    </Border>
-                    <Grid Grid.Row="1">
-                        <vm:VmRenderControl x:Name="CalibrationRenderControl"
-                                            CoordinateInfoVisible="True" />
-                        <StackPanel x:Name="CalibrationImagePlaceholder"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    IsHitTestVisible="False">
-                            <TextBlock Text="等待九点标定"
-                                       Foreground="#AAB9C6"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       HorizontalAlignment="Center" />
-                        </StackPanel>
-                    </Grid>
-                </Grid>
-            </Border>
-
-            <Border Grid.ColumnSpan="3"
                     x:Name="SdkErrorPanel"
                     Visibility="Collapsed"
                     Background="#EC202427"

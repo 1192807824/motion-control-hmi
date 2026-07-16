@@ -14,7 +14,7 @@
         ResizeMode="NoResize"
         WindowState="Normal"
         WindowStartupLocation="CenterScreen"
-        Background="#D7DDE5"
+        Background="#10263A"
         FontFamily="Microsoft YaHei UI">
     <Window.Resources>
         <SolidColorBrush x:Key="TopBar" Color="#071827" />
@@ -24,8 +24,7 @@
         <Style x:Key="MenuButton" TargetType="Button">
             <Setter Property="Foreground" Value="#EAF2FA" />
             <Setter Property="Background" Value="#20384F" />
-            <Setter Property="BorderBrush" Value="#7D98B1" />
-            <Setter Property="BorderThickness" Value="0,0,1,0" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="MinWidth" Value="112" />
             <Setter Property="Height" Value="36" />
             <Setter Property="Margin" Value="0" />
@@ -92,14 +91,14 @@
         </Style>
     </Window.Resources>
 
-    <Grid Background="#E8EDF2">
+    <Grid Background="#10263A">
             <Grid.RowDefinitions>
                 <RowDefinition Height="44" />
                 <RowDefinition Height="52" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Background="{StaticResource TopBar}" BorderBrush="#25435E" BorderThickness="0,0,0,1">
+            <Border Grid.Row="0" Background="{StaticResource TopBar}">
                 <Grid Margin="14,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="560" />
@@ -225,8 +224,8 @@
                                      Visibility="Collapsed" />
 
             <pages:VisualCalibrationPage x:Name="VisualCalibrationContent"
-                                         Grid.Row="2"
-                                         Visibility="Collapsed" />
+                                          Grid.Row="2"
+                                          Visibility="Hidden" />
 
             <pages:ConnectionConfigPage x:Name="ConnectionConfigContent"
                                         Grid.Row="2"

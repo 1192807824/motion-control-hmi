@@ -56,18 +56,18 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="8" Background="#10263A">
+    <Grid Margin="8" Background="#071D2F">
         <Grid.RowDefinitions>
-            <RowDefinition Height="38" />
+            <RowDefinition Height="56" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
                 Padding="10,0"
-                Background="#163047"
+                Background="#071D2F"
                 BorderBrush="#345269"
                 BorderThickness="1"
-                CornerRadius="5">
+                CornerRadius="4">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -77,27 +77,27 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="视觉标定"
                                Foreground="#F4F8FB"
-                               FontSize="15"
+                               FontSize="21"
                                FontWeight="Bold" />
                     <Ellipse x:Name="HostStatusIndicator"
-                             Width="9"
-                             Height="9"
-                             Margin="12,0,0,0"
+                             Width="12"
+                             Height="12"
+                             Margin="20,0,0,0"
                              Fill="#E0A21A" />
                     <TextBlock x:Name="HostStatusText"
-                               Margin="6,0,0,0"
+                               Margin="9,0,0,0"
                                Text="正在准备视觉组件…"
                                Foreground="#D8E4EC"
-                               FontSize="12"
+                               FontSize="14"
                                VerticalAlignment="Center" />
                 </StackPanel>
                 <Button Grid.Column="2"
                         x:Name="RestartHostButton"
                         Content="重启视觉"
-                        Height="28"
-                        Padding="10,0"
+                        Height="38"
+                        Padding="14,0"
                         Foreground="White"
-                        Background="#294A64"
+                        Background="#0B2235"
                         BorderBrush="#45647A"
                         Cursor="Hand"
                         IsEnabled="False"
@@ -105,14 +105,15 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Margin="0,6,0,0">
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="350" />
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="0" />
+                <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
+                    Visibility="Collapsed"
                     Padding="10"
                     Background="#163047"
                     BorderBrush="#345269"
@@ -248,74 +249,8 @@
                                              Style="{StaticResource PanelInput}"
                                              TextChanged="CalibrationSetting_Changed" />
                                 </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Style="{StaticResource SectionCard}">
-                            <StackPanel>
-                                <TextBlock Text="3　标定文件" Style="{StaticResource SectionTitle}" />
-                                <Grid Margin="0,5,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="5" />
-                                        <ColumnDefinition Width="68" />
-                                        <ColumnDefinition Width="5" />
-                                        <ColumnDefinition Width="68" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="CalibrationFilePathTextBox"
-                                             Style="{StaticResource PanelInput}"
-                                             TextAlignment="Left"
-                                             TextChanged="CalibrationFilePath_Changed"
-                                             ToolTip="标定文件保存位置" />
-                                    <Button Grid.Column="2"
-                                            x:Name="ChooseCalibrationFileButton"
-                                            Content="保存位置"
-                                            Style="{StaticResource PanelButton}"
-                                            Background="#294A64"
-                                            BorderBrush="#45647A"
-                                            Click="ChooseCalibrationFile_Click" />
-                                    <Button Grid.Column="4"
-                                            x:Name="ImportCalibrationFileButton"
-                                            Content="导入已有"
-                                            Style="{StaticResource PanelButton}"
-                                            Background="#17834A"
-                                            BorderBrush="#12683A"
-                                            ToolTip="导入已有的九点标定 XML，并应用到主页坐标换算"
-                                            Click="ImportCalibrationFile_Click" />
-                                </Grid>
-                                <Grid Margin="0,4,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="6" />
-                                        <ColumnDefinition Width="74" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="CalibrationProfilePathText"
-                                               Text="配置：完成双吸嘴后自动生成"
-                                               Foreground="#8FB2C9"
-                                               FontSize="10"
-                                               TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center" />
-                                    <Button Grid.Column="2"
-                                            x:Name="LoadCalibrationProfileButton"
-                                            Content="加载配置"
-                                            Style="{StaticResource PanelButton}"
-                                            Background="#294A64"
-                                            BorderBrush="#45647A"
-                                            FontSize="10"
-                                            Click="LoadCalibrationProfile_Click" />
-                                </Grid>
-                                <Button x:Name="SaveCalibrationProfileButton"
-                                        Margin="0,4,0,0"
-                                        Content="保存第一套XY标定配置"
-                                        Style="{StaticResource PanelButton}"
-                                        Background="#17834A"
-                                        BorderBrush="#12683A"
-                                        IsEnabled="False"
-                                        Visibility="Collapsed"
-                                        ToolTip="需完成双吸嘴对位，并分别通过吸嘴1、吸嘴2点击移动验证"
-                                        Click="SaveCalibrationProfile_Click" />
                                 <ProgressBar x:Name="CalibrationProgressBar"
-                                             Margin="0,5,0,0"
+                                             Margin="0,6,0,0"
                                              Height="5"
                                              Minimum="0"
                                              Maximum="9"
@@ -361,7 +296,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="4　吸嘴对位"
+                                    <TextBlock Text="3　吸嘴对位"
                                                Style="{StaticResource SectionTitle}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1"
@@ -413,7 +348,7 @@
                                         <ColumnDefinition Width="8" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="5　点击移动"
+                                    <TextBlock Text="4　点击移动"
                                                Style="{StaticResource SectionTitle}"
                                                VerticalAlignment="Center" />
                                     <ComboBox Grid.Column="2"
@@ -470,6 +405,8 @@
                                                       Started="VisionHost_Started"
                                                       Failed="VisionHost_Failed"
                                                       Exited="VisionHost_Exited"
+                                                      CalibrationToolbarActionRequested="VisionHost_CalibrationToolbarActionRequested"
+                                                      CalibrationSidebarActionRequested="VisionHost_CalibrationSidebarActionRequested"
                                                       ClickTargetReceived="VisionHost_ClickTargetReceived"
                                                       ClickTargetFailed="VisionHost_ClickTargetFailed" />
                     <StackPanel x:Name="HostPlaceholder"
@@ -483,6 +420,21 @@
                     </StackPanel>
                 </Grid>
             </Border>
+        </Grid>
+
+        <Grid Visibility="Collapsed">
+            <TextBox x:Name="CalibrationFilePathTextBox"
+                     TextChanged="CalibrationFilePath_Changed" />
+            <Button x:Name="ChooseCalibrationFileButton"
+                    Click="ChooseCalibrationFile_Click" />
+            <Button x:Name="ImportCalibrationFileButton"
+                    Click="ImportCalibrationFile_Click" />
+            <Button x:Name="LoadCalibrationProfileButton"
+                    Click="LoadCalibrationProfile_Click" />
+            <TextBlock x:Name="CalibrationProfilePathText" />
+            <Button x:Name="SaveCalibrationProfileButton"
+                    IsEnabled="False"
+                    Click="SaveCalibrationProfile_Click" />
         </Grid>
     </Grid>
 </UserControl>

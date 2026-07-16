@@ -22,6 +22,7 @@ public partial class MainWindow : Window
         VisualCalibrationContent.AttachMotionController(MotionPage);
         HomeContent.AttachMotionController(MotionPage);
         HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
+        HomeContent.ShowVisionInspectionDisplayAsync = ShowVisionInspectionDisplayAsync;
 
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;
@@ -30,6 +31,17 @@ public partial class MainWindow : Window
         _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _clockTimer.Tick += (_, _) => _viewModel.NowText = DateTime.Now.ToString("yyyy-MM-dd  HH:mm:ss");
         _clockTimer.Start();
+        Loaded += MainWindow_Loaded;
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        // 初始页仍是主页；视觉页保持 Hidden 以便先创建其原生承载窗口。
+        // 视觉宿主启动后会自动加载桌面“新纳方案.sol”及三个固定流程。
+        await Dispatcher.InvokeAsync(
+            () => VisualCalibrationContent.UpdateLayout(),
+            DispatcherPriority.ContextIdle);
+        await VisualCalibrationContent.EnsureStartedAsync();
     }
 
     private void PermissionLogin_Click(object sender, RoutedEventArgs e)
@@ -66,6 +78,12 @@ public partial class MainWindow : Window
     private void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
         ShowConnectionConfigPage();
+    }
+
+    private async Task ShowVisionInspectionDisplayAsync()
+    {
+        ShowVisualCalibrationPage();
+        await VisualCalibrationContent.EnsureStartedAsync();
     }
 
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e)
@@ -146,10 +164,12 @@ public partial class MainWindow : Window
         MotionPage.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
+        HomeContent.RefreshVisionInspectionDisplay(VisualCalibrationContent);
     }
 
     private void ShowVisualCalibrationPage()
     {
+        VisualCalibrationContent.UseDefaultVisionDisplay();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["ActiveMenuButton"];
@@ -158,6 +178,7 @@ public partial class MainWindow : Window
         MotionPage.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.Visibility = Visibility.Visible;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
+        VisualCalibrationContent.RefreshVisionDisplay();
     }
 
     private void ShowConnectionConfigPage()

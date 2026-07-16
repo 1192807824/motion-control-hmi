@@ -1,6 +1,7 @@
 <UserControl x:Class="ControlHub.Views.Pages.HomePage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:ControlHub.Views.Controls"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d"
@@ -423,6 +424,10 @@
                                 CornerRadius="3"
                                 ClipToBounds="True">
                             <Grid>
+                                <controls:VisionMasterDisplayHost x:Name="BlobInspectionVisionDisplayHost"
+                                                                  Visibility="Hidden"
+                                                                  HostSizeChanged="BlobInspectionVisionDisplayHost_HostSizeChanged" />
+
                                 <Viewbox x:Name="BlobInspectionImageViewbox"
                                          Stretch="Uniform"
                                          StretchDirection="Both"
@@ -746,6 +751,8 @@
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
                         <RowDefinition Height="*" MinHeight="202" />
+                        <RowDefinition Height="70" />
+                        <RowDefinition Height="70" />
                         <RowDefinition Height="142" />
                     </Grid.RowDefinitions>
 
@@ -845,22 +852,24 @@
                             BorderBrush="#527993"
                             IsEnabled="False"
                             Click="MoveAssignedNozzle_Click">
-                        <Grid Margin="20,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="50" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <Image Width="28" Height="28" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock x:Name="MoveAssignedNozzleTitleText"
-                                           Text="吸嘴顺序对位"
-                                           Foreground="White"
-                                           FontSize="19"
-                                           FontWeight="Bold" />
-                                <TextBlock x:Name="MoveAssignedNozzleHintText"
-                                           Text="等待Blob识别与目标分配"
-                                           Foreground="#D5E1E9"
-                                           FontSize="11"
-                                           Margin="0,2,0,0" />
-                            </StackPanel>
-                        </Grid>
+                            <Grid Margin="12,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="35" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock x:Name="MoveAssignedNozzleTitleText"
+                                               Text="吸嘴顺序对位"
+                                               Foreground="White"
+                                               FontSize="16"
+                                               FontWeight="Bold"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="MoveAssignedNozzleHintText"
+                                               Text="等待Blob识别与目标分配"
+                                               Foreground="#D5E1E9"
+                                               FontSize="9"
+                                               Margin="0,2,0,0"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
                     </Button>
 
                     <Border Grid.Row="7"
@@ -873,133 +882,249 @@
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="24" />
-                                <RowDefinition Height="20" />
-                                <RowDefinition Height="48" />
-                                <RowDefinition Height="32" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="52" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
                             <Grid>
-                                <TextBlock Text="第一套 XY 坐标换算（pulse）"
+                                <TextBlock Text="第一套 XY 绝对位置（pulse）"
                                            Foreground="#EAF2F7"
                                            FontSize="12"
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
-                                <TextBlock Text="只读 · 不移动"
+                                <TextBlock Text="直传绝对脉冲 · 不转换"
                                            Foreground="#49D17D"
                                            FontSize="10"
                                            HorizontalAlignment="Right"
                                            VerticalAlignment="Center" />
                             </Grid>
 
-                            <TextBlock Grid.Row="1"
-                                       x:Name="FirstSetCalibrationDetailsText"
-                                       Text="标定信息尚未加载"
-                                       Foreground="#8FB2C9"
-                                       FontSize="10"
-                                       TextTrimming="CharacterEllipsis"
-                                       VerticalAlignment="Center" />
-
-                            <Grid Grid.Row="2" Margin="0,3,0,3">
+                            <Grid Grid.Row="1" Margin="0,2,0,2">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="52" />
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
-                                    <ColumnDefinition Width="92" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="64" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="像素 X（px）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <TextBox x:Name="PixelXTextBox"
-                                             Height="25"
-                                             Text=""
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC" />
-                                </StackPanel>
+                                <TextBlock Text="位置 1"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center" />
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Text="像素 Y（px）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <TextBox x:Name="PixelYTextBox"
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="PresetPosition1XTextBox"
                                              Height="25"
                                              Text=""
                                              TextAlignment="Center"
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
-                                             Background="#F7FAFC" />
+                                             Background="#F7FAFC"
+                                             ToolTip="位置 1 的 X 轴绝对脉冲"
+                                             TextChanged="PresetPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="PresetPosition1YTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="位置 1 的 Y 轴绝对脉冲"
+                                             TextChanged="PresetPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="6">
                                     <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
-                                    <Button x:Name="ConvertBothNozzlesButton"
+                                    <Button x:Name="MovePresetPosition1Button"
                                             Height="25"
-                                            Content="换算双吸嘴"
+                                            Content="移动"
                                             Foreground="White"
                                             Background="#1674D1"
                                             BorderBrush="#62B5FF"
                                             Cursor="Hand"
-                                            Click="ConvertBothNozzles_Click" />
+                                            IsEnabled="False"
+                                            Click="MovePresetPosition1_Click" />
                                 </StackPanel>
                             </Grid>
 
-                            <Grid Grid.Row="3">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
+                            <Grid Grid.Row="2" Margin="0,2,0,2">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="48" />
+                                    <ColumnDefinition Width="52" />
+                                    <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="64" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="吸嘴1"
+                                <TextBlock Text="位置 2"
                                            Foreground="#62B5FF"
                                            FontSize="10"
                                            FontWeight="Bold"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1"
-                                           x:Name="Nozzle1MechanicalCoordinateText"
-                                           Text="X = —　Y = —"
-                                           Foreground="#DCE7EE"
-                                           FontFamily="Consolas"
-                                           FontSize="10"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="1"
-                                           Text="吸嘴2"
-                                           Foreground="#62B5FF"
-                                           FontSize="10"
-                                           FontWeight="Bold"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="1"
-                                           Grid.Column="1"
-                                           x:Name="Nozzle2MechanicalCoordinateText"
-                                           Text="X = —　Y = —"
-                                           Foreground="#DCE7EE"
-                                           FontFamily="Consolas"
-                                           FontSize="10"
-                                           VerticalAlignment="Center" />
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="PresetPosition2XTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="位置 2 的 X 轴绝对脉冲"
+                                             TextChanged="PresetPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="PresetPosition2YTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="位置 2 的 Y 轴绝对脉冲"
+                                             TextChanged="PresetPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="6">
+                                    <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <Button x:Name="MovePresetPosition2Button"
+                                            Height="25"
+                                            Content="移动"
+                                            Foreground="White"
+                                            Background="#1674D1"
+                                            BorderBrush="#62B5FF"
+                                            Cursor="Hand"
+                                            IsEnabled="False"
+                                            Click="MovePresetPosition2_Click" />
+                                </StackPanel>
                             </Grid>
 
-                            <StackPanel Grid.Row="4" VerticalAlignment="Center">
-                                <TextBlock x:Name="CoordinateTransformStatusText"
-                                           Text="输入像素坐标后换算；不会下发运动命令"
-                                           Foreground="#9FB1BF"
-                                           FontSize="10"
-                                           TextWrapping="Wrap" />
-                                <TextBlock x:Name="BlobRectangle1CenterText"
-                                           Text="矩形1质心(px)：X = —　Y = —"
-                                           Foreground="#49D17D"
-                                           FontFamily="Consolas"
-                                           FontSize="10"
-                                           Margin="0,2,0,0" />
-                                <TextBlock x:Name="BlobRectangle2CenterText"
-                                           Text="矩形2质心(px)：X = —　Y = —"
-                                           Foreground="#49D17D"
-                                           FontFamily="Consolas"
-                                           FontSize="10" />
-                            </StackPanel>
+                            <TextBlock Grid.Row="3"
+                                       x:Name="PresetPositionStatusText"
+                                       Text="预留两套 XY 绝对脉冲位置；点击“移动”后直接移动轴，不做坐标换算。"
+                                       Foreground="#9FB1BF"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
                         </Grid>
                     </Border>
 
-                    <Button Grid.Row="8"
+                    <Border Grid.Row="8"
+                            Margin="0,0,0,8"
+                            Background="#12283A"
+                            BorderBrush="#527993"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Padding="9,7">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="16" />
+                                <RowDefinition Height="26" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="DD马达（轴0）· 相对脉冲"
+                                       Foreground="#EAF2F7"
+                                       FontSize="10"
+                                       FontWeight="Bold" />
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="6" />
+                                    <ColumnDefinition Width="60" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="Axis0PulseTextBox"
+                                         Height="25"
+                                         Text=""
+                                         TextAlignment="Center"
+                                         VerticalContentAlignment="Center"
+                                         Foreground="#10263A"
+                                         Background="#F7FAFC"
+                                         ToolTip="输入相对移动脉冲：正数正转，负数反转"
+                                         TextChanged="Axis0PulseTextBox_TextChanged" />
+                                <Button Grid.Column="2"
+                                        x:Name="Axis0MoveButton"
+                                        Height="25"
+                                        Content="转动"
+                                        Foreground="White"
+                                        Background="#1674D1"
+                                        BorderBrush="#62B5FF"
+                                        Cursor="Hand"
+                                        IsEnabled="False"
+                                        Click="Axis0Move_Click" />
+                            </Grid>
+                            <TextBlock Grid.Row="2"
+                                       x:Name="Axis0MoveStatusText"
+                                       Text="正数正转，负数反转"
+                                       Foreground="#9FB1BF"
+                                       FontSize="9"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Bottom" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="9"
+                            Margin="0,0,0,8"
+                            Background="#12283A"
+                            BorderBrush="#8662C5"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Padding="9,7">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="16" />
+                                <RowDefinition Height="26" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="轴13 / 轴14 / 轴15 · 同步相对脉冲"
+                                       Foreground="#EAF2F7"
+                                       FontSize="10"
+                                       FontWeight="Bold" />
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="6" />
+                                    <ColumnDefinition Width="72" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="Axis13To15PulseTextBox"
+                                         Height="25"
+                                         Text=""
+                                         TextAlignment="Center"
+                                         VerticalContentAlignment="Center"
+                                         Foreground="#10263A"
+                                         Background="#F7FAFC"
+                                         ToolTip="向轴13、轴14、轴15同步发送相同的相对脉冲；正数正向，负数反向"
+                                         TextChanged="Axis13To15PulseTextBox_TextChanged" />
+                                <Button Grid.Column="2"
+                                        x:Name="Axis13To15MoveButton"
+                                        Height="25"
+                                        Content="同步转动"
+                                        Foreground="White"
+                                        Background="#6950A1"
+                                        BorderBrush="#B098E4"
+                                        Cursor="Hand"
+                                        IsEnabled="False"
+                                        Click="Axis13To15Move_Click" />
+                            </Grid>
+                            <TextBlock Grid.Row="2"
+                                       x:Name="Axis13To15MoveStatusText"
+                                       Text="正数正向，负数反向；三个轴同步下发相同脉冲"
+                                       Foreground="#BFB2DA"
+                                       FontSize="9"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Bottom" />
+                        </Grid>
+                    </Border>
+
+                    <Button Grid.Row="10"
                             Style="{StaticResource OperationButton}"
                             Background="{StaticResource DangerRed}"
                             BorderBrush="#FF4E57">

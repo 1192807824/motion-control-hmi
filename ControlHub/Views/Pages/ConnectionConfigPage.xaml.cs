@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ControlHub.Services.Devices;
@@ -36,11 +35,6 @@ public partial class ConnectionConfigPage : UserControl
     private bool _connecting;
     private bool _loaded;
     private bool _vibrationSequenceRunning;
-
-    static ConnectionConfigPage()
-    {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-    }
 
     public ConnectionConfigPage()
     {
@@ -187,7 +181,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             var payload = BuildPayload(settings);
             await _tcpClient.WriteAsync(payload);
-            AddLog($"TX [{NormalizeFormat(settings.SendFormat)}]  {FormatPayload(payload, settings.SendFormat)}");
+            AddLog($"TX [ASCII]  {FormatPayload(payload)}");
         }
         catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or FormatException or InvalidOperationException or ObjectDisposedException)
         {
@@ -298,13 +292,6 @@ public partial class ConnectionConfigPage : UserControl
         await SendAsciiProtocolCommandAsync(LightOffCommand, "\u5149\u6e90\u5173\u95ed");
     }
 
-    private async void ApplyLightBrightness_Click(object sender, RoutedEventArgs e)
-    {
-        _brightnessSendTimer.Stop();
-        SaveSettings(writeLog: false);
-        await ApplyLightBrightnessAsync("\u624b\u52a8\u5e94\u7528\u4eae\u5ea6");
-    }
-
     private void DecreaseLightBrightness_Click(object sender, RoutedEventArgs e)
     {
         AdjustLightBrightness(-1);
@@ -373,7 +360,7 @@ public partial class ConnectionConfigPage : UserControl
 
         _settingsStore.Save(settings);
         await SendAsciiProtocolCommandAsync(
-            $"&06,{normalizedBrightness:00}$",
+            $"&06,{normalizedBrightness:00},XX$",
             $"{actionName} {normalizedBrightness:00}%");
     }
 
@@ -466,7 +453,7 @@ public partial class ConnectionConfigPage : UserControl
                 return;
             }
 
-            AddLog($"RX [{NormalizeFormat(settings.ReceiveFormat)}]  {FormatPayload(payload, settings.ReceiveFormat)}");
+            AddLog($"RX [ASCII]  {FormatPayload(payload)}");
         }));
     }
 
@@ -487,77 +474,23 @@ public partial class ConnectionConfigPage : UserControl
 
     private static byte[] BuildPayload(VibrationFeederSettings settings)
     {
-        var format = NormalizeFormat(settings.SendFormat);
-        var payload = format == "HEX"
-            ? ParseHex(settings.ManualSendText)
-            : ResolveEncoding(format).GetBytes(settings.ManualSendText);
+        var payload = Encoding.ASCII.GetBytes(settings.ManualSendText);
 
         if (!settings.AppendNewLine)
         {
             return payload;
         }
 
-        var newLineBytes = ResolveEncoding(format).GetBytes(DecodeNewLine(settings.NewLine));
+        var newLineBytes = Encoding.ASCII.GetBytes(DecodeNewLine(settings.NewLine));
         return [.. payload, .. newLineBytes];
     }
 
-    private static string FormatPayload(byte[] payload, string? format)
+    private static string FormatPayload(byte[] payload)
     {
-        var normalizedFormat = NormalizeFormat(format);
-        return normalizedFormat == "HEX"
-            ? ToHex(payload)
-            : ResolveEncoding(normalizedFormat).GetString(payload)
-                .Replace("\r", "\\r", StringComparison.Ordinal)
-                .Replace("\n", "\\n", StringComparison.Ordinal)
-                .Replace("\t", "\\t", StringComparison.Ordinal);
-    }
-
-    private static byte[] ParseHex(string text)
-    {
-        var normalized = text
-            .Replace("0x", "", StringComparison.OrdinalIgnoreCase)
-            .Replace(",", " ", StringComparison.Ordinal)
-            .Replace(";", " ", StringComparison.Ordinal)
-            .Replace("-", " ", StringComparison.Ordinal);
-
-        var compact = string.Concat(normalized.Where(item => !char.IsWhiteSpace(item)));
-        if (compact.Length == 0)
-        {
-            return [];
-        }
-
-        if (compact.Length % 2 != 0)
-        {
-            throw new FormatException("HEX\u683c\u5f0f\u9700\u8981\u5076\u6570\u4e2a\u5b57\u7b26\uff0c\u4f8b\u5982 01 03 00 00\u3002");
-        }
-
-        var bytes = new byte[compact.Length / 2];
-        for (var index = 0; index < bytes.Length; index++)
-        {
-            bytes[index] = Convert.ToByte(compact.Substring(index * 2, 2), 16);
-        }
-
-        return bytes;
-    }
-
-    private static string ToHex(byte[] payload)
-    {
-        return string.Join(" ", payload.Select(item => item.ToString("X2")));
-    }
-
-    private static string NormalizeFormat(string? format)
-    {
-        return string.IsNullOrWhiteSpace(format) ? "ASCII" : format.Trim().ToUpperInvariant();
-    }
-
-    private static Encoding ResolveEncoding(string format)
-    {
-        return format switch
-        {
-            "UTF-8" => Encoding.UTF8,
-            "GB2312" => Encoding.GetEncoding("GB2312"),
-            _ => Encoding.ASCII
-        };
+        return Encoding.ASCII.GetString(payload)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal);
     }
 
     private static string DecodeNewLine(string? value)
@@ -582,12 +515,6 @@ public partial class ConnectionConfigPage : UserControl
             {
                 textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
             }
-            else if (child is ComboBox comboBox)
-            {
-                comboBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
-                comboBox.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateSource();
-            }
-
             CommitInputBindings(child);
         }
     }

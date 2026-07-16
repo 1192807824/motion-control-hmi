@@ -15,24 +15,27 @@ namespace ControlHub.Views.Pages;
 
 public partial class HomePage : UserControl
 {
-    private const string ChipInspectionProcedureName = "流程1";
+    private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionBlobModuleName = "Blob分析1";
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
-    private bool _coordinateTransformRunning;
+    private bool _presetPositionMoveRunning;
     private bool _startSequenceRunning;
     private bool _assignedNozzleMoveRunning;
+    private bool _ddMoveRunning;
+    private bool _axis13To15MoveRunning;
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
     private int _nextAssignedNozzleMoveStep;
+
+    public Func<Task>? ShowVisionInspectionDisplayAsync { get; set; }
 
     public HomePage()
     {
         InitializeComponent();
         _visionCalibration.Changed += VisionCalibration_Changed;
         RefreshVisionCalibrationStatus();
-        RefreshFirstSetCalibrationDetails();
     }
 
     public void AttachMotionController(MotionControlPage motionController)
@@ -46,6 +49,18 @@ public partial class HomePage : UserControl
         _visualCalibrationController = visualCalibrationController
             ?? throw new ArgumentNullException(nameof(visualCalibrationController));
         UpdateHomeCommandState();
+    }
+
+    public void RefreshVisionInspectionDisplay(VisualCalibrationPage visualCalibrationController)
+    {
+        if (BlobInspectionVisionDisplayHost.Visibility != Visibility.Visible ||
+            BlobInspectionVisionDisplayHost.HostWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        visualCalibrationController.AttachInspectionDisplayHost(BlobInspectionVisionDisplayHost.HostWindow);
+        visualCalibrationController.RefreshVisionDisplay();
     }
 
     /// <summary>
@@ -103,13 +118,17 @@ public partial class HomePage : UserControl
 
     /// <summary>
     /// 主页开始按钮只执行两个顺序步骤：
-    /// 1. 第一套 XY 回到九点标定中心；2. 运行“找芯片”方案中的“流程1”。
+    /// 1. 第一套 XY 回到九点标定中心；2. 运行固定视觉方案中的“找芯片流程”。
     /// 流程完成后读取“Blob分析1”结果表的前两行，并在主页显示两组像素质心 X、Y。
     /// 本阶段仍不执行取料、吸嘴或后续摆盘动作。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_startSequenceRunning || _coordinateTransformRunning || _assignedNozzleMoveRunning)
+        if (_startSequenceRunning ||
+            _presetPositionMoveRunning ||
+            _assignedNozzleMoveRunning ||
+            _ddMoveRunning ||
+            _axis13To15MoveRunning)
         {
             return;
         }
@@ -126,10 +145,9 @@ public partial class HomePage : UserControl
                 throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
             }
 
-            // 方案和标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
-            // 选择成功会保存，后续点击“开始”不再重复弹窗。
+            // 标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
+            // 视觉方案由视觉组件启动时固定加载桌面的“新纳方案.sol”，主页不再切换方案。
             var calibrationFile = GetOrSelectFirstSetCalibrationFile();
-            var inspectionSolution = GetOrSelectChipInspectionSolution();
 
             _startSequenceRunning = true;
             UpdateHomeCommandState();
@@ -168,23 +186,17 @@ public partial class HomePage : UserControl
                 moveTimeoutMilliseconds: timeoutMilliseconds,
                 cancellationToken: CancellationToken.None);
 
-            // 必须等轴1、轴2均确认到位后，才允许加载并单次执行找芯片流程。
-            // 流程名和模块名都采用截图中的固定名称，避免误跑标定流程或其他实时流程。
+            // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
+            // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
             SetStartProductionStatus(
                 $"步骤2/2：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                 $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
                 Color.FromRgb(242, 181, 68));
+            await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
+
             var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
-                inspectionSolution.FilePath,
                 CancellationToken.None);
             SetBlobInspectionResult(blobResult);
-
-            // 只有方案确实包含流程1/Blob分析1并成功执行后，才记住首次选择的路径。
-            if (inspectionSolution.WasSelected)
-            {
-                _visionCalibration.Settings.ChipInspectionSolutionPath = inspectionSolution.FilePath;
-                _visionCalibration.Save();
-            }
 
             try
             {
@@ -203,7 +215,7 @@ public partial class HomePage : UserControl
             catch (Exception exception)
             {
                 ClearAssignedNozzleTargets();
-                SetCoordinateTransformStatus($"吸嘴分配失败：{exception.Message}", false);
+                SetFirstSetPositionStatus($"吸嘴分配失败：{exception.Message}", false);
                 SetStartProductionStatus(
                     $"Blob已显示；吸嘴目标换算失败：{exception.Message}",
                     Color.FromRgb(242, 181, 68));
@@ -230,7 +242,7 @@ public partial class HomePage : UserControl
 
     /// <summary>
     /// 从第一套九点标定 XML 的 WorldPointLst 读取机械网格中心，并换算为控制卡脉冲。
-    /// 直接读取标定文件可保证“回初始位置”不依赖当前加载的是标定方案还是找芯片方案。
+    /// 直接读取标定文件可保证“回初始位置”不依赖当前固定方案内正在运行的流程。
     /// </summary>
     private static (double X, double Y) ReadFirstSetCalibrationCenter(string calibrationFilePath)
     {
@@ -352,23 +364,6 @@ public partial class HomePage : UserControl
                 "VisionMaster 标定文件 (*.xml)|*.xml|所有文件 (*.*)|*.*",
                 configuredPath,
                 "已取消开始：未选择第一套 XY 标定文件。"),
-            true);
-    }
-
-    private (string FilePath, bool WasSelected) GetOrSelectChipInspectionSolution()
-    {
-        var configuredPath = _visionCalibration.Settings.ChipInspectionSolutionPath?.Trim() ?? "";
-        if (IsExistingFileWithExtension(configuredPath, ".sol"))
-        {
-            return (Path.GetFullPath(configuredPath), false);
-        }
-
-        return (
-            SelectFile(
-                "选择“找芯片”VisionMaster方案（需包含 流程1 / Blob分析1）",
-                "VisionMaster 方案 (*.sol)|*.sol|所有文件 (*.*)|*.*",
-                configuredPath,
-                "已取消开始：未选择“找芯片”方案。"),
             true);
     }
 
@@ -605,9 +600,7 @@ public partial class HomePage : UserControl
         _blob1Nozzle1Target = targets.Nozzle1;
         _blob2Nozzle2Target = targets.Nozzle2;
         _nextAssignedNozzleMoveStep = 1;
-        Nozzle1MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle1);
-        Nozzle2MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle2);
-        SetCoordinateTransformStatus(
+        SetFirstSetPositionStatus(
             "已分配：Blob结果1 → 吸嘴1，Blob结果2 → 吸嘴2；等待第一次点击。",
             true);
         UpdateAssignedNozzleButtonText();
@@ -619,8 +612,6 @@ public partial class HomePage : UserControl
         _blob1Nozzle1Target = null;
         _blob2Nozzle2Target = null;
         _nextAssignedNozzleMoveStep = 0;
-        Nozzle1MechanicalCoordinateText.Text = "X = —　Y = —";
-        Nozzle2MechanicalCoordinateText.Text = "X = —　Y = —";
         UpdateAssignedNozzleButtonText();
         UpdateHomeCommandState();
     }
@@ -631,7 +622,11 @@ public partial class HomePage : UserControl
     /// </summary>
     private async void MoveAssignedNozzle_Click(object sender, RoutedEventArgs e)
     {
-        if (_assignedNozzleMoveRunning || _coordinateTransformRunning || _startSequenceRunning)
+        if (_assignedNozzleMoveRunning ||
+            _presetPositionMoveRunning ||
+            _startSequenceRunning ||
+            _ddMoveRunning ||
+            _axis13To15MoveRunning)
         {
             return;
         }
@@ -645,7 +640,7 @@ public partial class HomePage : UserControl
         };
         if (target is null)
         {
-            SetCoordinateTransformStatus("请先点击“开始运行”完成Blob识别和吸嘴分配。", false);
+            SetFirstSetPositionStatus("请先点击“开始运行”完成Blob识别和吸嘴分配。", false);
             return;
         }
 
@@ -665,7 +660,7 @@ public partial class HomePage : UserControl
             UpdateHomeCommandState();
             MoveAssignedNozzleTitleText.Text = $"{nozzleName}移动中";
             MoveAssignedNozzleHintText.Text = $"正在对位{objectName}…";
-            SetCoordinateTransformStatus(
+            SetFirstSetPositionStatus(
                 $"正在移动{nozzleName}到{objectName}：X={target.Value.X:0.###}，Y={target.Value.Y:0.###}",
                 true);
 
@@ -691,21 +686,21 @@ public partial class HomePage : UserControl
             if (step == 1)
             {
                 _nextAssignedNozzleMoveStep = 2;
-                SetCoordinateTransformStatus(
+                SetFirstSetPositionStatus(
                     $"吸嘴1已到物体1({actual.ActualX:0.###}, {actual.ActualY:0.###})；请再点一次移动吸嘴2。",
                     true);
             }
             else
             {
                 _nextAssignedNozzleMoveStep = 3;
-                SetCoordinateTransformStatus(
+                SetFirstSetPositionStatus(
                     $"吸嘴2已到物体2({actual.ActualX:0.###}, {actual.ActualY:0.###})；两次顺序对位完成。",
                     true);
             }
         }
         catch (Exception exception)
         {
-            SetCoordinateTransformStatus($"{nozzleName}对位失败：{exception.Message}", false);
+            SetFirstSetPositionStatus($"{nozzleName}对位失败：{exception.Message}", false);
         }
         finally
         {
@@ -713,6 +708,116 @@ public partial class HomePage : UserControl
             UpdateAssignedNozzleButtonText();
             UpdateHomeCommandState();
         }
+    }
+
+    private async void Axis0Move_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ddMoveRunning ||
+            _presetPositionMoveRunning ||
+            _startSequenceRunning ||
+            _assignedNozzleMoveRunning ||
+            _axis13To15MoveRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var pulseDistance = ParseFiniteCoordinate(Axis0PulseTextBox.Text, "DD马达脉冲");
+            if (pulseDistance == 0)
+            {
+                throw new ArgumentException("DD马达脉冲不能为 0。");
+            }
+
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            _ddMoveRunning = true;
+            UpdateHomeCommandState();
+            Axis0MoveButton.Content = "转动中";
+            SetAxis0MoveStatus(
+                $"轴0正在相对移动 {pulseDistance:0.###} pulse…",
+                Color.FromRgb(242, 181, 68));
+
+            var settled = await motionController.MoveAxisRelativeAsync(
+                hardwareAxisNo: 0,
+                pulseDistance: pulseDistance,
+                cancellationToken: CancellationToken.None);
+            SetAxis0MoveStatus(
+                $"轴0完成：{pulseDistance:0.###} pulse，当前位置 {settled.FeedbackPosition:0.###}。",
+                Color.FromRgb(73, 209, 125));
+        }
+        catch (Exception exception)
+        {
+            SetAxis0MoveStatus($"轴0移动失败：{exception.Message}", Color.FromRgb(242, 122, 128));
+        }
+        finally
+        {
+            _ddMoveRunning = false;
+            Axis0MoveButton.Content = "转动";
+            UpdateHomeCommandState();
+        }
+    }
+
+    private void Axis0PulseTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateHomeCommandState();
+    }
+
+    private async void Axis13To15Move_Click(object sender, RoutedEventArgs e)
+    {
+        if (_axis13To15MoveRunning ||
+            _presetPositionMoveRunning ||
+            _startSequenceRunning ||
+            _assignedNozzleMoveRunning ||
+            _ddMoveRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var pulseDistance = ParseFiniteCoordinate(
+                Axis13To15PulseTextBox.Text,
+                "轴13 / 轴14 / 轴15同步脉冲");
+            if (pulseDistance == 0)
+            {
+                throw new ArgumentException("轴13 / 轴14 / 轴15同步脉冲不能为 0。");
+            }
+
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            _axis13To15MoveRunning = true;
+            UpdateHomeCommandState();
+            Axis13To15MoveButton.Content = "同步转动中";
+            SetAxis13To15MoveStatus(
+                $"轴13 / 轴14 / 轴15正在同步相对移动 {pulseDistance:0.###} pulse…",
+                Color.FromRgb(242, 181, 68));
+
+            await motionController.MoveAxesRelativeAsync(
+                new[] { 13, 14, 15 },
+                pulseDistance,
+                CancellationToken.None);
+            SetAxis13To15MoveStatus(
+                $"轴13 / 轴14 / 轴15已同步完成 {pulseDistance:0.###} pulse。",
+                Color.FromRgb(73, 209, 125));
+        }
+        catch (Exception exception)
+        {
+            SetAxis13To15MoveStatus(
+                $"轴13 / 轴14 / 轴15同步移动失败：{exception.Message}",
+                Color.FromRgb(242, 122, 128));
+        }
+        finally
+        {
+            _axis13To15MoveRunning = false;
+            Axis13To15MoveButton.Content = "同步转动";
+            UpdateHomeCommandState();
+        }
+    }
+
+    private void Axis13To15PulseTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateHomeCommandState();
     }
 
     private void VisionCalibration_Changed(object? sender, EventArgs e)
@@ -724,7 +829,6 @@ public partial class HomePage : UserControl
         }
 
         RefreshVisionCalibrationStatus();
-        RefreshFirstSetCalibrationDetails();
     }
 
     private void RefreshVisionCalibrationStatus()
@@ -763,40 +867,95 @@ public partial class HomePage : UserControl
         VisionCalibrationStatusIndicator.Fill = new SolidColorBrush(statusColor);
     }
 
-    private async void ConvertBothNozzles_Click(object sender, System.Windows.RoutedEventArgs e)
+    private async void MovePresetPosition1_Click(object sender, RoutedEventArgs e)
     {
-        if (_coordinateTransformRunning || _startSequenceRunning)
+        await MovePresetPositionAsync(
+            "位置 1",
+            PresetPosition1XTextBox,
+            PresetPosition1YTextBox,
+            MovePresetPosition1Button);
+    }
+
+    private async void MovePresetPosition2_Click(object sender, RoutedEventArgs e)
+    {
+        await MovePresetPositionAsync(
+            "位置 2",
+            PresetPosition2XTextBox,
+            PresetPosition2YTextBox,
+            MovePresetPosition2Button);
+    }
+
+    private async Task MovePresetPositionAsync(
+        string positionName,
+        TextBox xInput,
+        TextBox yInput,
+        Button moveButton)
+    {
+        if (_presetPositionMoveRunning ||
+            _startSequenceRunning ||
+            _assignedNozzleMoveRunning ||
+            _ddMoveRunning ||
+            _axis13To15MoveRunning)
         {
             return;
         }
 
         try
         {
-            var pixelX = ParsePixelCoordinate(PixelXTextBox.Text, "像素 X");
-            var pixelY = ParsePixelCoordinate(PixelYTextBox.Text, "像素 Y");
+            var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X 轴绝对脉冲");
+            var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y 轴绝对脉冲");
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
+            }
 
-            _coordinateTransformRunning = true;
-            // 手工换算会覆盖右侧坐标显示，因此同时取消上一轮Blob的顺序移动目标。
-            ClearAssignedNozzleTargets();
+            _presetPositionMoveRunning = true;
             UpdateHomeCommandState();
-            SetCoordinateTransformStatus($"正在换算像素({pixelX}, {pixelY})…", true);
+            moveButton.Content = "移动中";
+            SetFirstSetPositionStatus(
+                $"正在绝对移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
+                true);
 
-            var targets = await ConvertPixelToMechanicalTargetsAsync(pixelX, pixelY);
-            Nozzle1MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle1);
-            Nozzle2MechanicalCoordinateText.Text = FormatMechanicalCoordinate(targets.Nozzle2);
-            SetCoordinateTransformStatus("换算完成；仅显示坐标，未下发运动命令。", true);
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
+            var timeoutMilliseconds = CalculateStartMoveTimeout(
+                current.ActualX,
+                current.ActualY,
+                targetX,
+                targetY,
+                velocity);
+            var actual = await motionController.MoveCalibrationAxesToAsync(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo,
+                targetX,
+                targetY,
+                velocity,
+                positionTolerance: 10d,
+                moveTimeoutMilliseconds: timeoutMilliseconds,
+                cancellationToken: CancellationToken.None);
+            SetFirstSetPositionStatus(
+                $"{positionName}已到位：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
+                true);
         }
         catch (Exception exception)
         {
-            Nozzle1MechanicalCoordinateText.Text = "X = —　Y = —";
-            Nozzle2MechanicalCoordinateText.Text = "X = —　Y = —";
-            SetCoordinateTransformStatus($"换算失败：{exception.Message}", false);
+            SetFirstSetPositionStatus($"{positionName}移动失败：{exception.Message}", false);
         }
         finally
         {
-            _coordinateTransformRunning = false;
+            _presetPositionMoveRunning = false;
+            moveButton.Content = "移动";
             UpdateHomeCommandState();
         }
+    }
+
+    private void PresetPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateHomeCommandState();
     }
 
     private VisionCalibrationSnapshot EnsureFirstSetToolsReady()
@@ -810,52 +969,65 @@ public partial class HomePage : UserControl
         return snapshot;
     }
 
-    private void RefreshFirstSetCalibrationDetails()
-    {
-        if (FirstSetCalibrationDetailsText is null)
-        {
-            return;
-        }
-
-        var snapshot = _visionCalibration.GetSnapshot();
-        var profileName = snapshot.CalibrationProfileExists
-            ? Path.GetFileName(snapshot.CalibrationProfilePath)
-            : "配置未保存";
-        var nozzle1 = snapshot.Nozzle1Calibrated ? "嘴1√" : "嘴1×";
-        var nozzle2 = snapshot.Nozzle2Calibrated ? "嘴2√" : "嘴2×";
-        FirstSetCalibrationDetailsText.Text = $"轴1=X / 轴2=Y　{profileName}　{nozzle1}　{nozzle2}";
-        FirstSetCalibrationDetailsText.ToolTip =
-            $"标定文件：{snapshot.CalibrationFilePath}\n" +
-            $"XY配置：{snapshot.CalibrationProfilePath}\n" +
-            $"吸嘴1偏移：X={snapshot.Nozzle1OffsetX:0.###}，Y={snapshot.Nozzle1OffsetY:0.###} pulse\n" +
-            $"吸嘴2偏移：X={snapshot.Nozzle2OffsetX:0.###}，Y={snapshot.Nozzle2OffsetY:0.###} pulse";
-    }
-
     private void UpdateHomeCommandState()
     {
-        if (ConvertBothNozzlesButton is null ||
-            StartProductionButton is null ||
-            MoveAssignedNozzleButton is null)
+        if (StartProductionButton is null ||
+            MoveAssignedNozzleButton is null ||
+            Axis0PulseTextBox is null ||
+            Axis0MoveButton is null ||
+            Axis13To15PulseTextBox is null ||
+            Axis13To15MoveButton is null ||
+            PresetPosition1XTextBox is null ||
+            PresetPosition1YTextBox is null ||
+            PresetPosition2XTextBox is null ||
+            PresetPosition2YTextBox is null ||
+            MovePresetPosition1Button is null ||
+            MovePresetPosition2Button is null)
         {
             return;
         }
 
-        var controllersReady =
+        var visionControllersReady =
             _motionController is not null &&
             _visualCalibrationController is not null;
         var commandsIdle =
-            !_coordinateTransformRunning &&
+            !_presetPositionMoveRunning &&
             !_startSequenceRunning &&
-            !_assignedNozzleMoveRunning;
-        ConvertBothNozzlesButton.IsEnabled = controllersReady && commandsIdle;
-        StartProductionButton.IsEnabled = controllersReady && commandsIdle;
+            !_assignedNozzleMoveRunning &&
+            !_ddMoveRunning &&
+            !_axis13To15MoveRunning;
+        StartProductionButton.IsEnabled = visionControllersReady && commandsIdle;
         MoveAssignedNozzleButton.IsEnabled =
-            controllersReady &&
+            visionControllersReady &&
             commandsIdle &&
             ((_nextAssignedNozzleMoveStep == 1 && _blob1Nozzle1Target is not null) ||
              (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
-        PixelXTextBox.IsEnabled = commandsIdle;
-        PixelYTextBox.IsEnabled = commandsIdle;
+        PresetPosition1XTextBox.IsEnabled = commandsIdle;
+        PresetPosition1YTextBox.IsEnabled = commandsIdle;
+        PresetPosition2XTextBox.IsEnabled = commandsIdle;
+        PresetPosition2YTextBox.IsEnabled = commandsIdle;
+        MovePresetPosition1Button.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            TryParseCoordinate(PresetPosition1XTextBox.Text, out _) &&
+            TryParseCoordinate(PresetPosition1YTextBox.Text, out _);
+        MovePresetPosition2Button.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
+            TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
+        Axis0PulseTextBox.IsEnabled = commandsIdle;
+        Axis0MoveButton.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            TryParseCoordinate(Axis0PulseTextBox.Text, out var pulseDistance) &&
+            pulseDistance != 0;
+        Axis13To15PulseTextBox.IsEnabled = commandsIdle;
+        Axis13To15MoveButton.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            TryParseCoordinate(Axis13To15PulseTextBox.Text, out var synchronizedPulseDistance) &&
+            synchronizedPulseDistance != 0;
     }
 
     private void UpdateAssignedNozzleButtonText()
@@ -893,12 +1065,62 @@ public partial class HomePage : UserControl
         StartProductionHintText.Foreground = new SolidColorBrush(color);
     }
 
-    private void ClearBlobInspectionResult()
+    private void SetAxis0MoveStatus(string message, Color color)
     {
-        BlobRectangle1CenterText.Text = "矩形1质心(px)：X = —　Y = —";
-        BlobRectangle2CenterText.Text = "矩形2质心(px)：X = —　Y = —";
+        Axis0MoveStatusText.Text = message;
+        Axis0MoveStatusText.ToolTip = message;
+        Axis0MoveStatusText.Foreground = new SolidColorBrush(color);
+    }
+
+    private void SetAxis13To15MoveStatus(string message, Color color)
+    {
+        Axis13To15MoveStatusText.Text = message;
+        Axis13To15MoveStatusText.ToolTip = message;
+        Axis13To15MoveStatusText.Foreground = new SolidColorBrush(color);
+    }
+
+    private async Task PrepareBlobInspectionVisionDisplayAsync(VisualCalibrationPage visualCalibrationController)
+    {
         BlobInspectionImage.Source = null;
         BlobInspectionOverlayCanvas.Children.Clear();
+        BlobInspectionImageViewbox.Visibility = Visibility.Collapsed;
+        BlobInspectionImagePlaceholder.Visibility = Visibility.Collapsed;
+        BlobInspectionVisionDisplayHost.Visibility = Visibility.Visible;
+
+        await Dispatcher.InvokeAsync(
+            () => BlobInspectionVisionDisplayHost.UpdateLayout(),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+
+        var displayHostWindow = BlobInspectionVisionDisplayHost.HostWindow;
+        if (displayHostWindow != IntPtr.Zero)
+        {
+            visualCalibrationController.AttachInspectionDisplayHost(displayHostWindow);
+            visualCalibrationController.RefreshVisionDisplay();
+            BlobInspectionImageStatusText.Text = "海康组件显示";
+            BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
+            return;
+        }
+
+        BlobInspectionVisionDisplayHost.Visibility = Visibility.Hidden;
+        if (ShowVisionInspectionDisplayAsync is not null)
+        {
+            await ShowVisionInspectionDisplayAsync();
+        }
+    }
+
+    private void BlobInspectionVisionDisplayHost_HostSizeChanged(object? sender, EventArgs e)
+    {
+        if (BlobInspectionVisionDisplayHost.Visibility == Visibility.Visible)
+        {
+            _visualCalibrationController?.RefreshVisionDisplay();
+        }
+    }
+
+    private void ClearBlobInspectionResult()
+    {
+        BlobInspectionImage.Source = null;
+        BlobInspectionOverlayCanvas.Children.Clear();
+        BlobInspectionVisionDisplayHost.Visibility = Visibility.Hidden;
         BlobInspectionImageViewbox.Visibility = Visibility.Collapsed;
         BlobInspectionImagePlaceholder.Visibility = Visibility.Visible;
         BlobInspectionImageStatusText.Text = "等待拍照";
@@ -907,10 +1129,6 @@ public partial class HomePage : UserControl
 
     private void SetBlobInspectionResult(VisionRectangleBlobResult result)
     {
-        BlobRectangle1CenterText.Text =
-            $"矩形1质心(px)：X = {result.Rectangle1.X:0.###}　Y = {result.Rectangle1.Y:0.###}";
-        BlobRectangle2CenterText.Text =
-            $"矩形2质心(px)：X = {result.Rectangle2.X:0.###}　Y = {result.Rectangle2.Y:0.###}";
         if (result.ImageWidth <= 0 ||
             result.ImageHeight <= 0 ||
             string.IsNullOrWhiteSpace(result.ImagePath))
@@ -918,6 +1136,13 @@ public partial class HomePage : UserControl
             BlobInspectionImageStatusText.Text = "XY已显示 · 本次未返回检测图";
             BlobInspectionImageStatusText.Foreground =
                 new SolidColorBrush(Color.FromRgb(242, 181, 68));
+            return;
+        }
+
+        if (BlobInspectionVisionDisplayHost.Visibility == Visibility.Visible)
+        {
+            BlobInspectionImageStatusText.Text = $"海康组件显示 · {result.ImageWidth}×{result.ImageHeight}";
+            BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 209, 125));
             return;
         }
 
@@ -1092,17 +1317,12 @@ public partial class HomePage : UserControl
         return (int)Math.Clamp(Math.Ceiling(estimatedMilliseconds), 10_000d, 120_000d);
     }
 
-    private void SetCoordinateTransformStatus(string message, bool success)
+    private void SetFirstSetPositionStatus(string message, bool success)
     {
-        CoordinateTransformStatusText.Text = message;
-        CoordinateTransformStatusText.Foreground = new SolidColorBrush(success
+        PresetPositionStatusText.Text = message;
+        PresetPositionStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)
             : Color.FromRgb(242, 181, 68));
-    }
-
-    private static string FormatMechanicalCoordinate(VisionMotionTarget target)
-    {
-        return $"X = {target.X:0.###}　Y = {target.Y:0.###}";
     }
 
     private static double ParseFiniteCoordinate(string? value, string fieldName)
@@ -1110,17 +1330,6 @@ public partial class HomePage : UserControl
         if (!TryParseCoordinate(value, out var parsed))
         {
             throw new ArgumentException($"{fieldName}必须是有效数字。");
-        }
-
-        return parsed;
-    }
-
-    private static double ParsePixelCoordinate(string? value, string fieldName)
-    {
-        var parsed = ParseFiniteCoordinate(value, fieldName);
-        if (parsed < 0)
-        {
-            throw new ArgumentException($"{fieldName}必须大于等于0。");
         }
 
         return parsed;

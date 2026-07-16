@@ -68,12 +68,6 @@ public sealed class VisualCalibrationSettings
 
     public string CalibrationProfilePath { get; set; } = "";
 
-    /// <summary>
-    /// 主页“开始”按钮使用的找芯片 VisionMaster 方案。
-    /// 流程名和 Blob 模块名固定为“流程1 / Blob分析1”。
-    /// </summary>
-    public string ChipInspectionSolutionPath { get; set; } = "";
-
     public bool NozzleOffsetCalibrated { get; set; }
 
     public double NozzleOffsetXPulses { get; set; }

@@ -25,7 +25,7 @@ The running application writes these JSON files next to the executable:
 - `axis-settings.json`: axis name, jog speed, and jog distance/absolute target by axis number.
 - `remembered-login.json`: last successful login user name and role for dialog prefilling.
 - `motion-settings.json`: real card selection, polling, every per-axis move-profile input, per-axis EtherCAT homing parameters, explicit homing sequence, wait/tolerance settings, and the shared homing timeout.
-- `vibration-feeder-settings.json`: vibration feeder TCP endpoint, timeouts, payload format, and line-ending settings.
+- `vibration-feeder-settings.json`: vibration feeder TCP endpoint and line-ending settings. Feeder communication uses fixed 2-second connect/write timeouts and ASCII payloads.
 
 Legacy `axis-names.json` and `permission-session.json` files are still read when present so older local data is not lost.
 

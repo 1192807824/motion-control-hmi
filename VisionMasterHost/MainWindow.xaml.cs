@@ -10,7 +10,6 @@ using System.Windows.Media;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSNPointCalibModuCs;
-using Microsoft.Win32;
 using VM.Core;
 using VM.PlatformSDKCS;
 using VMControls.Interface;
@@ -19,6 +18,12 @@ namespace VisionMasterHost;
 
 public partial class MainWindow : Window
 {
+    private const string FixedSolutionFileName = "新纳方案.sol";
+    private const string RealtimeProcedureName = "实时相机";
+    private const string InspectionProcedureName = "找芯片流程";
+    private const string CalibrationProcedureName = "标定流程";
+    private const string InspectionBlobModuleName = "Blob分析1";
+
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly bool _embedded;
     private readonly string? _commandPipeName;
@@ -26,6 +31,7 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _commandPipeCancellation = new();
     private readonly object _commandPipeSync = new();
     private VmProcedure? _previewProcedure;
+    private VmProcedure? _inspectionProcedure;
     private VmProcedure? _calibrationProcedure;
     private IMVSCalibTransformModuTool? _standaloneTransformModule;
     private IMVSBlobFindModuTool? _standaloneBlobModule;
@@ -41,12 +47,14 @@ public partial class MainWindow : Window
     private bool _busy;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
+    private bool _applyingCalibrationSidebarState;
     private bool _clickCenterPixelReady;
     private float _clickCenterPixelX;
     private float _clickCenterPixelY;
     private int _clickImagePixelWidth;
     private int _clickImagePixelHeight;
     private string _clickCalibrationPath = "";
+    private string? _fullscreenRenderTarget;
 
     public MainWindow(
         bool embedded,
@@ -62,6 +70,10 @@ public partial class MainWindow : Window
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
             ShowInTaskbar = false;
+        }
+        else
+        {
+            CalibrationToolbarPanel.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -83,7 +95,7 @@ public partial class MainWindow : Window
         SetStatus(message, StatusKind.Error);
     }
 
-    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         StartCommandPipeServer();
         if (!_sdkAvailable)
@@ -93,8 +105,10 @@ public partial class MainWindow : Window
 
         try
         {
-            VisionRenderControl.SetRenderToolbarVisible(true);
-            CalibrationRenderControl.SetRenderToolbarVisible(true);
+            VisionRenderControl.SetRenderToolbarVisible(false);
+            CalibrationRenderControl.SetRenderToolbarVisible(false);
+            VisionRenderControl.ChangeImageComboBoxVisibility(false);
+            CalibrationRenderControl.ChangeImageComboBoxVisibility(false);
         }
         catch (Exception exception)
         {
@@ -102,27 +116,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_embedded)
-        {
-            // 嵌入主程序时由“开始”命令或标定页的手动选择按需加载方案，
-            // 禁止启动即恢复旧方案，以免旧相机流程先占用海康设备。
-            SetStatus("视觉组件已就绪，等待按需加载方案。", StatusKind.Ready);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_settings.SolutionPath))
-        {
-            return;
-        }
-
-        SolutionPathTextBox.Text = _settings.SolutionPath;
-        if (!File.Exists(_settings.SolutionPath))
-        {
-            SetStatus("上次使用的方案文件不存在，请重新选择。", StatusKind.Error);
-            return;
-        }
-
-        await LoadSolutionAsync(_settings.SolutionPath, autoRestore: true);
+        LoadFixedSolution();
     }
 
     private void StartCommandPipeServer()
@@ -231,6 +225,8 @@ public partial class MainWindow : Window
             "ABORT" => AbortNinePointCalibration(),
             "SET_CLICK_MODE" => SetClickMoveMode(parts),
             "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
+            "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
+            "SET_CALIBRATION_SIDEBAR_STATE" => SetCalibrationSidebarState(parts),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
@@ -256,12 +252,12 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 加载用户选择的“找芯片”方案，精确执行“流程1”，再按 VisionMaster 结果表原顺序
-    /// 读取“Blob分析1”的前两行。这里绝不创建临时 Blob 工具，也不会误用当前选中的流程。
+    /// 在已加载的固定方案内，单次执行“找芯片流程”，再按 VisionMaster 结果表原顺序
+    /// 读取“Blob分析1”的前两行。找芯片流程独立于实时相机流程，执行后恢复实时预览。
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 2)
+        if (parts.Count != 1)
         {
             throw new InvalidDataException("找芯片流程命令参数不正确。");
         }
@@ -271,18 +267,29 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("视觉标定正在执行，暂不允许拍照检测。");
         }
 
-        const string procedureName = "流程1";
-        const string blobModuleName = "Blob分析1";
-        var solutionPath = DecodeAndValidateSolutionFilePath(parts[1]);
-        var procedure = EnsureInspectionProcedureLoaded(solutionPath, procedureName);
-        var blobModule = ResolveNamedBlobFindModule(procedureName, blobModuleName);
-        var imageStepBound = TryBindInspectionImageStep(procedureName, procedure);
-
-        if (procedure.ContinuousRunEnable)
+        if (!_solutionLoaded || _inspectionProcedure is null)
         {
-            // 暂停连续运行，确保下面读取到的就是本次单次执行对应的结果。
-            procedure.ContinuousRunEnable = false;
+            // 进程窗口先于方案加载完成时，主页可能已经发来第一次检测命令。
+            // 在 UI 线程内同步确保固定方案已就绪，避免出现启动时序导致的方案切换或误报。
+            LoadFixedSolution();
         }
+
+        if (!_solutionLoaded || _inspectionProcedure is null)
+        {
+            throw new InvalidOperationException(
+                $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”。");
+        }
+
+        var procedure = _inspectionProcedure;
+        var blobModule = ResolveNamedBlobFindModule(InspectionProcedureName, InspectionBlobModuleName);
+        var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
+        if (previewWasRunning)
+        {
+            // 拍找芯片图时暂停实时相机，确保本次结果只来自找芯片流程。
+            _previewProcedure!.ContinuousRunEnable = false;
+        }
+
+        var imageStepBound = TryBindInspectionImageStep(InspectionProcedureName, procedure);
 
         InspectionImageFile? inspectionImage = null;
         try
@@ -299,21 +306,22 @@ public partial class MainWindow : Window
                             $"{error.strDisplayName}(0x{unchecked((uint)error.nErrorCode):X8})"));
                 throw new InvalidOperationException(
                     string.IsNullOrWhiteSpace(details)
-                        ? "找芯片方案中的流程1执行异常。"
-                        : $"找芯片方案中的流程1执行异常：{details}");
+                        ? $"固定方案中的{InspectionProcedureName}执行异常。"
+                        : $"固定方案中的{InspectionProcedureName}执行异常：{details}");
             }
 
             var blobResult = blobModule.ModuResult;
             if (blobResult.ModuStatus != 1)
             {
-                throw new InvalidOperationException("流程1.Blob分析1返回NG，请检查相机图和模块参数。");
+                throw new InvalidOperationException(
+                    $"{InspectionProcedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
             }
 
             var resultCount = Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0);
             if (resultCount < 2)
             {
                 throw new InvalidOperationException(
-                    $"流程1.Blob分析1只返回 {resultCount} 个结果，至少需要两个。");
+                    $"{InspectionProcedureName}.{InspectionBlobModuleName}只返回 {resultCount} 个结果，至少需要两个。");
             }
 
             // 与 VisionMaster 的“当前结果”表严格一致：直接读取第0、1行，不筛选也不重排。
@@ -336,7 +344,7 @@ public partial class MainWindow : Window
             }
 
             SetStatus(
-                $"流程1执行完成：结果1({first.PixelX:0.###}, {first.PixelY:0.###})，" +
+                $"{InspectionProcedureName}执行完成：结果1({first.PixelX:0.###}, {first.PixelY:0.###})，" +
                 $"结果2({second.PixelX:0.###}, {second.PixelY:0.###}){imageWarning}",
                 StatusKind.Success);
             return string.Join(
@@ -376,60 +384,142 @@ public partial class MainWindow : Window
         {
             if (!_closed)
             {
-                // 主页要求单次执行；结束后保持停止，避免流程继续占用相机。
+                // 找芯片流程始终单次执行；随后恢复固定的实时相机流程。
                 procedure.ContinuousRunEnable = false;
+                RestoreRealtimePreviewNoThrow(previewWasRunning);
             }
 
             UpdateCommandState();
         }
     }
 
-    /// <summary>
-    /// 主页开始流程使用独立的方案路径。只有用户点击“开始”时才加载该方案，
-    /// 并且不把它写入标定页的自动恢复设置，避免下次启动时提前占用相机。
-    /// </summary>
-    private VmProcedure EnsureInspectionProcedureLoaded(string solutionPath, string procedureName)
+    private string SetCalibrationToolbarState(IReadOnlyList<string> parts)
     {
-        if (_solutionLoaded &&
-            string.Equals(_loadedSolutionPath, solutionPath, StringComparison.OrdinalIgnoreCase))
+        if (parts.Count != 6)
         {
-            var loadedProcedure = VmSolution.Instance[procedureName] as VmProcedure
-                ?? throw new InvalidOperationException(
-                    $"所选找芯片方案中未找到“{procedureName}”。");
-            if (!ReferenceEquals(_previewProcedure, loadedProcedure))
-            {
-                StopPreviewProcedureNoThrow();
-                _previewProcedure = loadedProcedure;
-            }
-
-            return loadedProcedure;
+            throw new InvalidDataException("标定文件菜单状态参数不正确。");
         }
 
-        CloseCurrentSolution();
+        string path;
         try
         {
-            VmSolution.Load(solutionPath, "");
-            _solutionLoaded = true;
-            _loadedSolutionPath = solutionPath;
-
-            var procedureNames = GetProcedureNames();
-            var procedure = VmSolution.Instance[procedureName] as VmProcedure
-                ?? throw new InvalidOperationException(
-                    $"所选找芯片方案中未找到“{procedureName}”。");
-
-            SolutionPathTextBox.Text = solutionPath;
-            PreviewProcedureComboBox.ItemsSource = procedureNames;
-            CalibrationProcedureComboBox.ItemsSource = procedureNames;
-            _previewProcedure = procedure;
-            _calibrationProcedure = null;
-            UpdateCommandState();
-            return procedure;
+            path = Encoding.UTF8.GetString(Convert.FromBase64String(parts[1]));
         }
-        catch
+        catch (FormatException exception)
         {
-            CloseCurrentSolutionNoThrow();
-            throw;
+            throw new InvalidDataException("标定文件菜单路径格式不正确。", exception);
         }
+
+        CalibrationToolbarPathTextBox.Text = path;
+        CalibrationToolbarPathTextBox.ToolTip = string.IsNullOrWhiteSpace(path)
+            ? "当前九点标定文件"
+            : path;
+        CalibrationToolbarPathTextBox.IsEnabled = parts[2] == "1";
+        ChooseCalibrationToolbarButton.IsEnabled = parts[3] == "1";
+        ImportCalibrationToolbarButton.IsEnabled = parts[4] == "1";
+        LoadCalibrationProfileToolbarButton.IsEnabled = parts[5] == "1";
+        return "标定文件菜单状态已更新。";
+    }
+
+    private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 29)
+        {
+            throw new InvalidDataException("标定侧栏状态参数不正确。");
+        }
+
+        static string Decode(string encoded)
+        {
+            try
+            {
+                return Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+            }
+            catch (FormatException exception)
+            {
+                throw new InvalidDataException("标定侧栏文本格式不正确。", exception);
+            }
+        }
+
+        static void SetText(TextBox textBox, string value)
+        {
+            if (!string.Equals(textBox.Text, value, StringComparison.Ordinal))
+            {
+                textBox.Text = value;
+            }
+        }
+
+        static void SelectByTag(ComboBox comboBox, string tag)
+        {
+            var item = comboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(candidate => string.Equals(candidate.Tag as string, tag, StringComparison.Ordinal));
+            if (item is not null && !ReferenceEquals(comboBox.SelectedItem, item))
+            {
+                comboBox.SelectedItem = item;
+            }
+        }
+
+        static Brush ParseBrush(string value, Brush fallback)
+        {
+            try
+            {
+                return (Brush?)new BrushConverter().ConvertFromString(value) ?? fallback;
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        _applyingCalibrationSidebarState = true;
+        try
+        {
+            SidebarCenterXPulseText.Text = Decode(parts[1]);
+            SidebarCenterYPulseText.Text = Decode(parts[2]);
+            SidebarCenterVmText.Text = Decode(parts[3]);
+            SetText(SidebarStepXTextBox, Decode(parts[4]));
+            SetText(SidebarStepYTextBox, Decode(parts[5]));
+            SelectByTag(SidebarMovePriorityComboBox, Decode(parts[6]));
+            SetText(SidebarVelocityTextBox, Decode(parts[7]));
+            SetText(SidebarSettleTextBox, Decode(parts[8]));
+            SidebarNozzleTeachStepText.Text = Decode(parts[9]);
+            SidebarRecordNozzleButton.Content = Decode(parts[10]);
+            SidebarNozzleStatusText.Text = Decode(parts[11]);
+            SelectByTag(SidebarClickTargetComboBox, Decode(parts[12]));
+            SidebarEnableClickMoveCheckBox.IsChecked = parts[13] == "1";
+            SidebarClickMoveStatusText.Text = Decode(parts[14]);
+            SidebarRecordCenterButton.IsEnabled = parts[15] == "1";
+            SidebarStartCalibrationButton.IsEnabled = parts[16] == "1" || parts[17] == "1";
+            var calibrationRunning = parts[17] == "1";
+            SidebarStartCalibrationButton.Tag = calibrationRunning ? "StopCalibration" : "StartCalibration";
+            SidebarStartCalibrationButton.Content = calibrationRunning ? "停止九点标定" : "一键九点标定";
+            SidebarStartCalibrationButton.Background = new SolidColorBrush(
+                calibrationRunning ? Color.FromRgb(117, 18, 28) : Color.FromRgb(0, 169, 101));
+            SidebarStartCalibrationButton.BorderBrush = new SolidColorBrush(
+                calibrationRunning ? Color.FromRgb(217, 13, 22) : Color.FromRgb(0, 199, 120));
+            var parameterInputsEnabled = parts[18] == "1";
+            SidebarStepXTextBox.IsEnabled = parameterInputsEnabled;
+            SidebarStepYTextBox.IsEnabled = parameterInputsEnabled;
+            SidebarMovePriorityComboBox.IsEnabled = parameterInputsEnabled;
+            SidebarVelocityTextBox.IsEnabled = parameterInputsEnabled;
+            SidebarSettleTextBox.IsEnabled = parameterInputsEnabled;
+            SidebarRecordCameraButton.IsEnabled = parts[19] == "1";
+            SidebarRecordNozzleButton.IsEnabled = parts[20] == "1";
+            SidebarClickTargetComboBox.IsEnabled = parts[21] == "1";
+            SidebarEnableClickMoveCheckBox.IsEnabled = parts[22] == "1";
+            SidebarReturnCameraCenterButton.IsEnabled = parts[23] == "1";
+            SidebarStopClickMoveButton.IsEnabled = parts[24] == "1";
+            SidebarCenterVmText.Foreground = ParseBrush(Decode(parts[25]), Brushes.LimeGreen);
+            SidebarNozzleStatusText.Foreground = ParseBrush(Decode(parts[26]), Brushes.LightSteelBlue);
+            SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[27]), Brushes.LightSteelBlue);
+            SidebarStartCalibrationButton.ToolTip = Decode(parts[28]);
+        }
+        finally
+        {
+            _applyingCalibrationSidebarState = false;
+        }
+
+        return "标定侧栏状态已更新。";
     }
 
     /// <summary>
@@ -450,42 +540,6 @@ public partial class MainWindow : Window
 
         BindImageStep(imageOption, persistSelection: false);
         return true;
-    }
-
-    private static string DecodeAndValidateSolutionFilePath(string encodedPath)
-    {
-        string decodedPath;
-        try
-        {
-            decodedPath = Encoding.UTF8.GetString(Convert.FromBase64String(encodedPath));
-        }
-        catch (FormatException exception)
-        {
-            throw new InvalidDataException("找芯片方案路径格式不正确。", exception);
-        }
-
-        string fullPath;
-        try
-        {
-            fullPath = Path.GetFullPath(decodedPath);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            throw new InvalidDataException("找芯片方案路径无效。", exception);
-        }
-
-        if (!string.Equals(Path.GetExtension(fullPath), ".sol", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException("找芯片方案必须使用 .sol 扩展名。");
-        }
-
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException("找芯片方案文件不存在。", fullPath);
-        }
-
-        return fullPath;
     }
 
     /// <summary>
@@ -760,7 +814,7 @@ public partial class MainWindow : Window
 
         if (!_solutionLoaded)
         {
-            throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
+            throw new InvalidOperationException("固定视觉方案尚未就绪，请等待实时相机流程启动完成。");
         }
 
         var previewWasRunning = _previewProcedure?.ContinuousRunEnable == true;
@@ -834,7 +888,7 @@ public partial class MainWindow : Window
             DetachCrosshairModule();
             _clickCenterPixelReady = false;
             _clickCalibrationPath = calibrationPath;
-            VisionRenderControl.SetRenderToolbarVisible(true);
+            VisionRenderControl.SetRenderToolbarVisible(false);
             CenterCrosshair.Visibility = Visibility.Visible;
             UpdateCommandState();
             SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
@@ -848,7 +902,7 @@ public partial class MainWindow : Window
 
         if (!_solutionLoaded)
         {
-            throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
+            throw new InvalidOperationException("固定视觉方案尚未就绪，请等待实时相机流程启动完成。");
         }
 
         var fullPath = ValidateCalibrationFilePath(calibrationPath);
@@ -857,7 +911,7 @@ public partial class MainWindow : Window
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
         _ = GetClickCenterPixel();
-        VisionRenderControl.SetRenderToolbarVisible(true);
+        VisionRenderControl.SetRenderToolbarVisible(false);
         _clickMoveEnabled = true;
         CenterCrosshair.Visibility = Visibility.Collapsed;
         AttachCrosshairModule();
@@ -874,12 +928,12 @@ public partial class MainWindow : Window
             throw new InvalidDataException("写入标定中心的参数数量不正确。");
         }
 
-        if (!_solutionLoaded ||
-            _calibrationProcedure is null ||
-            CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        if (!_solutionLoaded || _calibrationProcedure is null)
         {
-            throw new InvalidOperationException("请先加载方案并选择标定流程。");
+            throw new InvalidOperationException("固定视觉方案尚未加载完成，无法写入标定流程。");
         }
+
+        const string procedureName = CalibrationProcedureName;
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
@@ -928,12 +982,12 @@ public partial class MainWindow : Window
             throw new InvalidDataException("准备九点标定的参数数量不正确。");
         }
 
-        if (!_solutionLoaded ||
-            _calibrationProcedure is null ||
-            CalibrationProcedureComboBox.SelectedItem is not string procedureName)
+        if (!_solutionLoaded || _calibrationProcedure is null)
         {
-            throw new InvalidOperationException("请先在视觉组件中加载标定方案并选择标定流程。");
+            throw new InvalidOperationException("固定视觉方案尚未加载完成，无法开始九点标定。");
         }
+
+        const string procedureName = CalibrationProcedureName;
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
@@ -1242,11 +1296,11 @@ public partial class MainWindow : Window
     /// </summary>
     private IMVSCalibTransformModuTool GetCalibrationTransformModule()
     {
-        if (CalibrationProcedureComboBox.SelectedItem is string procedureName)
+        if (_solutionLoaded && _calibrationProcedure is not null)
         {
             try
             {
-                return ResolveCalibrationTransformModule(procedureName);
+                return ResolveCalibrationTransformModule(CalibrationProcedureName);
             }
             catch (InvalidOperationException)
             {
@@ -1325,7 +1379,7 @@ public partial class MainWindow : Window
         }
 
         var procedure = VmSolution.Instance[procedureName] as VmProcedure
-            ?? throw new InvalidOperationException($"所选找芯片方案中未找到“{procedureName}”。");
+            ?? throw new InvalidOperationException($"固定方案中未找到“{procedureName}”。");
         var moduleList = procedure.GetProcedureModuleList();
         for (var index = 0; index < moduleList.nNum; index++)
         {
@@ -1359,7 +1413,7 @@ public partial class MainWindow : Window
         }
 
         throw new InvalidOperationException(
-            $"找芯片方案的“{procedureName}”中未找到“{blobModuleName}”。");
+            $"固定方案的“{procedureName}”中未找到“{blobModuleName}”。");
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
@@ -1379,7 +1433,7 @@ public partial class MainWindow : Window
 
             if (!_solutionLoaded)
             {
-                throw new InvalidOperationException("请先加载视觉方案，确保实时相机已经正常出图。");
+                throw new InvalidOperationException("固定视觉方案尚未就绪，请等待实时相机流程启动完成。");
             }
 
             if (string.IsNullOrWhiteSpace(_clickCalibrationPath) || !File.Exists(_clickCalibrationPath))
@@ -1649,38 +1703,164 @@ public partial class MainWindow : Window
         await writer.WriteLineAsync(message).ConfigureAwait(false);
     }
 
-    private async void ChooseSolution_Click(object sender, RoutedEventArgs e)
+    private void RenderToolButton_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
-        {
-            Title = "选择 VisionMaster 标定方案",
-            Filter = "VisionMaster 方案 (*.sol)|*.sol|所有文件 (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false,
-            InitialDirectory = GetInitialSolutionDirectory()
-        };
-
-        if (dialog.ShowDialog(this) != true)
+        if (sender is not Button { Tag: string tag })
         {
             return;
         }
 
-        SolutionPathTextBox.Text = dialog.FileName;
-        await LoadSolutionAsync(dialog.FileName, autoRestore: false);
+        var parts = tag.Split(':');
+        if (parts.Length != 2)
+        {
+            return;
+        }
+
+        var target = parts[0];
+        var renderControl = string.Equals(target, "Live", StringComparison.Ordinal)
+            ? VisionRenderControl
+            : CalibrationRenderControl;
+
+        switch (parts[1])
+        {
+            case "ZoomIn":
+                renderControl.EnlargeView();
+                break;
+            case "ZoomOut":
+                renderControl.ShrinkView();
+                break;
+            case "Actual":
+                renderControl.InitViewSize();
+                break;
+            case "Fullscreen":
+                ToggleRenderFullscreen(target);
+                break;
+        }
     }
 
-    private async Task LoadSolutionAsync(string solutionPath, bool autoRestore)
+    private void ToggleRenderFullscreen(string target)
     {
+        if (string.Equals(_fullscreenRenderTarget, target, StringComparison.Ordinal))
+        {
+            _fullscreenRenderTarget = null;
+            WorkspaceSidebarColumn.Width = new GridLength(320);
+            WorkspaceGapColumn.Width = new GridLength(10);
+            CalibrationSidebar.Visibility = Visibility.Visible;
+            LiveRenderPanel.Visibility = Visibility.Visible;
+            CalibrationRenderPanel.Visibility = Visibility.Visible;
+            Grid.SetColumn(LiveRenderPanel, 0);
+            Grid.SetColumnSpan(LiveRenderPanel, 1);
+            Grid.SetColumn(CalibrationRenderPanel, 2);
+            Grid.SetColumnSpan(CalibrationRenderPanel, 1);
+            LiveFullscreenButton.Content = "\uE740";
+            CalibrationFullscreenButton.Content = "\uE740";
+            return;
+        }
+
+        _fullscreenRenderTarget = target;
+        WorkspaceSidebarColumn.Width = new GridLength(0);
+        WorkspaceGapColumn.Width = new GridLength(0);
+        CalibrationSidebar.Visibility = Visibility.Collapsed;
+
+        var showLive = string.Equals(target, "Live", StringComparison.Ordinal);
+        LiveRenderPanel.Visibility = showLive ? Visibility.Visible : Visibility.Collapsed;
+        CalibrationRenderPanel.Visibility = showLive ? Visibility.Collapsed : Visibility.Visible;
+        var visiblePanel = showLive ? LiveRenderPanel : CalibrationRenderPanel;
+        Grid.SetColumn(visiblePanel, 0);
+        Grid.SetColumnSpan(visiblePanel, 3);
+        LiveFullscreenButton.Content = showLive ? "\uE73F" : "\uE740";
+        CalibrationFullscreenButton.Content = showLive ? "\uE740" : "\uE73F";
+    }
+
+    private async void CalibrationToolbarAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string action } || string.IsNullOrWhiteSpace(action))
+        {
+            return;
+        }
+
+        try
+        {
+            await SendHostEventAsync($"CALIBRATION_TOOLBAR_ACTION\t{action}");
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"标定文件菜单操作失败：{FormatException(exception)}", StatusKind.Error);
+        }
+    }
+
+    private async void CalibrationSidebarButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_applyingCalibrationSidebarState || sender is not Button { Tag: string action })
+        {
+            return;
+        }
+
+        await SendCalibrationSidebarActionNoThrowAsync(action, string.Empty);
+    }
+
+    private async void CalibrationSidebarInput_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_applyingCalibrationSidebarState || sender is not TextBox { Tag: string action } textBox)
+        {
+            return;
+        }
+
+        await SendCalibrationSidebarActionNoThrowAsync(action, textBox.Text);
+    }
+
+    private async void CalibrationSidebarSelection_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_applyingCalibrationSidebarState ||
+            sender is not ComboBox { Tag: string action } comboBox ||
+            comboBox.SelectedItem is not ComboBoxItem selectedItem)
+        {
+            return;
+        }
+
+        await SendCalibrationSidebarActionNoThrowAsync(
+            action,
+            selectedItem.Tag as string ?? selectedItem.Content?.ToString() ?? string.Empty);
+    }
+
+    private async void CalibrationSidebarClickMove_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_applyingCalibrationSidebarState || sender is not CheckBox checkBox)
+        {
+            return;
+        }
+
+        await SendCalibrationSidebarActionNoThrowAsync(
+            "EnableClickMove",
+            checkBox.IsChecked == true ? "1" : "0");
+    }
+
+    private async Task SendCalibrationSidebarActionNoThrowAsync(string action, string value)
+    {
+        try
+        {
+            var encodedValue = Convert.ToBase64String(Encoding.UTF8.GetBytes(value ?? string.Empty));
+            await SendHostEventAsync($"CALIBRATION_SIDEBAR_ACTION\t{action}\t{encodedValue}");
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"标定侧栏操作失败：{FormatException(exception)}", StatusKind.Error);
+        }
+    }
+
+    private void LoadFixedSolution()
+    {
+        var solutionPath = GetFixedSolutionPath();
         if (!File.Exists(solutionPath))
         {
-            SetStatus("请选择有效的 VisionMaster .sol 方案文件。", StatusKind.Error);
+            SetStatus(
+                $"未找到固定视觉方案：{solutionPath}。请将“{FixedSolutionFileName}”放到当前用户桌面。",
+                StatusKind.Error);
             return;
         }
 
         SetBusy(true);
-        SetStatus(autoRestore ? "正在恢复上次标定方案…" : "正在加载标定方案…", StatusKind.Busy);
-        await System.Windows.Threading.Dispatcher.Yield(
-            System.Windows.Threading.DispatcherPriority.Background);
+        SetStatus("正在加载固定视觉方案…", StatusKind.Busy);
 
         var previousSolutionClosed = false;
         try
@@ -1692,29 +1872,33 @@ public partial class MainWindow : Window
             _solutionLoaded = true;
 
             var procedureNames = GetProcedureNames();
-            if (procedureNames.Count == 0)
-            {
-                throw new InvalidOperationException("方案中没有可用流程。 ");
-            }
+            _previewProcedure = GetRequiredProcedure(RealtimeProcedureName);
+            _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
+            _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
 
-            _settings.SolutionPath = _loadedSolutionPath;
-            SolutionPathTextBox.Text = _settings.SolutionPath;
+            // 保留隐藏控件仅供现有渲染/标定逻辑读取；用户不能再切换方案或流程。
             PreviewProcedureComboBox.ItemsSource = procedureNames;
             CalibrationProcedureComboBox.ItemsSource = procedureNames;
-            CalibrationProcedureComboBox.SelectedItem =
-                SelectPreferredCalibrationProcedure(procedureNames);
-            PreviewProcedureComboBox.SelectedItem =
-                SelectPreferredPreviewProcedure(procedureNames);
+            PreviewProcedureComboBox.SelectedItem = RealtimeProcedureName;
+            CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
+
+            _settings.SolutionPath = _loadedSolutionPath;
+            _settings.PreviewProcedureName = RealtimeProcedureName;
+            _settings.CalibrationProcedureName = CalibrationProcedureName;
+            SolutionPathTextBox.Text = _loadedSolutionPath;
+            PopulateImageSteps(RealtimeProcedureName, _previewProcedure);
+            BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
             SaveSettingsNoThrow();
-            UpdateCommandState();
-            if (_previewProcedure?.ContinuousRunEnable == true)
+
+            if (!TryStartLivePreview(out var previewError))
             {
-                SetStatus(
-                    autoRestore
-                        ? $"已自动加载：{Path.GetFileName(solutionPath)}；实时与标定流程已分离"
-                        : $"方案已加载：{Path.GetFileName(solutionPath)}；实时与标定流程已分离",
-                    StatusKind.Success);
+                throw new InvalidOperationException($"实时相机流程启动失败：{previewError}");
             }
+
+            UpdateCommandState();
+            SetStatus(
+                $"已加载固定方案：{Path.GetFileName(solutionPath)}；实时相机、找芯片和标定流程已就绪",
+                StatusKind.Success);
         }
         catch (Exception exception)
         {
@@ -1723,14 +1907,26 @@ public partial class MainWindow : Window
                 CloseCurrentSolutionNoThrow();
             }
 
-            SetStatus(
-                $"{(autoRestore ? "自动加载" : "加载")}失败：{FormatException(exception)}",
-                StatusKind.Error);
+            SetStatus($"固定视觉方案加载失败：{FormatException(exception)}", StatusKind.Error);
         }
         finally
         {
             SetBusy(false);
         }
+    }
+
+    private static string GetFixedSolutionPath()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            FixedSolutionFileName);
+    }
+
+    private static VmProcedure GetRequiredProcedure(string procedureName)
+    {
+        return VmSolution.Instance[procedureName] as VmProcedure
+            ?? throw new InvalidOperationException(
+                $"固定方案中未找到必需流程“{procedureName}”。");
     }
 
     private void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1971,29 +2167,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private string SelectPreferredPreviewProcedure(IReadOnlyList<string> procedureNames)
-    {
-        return procedureNames.FirstOrDefault(name =>
-                   string.Equals(name, _settings.PreviewProcedureName, StringComparison.Ordinal))
-               ?? procedureNames.FirstOrDefault(name =>
-                   string.Equals(name, "实时相机", StringComparison.Ordinal))
-               ?? procedureNames.FirstOrDefault(name => name.Contains("实时"))
-               ?? procedureNames.FirstOrDefault(name => name.Contains("图像采集"))
-               ?? procedureNames.FirstOrDefault(name => name.Contains("相机"))
-               ?? procedureNames.FirstOrDefault(name => !name.Contains("标定"))
-               ?? procedureNames[0];
-    }
-
-    private string SelectPreferredCalibrationProcedure(IReadOnlyList<string> procedureNames)
-    {
-        return procedureNames.FirstOrDefault(name =>
-                   string.Equals(name, _settings.CalibrationProcedureName, StringComparison.Ordinal))
-               ?? procedureNames.FirstOrDefault(name =>
-                   string.Equals(name, "标定流程", StringComparison.Ordinal))
-               ?? procedureNames.FirstOrDefault(name => name.Contains("标定"))
-               ?? procedureNames[0];
-    }
-
     private static IReadOnlyList<string> GetProcedureNames()
     {
         var procedureList = VmSolution.Instance.GetAllProcedureList();
@@ -2017,7 +2190,7 @@ public partial class MainWindow : Window
             return true;
         }
 
-        SetStatus("请先选择方案、实时流程和预览图像。", StatusKind.Error);
+        SetStatus("固定视觉方案或实时相机流程尚未就绪。", StatusKind.Error);
         return false;
     }
 
@@ -2034,6 +2207,7 @@ public partial class MainWindow : Window
         }
 
         _previewProcedure = null;
+        _inspectionProcedure = null;
         _calibrationProcedure = null;
         _loadedSolutionPath = "";
         _solutionLoaded = false;
@@ -2058,6 +2232,7 @@ public partial class MainWindow : Window
         }
 
         _previewProcedure = null;
+        _inspectionProcedure = null;
         _calibrationProcedure = null;
         _loadedSolutionPath = "";
         _solutionLoaded = false;
@@ -2133,6 +2308,37 @@ public partial class MainWindow : Window
         }
         catch
         {
+        }
+    }
+
+    private void RestoreRealtimePreviewNoThrow(bool resumePreview)
+    {
+        if (_previewProcedure is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var options = GetImageStepOptions(RealtimeProcedureName, _previewProcedure);
+            ImageStepComboBox.ItemsSource = options;
+            var imageOption = options.FirstOrDefault(option =>
+                string.Equals(option.DisplayName, "图像源1", StringComparison.Ordinal))
+                ?? options.FirstOrDefault(option => option.IsImageSource)
+                ?? options.FirstOrDefault();
+            if (imageOption is not null)
+            {
+                BindImageStep(imageOption, persistSelection: false);
+            }
+
+            if (resumePreview && !_closed)
+            {
+                _previewProcedure.ContinuousRunEnable = true;
+            }
+        }
+        catch
+        {
+            // Blob 结果已经取得；恢复实时画面失败不能改变本次检测结果。
         }
     }
 
@@ -2250,28 +2456,17 @@ public partial class MainWindow : Window
         var previewReady = _solutionLoaded && _previewProcedure is not null;
         var calibrationReady = _solutionLoaded && _calibrationProcedure is not null;
         var continuousRunning = previewReady && _previewProcedure!.ContinuousRunEnable;
-        ChooseSolutionButton.IsEnabled = !_busy && !continuousRunning && !_clickMoveEnabled;
-        PreviewProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning && !_clickMoveEnabled;
-        CalibrationProcedureComboBox.IsEnabled = !_busy && _solutionLoaded && !continuousRunning && !_clickMoveEnabled;
+        ChooseSolutionButton.IsEnabled = false;
+        PreviewProcedureComboBox.IsEnabled = false;
+        CalibrationProcedureComboBox.IsEnabled = false;
         ImageStepComboBox.IsEnabled = !_busy && previewReady && !continuousRunning && !_clickMoveEnabled;
         RunOnceButton.IsEnabled = !_busy && previewReady && !continuousRunning;
         ContinuousRunButton.IsEnabled = !_busy && previewReady && !continuousRunning;
         StopRunButton.IsEnabled = !_busy && continuousRunning;
         if (!calibrationReady && _solutionLoaded)
         {
-            CalibrationProcedureComboBox.ToolTip = "请选择包含N点标定模块的流程";
+            CalibrationProcedureComboBox.ToolTip = "固定方案中的标定流程未就绪";
         }
-    }
-
-    private string? GetInitialSolutionDirectory()
-    {
-        if (string.IsNullOrWhiteSpace(_settings.SolutionPath))
-        {
-            return null;
-        }
-
-        var directory = Path.GetDirectoryName(_settings.SolutionPath);
-        return Directory.Exists(directory) ? directory : null;
     }
 
     private void SaveSettingsNoThrow()
