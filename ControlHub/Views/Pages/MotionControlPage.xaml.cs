@@ -527,7 +527,8 @@ public partial class MotionControlPage : UserControl
         int hardwareAxisNo,
         double pulseDistance,
         CancellationToken cancellationToken,
-        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? minimumCompletionTolerance = null)
     {
         if (hardwareAxisNo < 0)
         {
@@ -572,6 +573,19 @@ public partial class MotionControlPage : UserControl
             ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
         var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
         profile.Validate();
+        var completionTolerance = profile.CompletionTolerance;
+        if (minimumCompletionTolerance is { } requestedCompletionTolerance)
+        {
+            if (!double.IsFinite(requestedCompletionTolerance) || requestedCompletionTolerance <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(minimumCompletionTolerance),
+                    "最小完成容差必须是大于 0 的有效数值。");
+            }
+
+            completionTolerance = Math.Max(completionTolerance, requestedCompletionTolerance);
+        }
+
         if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
         {
             throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
@@ -602,7 +616,7 @@ public partial class MotionControlPage : UserControl
             _activePositionTarget = expectedTarget;
             _activePositionIssuedAtUtc = DateTime.UtcNow;
             _activePositionDeadlineUtc = _activePositionIssuedAtUtc.Value.AddMilliseconds(moveTimeoutMilliseconds);
-            _activePositionTolerance = profile.CompletionTolerance;
+            _activePositionTolerance = completionTolerance;
             _activePositionTimeoutMilliseconds = moveTimeoutMilliseconds;
             _activePositionObservedMoving = false;
             _operatorStopRequestedAxisNo = null;
@@ -621,10 +635,10 @@ public partial class MotionControlPage : UserControl
             ApplySnapshot(axis, settled);
             EnsureRelativeAxisReady(axis, settled, pulseDistance);
             if (settled.IsMoving ||
-                Math.Abs(settled.FeedbackPosition - expectedTarget) > profile.CompletionTolerance)
+                Math.Abs(settled.FeedbackPosition - expectedTarget) > completionTolerance)
             {
                 throw new InvalidOperationException(
-                    $"{axis.Name} 未在允许误差内到位：{settled.FeedbackPosition:0.###}/{expectedTarget:0.###}。");
+                    $"{axis.Name} 未在允许误差内到位：{settled.FeedbackPosition:0.###}/{expectedTarget:0.###}，允许误差 {completionTolerance:0.###} pulse。");
             }
 
             return settled;

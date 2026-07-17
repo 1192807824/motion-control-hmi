@@ -25,6 +25,7 @@ public partial class HomePage : UserControl
     private const int FirstSetZ2BreakVacuumOutputChannel = 9;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
+    private const double DdMotorCompletionTolerance = 5d;
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
@@ -170,9 +171,38 @@ public partial class HomePage : UserControl
             _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
         };
 
-        return motionController.SetDigitalOutputChannel(vacuumChannel, vacuumEnabled) &&
-               motionController.SetDigitalOutputChannel(breakVacuumChannel, breakVacuumEnabled);
+        var vacuumSet = false;
+        var breakVacuumSet = false;
+        Exception? firstFailure = null;
+        try
+        {
+            vacuumSet = motionController.SetDigitalOutputChannel(vacuumChannel, vacuumEnabled);
+        }
+        catch (Exception exception)
+        {
+            firstFailure ??= exception;
+        }
+
+        try
+        {
+            breakVacuumSet = motionController.SetDigitalOutputChannel(breakVacuumChannel, breakVacuumEnabled);
+        }
+        catch (Exception exception)
+        {
+            firstFailure ??= exception;
+        }
+
+        if (firstFailure is not null)
+        {
+            throw new InvalidOperationException(
+                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumChannel:00}={FormatIoState(vacuumEnabled)}，破Y{breakVacuumChannel:00}={FormatIoState(breakVacuumEnabled)}。",
+                firstFailure);
+        }
+
+        return vacuumSet & breakVacuumSet;
     }
+
+    private static string FormatIoState(bool enabled) => enabled ? "ON" : "OFF";
 
     private void EnableFirstSetNozzleVacuum(int nozzleNumber, CancellationToken cancellationToken)
     {
@@ -214,8 +244,32 @@ public partial class HomePage : UserControl
 
     private void CloseAllFirstSetNozzleVacuumOutputs()
     {
-        var z1Closed = SetFirstSetNozzleVacuumOutputs(1, vacuumEnabled: false, breakVacuumEnabled: false);
-        var z2Closed = SetFirstSetNozzleVacuumOutputs(2, vacuumEnabled: false, breakVacuumEnabled: false);
+        var z1Closed = false;
+        var z2Closed = false;
+        Exception? firstFailure = null;
+        try
+        {
+            z1Closed = SetFirstSetNozzleVacuumOutputs(1, vacuumEnabled: false, breakVacuumEnabled: false);
+        }
+        catch (Exception exception)
+        {
+            firstFailure ??= exception;
+        }
+
+        try
+        {
+            z2Closed = SetFirstSetNozzleVacuumOutputs(2, vacuumEnabled: false, breakVacuumEnabled: false);
+        }
+        catch (Exception exception)
+        {
+            firstFailure ??= exception;
+        }
+
+        if (firstFailure is not null)
+        {
+            throw new InvalidOperationException("Z1/Z2真空吸和真空破关闭失败，已尝试写入全部四路 OFF。", firstFailure);
+        }
+
         if (!z1Closed || !z2Closed)
         {
             throw new InvalidOperationException("Z1/Z2真空吸和真空破关闭失败。");
@@ -1466,7 +1520,8 @@ public partial class HomePage : UserControl
             hardwareAxisNo: 0,
             pulseDistance: pulseDistance,
             cancellationToken: cancellationToken,
-            allowedMovingAxisNos: allowedMovingAxisNos);
+            allowedMovingAxisNos: allowedMovingAxisNos,
+            minimumCompletionTolerance: DdMotorCompletionTolerance);
         SetAxis0MoveStatus(
             $"轴0完成：{pulseDistance:0.###} pulse，当前位置 {settled.FeedbackPosition:0.###}。",
             Color.FromRgb(73, 209, 125));
