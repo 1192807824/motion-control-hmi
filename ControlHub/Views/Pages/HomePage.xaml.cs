@@ -33,6 +33,25 @@ public partial class HomePage : UserControl
     private const string CarouselStatusDwelling = "停留";
     private const string CarouselStatusHoming = "回原";
     private static readonly int[] MoveOutAxisNos = [13, 14, 15];
+    private static readonly Point[] CarouselStationCardSlots =
+    [
+        new(241, 16),
+        new(327, 33),
+        new(400, 82),
+        new(449, 155),
+        new(466, 241),
+        new(449, 327),
+        new(400, 400),
+        new(327, 449),
+        new(241, 466),
+        new(155, 449),
+        new(82, 400),
+        new(33, 327),
+        new(16, 241),
+        new(33, 155),
+        new(82, 82),
+        new(155, 33)
+    ];
     private static readonly IReadOnlyDictionary<int, int> TestStationAxisByStation =
         new Dictionary<int, int>
         {
@@ -56,6 +75,7 @@ public partial class HomePage : UserControl
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
     private int _nextAssignedNozzleMoveStep;
+    private int _carouselVisualStepOffset;
     private bool _loadingPresetPositions = true;
 
     public HomePage()
@@ -64,7 +84,7 @@ public partial class HomePage : UserControl
         LoadPresetPositions();
         _visionCalibration.Changed += VisionCalibration_Changed;
         RefreshVisionCalibrationStatus();
-        UpdateCarouselStationDisplay(new bool[CarouselStationCount + 1]);
+        UpdateCarouselStationDisplay(CreateCarouselStationStates());
     }
 
     public void AttachMotionController(MotionControlPage motionController)
@@ -332,8 +352,9 @@ public partial class HomePage : UserControl
             var cycleNumber = 0;
 
             // 转盘工位占料状态。启动时按空盘处理；放料到 1/2 后，后续每次 DD 转动推进一个工位。
-            var carouselOccupied = new bool[CarouselStationCount + 1];
-            UpdateCarouselStationDisplay(carouselOccupied);
+            var carouselStations = CreateCarouselStationStates();
+            _carouselVisualStepOffset = 0;
+            UpdateCarouselStationDisplay(carouselStations);
 
             // 第一轮直接放 1/2；之后每轮放料前先让转盘转两格，并对 4/5/6 已占料工位执行测试。
             var advanceCarouselBeforePlacement = false;
@@ -461,7 +482,7 @@ public partial class HomePage : UserControl
                         $"第{cycleNumber}轮：放料前 DD 正在转两工位，并执行 4/5/6 工位测试…",
                         Color.FromRgb(242, 181, 68));
                     await AdvanceCarouselTwoStationsWithTestsAsync(
-                        carouselOccupied,
+                        carouselStations,
                         axis0PulseDistance,
                         _productionCancellation.Token);
                     advanceCarouselBeforePlacement = false;
@@ -503,9 +524,9 @@ public partial class HomePage : UserControl
                     Color.FromRgb(242, 181, 68));
                 await PulseFirstSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
 
-                carouselOccupied[1] = true;
-                carouselOccupied[2] = true;
-                UpdateCarouselStationDisplay(carouselOccupied);
+                carouselStations[1].SetLoaded();
+                carouselStations[2].SetLoaded();
+                UpdateCarouselStationDisplay(carouselStations);
                 advanceCarouselBeforePlacement = true;
 
                 // 放料后不等待 DD 转两次，下一轮立即回中心拍照；真正放下一组料前再转盘两工位。
@@ -586,13 +607,13 @@ public partial class HomePage : UserControl
     }
 
     private async Task AdvanceCarouselTwoStationsWithTestsAsync(
-        bool[] carouselOccupied,
+        CarouselStationState[] carouselStations,
         double axis0PulseDistance,
         CancellationToken cancellationToken)
     {
-        if (carouselOccupied.Length <= CarouselStationCount)
+        if (carouselStations.Length <= CarouselStationCount)
         {
-            throw new ArgumentException("转盘工位缓存长度无效。", nameof(carouselOccupied));
+            throw new ArgumentException("转盘工位缓存长度无效。", nameof(carouselStations));
         }
 
         for (var turn = 1; turn <= 2; turn++)
@@ -603,18 +624,18 @@ public partial class HomePage : UserControl
                 Color.FromRgb(242, 181, 68));
             await MoveAxis0RelativeCoreAsync(axis0PulseDistance, cancellationToken);
 
-            AdvanceCarouselOccupancy(carouselOccupied);
-            UpdateCarouselStationDisplay(carouselOccupied);
-            await RunOccupiedTestStationsAsync(carouselOccupied, cancellationToken);
+            AdvanceCarouselOccupancy(carouselStations);
+            UpdateCarouselStationDisplay(carouselStations);
+            await RunOccupiedTestStationsAsync(carouselStations, cancellationToken);
         }
     }
 
     private async Task RunOccupiedTestStationsAsync(
-        bool[] carouselOccupied,
+        CarouselStationState[] carouselStations,
         CancellationToken cancellationToken)
     {
         var axisTargets = TestStationAxisByStation
-            .Where(pair => carouselOccupied[pair.Key])
+            .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
         if (axisTargets.Count == 0)
         {
@@ -623,10 +644,10 @@ public partial class HomePage : UserControl
         }
 
         var stations = TestStationAxisByStation
-            .Where(pair => carouselOccupied[pair.Key])
+            .Where(pair => carouselStations[pair.Key].Occupied)
             .Select(pair => $"{pair.Key}号→轴{pair.Value}")
             .ToArray();
-        UpdateCarouselStationDisplay(carouselOccupied, axisTargets.Keys, CarouselStatusPressing);
+        UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusPressing);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 有料，测试轴同步下压 {MoveOutAbsolutePosition:0.###} pulse…",
             Color.FromRgb(242, 181, 68));
@@ -634,14 +655,14 @@ public partial class HomePage : UserControl
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         await motionController.MoveAxesAbsoluteAsync(axisTargets, cancellationToken);
-        UpdateCarouselStationDisplay(carouselOccupied, axisTargets.Keys, CarouselStatusDwelling);
+        UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
             Color.FromRgb(242, 181, 68));
 
         await Task.Delay(TestStationDwellMilliseconds, cancellationToken);
 
-        UpdateCarouselStationDisplay(carouselOccupied, axisTargets.Keys, CarouselStatusHoming);
+        UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusHoming);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原…",
             Color.FromRgb(242, 181, 68));
@@ -651,25 +672,31 @@ public partial class HomePage : UserControl
             TestStationHomeMode,
             MoveOutAbsolutePosition,
             cancellationToken);
+        foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
+        {
+            carouselStations[station].SetTested($"BIN{Random.Shared.Next(0, 4)}");
+        }
+
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 测试站已回原完成。",
             Color.FromRgb(73, 209, 125));
-        UpdateCarouselStationDisplay(carouselOccupied);
+        UpdateCarouselStationDisplay(carouselStations);
     }
 
-    private static void AdvanceCarouselOccupancy(bool[] carouselOccupied)
+    private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
     {
-        var station16Occupied = carouselOccupied[CarouselStationCount];
+        var station16 = carouselStations[CarouselStationCount];
         for (var station = CarouselStationCount; station >= 2; station--)
         {
-            carouselOccupied[station] = carouselOccupied[station - 1];
+            carouselStations[station] = carouselStations[station - 1];
         }
 
-        carouselOccupied[1] = station16Occupied;
+        carouselStations[1] = station16;
+        _carouselVisualStepOffset = (_carouselVisualStepOffset + 1) % CarouselStationCount;
     }
 
     private void UpdateCarouselStationDisplay(
-        IReadOnlyList<bool> carouselOccupied,
+        IReadOnlyList<CarouselStationState> carouselStations,
         IEnumerable<int>? activeAxisNos = null,
         string? activeStatus = null)
     {
@@ -690,9 +717,13 @@ public partial class HomePage : UserControl
         for (var index = 0; index < cards.Length; index++)
         {
             var station = index + 1;
-            var occupied = station < carouselOccupied.Count && carouselOccupied[station];
+            var state = station < carouselStations.Count ? carouselStations[station] : CarouselStationState.Empty();
+            var occupied = state.Occupied;
             var isActive = activeStations.Contains(station);
             var card = cards[index];
+            var slot = CarouselStationCardSlots[(index + _carouselVisualStepOffset) % CarouselStationCount];
+            Canvas.SetLeft(card, slot.X);
+            Canvas.SetTop(card, slot.Y);
             var textBlocks = ((StackPanel)card.Child).Children.OfType<TextBlock>().ToArray();
             var resultText = textBlocks.ElementAtOrDefault(1);
             var objectText = textBlocks.ElementAtOrDefault(2);
@@ -718,18 +749,24 @@ public partial class HomePage : UserControl
 
             if (occupied)
             {
-                card.Background = new SolidColorBrush(Color.FromRgb(53, 45, 24));
-                card.BorderBrush = new SolidColorBrush(Color.FromRgb(231, 163, 43));
+                card.Background = new SolidColorBrush(
+                    state.Tested ? Color.FromRgb(21, 61, 47) : Color.FromRgb(53, 45, 24));
+                card.BorderBrush = new SolidColorBrush(
+                    state.Tested ? Color.FromRgb(54, 196, 106) : Color.FromRgb(231, 163, 43));
                 if (resultText is not null)
                 {
-                    resultText.Text = CarouselStatusLoaded;
-                    resultText.Foreground = new SolidColorBrush(Color.FromRgb(242, 181, 68));
+                    resultText.Text = state.Tested ? "已测试" : CarouselStatusLoaded;
+                    resultText.Foreground = new SolidColorBrush(
+                        state.Tested ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68));
                 }
 
                 if (objectText is not null)
                 {
-                    objectText.Text = TestStationAxisByStation.ContainsKey(station) ? "待测试" : "有物体";
-                    objectText.Foreground = new SolidColorBrush(Color.FromRgb(229, 214, 175));
+                    objectText.Text = state.Tested
+                        ? state.Bin ?? "BIN?"
+                        : TestStationAxisByStation.ContainsKey(station) ? "待测试" : "有物体";
+                    objectText.Foreground = new SolidColorBrush(
+                        state.Tested ? Color.FromRgb(194, 246, 214) : Color.FromRgb(229, 214, 175));
                 }
             }
             else
@@ -750,14 +787,52 @@ public partial class HomePage : UserControl
             }
         }
 
-        var occupiedCount = Enumerable.Range(1, Math.Min(CarouselStationCount, carouselOccupied.Count - 1))
-            .Count(station => carouselOccupied[station]);
+        var occupiedCount = Enumerable.Range(1, Math.Min(CarouselStationCount, carouselStations.Count - 1))
+            .Count(station => carouselStations[station].Occupied);
+        var testedCount = Enumerable.Range(1, Math.Min(CarouselStationCount, carouselStations.Count - 1))
+            .Count(station => carouselStations[station].Occupied && carouselStations[station].Tested);
         var activeText = activeStations.Count > 0 && activeStatus is not null
             ? $"｜测试站{activeStatus}"
             : "";
-        CarouselSummaryText.Text = $"有料 {occupiedCount}/16{activeText}";
+        CarouselSummaryText.Text = $"有料 {occupiedCount}/16｜已测 {testedCount}{activeText}";
         CarouselSummaryText.Foreground = new SolidColorBrush(
             activeStations.Count > 0 ? Color.FromRgb(242, 181, 68) : Color.FromRgb(54, 196, 106));
+    }
+
+    private static CarouselStationState[] CreateCarouselStationStates()
+    {
+        var states = new CarouselStationState[CarouselStationCount + 1];
+        for (var index = 0; index < states.Length; index++)
+        {
+            states[index] = CarouselStationState.Empty();
+        }
+
+        return states;
+    }
+
+    private sealed class CarouselStationState
+    {
+        public bool Occupied { get; private set; }
+
+        public bool Tested { get; private set; }
+
+        public string? Bin { get; private set; }
+
+        public static CarouselStationState Empty() => new();
+
+        public void SetLoaded()
+        {
+            Occupied = true;
+            Tested = false;
+            Bin = null;
+        }
+
+        public void SetTested(string bin)
+        {
+            Occupied = true;
+            Tested = true;
+            Bin = bin;
+        }
     }
 
     /// <summary>
