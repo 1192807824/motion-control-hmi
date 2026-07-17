@@ -7,7 +7,7 @@ public sealed class SimulatedMotionCard : IMotionCard
     private readonly List<SimulatedAxis> _axes;
     private readonly double[] _analogInputs;
     private readonly double[] _analogOutputs;
-    private uint _digitalOutputs;
+    private readonly Dictionary<int, uint> _digitalOutputPorts = [];
 
     public SimulatedMotionCard(MotionCardOptions options)
     {
@@ -105,7 +105,7 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
-            return _digitalOutputs;
+            return _digitalOutputPorts.GetValueOrDefault(portNo);
         }
     }
 
@@ -114,19 +114,25 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
-            if (bitNo < 0 || bitNo >= Math.Min(DigitalOutputCount, 32))
+            var maximumBitNo = Math.Max(DigitalOutputCount, _options.DigitalOutputStartBit + DigitalOutputCount);
+            if (bitNo < 0 || bitNo >= maximumBitNo)
             {
                 throw new ArgumentOutOfRangeException(nameof(bitNo));
             }
 
+            var portNo = bitNo / 32;
+            var portBitNo = bitNo % 32;
+            var portState = _digitalOutputPorts.GetValueOrDefault(portNo);
             if (enabled)
             {
-                _digitalOutputs |= 1u << bitNo;
+                portState |= 1u << portBitNo;
             }
             else
             {
-                _digitalOutputs &= ~(1u << bitNo);
+                portState &= ~(1u << portBitNo);
             }
+
+            _digitalOutputPorts[portNo] = portState;
         }
     }
 

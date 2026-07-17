@@ -19,6 +19,10 @@ public sealed class MotionCardOptions
 
     public int DigitalOutputPort { get; init; }
 
+    public int DigitalInputStartBit { get; init; }
+
+    public int DigitalOutputStartBit { get; init; }
+
     public int SimulationDigitalInputCount { get; init; } = 32;
 
     public int SimulationDigitalOutputCount { get; init; } = 32;
@@ -147,6 +151,16 @@ public sealed class MotionCardOptions
         if (DigitalOutputPort is < 0 or > ushort.MaxValue)
         {
             throw new InvalidDataException("DigitalOutputPort 超出有效范围。");
+        }
+
+        if (DigitalInputStartBit is < 0 or > 31)
+        {
+            throw new InvalidDataException("DigitalInputStartBit 必须在 0 到 31 之间。");
+        }
+
+        if (DigitalOutputStartBit is < 0 or > 31)
+        {
+            throw new InvalidDataException("DigitalOutputStartBit 必须在 0 到 31 之间。");
         }
 
         foreach (var count in new[]

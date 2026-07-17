@@ -3023,7 +3023,7 @@ public partial class MotionControlPage : UserControl
             return;
         }
 
-        if (ExecuteMotion(null, $"DO-{point.Channel}", () => _motionCard.WriteDigitalOutput(point.Channel, !point.IsOn)))
+        if (ExecuteMotion(null, $"DO-{point.BitNo}", () => _motionCard.WriteDigitalOutput(point.BitNo, !point.IsOn)))
         {
             PollIoState();
         }
@@ -3439,20 +3439,20 @@ public partial class MotionControlPage : UserControl
             {
                 case IoPointKind.DigitalInput:
                 {
-                    var inputs = _motionCard.ReadDigitalInputs(_motionOptions.DigitalInputPort);
+                    var portStates = new Dictionary<int, uint>();
                     foreach (var point in viewModel.IoPoints)
                     {
-                        point.IsOn = (inputs & (1u << point.BitNo)) != 0;
+                        point.IsOn = ReadDigitalInputBit(point.BitNo, portStates);
                     }
 
                     break;
                 }
                 case IoPointKind.DigitalOutput:
                 {
-                    var outputs = _motionCard.ReadDigitalOutputs(_motionOptions.DigitalOutputPort);
+                    var portStates = new Dictionary<int, uint>();
                     foreach (var point in viewModel.IoPoints)
                     {
-                        point.IsOn = (outputs & (1u << point.BitNo)) != 0;
+                        point.IsOn = ReadDigitalOutputBit(point.BitNo, portStates);
                     }
 
                     break;
@@ -3506,11 +3506,12 @@ public partial class MotionControlPage : UserControl
             _ => 0
         };
 
-        // Digital port reads return a 32-bit image. Do not truncate the 32
-        // hardware points to the old 20-point dashboard limit.
+        var firstBit = 0;
+        // Digital I/O modules are displayed as a continuous list, while the
+        // hardware bit can start after controller-local I/O and cross ports.
         if (mode is IoPointKind.DigitalInput or IoPointKind.DigitalOutput)
         {
-            count = Math.Min(count, 32);
+            firstBit = GetDigitalIoStartBit(mode, count);
         }
         viewModel.IoPoints.Clear();
         for (var channel = 0; channel < count; channel++)
@@ -3528,6 +3529,9 @@ public partial class MotionControlPage : UserControl
             viewModel.IoPoints.Add(new IoPoint
             {
                 Channel = channel,
+                HardwareBitNo = mode is IoPointKind.DigitalInput or IoPointKind.DigitalOutput
+                    ? firstBit + channel
+                    : channel,
                 Kind = mode,
                 DefaultName = defaultName,
                 Name = string.IsNullOrWhiteSpace(displayName) ? defaultName : displayName
@@ -3538,6 +3542,44 @@ public partial class MotionControlPage : UserControl
         SetIoModeButtonState(DigitalOutputTab, mode == IoPointKind.DigitalOutput);
         SetIoModeButtonState(AnalogInputTab, mode == IoPointKind.AnalogInput);
         SetIoModeButtonState(AnalogOutputTab, mode == IoPointKind.AnalogOutput);
+    }
+
+    private bool ReadDigitalInputBit(int hardwareBitNo, Dictionary<int, uint> portStates)
+    {
+        var portNo = hardwareBitNo / 32;
+        var bitNo = hardwareBitNo % 32;
+        if (!portStates.TryGetValue(portNo, out var state))
+        {
+            state = _motionCard.ReadDigitalInputs(portNo);
+            portStates[portNo] = state;
+        }
+
+        return (state & (1u << bitNo)) != 0;
+    }
+
+    private bool ReadDigitalOutputBit(int hardwareBitNo, Dictionary<int, uint> portStates)
+    {
+        var portNo = hardwareBitNo / 32;
+        var bitNo = hardwareBitNo % 32;
+        if (!portStates.TryGetValue(portNo, out var state))
+        {
+            state = _motionCard.ReadDigitalOutputs(portNo);
+            portStates[portNo] = state;
+        }
+
+        return (state & (1u << bitNo)) != 0;
+    }
+
+    private int GetDigitalIoStartBit(IoPointKind kind, int availableCount)
+    {
+        var configuredStartBit = kind switch
+        {
+            IoPointKind.DigitalInput => _motionOptions.DigitalInputStartBit,
+            IoPointKind.DigitalOutput => _motionOptions.DigitalOutputStartBit,
+            _ => 0
+        };
+
+        return availableCount > configuredStartBit ? configuredStartBit : 0;
     }
 
     private static string GetIoNameKey(IoPointKind kind, int channel)

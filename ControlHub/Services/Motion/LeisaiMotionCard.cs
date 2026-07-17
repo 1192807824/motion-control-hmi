@@ -283,7 +283,8 @@ public sealed class LeisaiMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
-            if (bitNo < 0 || bitNo >= DigitalOutputCount)
+            var maximumBitNo = Math.Max(DigitalOutputCount, _options.DigitalOutputStartBit + DigitalOutputCount);
+            if (bitNo < 0 || bitNo >= maximumBitNo)
             {
                 throw new ArgumentOutOfRangeException(nameof(bitNo), $"数字输出点必须在 0 到 {DigitalOutputCount - 1} 之间。");
             }
