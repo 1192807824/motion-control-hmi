@@ -4754,8 +4754,7 @@ public partial class MotionControlPage : UserControl
             return IsAnyMotionWorkflowActive();
         }
 
-        return _calibrationOperationActive ||
-               (_activeJogAxisNo is { } activeJogAxisNo && !ignored.Contains(activeJogAxisNo)) ||
+        return (_activeJogAxisNo is { } activeJogAxisNo && !ignored.Contains(activeJogAxisNo)) ||
                (_activePositionAxisNo is { } activePositionAxisNo && !ignored.Contains(activePositionAxisNo)) ||
                _pendingStopAxisNos.Any(axisNo => !ignored.Contains(axisNo)) ||
                _homeDeadlines.Keys.Any(axisNo => !ignored.Contains(axisNo)) ||

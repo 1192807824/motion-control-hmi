@@ -847,6 +847,9 @@ public partial class HomePage : UserControl
             $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原点，低速/高速 {TestStationHomeVelocity:0.###} units/s…",
             Color.FromRgb(242, 181, 68));
 
+        SetStartProductionStatus(
+            $"{string.Join("，", stations)} 正在下发 21 模式回原点命令，速度 {TestStationHomeVelocity:0.###} units/s…",
+            Color.FromRgb(242, 181, 68));
         await motionController.HomeAxesAsync(
             axisTargets.Keys.ToArray(),
             TestStationHomeMode,
@@ -855,6 +858,9 @@ public partial class HomePage : UserControl
             TestStationHomeVelocity,
             TestStationHomeVelocity,
             [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo]);
+        SetStartProductionStatus(
+            $"{string.Join("，", stations)} 21 模式回原点完成，DD可继续下一步。",
+            Color.FromRgb(73, 209, 125));
         foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
         {
             carouselStations[station].SetTested($"BIN{Random.Shared.Next(0, 4)}");
