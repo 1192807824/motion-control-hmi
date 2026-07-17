@@ -32,8 +32,8 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int FirstUnloadStation = 13;
     private const int SecondUnloadStation = 14;
-    private const double FirstSetXyVelocity = 600_000d;
-    private const double SecondSetXyVelocity = 600_000d;
+    private const double FirstSetXyVelocity = 800_000d;
+    private const double SecondSetXyVelocity = 800_000d;
     private const double SecondSetNozzle1PickupX = 1_606_271d;
     private const double SecondSetNozzle1PickupY = -222_828d;
     private const double SecondSetNozzle2PickupX = 1_606_631d;
@@ -43,12 +43,12 @@ public partial class HomePage : UserControl
     private const double SecondSetNozzle2DropX = 592_498d;
     private const double SecondSetNozzle2DropY = 1_374_787d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
-    private const double TestStationPressVelocity = 200_000d;
+    private const double TestStationPressVelocity = 60_000d;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
     private const double TestStationHomeVelocity = 200_000d;
     private const double TestStationHomeOffsetPosition = 0d;
-    private const int TestStationDwellMilliseconds = 1_000;
+    private const int TestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
