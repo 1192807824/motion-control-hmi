@@ -473,6 +473,14 @@
                     CornerRadius="4">
                 <StackPanel>
                     <Border Style="{StaticResource SidebarSection}">
+                        <Button x:Name="SidebarStartLivePreviewButton" Tag="StartLivePreview"
+                                Margin="0" Content="获取实时画面"
+                                Style="{StaticResource SidebarButton}"
+                                Background="#0D6EE8" BorderBrush="#2A8CFF"
+                                Click="CalibrationSidebarButton_Click" />
+                    </Border>
+
+                    <Border Style="{StaticResource SidebarSection}">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                 <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">

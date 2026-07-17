@@ -35,11 +35,12 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // 初始页仍是主页；这里只创建原生承载窗口，不启动视觉或标定流程。
-        // 主页找芯片和标定页都按需启动，避免相机流程互相占用。
+        // 初始页仍是主页；启动时先把 VisionMasterHost 拉起，让固定方案提前加载。
+        // 标定页打开时只切换界面，获取实时画面由按钮手动触发。
         await Dispatcher.InvokeAsync(
             () => VisualCalibrationContent.UpdateLayout(),
             DispatcherPriority.ContextIdle);
+        await VisualCalibrationContent.EnsureStartedAsync();
     }
 
     private void PermissionLogin_Click(object sender, RoutedEventArgs e)

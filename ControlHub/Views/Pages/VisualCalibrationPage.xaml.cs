@@ -40,6 +40,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _centerSyncRunning;
     private bool _clickMoveRunning;
     private bool _clickMoveConfigurationRunning;
+    private bool _livePreviewStarting;
     private bool _calibrationFileImporting;
     private bool _calibrationToolbarSyncRunning;
     private bool _calibrationToolbarSyncPending;
@@ -697,6 +698,37 @@ public partial class VisualCalibrationPage : UserControl
         }
     }
 
+    private async void StartLivePreview_Click(object sender, RoutedEventArgs e)
+    {
+        if (_livePreviewStarting || _calibrationRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_hostReady)
+            {
+                throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
+            }
+
+            _livePreviewStarting = true;
+            UpdateCommandState();
+            SetWorkflowStatus("正在获取实时画面…", WorkflowStatus.Running);
+            var message = await VisionHost.StartLivePreviewAsync(CancellationToken.None);
+            SetWorkflowStatus(string.IsNullOrWhiteSpace(message) ? "实时画面已启动。" : message, WorkflowStatus.Success);
+        }
+        catch (Exception exception)
+        {
+            SetWorkflowStatus($"获取实时画面失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _livePreviewStarting = false;
+            UpdateCommandState();
+        }
+    }
+
     private void StopCalibration_Click(object sender, RoutedEventArgs e)
     {
         StopCalibrationButton.IsEnabled = false;
@@ -901,6 +933,9 @@ public partial class VisualCalibrationPage : UserControl
         {
             case "RecordCenter":
                 RecordCenter_Click(this, new RoutedEventArgs());
+                break;
+            case "StartLivePreview":
+                StartLivePreview_Click(this, new RoutedEventArgs());
                 break;
             case "StartCalibration":
                 StartCalibration_Click(this, new RoutedEventArgs());
@@ -1777,6 +1812,7 @@ public partial class VisualCalibrationPage : UserControl
     private void UpdateCommandState()
     {
         if (RecordCenterButton is null ||
+            StartLivePreviewButton is null ||
             CalibrationFilePathTextBox is null ||
             RecordCameraToolPointButton is null ||
             ImportCalibrationFileButton is null ||
@@ -1802,12 +1838,22 @@ public partial class VisualCalibrationPage : UserControl
 
         RecordCenterButton.IsEnabled =
             !_calibrationRunning &&
+            !_livePreviewStarting &&
             !_centerSyncRunning &&
             !_clickMoveRunning &&
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null;
+        StartLivePreviewButton.IsEnabled =
+            !_calibrationRunning &&
+            !_livePreviewStarting &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            EnableClickMoveCheckBox.IsChecked != true &&
+            _hostReady;
         StartCalibrationButton.IsEnabled =
             !_calibrationRunning &&
+            !_livePreviewStarting &&
             !_calibrationFileImporting &&
             !_centerSyncRunning &&
             !_clickMoveRunning &&
@@ -1995,6 +2041,7 @@ public partial class VisualCalibrationPage : UserControl
                     clickTarget,
                     EnableClickMoveCheckBox.IsChecked == true,
                     ClickMoveStatusText.Text,
+                    StartLivePreviewButton.IsEnabled,
                     RecordCenterButton.IsEnabled,
                     StartCalibrationButton.IsEnabled,
                     _calibrationRunning,

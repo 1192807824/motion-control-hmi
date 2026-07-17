@@ -133,6 +133,13 @@
                     BorderThickness="1"
                     CornerRadius="5">
                     <StackPanel>
+                        <Border Style="{StaticResource SectionCard}">
+                            <Button x:Name="StartLivePreviewButton"
+                                    Content="获取实时画面"
+                                    Style="{StaticResource PanelButton}"
+                                    Click="StartLivePreview_Click" />
+                        </Border>
+
                         <Grid Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />

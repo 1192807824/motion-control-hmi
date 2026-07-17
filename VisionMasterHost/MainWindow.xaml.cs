@@ -124,7 +124,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        SetStatus("视觉方案按需加载：主页找芯片或进入视觉标定时才打开", StatusKind.Ready);
+        LoadFixedSolution();
     }
 
     private void StartCommandPipeServer()
@@ -248,6 +248,7 @@ public partial class MainWindow : Window
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
             "SET_CALIBRATION_SAVE_FEEDBACK" => SetCalibrationSaveFeedback(parts),
             "SET_CALIBRATION_SIDEBAR_STATE" => SetCalibrationSidebarState(parts),
+            "START_LIVE_PREVIEW" => StartLivePreviewFromCommand(),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
@@ -264,31 +265,23 @@ public partial class MainWindow : Window
 
         if (!_solutionLoaded)
         {
-            LoadFixedSolution();
-        }
-
-        if (!_solutionLoaded)
-        {
             throw new InvalidOperationException(
-                $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
+                $"固定方案尚未加载完成。请等待程序启动加载完成，或确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
         }
 
         _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
         _calibrationViewActive = true;
 
         CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
-        ApplyLiveRenderLayout();
+        StopAllContinuousExecutionNoThrow();
+        ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
         BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
-        if (!TryStartLivePreview(out var previewError))
-        {
-            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
-        }
         await RefreshRenderLayoutAsync();
 
         UpdateCommandState();
-        SetStatus("标定界面已开启：使用标定流程图像源，标定流程已就绪。", StatusKind.Success);
+        SetStatus("标定界面已开启：方案已加载，点击一键九点标定后开始取像。", StatusKind.Success);
         return "标定界面已开启。";
     }
 
@@ -302,16 +295,22 @@ public partial class MainWindow : Window
         StopAllContinuousExecutionNoThrow();
         _calibrationSession = null;
         _calibrationViewActive = false;
-        CloseCurrentSolutionNoThrow();
+        ClearCalibrationRenderer();
         UpdateCommandState();
-        SetStatus("已离开视觉标定：实时画面和新纳方案均已关闭", StatusKind.Ready);
+        SetStatus("已离开视觉标定：固定方案保持加载，实时画面已停止。", StatusKind.Ready);
         return "标定界面已关闭。";
     }
 
     private async Task<string> ActivateInspectionViewAsync()
     {
         StopAllContinuousExecutionNoThrow();
-        CloseCurrentSolutionNoThrow();
+        if (!_solutionLoaded)
+        {
+            throw new InvalidOperationException(
+                $"固定方案尚未加载完成。请等待程序启动加载完成，或确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
+        }
+
+        _inspectionProcedure ??= GetRequiredProcedure(InspectionProcedureName);
         _calibrationViewActive = false;
         _clickMoveEnabled = false;
         _clickCenterPixelReady = false;
@@ -548,7 +547,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 29)
+        if (parts.Count != 30)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -613,31 +612,32 @@ public partial class MainWindow : Window
             SelectByTag(SidebarClickTargetComboBox, Decode(parts[12]));
             SidebarEnableClickMoveCheckBox.IsChecked = parts[13] == "1";
             SidebarClickMoveStatusText.Text = Decode(parts[14]);
-            SidebarRecordCenterButton.IsEnabled = parts[15] == "1";
-            SidebarStartCalibrationButton.IsEnabled = parts[16] == "1" || parts[17] == "1";
-            var calibrationRunning = parts[17] == "1";
+            SidebarStartLivePreviewButton.IsEnabled = parts[15] == "1";
+            SidebarRecordCenterButton.IsEnabled = parts[16] == "1";
+            SidebarStartCalibrationButton.IsEnabled = parts[17] == "1" || parts[18] == "1";
+            var calibrationRunning = parts[18] == "1";
             SidebarStartCalibrationButton.Tag = calibrationRunning ? "StopCalibration" : "StartCalibration";
             SidebarStartCalibrationButton.Content = calibrationRunning ? "停止九点标定" : "一键九点标定";
             SidebarStartCalibrationButton.Background = new SolidColorBrush(
                 calibrationRunning ? Color.FromRgb(117, 18, 28) : Color.FromRgb(0, 169, 101));
             SidebarStartCalibrationButton.BorderBrush = new SolidColorBrush(
                 calibrationRunning ? Color.FromRgb(217, 13, 22) : Color.FromRgb(0, 199, 120));
-            var parameterInputsEnabled = parts[18] == "1";
+            var parameterInputsEnabled = parts[19] == "1";
             SidebarStepXTextBox.IsEnabled = parameterInputsEnabled;
             SidebarStepYTextBox.IsEnabled = parameterInputsEnabled;
             SidebarMovePriorityComboBox.IsEnabled = parameterInputsEnabled;
             SidebarVelocityTextBox.IsEnabled = parameterInputsEnabled;
             SidebarSettleTextBox.IsEnabled = parameterInputsEnabled;
-            SidebarRecordCameraButton.IsEnabled = parts[19] == "1";
-            SidebarRecordNozzleButton.IsEnabled = parts[20] == "1";
-            SidebarClickTargetComboBox.IsEnabled = parts[21] == "1";
-            SidebarEnableClickMoveCheckBox.IsEnabled = parts[22] == "1";
-            SidebarReturnCameraCenterButton.IsEnabled = parts[23] == "1";
-            SidebarStopClickMoveButton.IsEnabled = parts[24] == "1";
-            SidebarCenterVmText.Foreground = ParseBrush(Decode(parts[25]), Brushes.LimeGreen);
-            SidebarNozzleStatusText.Foreground = ParseBrush(Decode(parts[26]), Brushes.LightSteelBlue);
-            SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[27]), Brushes.LightSteelBlue);
-            SidebarStartCalibrationButton.ToolTip = Decode(parts[28]);
+            SidebarRecordCameraButton.IsEnabled = parts[20] == "1";
+            SidebarRecordNozzleButton.IsEnabled = parts[21] == "1";
+            SidebarClickTargetComboBox.IsEnabled = parts[22] == "1";
+            SidebarEnableClickMoveCheckBox.IsEnabled = parts[23] == "1";
+            SidebarReturnCameraCenterButton.IsEnabled = parts[24] == "1";
+            SidebarStopClickMoveButton.IsEnabled = parts[25] == "1";
+            SidebarCenterVmText.Foreground = ParseBrush(Decode(parts[26]), Brushes.LimeGreen);
+            SidebarNozzleStatusText.Foreground = ParseBrush(Decode(parts[27]), Brushes.LightSteelBlue);
+            SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[28]), Brushes.LightSteelBlue);
+            SidebarStartCalibrationButton.ToolTip = Decode(parts[29]);
         }
         finally
         {
@@ -995,8 +995,7 @@ public partial class MainWindow : Window
             _clickCalibrationPath = calibrationPath;
             VisionRenderControl.SetRenderToolbarVisible(false);
             CenterCrosshair.Visibility = Visibility.Collapsed;
-            AttachCrosshairModule();
-            QueueClickCenterInitialization();
+            DetachCrosshairModule();
             UpdateCommandState();
             SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
             return "点击视觉移动已关闭。";
@@ -1027,7 +1026,6 @@ public partial class MainWindow : Window
         _clickMoveEnabled = true;
         CenterCrosshair.Visibility = Visibility.Collapsed;
         AttachCrosshairModule();
-        QueueClickCenterInitialization();
         UpdateCommandState();
         SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
         return $"已引用标定文件：{fullPath}。点击图像后将把该点移到绿色十字中心。";
@@ -1236,15 +1234,12 @@ public partial class MainWindow : Window
 
         session.Module.ModuParams.DoSaveFile(session.CalibrationPath);
         StopAllContinuousExecutionNoThrow();
-        ClearCalibrationRenderer();
         _calibrationSession = null;
-        ApplyLiveRenderLayout();
-        var previewRestored = TryStartLivePreview(out var previewError);
+        ApplyCalibrationRenderLayout();
         RefreshRenderLayout();
         var message =
             $"九点标定成功，像素精度 {result.PixelPrecision:0.######}，" +
-            $"标定文件：{session.CalibrationPath}" +
-            (previewRestored ? "；实时画面已恢复" : $"；实时画面恢复失败：{previewError}");
+            $"标定文件：{session.CalibrationPath}";
         SetBusy(false);
         SetStatus(message, StatusKind.Success);
         return Task.FromResult(message);
@@ -1260,8 +1255,7 @@ public partial class MainWindow : Window
 
         ClearCalibrationRenderer();
         StopAllContinuousExecutionNoThrow();
-        ApplyLiveRenderLayout();
-        _ = TryStartLivePreview(out _);
+        ApplyCalibrationRenderLayout();
         RefreshRenderLayout();
         var message = "九点标定已取消，本次未完成的标定点已清空。";
         SetBusy(false);
@@ -2440,6 +2434,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private string StartLivePreviewFromCommand()
+    {
+        if (!EnsureProcedureReady())
+        {
+            throw new InvalidOperationException("固定视觉方案或实时相机流程尚未就绪。");
+        }
+
+        ApplyLiveRenderLayout();
+        RefreshRenderLayout();
+        if (!TryStartLivePreview(out var previewError))
+        {
+            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
+        }
+
+        SetStatus("实时画面已启动。", StatusKind.Success);
+        return "实时画面已启动。";
+    }
+
     private void StopRun_Click(object sender, RoutedEventArgs e)
     {
         if (_previewProcedure is null)
@@ -2578,15 +2590,6 @@ public partial class MainWindow : Window
     {
         CalibrationImagePlaceholder.Visibility = Visibility.Visible;
         CalibrationRenderControl.ModuleSource = module;
-        try
-        {
-            CalibrationRenderControl.UpdateVMResultShow();
-        }
-        catch
-        {
-            // The module has no render result until the first calibration capture.
-        }
-
     }
 
     private void StopPreviewProcedureNoThrow()
@@ -2700,18 +2703,9 @@ public partial class MainWindow : Window
         _displayedModule = option.Module as VmModule;
         ImagePlaceholder.Visibility = Visibility.Visible;
         VisionRenderControl.ModuleSource = option.Module;
-        try
-        {
-            VisionRenderControl.UpdateVMResultShow();
-        }
-        catch
-        {
-            // A newly loaded image source may not have a render result until its first frame.
-        }
 
         CenterCrosshair.Visibility = Visibility.Collapsed;
         AttachCrosshairModule();
-        QueueClickCenterInitialization();
         if (!persistSelection)
         {
             return;

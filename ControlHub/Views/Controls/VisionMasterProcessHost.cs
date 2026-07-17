@@ -260,6 +260,11 @@ public sealed class VisionMasterProcessHost : HwndHost
         return SendCalibrationCommandAsync("DEACTIVATE_CALIBRATION_VIEW", cancellationToken);
     }
 
+    public Task<string> StartLivePreviewAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("START_LIVE_PREVIEW", cancellationToken);
+    }
+
     public Task<string> CaptureCalibrationPointAsync(
         int pointNumber,
         CancellationToken cancellationToken)
@@ -360,6 +365,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.ClickTarget),
                 state.ClickMoveChecked ? "1" : "0",
                 Encode(state.ClickMoveStatus),
+                state.StartLivePreviewEnabled ? "1" : "0",
                 state.RecordCenterEnabled ? "1" : "0",
                 state.StartCalibrationEnabled ? "1" : "0",
                 state.CalibrationRunning ? "1" : "0",
@@ -1318,6 +1324,7 @@ public sealed record CalibrationSidebarState(
     string ClickTarget,
     bool ClickMoveChecked,
     string ClickMoveStatus,
+    bool StartLivePreviewEnabled,
     bool RecordCenterEnabled,
     bool StartCalibrationEnabled,
     bool CalibrationRunning,
