@@ -539,7 +539,11 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="7" Height="7" Fill="{StaticResource SuccessGreen}" Margin="0,0,6,0" />
-                                    <TextBlock Text="默认空工位" Foreground="{StaticResource SuccessGreen}" FontSize="11" FontWeight="Bold" />
+                                    <TextBlock x:Name="CarouselSummaryText"
+                                               Text="默认空工位"
+                                               Foreground="{StaticResource SuccessGreen}"
+                                               FontSize="11"
+                                               FontWeight="Bold" />
                                 </StackPanel>
                             </Grid>
 
@@ -547,7 +551,7 @@
                                      Stretch="Uniform"
                                      StretchDirection="DownOnly"
                                      Margin="0,4,0,2">
-                                <Canvas Width="560" Height="560">
+                                <Canvas x:Name="CarouselStationCanvas" Width="560" Height="560">
                                     <Ellipse Width="360"
                                              Height="360"
                                              Canvas.Left="100"
@@ -572,7 +576,7 @@
                                                    FontSize="22"
                                                    FontWeight="Bold"
                                                    TextAlignment="Center" />
-                                        <TextBlock Text="待检测 / 有物体 / 检测完成"
+                                        <TextBlock Text="空闲 / 有物体 / 测试中"
                                                    Foreground="{StaticResource TextSecondary}"
                                                    FontSize="12"
                                                    Margin="0,8,0,0"
@@ -638,7 +642,7 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Ellipse Width="8" Height="8" Fill="#6F8392" Margin="0,0,6,0" />
-                                    <TextBlock Text="待检测" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                    <TextBlock Text="空闲" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Ellipse Width="8" Height="8" Fill="{StaticResource WarningAmber}" Margin="0,0,6,0" />
@@ -646,7 +650,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessGreen}" Margin="0,0,6,0" />
-                                    <TextBlock Text="检测完成" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                    <TextBlock Text="测试中" Foreground="{StaticResource TextSecondary}" FontSize="11" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
