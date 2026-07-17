@@ -919,6 +919,9 @@ public partial class HomePage : UserControl
                 cancellationToken);
             EnableNozzleVacuum(VisionCalibrationAxisSet.Second, 2, cancellationToken);
 
+            // 第二套必须先完成两次取料。任一吸嘴未确认持料时，禁止进入任何放料动作。
+            EnsureBothSecondSetNozzlesHolding();
+
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴1放料",
                 SecondSetNozzle1DropX,
@@ -948,6 +951,17 @@ public partial class HomePage : UserControl
         {
             CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
             throw;
+        }
+    }
+
+    private void EnsureBothSecondSetNozzlesHolding()
+    {
+        var secondSetIndex = (int)VisionCalibrationAxisSet.Second;
+        if (!_nozzleVacuumEnabledBySet[secondSetIndex, 1] ||
+            !_nozzleVacuumEnabledBySet[secondSetIndex, 2])
+        {
+            throw new InvalidOperationException(
+                "第二套两个吸嘴尚未全部完成吸料，禁止进入统一放料流程。");
         }
     }
 
