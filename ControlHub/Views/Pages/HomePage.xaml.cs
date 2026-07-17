@@ -829,7 +829,8 @@ public partial class HomePage : UserControl
         await motionController.MoveAxesAbsoluteAsync(
             axisTargets,
             cancellationToken,
-            TestStationMoveTimeoutMilliseconds);
+            TestStationMoveTimeoutMilliseconds,
+            [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo]);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
@@ -851,7 +852,8 @@ public partial class HomePage : UserControl
             MoveOutAbsolutePosition,
             cancellationToken,
             TestStationHomeVelocity,
-            TestStationHomeVelocity);
+            TestStationHomeVelocity,
+            [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo]);
         foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
         {
             carouselStations[station].SetTested($"BIN{Random.Shared.Next(0, 4)}");

@@ -881,7 +881,8 @@ public partial class MotionControlPage : UserControl
     public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesAbsoluteAsync(
         IReadOnlyDictionary<int, double> targetPositions,
         CancellationToken cancellationToken,
-        int minimumTimeoutMilliseconds = 10_000)
+        int minimumTimeoutMilliseconds = 10_000,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         ArgumentNullException.ThrowIfNull(targetPositions);
 
@@ -915,7 +916,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                axisTargets.Select(pair => pair.Key).ToArray()))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行同步绝对位置移动。");
         }
@@ -1115,7 +1118,8 @@ public partial class MotionControlPage : UserControl
         double offsetPosition,
         CancellationToken cancellationToken,
         double? lowVelocityOverride = null,
-        double? highVelocityOverride = null)
+        double? highVelocityOverride = null,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareAxisNos);
         var axisNumbers = hardwareAxisNos
@@ -1159,7 +1163,7 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(allowedMovingAxisNos, axisNumbers))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行轴组回原。");
         }
@@ -4727,13 +4731,23 @@ public partial class MotionControlPage : UserControl
         IReadOnlyCollection<int>? ignoredAxisNos,
         int activeHardwareAxisNo)
     {
+        return IsAnyMotionWorkflowActiveExcept(ignoredAxisNos, [activeHardwareAxisNo]);
+    }
+
+    private bool IsAnyMotionWorkflowActiveExcept(
+        IReadOnlyCollection<int>? ignoredAxisNos,
+        IReadOnlyCollection<int> activeHardwareAxisNos)
+    {
         if (ignoredAxisNos is null || ignoredAxisNos.Count == 0)
         {
             return IsAnyMotionWorkflowActive();
         }
 
+        var active = activeHardwareAxisNos
+            .Where(axisNo => axisNo >= 0)
+            .ToHashSet();
         var ignored = ignoredAxisNos
-            .Where(axisNo => axisNo >= 0 && axisNo != activeHardwareAxisNo)
+            .Where(axisNo => axisNo >= 0 && !active.Contains(axisNo))
             .ToHashSet();
         if (ignored.Count == 0)
         {
