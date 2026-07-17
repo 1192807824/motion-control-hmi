@@ -210,6 +210,30 @@ public partial class HomePage : UserControl
             true);
     }
 
+    private void CloseAllFirstSetNozzleVacuumOutputs()
+    {
+        var z1Closed = SetFirstSetNozzleVacuumOutputs(1, vacuumEnabled: false, breakVacuumEnabled: false);
+        var z2Closed = SetFirstSetNozzleVacuumOutputs(2, vacuumEnabled: false, breakVacuumEnabled: false);
+        if (!z1Closed || !z2Closed)
+        {
+            throw new InvalidOperationException("Z1/Z2真空吸和真空破关闭失败。");
+        }
+
+        SetFirstSetPositionStatus("Z1/Z2真空吸和真空破已全部关闭。", true);
+    }
+
+    private void CloseAllFirstSetNozzleVacuumOutputsNoThrow()
+    {
+        try
+        {
+            CloseAllFirstSetNozzleVacuumOutputs();
+        }
+        catch
+        {
+            // 收尾兜底不能掩盖原始停止或故障原因。
+        }
+    }
+
     /// <summary>
     /// 从视觉标定页的共享配置中加载第一套 XY 标定文件。
     /// </summary>
@@ -523,6 +547,7 @@ public partial class HomePage : UserControl
                     $"第{cycleNumber}轮：2工位已到位，Z2正在真空破并关闭吸…",
                     Color.FromRgb(242, 181, 68));
                 await PulseFirstSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
+                CloseAllFirstSetNozzleVacuumOutputs();
 
                 carouselStations[1].SetLoaded();
                 carouselStations[2].SetLoaded();
@@ -554,6 +579,8 @@ public partial class HomePage : UserControl
         }
         finally
         {
+            CloseAllFirstSetNozzleVacuumOutputsNoThrow();
+
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
 
