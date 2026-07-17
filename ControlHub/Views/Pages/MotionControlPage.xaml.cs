@@ -1113,7 +1113,9 @@ public partial class MotionControlPage : UserControl
         IReadOnlyCollection<int> hardwareAxisNos,
         int homeMode,
         double offsetPosition,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double? lowVelocityOverride = null,
+        double? highVelocityOverride = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareAxisNos);
         var axisNumbers = hardwareAxisNos
@@ -1128,6 +1130,18 @@ public partial class MotionControlPage : UserControl
         if (!double.IsFinite(offsetPosition))
         {
             throw new ArgumentOutOfRangeException(nameof(offsetPosition), "回原偏移必须是有限数值。");
+        }
+
+        if (lowVelocityOverride is { } lowVelocity &&
+            (!double.IsFinite(lowVelocity) || lowVelocity <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lowVelocityOverride), "回原低速必须是大于 0 的有效数值。");
+        }
+
+        if (highVelocityOverride is { } highVelocity &&
+            (!double.IsFinite(highVelocity) || highVelocity <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(highVelocityOverride), "回原高速必须是大于 0 的有效数值。");
         }
 
         if (_closed)
@@ -1180,7 +1194,8 @@ public partial class MotionControlPage : UserControl
                 throw new MotionCardException($"{axis.Name} 未使能，不能启动轴组回原。");
             }
 
-            if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+            if ((!lowVelocityOverride.HasValue || !highVelocityOverride.HasValue) &&
+                (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0))
             {
                 throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
             }
@@ -1199,8 +1214,8 @@ public partial class MotionControlPage : UserControl
                 {
                     Enabled = true,
                     Mode = homeMode,
-                    LowVelocity = axis.JogSpeed * TestHomeLowSpeedRatio,
-                    HighVelocity = axis.JogSpeed,
+                    LowVelocity = lowVelocityOverride ?? axis.JogSpeed * TestHomeLowSpeedRatio,
+                    HighVelocity = highVelocityOverride ?? axis.JogSpeed,
                     AccelerationSeconds = 0.1,
                     DecelerationSeconds = 0.1,
                     OffsetPosition = offsetPosition

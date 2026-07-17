@@ -30,6 +30,7 @@ public partial class HomePage : UserControl
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
+    private const double TestStationHomeVelocity = 200_000d;
     private const int TestStationDwellMilliseconds = 1_000;
     private const int MoveAwayBeforeDdMilliseconds = 500;
     private const string CarouselStatusLoaded = "有料";
@@ -611,7 +612,6 @@ public partial class HomePage : UserControl
                         carouselStations,
                         axis0PulseDistance,
                         [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
-                        xyReturnToCenterTask,
                         _productionCancellation.Token);
 
                     var returnedCenter = await xyReturnToCenterTask;
@@ -748,7 +748,6 @@ public partial class HomePage : UserControl
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
         IReadOnlyCollection<int>? allowedMovingAxisNos,
-        Task? xyReturnToCenterTask,
         CancellationToken cancellationToken)
     {
         if (carouselStations.Length <= CarouselStationCount)
@@ -774,9 +773,11 @@ public partial class HomePage : UserControl
 
             AdvanceCarouselOccupancy(carouselStations);
             UpdateCarouselStationDisplay(carouselStations);
+            SetStartProductionStatus(
+                $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成，正在检查 5/6/7 测试站…",
+                Color.FromRgb(242, 181, 68));
             var testedThisTurn = await RunOccupiedTestStationsAsync(
                 carouselStations,
-                xyReturnToCenterTask,
                 cancellationToken);
             testedStationCount += testedThisTurn;
             if (testedThisTurn > 0)
@@ -799,7 +800,6 @@ public partial class HomePage : UserControl
 
     private async Task<int> RunOccupiedTestStationsAsync(
         CarouselStationState[] carouselStations,
-        Task? xyReturnToCenterTask,
         CancellationToken cancellationToken)
     {
         var axisTargets = TestStationAxisByStation
@@ -815,18 +815,14 @@ public partial class HomePage : UserControl
             .Where(pair => carouselStations[pair.Key].Occupied)
             .Select(pair => $"{pair.Key}号→轴{pair.Value}")
             .ToArray();
+
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusPressing);
+        SetStartProductionStatus(
+            $"{string.Join("，", stations)} 已进测试站，不等待XY回中心，立即下压测试…",
+            Color.FromRgb(242, 181, 68));
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 有料，测试轴同步下压 {MoveOutAbsolutePosition:0.###} pulse…",
             Color.FromRgb(242, 181, 68));
-
-        if (xyReturnToCenterTask is not null && !xyReturnToCenterTask.IsCompleted)
-        {
-            SetAxis13To15MoveStatus(
-                $"{string.Join("，", stations)} 有料，等待XY回中心完成后下压测试站…",
-                Color.FromRgb(242, 181, 68));
-            await xyReturnToCenterTask;
-        }
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
@@ -842,15 +838,20 @@ public partial class HomePage : UserControl
         await Task.Delay(TestStationDwellMilliseconds, cancellationToken);
 
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusHoming);
+        SetStartProductionStatus(
+            $"{string.Join("，", stations)} 停留完成，测试站正在回原，DD等待回原完成…",
+            Color.FromRgb(242, 181, 68));
         SetAxis13To15MoveStatus(
-            $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原…",
+            $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原，低速/高速 {TestStationHomeVelocity:0.###} units/s…",
             Color.FromRgb(242, 181, 68));
 
         await motionController.HomeAxesAsync(
             axisTargets.Keys.ToArray(),
             TestStationHomeMode,
             MoveOutAbsolutePosition,
-            cancellationToken);
+            cancellationToken,
+            TestStationHomeVelocity,
+            TestStationHomeVelocity);
         foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
         {
             carouselStations[station].SetTested($"BIN{Random.Shared.Next(0, 4)}");
