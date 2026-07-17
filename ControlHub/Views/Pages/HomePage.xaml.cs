@@ -32,15 +32,16 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int FirstUnloadStation = 13;
     private const int SecondUnloadStation = 14;
-    private const double SecondSetNozzle1PickupX = 161_925d;
-    private const double SecondSetNozzle1PickupY = -222_429d;
-    private const double SecondSetNozzle2PickupX = 1_603_045d;
-    private const double SecondSetNozzle2PickupY = 333_140d;
-    private const double SecondSetNozzle1DropX = 561_460d;
-    private const double SecondSetNozzle1DropY = 208_793d;
-    private const double SecondSetNozzle2DropX = 611_860d;
-    private const double SecondSetNozzle2DropY = 1_367_136d;
+    private const double SecondSetNozzle1PickupX = 1_606_271d;
+    private const double SecondSetNozzle1PickupY = -222_828d;
+    private const double SecondSetNozzle2PickupX = 1_606_631d;
+    private const double SecondSetNozzle2PickupY = 330_321d;
+    private const double SecondSetNozzle1DropX = 592_474d;
+    private const double SecondSetNozzle1DropY = 204_106d;
+    private const double SecondSetNozzle2DropX = 592_498d;
+    private const double SecondSetNozzle2DropY = 1_374_787d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
+    private const double TestStationPressVelocity = 200_000d;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
     private const double TestStationHomeVelocity = 200_000d;
@@ -1080,7 +1081,8 @@ public partial class HomePage : UserControl
             cancellationToken,
             TestStationMoveTimeoutMilliseconds,
             [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
-            HomePageCompletionTolerance);
+            HomePageCompletionTolerance,
+            TestStationPressVelocity);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
@@ -1860,7 +1862,8 @@ public partial class HomePage : UserControl
                 MoveOutAxisNos.ToDictionary(axisNo => axisNo, _ => MoveOutAbsolutePosition),
                 CancellationToken.None,
                 TestStationMoveTimeoutMilliseconds,
-                minimumCompletionTolerance: HomePageCompletionTolerance);
+                minimumCompletionTolerance: HomePageCompletionTolerance,
+                velocityOverride: TestStationPressVelocity);
             SetAxis13To15MoveStatus(
                 $"轴{string.Join(" / 轴", MoveOutAxisNos)}已到移出绝对位置 {MoveOutAbsolutePosition:0.###} pulse。",
                 Color.FromRgb(73, 209, 125));

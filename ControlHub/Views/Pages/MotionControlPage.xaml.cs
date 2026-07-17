@@ -892,7 +892,8 @@ public partial class MotionControlPage : UserControl
         CancellationToken cancellationToken,
         int minimumTimeoutMilliseconds = 10_000,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null,
-        double? minimumCompletionTolerance = null)
+        double? minimumCompletionTolerance = null,
+        double? velocityOverride = null)
     {
         ArgumentNullException.ThrowIfNull(targetPositions);
 
@@ -917,6 +918,14 @@ public partial class MotionControlPage : UserControl
             throw new ArgumentOutOfRangeException(
                 nameof(minimumCompletionTolerance),
                 "最小完成容差必须是大于 0 的有效数值。");
+        }
+
+        if (velocityOverride is { } requestedVelocity &&
+            (!double.IsFinite(requestedVelocity) || requestedVelocity <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(velocityOverride),
+                "统一运行速度必须是大于 0 的有效数值。");
         }
 
         if (_closed)
@@ -947,7 +956,7 @@ public partial class MotionControlPage : UserControl
                 $"同步移动包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
         }
 
-        var moves = new List<(AxisStatus Axis, double Target, double Tolerance)>();
+        var moves = new List<(AxisStatus Axis, double Target, double Tolerance, double Velocity)>();
         var maximumTimeoutMilliseconds = Math.Clamp((double)minimumTimeoutMilliseconds, 10_000d, 120_000d);
         foreach (var (hardwareAxisNo, target) in axisTargets)
         {
@@ -956,7 +965,8 @@ public partial class MotionControlPage : UserControl
                 ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
             var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
             profile.Validate();
-            if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+            var velocity = velocityOverride ?? axis.JogSpeed;
+            if (!double.IsFinite(velocity) || velocity <= 0)
             {
                 throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
             }
@@ -967,14 +977,14 @@ public partial class MotionControlPage : UserControl
             EnsureRelativeAxisReady(axis, beforeMove, delta == 0 ? 1 : delta);
 
             var estimatedTimeoutMilliseconds = Math.Ceiling(
-                Math.Abs(target - beforeMove.FeedbackPosition) / axis.JogSpeed * 1000d + 5000d);
+                Math.Abs(target - beforeMove.FeedbackPosition) / velocity * 1000d + 5000d);
             maximumTimeoutMilliseconds = Math.Max(
                 maximumTimeoutMilliseconds,
                 Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
             var completionTolerance = minimumCompletionTolerance is { } requestedTolerance
                 ? Math.Max(profile.CompletionTolerance, requestedTolerance)
                 : profile.CompletionTolerance;
-            moves.Add((axis, target, completionTolerance));
+            moves.Add((axis, target, completionTolerance, velocity));
         }
 
         var moveTimeoutMilliseconds = (int)Math.Clamp(
@@ -996,7 +1006,7 @@ public partial class MotionControlPage : UserControl
                     continue;
                 }
 
-                _motionCard.MoveAbsolute(move.Axis.HardwareAxisNo, move.Target, move.Axis.JogSpeed);
+                _motionCard.MoveAbsolute(move.Axis.HardwareAxisNo, move.Target, move.Velocity);
                 commandedAxes.Add(move.Axis);
                 move.Axis.IsMoving = true;
                 move.Axis.State = $"同步绝对位置命令已发送：{move.Target:0.###} {move.Axis.Unit}";
