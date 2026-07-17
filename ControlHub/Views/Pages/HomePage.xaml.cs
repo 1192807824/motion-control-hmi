@@ -18,6 +18,14 @@ public partial class HomePage : UserControl
 {
     private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionBlobModuleName = "Blob分析1";
+    private const int FirstSetZ1VacuumOutputChannel = 7;
+    private const int FirstSetZ1BreakVacuumOutputChannel = 6;
+    private const int FirstSetZ2VacuumOutputChannel = 9;
+    private const int FirstSetZ2BreakVacuumOutputChannel = 8;
+    private const int VacuumBreakPulseMilliseconds = 150;
+    private const double DdMotorPulsePerTurn = 22_500d;
+    private const double MoveOutAbsolutePosition = 250_000d;
+    private static readonly int[] MoveOutAxisNos = [13, 14, 15];
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
     private HomePageSettings _homeSettings = new();
@@ -111,6 +119,60 @@ public partial class HomePage : UserControl
         return _visionCalibration.CalculateTarget(cameraTargetX, cameraTargetY, targetTool);
     }
 
+    private bool SetFirstSetNozzleVacuumOutputs(
+        int nozzleNumber,
+        bool vacuumEnabled,
+        bool breakVacuumEnabled)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var (vacuumChannel, breakVacuumChannel) = nozzleNumber switch
+        {
+            1 => (FirstSetZ1VacuumOutputChannel, FirstSetZ1BreakVacuumOutputChannel),
+            2 => (FirstSetZ2VacuumOutputChannel, FirstSetZ2BreakVacuumOutputChannel),
+            _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
+        };
+
+        return motionController.SetDigitalOutputChannel(vacuumChannel, vacuumEnabled) &&
+               motionController.SetDigitalOutputChannel(breakVacuumChannel, breakVacuumEnabled);
+    }
+
+    private void EnableFirstSetNozzleVacuum(int nozzleNumber, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: true, breakVacuumEnabled: false))
+        {
+            throw new InvalidOperationException($"Z{nozzleNumber}真空吸开启失败。");
+        }
+
+        SetFirstSetPositionStatus($"Z{nozzleNumber}真空吸已开启。", true);
+    }
+
+    private async Task PulseFirstSetNozzleBreakVacuumAsync(
+        int nozzleNumber,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: true))
+        {
+            throw new InvalidOperationException($"Z{nozzleNumber}真空破开启失败。");
+        }
+
+        try
+        {
+            await Task.Delay(VacuumBreakPulseMilliseconds, cancellationToken);
+        }
+        finally
+        {
+            if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: false))
+            {
+                throw new InvalidOperationException($"Z{nozzleNumber}真空破关闭失败。");
+            }
+        }
+
+        SetFirstSetPositionStatus($"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms 并关闭。", true);
+    }
+
     /// <summary>
     /// 从视觉标定页的共享配置中加载第一套 XY 标定文件。
     /// </summary>
@@ -149,8 +211,8 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴对位、XY位置1、XY位置2，
-    /// 最后让DD马达按同一相对脉冲连续转动两次，然后回中心进入下一轮。
+    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴对位并开启对应真空吸、
+    /// XY位置1后Z1破真空、XY位置2后Z2破真空，最后让DD马达转动一次并进入下一轮。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -206,15 +268,8 @@ public partial class HomePage : UserControl
             // 读取位置2的 Y 轴目标脉冲。
             var position2Y = ParseFiniteCoordinate(PresetPosition2YTextBox.Text, "位置 2 Y 轴绝对脉冲");
 
-            // 读取 DD 马达每次相对转动的脉冲数。
-            var axis0PulseDistance = ParseFiniteCoordinate(Axis0PulseTextBox.Text, "DD马达脉冲");
-
-            // DD 马达的相对运动距离不能为 0，否则连续生产会出现无效动作。
-            if (axis0PulseDistance == 0)
-            {
-                // 用异常提醒操作员先录入有效脉冲。
-                throw new InvalidOperationException("DD马达脉冲不能为 0。");
-            }
+            // DD 马达每次转动的脉冲固定写在代码中，不再从界面输入读取。
+            var axis0PulseDistance = DdMotorPulsePerTurn;
 
             // 标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
             // 主页需要找芯片时按需加载桌面的“新纳方案.sol”，标定页离开后方案会关闭。
@@ -289,7 +344,7 @@ public partial class HomePage : UserControl
 
                 // 告诉操作员第 1 步正在把第一套 XY 轴回到标定中心。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 1/8：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
+                    $"第{cycleNumber}轮 1/9：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 下发第一套 XY 轴绝对移动，并等待控制器确认到位。
@@ -306,7 +361,7 @@ public partial class HomePage : UserControl
                 // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
                 // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 2/8：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+                    $"第{cycleNumber}轮 2/9：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                     $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
                     Color.FromRgb(242, 181, 68));
 
@@ -354,25 +409,31 @@ public partial class HomePage : UserControl
                 // 缓存本轮换算出的吸嘴目标，并同步更新吸嘴对位 UI。
                 SetAssignedNozzleTargets(assignedTargets);
 
-                // 提示第 3 步开始：吸嘴1对位物体1。
+                // 提示第 3 步开始：吸嘴1对位物体1，到位后开启 Z1 真空吸。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 3/8：Blob识别完成，吸嘴1正在对位物体1…",
+                    $"第{cycleNumber}轮 3/9：Blob识别完成，吸嘴1正在对位物体1…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行吸嘴1对位动作。
                 await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
 
-                // 提示第 4 步开始：吸嘴2对位物体2。
+                // 吸嘴1到达物体1后，打开 Z1 对应真空吸。
+                EnableFirstSetNozzleVacuum(1, _productionCancellation.Token);
+
+                // 提示第 4 步开始：吸嘴2对位物体2，到位后开启 Z2 真空吸。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 4/8：吸嘴1已到位，吸嘴2正在对位物体2…",
+                    $"第{cycleNumber}轮 4/9：Z1真空吸已开启，吸嘴2正在对位物体2…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行吸嘴2对位动作。
                 await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
 
+                // 吸嘴2到达物体2后，打开 Z2 对应真空吸。
+                EnableFirstSetNozzleVacuum(2, _productionCancellation.Token);
+
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 5/8：XY正在移动到位置1({position1X:0.###}, {position1Y:0.###})…",
+                    $"第{cycleNumber}轮 5/9：Z2真空吸已开启，XY正在移动到位置1({position1X:0.###}, {position1Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行位置1的绝对移动。
@@ -382,9 +443,15 @@ public partial class HomePage : UserControl
                     position1Y,
                     _productionCancellation.Token);
 
-                // 提示第 6 步开始：第一套 XY 移动到预设位置2。
+                // 到达位置1后，Z1 先破真空，破一下就关闭。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 6/8：XY正在移动到位置2({position2X:0.###}, {position2Y:0.###})…",
+                    $"第{cycleNumber}轮 6/9：位置1已到位，Z1正在真空破…",
+                    Color.FromRgb(242, 181, 68));
+                await PulseFirstSetNozzleBreakVacuumAsync(1, _productionCancellation.Token);
+
+                // 提示第 7 步开始：第一套 XY 移动到预设位置2。
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 7/9：Z1真空破已关闭，XY正在移动到位置2({position2X:0.###}, {position2Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行位置2的绝对移动。
@@ -394,20 +461,18 @@ public partial class HomePage : UserControl
                     position2Y,
                     _productionCancellation.Token);
 
-                // 提示第 7 步开始：DD 马达执行第一次相对转动。
+                // 到达位置2后，Z2 再破真空，破一下就关闭。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 7/8：DD马达第1次转动 {axis0PulseDistance:0.###} pulse…",
+                    $"第{cycleNumber}轮 8/9：位置2已到位，Z2正在真空破…",
+                    Color.FromRgb(242, 181, 68));
+                await PulseFirstSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
+
+                // 提示第 9 步开始：DD 马达只执行一次相对转动。
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮 9/9：Z2真空破已关闭，DD马达转动一次 {axis0PulseDistance:0.###} pulse…",
                     Color.FromRgb(242, 181, 68));
 
-                // 按配置脉冲转动 DD 马达第一次。
-                await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
-
-                // 提示第 8 步开始：DD 马达执行第二次相对转动。
-                SetStartProductionStatus(
-                    $"第{cycleNumber}轮 8/8：DD马达第2次转动 {axis0PulseDistance:0.###} pulse…",
-                    Color.FromRgb(242, 181, 68));
-
-                // 按同样脉冲转动 DD 马达第二次。
+                // 按配置脉冲转动 DD 马达一次。
                 await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
 
                 // 本轮所有动作已完成，下一轮会重新回到标定中心并再次识别。
@@ -983,18 +1048,12 @@ public partial class HomePage : UserControl
 
         try
         {
-            var pulseDistance = ParseFiniteCoordinate(Axis0PulseTextBox.Text, "DD马达脉冲");
-            if (pulseDistance == 0)
-            {
-                throw new ArgumentException("DD马达脉冲不能为 0。");
-            }
-
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             _ddMoveRunning = true;
             UpdateHomeCommandState();
             Axis0MoveButton.Content = "转动中";
-            await MoveAxis0RelativeCoreAsync(pulseDistance, CancellationToken.None);
+            await MoveAxis0RelativeCoreAsync(DdMotorPulsePerTurn, CancellationToken.None);
         }
         catch (Exception exception)
         {
@@ -1034,28 +1093,11 @@ public partial class HomePage : UserControl
 
     private void RecordAxis0Pulse_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            var pulseDistance = ParseFiniteCoordinate(Axis0PulseTextBox.Text, "DD马达脉冲");
-            if (pulseDistance == 0)
-            {
-                throw new ArgumentException("DD马达脉冲不能为 0。");
-            }
-
-            _homeSettings.Axis0RelativePulse = pulseDistance;
-            _homeSettingsStore.Save(_homeSettings);
-            SetAxis0MoveStatus(
-                $"DD马达脉冲已记录：{pulseDistance:0.###} pulse，重启后仍保留。",
-                Color.FromRgb(73, 209, 125));
-        }
-        catch (Exception exception)
-        {
-            SetAxis0MoveStatus($"DD马达脉冲记录失败：{exception.Message}", Color.FromRgb(242, 122, 128));
-        }
-        finally
-        {
-            UpdateHomeCommandState();
-        }
+        Axis0PulseTextBox.Text = FormatPresetCoordinate(DdMotorPulsePerTurn);
+        SetAxis0MoveStatus(
+            $"DD马达每转固定脉冲：{DdMotorPulsePerTurn:0.###} pulse（代码配置）。",
+            Color.FromRgb(73, 209, 125));
+        UpdateHomeCommandState();
     }
 
     private void Axis0PulseTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -1076,41 +1118,32 @@ public partial class HomePage : UserControl
 
         try
         {
-            var pulseDistance = ParseFiniteCoordinate(
-                Axis13To15PulseTextBox.Text,
-                "轴13 / 轴14 / 轴15同步脉冲");
-            if (pulseDistance == 0)
-            {
-                throw new ArgumentException("轴13 / 轴14 / 轴15同步脉冲不能为 0。");
-            }
-
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             _axis13To15MoveRunning = true;
             UpdateHomeCommandState();
-            Axis13To15MoveButton.Content = "同步转动中";
+            Axis13To15MoveButton.Content = "移出中";
             SetAxis13To15MoveStatus(
-                $"轴13 / 轴14 / 轴15正在同步相对移动 {pulseDistance:0.###} pulse…",
+                $"轴{string.Join(" / 轴", MoveOutAxisNos)}正在绝对移动到 {MoveOutAbsolutePosition:0.###} pulse…",
                 Color.FromRgb(242, 181, 68));
 
-            await motionController.MoveAxesRelativeAsync(
-                new[] { 13, 14, 15 },
-                pulseDistance,
+            await motionController.MoveAxesAbsoluteAsync(
+                MoveOutAxisNos.ToDictionary(axisNo => axisNo, _ => MoveOutAbsolutePosition),
                 CancellationToken.None);
             SetAxis13To15MoveStatus(
-                $"轴13 / 轴14 / 轴15已同步完成 {pulseDistance:0.###} pulse。",
+                $"轴{string.Join(" / 轴", MoveOutAxisNos)}已到移出绝对位置 {MoveOutAbsolutePosition:0.###} pulse。",
                 Color.FromRgb(73, 209, 125));
         }
         catch (Exception exception)
         {
             SetAxis13To15MoveStatus(
-                $"轴13 / 轴14 / 轴15同步移动失败：{exception.Message}",
+                $"移出轴组绝对移动失败：{exception.Message}",
                 Color.FromRgb(242, 122, 128));
         }
         finally
         {
             _axis13To15MoveRunning = false;
-            Axis13To15MoveButton.Content = "同步转动";
+            Axis13To15MoveButton.Content = "移出";
             UpdateHomeCommandState();
         }
     }
@@ -1356,7 +1389,8 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1Y);
         PresetPosition2XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2X);
         PresetPosition2YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2Y);
-        Axis0PulseTextBox.Text = FormatPresetCoordinate(_homeSettings.Axis0RelativePulse);
+        Axis0PulseTextBox.Text = FormatPresetCoordinate(DdMotorPulsePerTurn);
+        Axis13To15PulseTextBox.Text = FormatPresetCoordinate(MoveOutAbsolutePosition);
         _loadingPresetPositions = false;
     }
 
@@ -1482,22 +1516,16 @@ public partial class HomePage : UserControl
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
         HomeEmergencyStopButton.IsEnabled = _motionController is not null;
-        Axis0PulseTextBox.IsEnabled = commandsIdle;
+        Axis0PulseTextBox.IsEnabled = false;
         RecordAxis0PulseButton.IsEnabled =
-            commandsIdle &&
-            TryParseCoordinate(Axis0PulseTextBox.Text, out var recordPulseDistance) &&
-            recordPulseDistance != 0;
+            commandsIdle;
         Axis0MoveButton.IsEnabled =
             _motionController is not null &&
-            commandsIdle &&
-            TryParseCoordinate(Axis0PulseTextBox.Text, out var pulseDistance) &&
-            pulseDistance != 0;
-        Axis13To15PulseTextBox.IsEnabled = commandsIdle;
+            commandsIdle;
+        Axis13To15PulseTextBox.IsEnabled = false;
         Axis13To15MoveButton.IsEnabled =
             _motionController is not null &&
-            commandsIdle &&
-            TryParseCoordinate(Axis13To15PulseTextBox.Text, out var synchronizedPulseDistance) &&
-            synchronizedPulseDistance != 0;
+            commandsIdle;
     }
 
     private void UpdateAssignedNozzleButtonText()

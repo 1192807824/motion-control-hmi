@@ -1028,7 +1028,7 @@
                                                FontSize="21"
                                                FontWeight="Bold" />
                                     <TextBlock x:Name="StartProductionHintText"
-                                               Text="连续循环 · DD马达每轮转动两次"
+                                               Text="连续循环 · 真空吸放后DD马达转动一次"
                                                Foreground="#D7F4E5"
                                                FontSize="11"
                                                Margin="0,3,0,0"
@@ -1281,7 +1281,7 @@
                                 <RowDefinition Height="26" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="DD马达（轴0）· 相对脉冲"
+                            <TextBlock Text="DD马达（轴0）· 固定每转脉冲"
                                        Foreground="#EAF2F7"
                                        FontSize="10"
                                        FontWeight="Bold" />
@@ -1300,12 +1300,12 @@
                                          VerticalContentAlignment="Center"
                                          Foreground="#10263A"
                                          Background="#F7FAFC"
-                                         ToolTip="输入相对移动脉冲：正数正转，负数反转"
+                                         ToolTip="代码固定：22500 pulse"
                                          TextChanged="Axis0PulseTextBox_TextChanged" />
                                 <Button Grid.Column="2"
                                         x:Name="RecordAxis0PulseButton"
                                         Height="25"
-                                        Content="记录"
+                                        Content="固定"
                                         Foreground="White"
                                         Background="#166A52"
                                         BorderBrush="#49D17D"
@@ -1325,7 +1325,7 @@
                             </Grid>
                             <TextBlock Grid.Row="2"
                                        x:Name="Axis0MoveStatusText"
-                                       Text="记录后重启仍保留；正数正转，负数反转"
+                                       Text="代码固定 22500 pulse；按钮按固定脉冲转动一次"
                                        Foreground="#9FB1BF"
                                        FontSize="9"
                                        TextTrimming="CharacterEllipsis"
@@ -1346,7 +1346,7 @@
                                 <RowDefinition Height="26" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="轴13 / 轴14 / 轴15 · 同步相对脉冲"
+                            <TextBlock Text="轴13 / 轴14 / 轴15 · 移出绝对位置"
                                        Foreground="#EAF2F7"
                                        FontSize="10"
                                        FontWeight="Bold" />
@@ -1363,12 +1363,12 @@
                                          VerticalContentAlignment="Center"
                                          Foreground="#10263A"
                                          Background="#F7FAFC"
-                                         ToolTip="向轴13、轴14、轴15同步发送相同的相对脉冲；正数正向，负数反向"
+                                         ToolTip="代码固定：轴13、轴14、轴15 绝对位置 250000 pulse"
                                          TextChanged="Axis13To15PulseTextBox_TextChanged" />
                                 <Button Grid.Column="2"
                                         x:Name="Axis13To15MoveButton"
                                         Height="25"
-                                        Content="同步转动"
+                                        Content="移出"
                                         Foreground="White"
                                         Background="#6950A1"
                                         BorderBrush="#B098E4"
@@ -1378,7 +1378,7 @@
                             </Grid>
                             <TextBlock Grid.Row="2"
                                        x:Name="Axis13To15MoveStatusText"
-                                       Text="正数正向，负数反向；三个轴同步下发相同脉冲"
+                                       Text="代码固定绝对位置 250000 pulse；三个轴同时移出"
                                        Foreground="#BFB2DA"
                                        FontSize="9"
                                        TextTrimming="CharacterEllipsis"
