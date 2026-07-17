@@ -23,10 +23,23 @@ public partial class HomePage : UserControl
     private const int FirstSetZ1BreakVacuumOutputBit = 14;
     private const int FirstSetZ2VacuumOutputBit = 17;
     private const int FirstSetZ2BreakVacuumOutputBit = 16;
+    private const int SecondSetZ1BreakVacuumOutputBit = 18;
+    private const int SecondSetSharedVacuumOutputBit = 19;
+    private const int SecondSetZ2BreakVacuumOutputBit = 20;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double HomePageCompletionTolerance = 100d;
     private const double MoveOutAbsolutePosition = 250_000d;
+    private const int FirstUnloadStation = 13;
+    private const int SecondUnloadStation = 14;
+    private const double SecondSetNozzle1PickupX = 161_925d;
+    private const double SecondSetNozzle1PickupY = -222_429d;
+    private const double SecondSetNozzle2PickupX = 1_603_045d;
+    private const double SecondSetNozzle2PickupY = 333_140d;
+    private const double SecondSetNozzle1DropX = 561_460d;
+    private const double SecondSetNozzle1DropY = 208_793d;
+    private const double SecondSetNozzle2DropX = 611_860d;
+    private const double SecondSetNozzle2DropY = 1_367_136d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
@@ -39,6 +52,10 @@ public partial class HomePage : UserControl
     private const string CarouselStatusDwelling = "停留";
     private const string CarouselStatusHoming = "回原";
     private static readonly int[] MoveOutAxisNos = [13, 14, 15];
+    private static readonly int[] FirstSetAxisNos =
+        [VisionCalibrationService.FirstSetXHardwareAxisNo, VisionCalibrationService.FirstSetYHardwareAxisNo];
+    private static readonly int[] SecondSetAxisNos =
+        [VisionCalibrationService.SecondSetXHardwareAxisNo, VisionCalibrationService.SecondSetYHardwareAxisNo];
     private static readonly Point[] CarouselStationCardSlots =
     [
         new(241, 16),
@@ -78,6 +95,8 @@ public partial class HomePage : UserControl
     private CancellationTokenSource? _productionCancellation;
     private TaskCompletionSource<bool>? _productionCompletion;
     private bool _productionStopRequested;
+    private VisionCalibrationAxisSet? _productionAxisSet;
+    private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
     private int _nextAssignedNozzleMoveStep;
@@ -149,6 +168,11 @@ public partial class HomePage : UserControl
     /// </summary>
     public VisionCalibrationSnapshot VisionCalibration => _visionCalibration.GetSnapshot();
 
+    private IReadOnlyCollection<int>? AllowedProductionPeerAxisNos =>
+        _startSequenceRunning && _productionAxisSet == VisionCalibrationAxisSet.First
+            ? SecondSetAxisNos
+            : null;
+
     /// <summary>
     /// 将视觉计算出的相机轴坐标转换为相机/吸嘴1/吸嘴2的实际轴目标。
     /// </summary>
@@ -160,26 +184,49 @@ public partial class HomePage : UserControl
         return _visionCalibration.CalculateTarget(cameraTargetX, cameraTargetY, targetTool);
     }
 
-    private bool SetFirstSetNozzleVacuumOutputs(
+    private bool SetNozzleVacuumOutputs(
+        VisionCalibrationAxisSet axisSet,
         int nozzleNumber,
         bool vacuumEnabled,
         bool breakVacuumEnabled)
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var (vacuumBit, breakVacuumBit) = nozzleNumber switch
+        var (vacuumBit, breakVacuumBit) = (axisSet, nozzleNumber) switch
         {
-            1 => (FirstSetZ1VacuumOutputBit, FirstSetZ1BreakVacuumOutputBit),
-            2 => (FirstSetZ2VacuumOutputBit, FirstSetZ2BreakVacuumOutputBit),
+            (VisionCalibrationAxisSet.First, 1) =>
+                (FirstSetZ1VacuumOutputBit, FirstSetZ1BreakVacuumOutputBit),
+            (VisionCalibrationAxisSet.First, 2) =>
+                (FirstSetZ2VacuumOutputBit, FirstSetZ2BreakVacuumOutputBit),
+            (VisionCalibrationAxisSet.Second, 1) =>
+                (SecondSetSharedVacuumOutputBit, SecondSetZ1BreakVacuumOutputBit),
+            (VisionCalibrationAxisSet.Second, 2) =>
+                (SecondSetSharedVacuumOutputBit, SecondSetZ2BreakVacuumOutputBit),
             _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
         };
+
+        var axisSetIndex = (int)axisSet;
+        var nextNozzle1VacuumEnabled = nozzleNumber == 1
+            ? vacuumEnabled
+            : _nozzleVacuumEnabledBySet[axisSetIndex, 1];
+        var nextNozzle2VacuumEnabled = nozzleNumber == 2
+            ? vacuumEnabled
+            : _nozzleVacuumEnabledBySet[axisSetIndex, 2];
+        var effectiveVacuumEnabled = axisSet == VisionCalibrationAxisSet.Second
+            ? nextNozzle1VacuumEnabled || nextNozzle2VacuumEnabled
+            : vacuumEnabled;
 
         var vacuumSet = false;
         var breakVacuumSet = false;
         Exception? firstFailure = null;
         try
         {
-            vacuumSet = motionController.SetDigitalOutputHardwareBit(vacuumBit, !vacuumEnabled);
+            vacuumSet = motionController.SetDigitalOutputHardwareBit(vacuumBit, !effectiveVacuumEnabled);
+            if (vacuumSet)
+            {
+                _nozzleVacuumEnabledBySet[axisSetIndex, 1] = nextNozzle1VacuumEnabled;
+                _nozzleVacuumEnabledBySet[axisSetIndex, 2] = nextNozzle2VacuumEnabled;
+            }
         }
         catch (Exception exception)
         {
@@ -198,7 +245,7 @@ public partial class HomePage : UserControl
         if (firstFailure is not null)
         {
             throw new InvalidOperationException(
-                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumBit:00}={FormatIoState(vacuumEnabled)}，破Y{breakVacuumBit:00}={FormatIoState(breakVacuumEnabled)}。",
+                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumBit:00}={FormatIoState(effectiveVacuumEnabled)}，破Y{breakVacuumBit:00}={FormatIoState(breakVacuumEnabled)}。",
                 firstFailure);
         }
 
@@ -207,10 +254,25 @@ public partial class HomePage : UserControl
 
     private static string FormatIoState(bool enabled) => enabled ? "ON" : "OFF";
 
-    private void EnableFirstSetNozzleVacuum(int nozzleNumber, CancellationToken cancellationToken)
+    private void EnableActiveSetNozzleVacuum(int nozzleNumber, CancellationToken cancellationToken)
+    {
+        EnableNozzleVacuum(
+            _productionAxisSet ?? _visionCalibration.ActiveAxisSet,
+            nozzleNumber,
+            cancellationToken);
+    }
+
+    private void EnableNozzleVacuum(
+        VisionCalibrationAxisSet axisSet,
+        int nozzleNumber,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: true, breakVacuumEnabled: false))
+        if (!SetNozzleVacuumOutputs(
+                axisSet,
+                nozzleNumber,
+                vacuumEnabled: true,
+                breakVacuumEnabled: false))
         {
             throw new InvalidOperationException($"Z{nozzleNumber}真空吸开启失败。");
         }
@@ -218,12 +280,27 @@ public partial class HomePage : UserControl
         SetFirstSetPositionStatus($"Z{nozzleNumber}真空吸已开启。", true);
     }
 
-    private async Task PulseFirstSetNozzleBreakVacuumAsync(
+    private async Task PulseActiveSetNozzleBreakVacuumAsync(
+        int nozzleNumber,
+        CancellationToken cancellationToken)
+    {
+        await PulseNozzleBreakVacuumAsync(
+            _productionAxisSet ?? _visionCalibration.ActiveAxisSet,
+            nozzleNumber,
+            cancellationToken);
+    }
+
+    private async Task PulseNozzleBreakVacuumAsync(
+        VisionCalibrationAxisSet axisSet,
         int nozzleNumber,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: true))
+        if (!SetNozzleVacuumOutputs(
+                axisSet,
+                nozzleNumber,
+                vacuumEnabled: false,
+                breakVacuumEnabled: true))
         {
             throw new InvalidOperationException($"Z{nozzleNumber}真空破开启失败。");
         }
@@ -234,25 +311,44 @@ public partial class HomePage : UserControl
         }
         finally
         {
-            if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: false))
+            if (!SetNozzleVacuumOutputs(
+                    axisSet,
+                    nozzleNumber,
+                    vacuumEnabled: false,
+                    breakVacuumEnabled: false))
             {
                 throw new InvalidOperationException($"Z{nozzleNumber}真空破和真空吸关闭失败。");
             }
         }
 
+        var axisSetIndex = (int)axisSet;
+        var sharedVacuumStillEnabled = axisSet == VisionCalibrationAxisSet.Second &&
+            (_nozzleVacuumEnabledBySet[axisSetIndex, 1] ||
+             _nozzleVacuumEnabledBySet[axisSetIndex, 2]);
         SetFirstSetPositionStatus(
-            $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
+            sharedVacuumStillEnabled
+                ? $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms；另一吸嘴仍在持料，共享真空吸Y{SecondSetSharedVacuumOutputBit:00}保持开启。"
+                : $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
             true);
     }
 
-    private void CloseAllFirstSetNozzleVacuumOutputs()
+    private void CloseAllActiveSetNozzleVacuumOutputs()
+    {
+        CloseAllNozzleVacuumOutputs(_productionAxisSet ?? _visionCalibration.ActiveAxisSet);
+    }
+
+    private void CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet axisSet)
     {
         var z1Closed = false;
         var z2Closed = false;
         Exception? firstFailure = null;
         try
         {
-            z1Closed = SetFirstSetNozzleVacuumOutputs(1, vacuumEnabled: false, breakVacuumEnabled: false);
+            z1Closed = SetNozzleVacuumOutputs(
+                axisSet,
+                1,
+                vacuumEnabled: false,
+                breakVacuumEnabled: false);
         }
         catch (Exception exception)
         {
@@ -261,7 +357,11 @@ public partial class HomePage : UserControl
 
         try
         {
-            z2Closed = SetFirstSetNozzleVacuumOutputs(2, vacuumEnabled: false, breakVacuumEnabled: false);
+            z2Closed = SetNozzleVacuumOutputs(
+                axisSet,
+                2,
+                vacuumEnabled: false,
+                breakVacuumEnabled: false);
         }
         catch (Exception exception)
         {
@@ -270,7 +370,7 @@ public partial class HomePage : UserControl
 
         if (firstFailure is not null)
         {
-            throw new InvalidOperationException("Z1/Z2真空吸和真空破关闭失败，已尝试写入全部四路 OFF。", firstFailure);
+            throw new InvalidOperationException("Z1/Z2真空吸和真空破关闭失败，已尝试关闭当前轴组的全部真空 IO。", firstFailure);
         }
 
         if (!z1Closed || !z2Closed)
@@ -281,15 +381,23 @@ public partial class HomePage : UserControl
         SetFirstSetPositionStatus("Z1/Z2真空吸和真空破已全部关闭。", true);
     }
 
-    private void CloseAllFirstSetNozzleVacuumOutputsNoThrow()
+    private void CloseAllActiveSetNozzleVacuumOutputsNoThrow()
+    {
+        foreach (var axisSet in new[] { VisionCalibrationAxisSet.First, VisionCalibrationAxisSet.Second })
+        {
+            CloseNozzleVacuumOutputsNoThrow(axisSet);
+        }
+    }
+
+    private void CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet axisSet)
     {
         try
         {
-            CloseAllFirstSetNozzleVacuumOutputs();
+            CloseAllNozzleVacuumOutputs(axisSet);
         }
         catch
         {
-            // 收尾兜底不能掩盖原始停止或故障原因。
+            // 收尾兜底不能掩盖原始停止或故障原因，另一套轴组仍需继续尝试关闭。
         }
     }
 
@@ -331,11 +439,13 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴取料、放到 1/2 工位并关闭吸/破；
-    /// 然后XY先离开放料点 0.5 秒，DD 推进一个工位并执行 5/6/7 测试站。
+    /// 每轮由第一套XY向1/2工位上两个新料；13/14同时有料时，第二套XY并行完成双吸嘴收料。
+    /// 上料和收料均完成后，XY先离开放料点0.5秒，DD固定推进两个工位并执行5/6/7测试站。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        Task activeSecondSetUnloadTask = Task.CompletedTask;
+
         // 如果当前已经在连续生产，再次点击按钮表示请求停止。
         if (_startSequenceRunning)
         {
@@ -425,6 +535,9 @@ public partial class HomePage : UserControl
             // 清空停止标记，表示新的连续生产流程还没有收到停止请求。
             _productionStopRequested = false;
 
+            // 锁定本轮生产所使用的轴组，防止运行中切换视觉页时误写另一套真空 IO。
+            _productionAxisSet = _visionCalibration.ActiveAxisSet;
+
             // 标记连续生产已进入运行状态。
             _startSequenceRunning = true;
 
@@ -448,6 +561,11 @@ public partial class HomePage : UserControl
                 // 记录当前正在执行第几轮，便于状态栏提示和现场排查。
                 cycleNumber++;
 
+                // 13/14 工位同时有料时，第二套 XY 立即开始收料；它与第一套 XY 上料并行。
+                activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
+                    carouselStations,
+                    _productionCancellation.Token);
+
                 // 清空上一轮的 Blob 识别显示，避免操作员误看旧结果。
                 ClearBlobInspectionResult();
 
@@ -457,7 +575,8 @@ public partial class HomePage : UserControl
                 // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
                 var current = motionController.CaptureCalibrationFeedback(
                     VisionCalibration.XHardwareAxisNo,
-                    VisionCalibration.YHardwareAxisNo);
+                    VisionCalibration.YHardwareAxisNo,
+                    AllowedProductionPeerAxisNos);
 
                 // 根据当前位置、目标中心点和配置速度估算本次回中心允许等待的最长时间。
                 var timeoutMilliseconds = CalculateStartMoveTimeout(
@@ -481,7 +600,8 @@ public partial class HomePage : UserControl
                     velocity,
                     positionTolerance: HomePageCompletionTolerance,
                     moveTimeoutMilliseconds: timeoutMilliseconds,
-                    cancellationToken: _productionCancellation.Token);
+                    cancellationToken: _productionCancellation.Token,
+                    allowedMovingAxisNos: AllowedProductionPeerAxisNos);
 
                 // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
                 // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
@@ -543,7 +663,7 @@ public partial class HomePage : UserControl
                 await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
 
                 // 吸嘴1到达物体1后，打开 Z1 对应真空吸。
-                EnableFirstSetNozzleVacuum(1, _productionCancellation.Token);
+                EnableActiveSetNozzleVacuum(1, _productionCancellation.Token);
 
                 // 提示第 4 步开始：吸嘴2对位物体2，到位后开启 Z2 真空吸。
                 SetStartProductionStatus(
@@ -554,7 +674,7 @@ public partial class HomePage : UserControl
                 await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
 
                 // 吸嘴2到达物体2后，打开 Z2 对应真空吸。
-                EnableFirstSetNozzleVacuum(2, _productionCancellation.Token);
+                EnableActiveSetNozzleVacuum(2, _productionCancellation.Token);
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
@@ -572,7 +692,7 @@ public partial class HomePage : UserControl
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：1工位已到位，Z1正在真空破并关闭吸…",
                     Color.FromRgb(242, 181, 68));
-                await PulseFirstSetNozzleBreakVacuumAsync(1, _productionCancellation.Token);
+                await PulseActiveSetNozzleBreakVacuumAsync(1, _productionCancellation.Token);
 
                 // 提示第 7 步开始：第一套 XY 移动到预设位置2。
                 SetStartProductionStatus(
@@ -590,15 +710,25 @@ public partial class HomePage : UserControl
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：2工位已到位，Z2正在真空破并关闭吸…",
                     Color.FromRgb(242, 181, 68));
-                await PulseFirstSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
-                CloseAllFirstSetNozzleVacuumOutputs();
+                await PulseActiveSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
+                CloseAllActiveSetNozzleVacuumOutputs();
 
                 carouselStations[1].SetLoaded();
                 carouselStations[2].SetLoaded();
                 UpdateCarouselStationDisplay(carouselStations);
 
+                if (!activeSecondSetUnloadTask.IsCompleted)
+                {
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：两个新料已上完，正在等待第二套XY完成13/14工位收料，DD保持禁止转动…",
+                        Color.FromRgb(242, 181, 68));
+                }
+
+                await activeSecondSetUnloadTask;
+                activeSecondSetUnloadTask = Task.CompletedTask;
+
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，Z1/Z2真空吸和真空破已关闭，XY正在离开放料点…",
+                    $"第{cycleNumber}轮上下料均已完成，Z1/Z2真空吸和真空破已关闭，XY正在离开放料点…",
                     Color.FromRgb(73, 209, 125));
                 var xyReturnToCenterTask = StartFirstSetReturnToCenterAsync(
                     motionController,
@@ -650,7 +780,10 @@ public partial class HomePage : UserControl
         }
         finally
         {
-            CloseAllFirstSetNozzleVacuumOutputsNoThrow();
+            _productionCancellation?.Cancel();
+            await ObserveTaskNoThrowAsync(activeSecondSetUnloadTask);
+            CloseAllActiveSetNozzleVacuumOutputsNoThrow();
+            _productionAxisSet = null;
 
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
@@ -742,6 +875,121 @@ public partial class HomePage : UserControl
         }
         catch
         {
+        }
+    }
+
+    private Task StartSecondSetUnloadIfReadyAsync(
+        CarouselStationState[] carouselStations,
+        CancellationToken cancellationToken)
+    {
+        if (!carouselStations[FirstUnloadStation].Occupied ||
+            !carouselStations[SecondUnloadStation].Occupied)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (_productionAxisSet != VisionCalibrationAxisSet.First)
+        {
+            throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行13/14工位收料。");
+        }
+
+        return RunSecondSetUnloadAsync(carouselStations, cancellationToken);
+    }
+
+    private async Task RunSecondSetUnloadAsync(
+        CarouselStationState[] carouselStations,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await MoveSecondSetUnloadAxesToAsync(
+                "吸嘴1取13工位",
+                SecondSetNozzle1PickupX,
+                SecondSetNozzle1PickupY,
+                cancellationToken);
+            EnableNozzleVacuum(VisionCalibrationAxisSet.Second, 1, cancellationToken);
+
+            await MoveSecondSetUnloadAxesToAsync(
+                "吸嘴2取14工位",
+                SecondSetNozzle2PickupX,
+                SecondSetNozzle2PickupY,
+                cancellationToken);
+            EnableNozzleVacuum(VisionCalibrationAxisSet.Second, 2, cancellationToken);
+
+            await MoveSecondSetUnloadAxesToAsync(
+                "吸嘴1放料",
+                SecondSetNozzle1DropX,
+                SecondSetNozzle1DropY,
+                cancellationToken);
+            await PulseNozzleBreakVacuumAsync(
+                VisionCalibrationAxisSet.Second,
+                1,
+                cancellationToken);
+
+            await MoveSecondSetUnloadAxesToAsync(
+                "吸嘴2放料",
+                SecondSetNozzle2DropX,
+                SecondSetNozzle2DropY,
+                cancellationToken);
+            await PulseNozzleBreakVacuumAsync(
+                VisionCalibrationAxisSet.Second,
+                2,
+                cancellationToken);
+            CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet.Second);
+
+            carouselStations[FirstUnloadStation] = CarouselStationState.Empty();
+            carouselStations[SecondUnloadStation] = CarouselStationState.Empty();
+            UpdateCarouselStationDisplay(carouselStations);
+        }
+        catch
+        {
+            CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
+            throw;
+        }
+    }
+
+    private async Task MoveSecondSetUnloadAxesToAsync(
+        string actionName,
+        double targetX,
+        double targetY,
+        CancellationToken cancellationToken)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var velocity = _visionCalibration.Settings.SecondVelocityPulsesPerSecond;
+        if (!double.IsFinite(velocity) || velocity <= 0)
+        {
+            throw new InvalidOperationException("第二套XY的移动速度配置无效。");
+        }
+
+        var current = motionController.CaptureCalibrationFeedback(
+            VisionCalibrationService.SecondSetXHardwareAxisNo,
+            VisionCalibrationService.SecondSetYHardwareAxisNo,
+            FirstSetAxisNos);
+        var timeoutMilliseconds = CalculateStartMoveTimeout(
+            current.ActualX,
+            current.ActualY,
+            targetX,
+            targetY,
+            velocity);
+        try
+        {
+            await motionController.MoveCalibrationAxesToAsync(
+                VisionCalibrationService.SecondSetXHardwareAxisNo,
+                VisionCalibrationService.SecondSetYHardwareAxisNo,
+                targetX,
+                targetY,
+                velocity,
+                positionTolerance: HomePageCompletionTolerance,
+                moveTimeoutMilliseconds: timeoutMilliseconds,
+                cancellationToken: cancellationToken,
+                allowedMovingAxisNos: FirstSetAxisNos);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException(
+                $"第二套XY执行“{actionName}”失败，目标({targetX:0.###}, {targetY:0.###})：{exception.Message}",
+                exception);
         }
     }
 
@@ -1475,7 +1723,8 @@ public partial class HomePage : UserControl
 
         var current = motionController.CaptureCalibrationCenter(
             VisionCalibration.XHardwareAxisNo,
-            VisionCalibration.YHardwareAxisNo);
+            VisionCalibration.YHardwareAxisNo,
+            AllowedProductionPeerAxisNos);
         var timeoutMilliseconds = CalculateStartMoveTimeout(
             current.ActualX,
             current.ActualY,
@@ -1490,7 +1739,8 @@ public partial class HomePage : UserControl
             velocity,
             positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            allowedMovingAxisNos: AllowedProductionPeerAxisNos);
 
         if (step == 1)
         {
@@ -1835,7 +2085,8 @@ public partial class HomePage : UserControl
             true);
         var current = motionController.CaptureCalibrationFeedback(
             VisionCalibration.XHardwareAxisNo,
-            VisionCalibration.YHardwareAxisNo);
+            VisionCalibration.YHardwareAxisNo,
+            AllowedProductionPeerAxisNos);
         var timeoutMilliseconds = CalculateStartMoveTimeout(
             current.ActualX,
             current.ActualY,
@@ -1850,7 +2101,8 @@ public partial class HomePage : UserControl
             velocity,
             positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            allowedMovingAxisNos: AllowedProductionPeerAxisNos);
         SetFirstSetPositionStatus(
             $"{positionName}已到位：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
             true);

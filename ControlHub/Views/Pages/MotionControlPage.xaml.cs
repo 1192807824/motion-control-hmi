@@ -227,7 +227,8 @@ public partial class MotionControlPage : UserControl
 
     public CalibrationCenterPosition CaptureCalibrationCenter(
         int xHardwareAxisNo,
-        int yHardwareAxisNo)
+        int yHardwareAxisNo,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (_closed)
         {
@@ -245,7 +246,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                [xHardwareAxisNo, yHardwareAxisNo]))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，请等待完成后再记录中心。");
         }
@@ -271,7 +274,8 @@ public partial class MotionControlPage : UserControl
     /// </summary>
     public CalibrationCenterPosition CaptureCalibrationFeedback(
         int xHardwareAxisNo,
-        int yHardwareAxisNo)
+        int yHardwareAxisNo,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (_closed)
         {
@@ -283,7 +287,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                [xHardwareAxisNo, yHardwareAxisNo]))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能读取拍照位置。");
         }
@@ -312,7 +318,8 @@ public partial class MotionControlPage : UserControl
         double velocity,
         double positionTolerance,
         int moveTimeoutMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (xHardwareAxisNo < 0 || yHardwareAxisNo < 0 || xHardwareAxisNo == yHardwareAxisNo)
         {
@@ -346,7 +353,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                [xHardwareAxisNo, yHardwareAxisNo]))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行点击移动。");
         }
