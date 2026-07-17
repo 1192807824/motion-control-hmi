@@ -262,6 +262,65 @@ public sealed class SimulatedMotionCard : IMotionCard
         }
     }
 
+    public void MoveRelativeSynchronized(
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> distances,
+        IReadOnlyList<double> velocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(distances);
+        ArgumentNullException.ThrowIfNull(velocities);
+
+        if (hardwareAxisNos.Count == 0 ||
+            hardwareAxisNos.Count != distances.Count ||
+            hardwareAxisNos.Count != velocities.Count)
+        {
+            throw new ArgumentException("同步相对移动的轴号、脉冲和速度数量必须一致且不能为空。");
+        }
+
+        lock (_sync)
+        {
+            var moves = new List<(SimulatedAxis Axis, double Distance, double Velocity)>(hardwareAxisNos.Count);
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var axis = GetReadyAxis(hardwareAxisNos[index]);
+                EnsureAxisStopped(axis, hardwareAxisNos[index]);
+                var distance = distances[index];
+                var velocity = velocities[index];
+                if (!double.IsFinite(distance) || distance == 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(distances));
+                }
+
+                if (!double.IsFinite(velocity) || velocity <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(velocities));
+                }
+
+                if (distance > 0 && axis.PositiveLimit)
+                {
+                    throw new MotionCardException("仿真轴正限位已触发，禁止继续正向运动。");
+                }
+
+                if (distance < 0 && axis.NegativeLimit)
+                {
+                    throw new MotionCardException("仿真轴负限位已触发，禁止继续负向运动。");
+                }
+
+                moves.Add((axis, distance, velocity));
+            }
+
+            foreach (var move in moves)
+            {
+                move.Axis.StartMove(
+                    move.Axis.Position + move.Distance,
+                    move.Velocity,
+                    runMode: 1,
+                    markHomedOnCompletion: false);
+            }
+        }
+    }
+
     public void MoveAbsolute(int hardwareAxisNo, double position, double velocity)
     {
         lock (_sync)

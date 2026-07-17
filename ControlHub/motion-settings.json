@@ -7,7 +7,7 @@
   "DigitalInputPort": 0,
   "DigitalOutputPort": 0,
   "DigitalInputStartBit": 16,
-  "DigitalOutputStartBit": 16,
+  "DigitalOutputStartBit": 0,
   "SimulationDigitalInputCount": 32,
   "SimulationDigitalOutputCount": 32,
   "SimulationAnalogInputCount": 8,

@@ -19,14 +19,15 @@ public partial class HomePage : UserControl
 {
     private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionBlobModuleName = "Blob分析1";
-    private const int FirstSetZ1VacuumOutputChannel = 6;
-    private const int FirstSetZ1BreakVacuumOutputChannel = 7;
-    private const int FirstSetZ2VacuumOutputChannel = 8;
-    private const int FirstSetZ2BreakVacuumOutputChannel = 9;
+    private const int FirstSetZ1VacuumOutputBit = 15;
+    private const int FirstSetZ1BreakVacuumOutputBit = 14;
+    private const int FirstSetZ2VacuumOutputBit = 17;
+    private const int FirstSetZ2BreakVacuumOutputBit = 16;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double DdMotorCompletionTolerance = 5d;
     private const double MoveOutAbsolutePosition = 250_000d;
+    private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
     private const int TestStationDwellMilliseconds = 1_000;
@@ -58,9 +59,9 @@ public partial class HomePage : UserControl
     private static readonly IReadOnlyDictionary<int, int> TestStationAxisByStation =
         new Dictionary<int, int>
         {
-            [4] = 13,
-            [5] = 14,
-            [6] = 15
+            [5] = 13,
+            [6] = 14,
+            [7] = 15
         };
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
@@ -164,10 +165,10 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var (vacuumChannel, breakVacuumChannel) = nozzleNumber switch
+        var (vacuumBit, breakVacuumBit) = nozzleNumber switch
         {
-            1 => (FirstSetZ1VacuumOutputChannel, FirstSetZ1BreakVacuumOutputChannel),
-            2 => (FirstSetZ2VacuumOutputChannel, FirstSetZ2BreakVacuumOutputChannel),
+            1 => (FirstSetZ1VacuumOutputBit, FirstSetZ1BreakVacuumOutputBit),
+            2 => (FirstSetZ2VacuumOutputBit, FirstSetZ2BreakVacuumOutputBit),
             _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
         };
 
@@ -176,7 +177,7 @@ public partial class HomePage : UserControl
         Exception? firstFailure = null;
         try
         {
-            vacuumSet = motionController.SetDigitalOutputChannel(vacuumChannel, vacuumEnabled);
+            vacuumSet = motionController.SetDigitalOutputHardwareBit(vacuumBit, !vacuumEnabled);
         }
         catch (Exception exception)
         {
@@ -185,7 +186,7 @@ public partial class HomePage : UserControl
 
         try
         {
-            breakVacuumSet = motionController.SetDigitalOutputChannel(breakVacuumChannel, breakVacuumEnabled);
+            breakVacuumSet = motionController.SetDigitalOutputHardwareBit(breakVacuumBit, !breakVacuumEnabled);
         }
         catch (Exception exception)
         {
@@ -195,7 +196,7 @@ public partial class HomePage : UserControl
         if (firstFailure is not null)
         {
             throw new InvalidOperationException(
-                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumChannel:00}={FormatIoState(vacuumEnabled)}，破Y{breakVacuumChannel:00}={FormatIoState(breakVacuumEnabled)}。",
+                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumBit:00}={FormatIoState(vacuumEnabled)}，破Y{breakVacuumBit:00}={FormatIoState(breakVacuumEnabled)}。",
                 firstFailure);
         }
 
@@ -329,7 +330,7 @@ public partial class HomePage : UserControl
 
     /// <summary>
     /// 每轮依次执行：回标定中心、Blob识别、双吸嘴取料、放到 1/2 工位并关闭吸/破；
-    /// 然后XY先离开放料点 0.5 秒，DD 连续推进两工位并执行 4/5/6 测试站。
+    /// 然后XY先离开放料点 0.5 秒，DD 推进一个工位并执行 5/6/7 测试站。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -605,7 +606,7 @@ public partial class HomePage : UserControl
                 try
                 {
                     await Task.Delay(MoveAwayBeforeDdMilliseconds, _productionCancellation.Token);
-                    await AdvanceCarouselTwoStationsWithTestsAsync(
+                    await AdvanceCarouselOneStationWithTestsAsync(
                         carouselStations,
                         axis0PulseDistance,
                         [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
@@ -624,7 +625,7 @@ public partial class HomePage : UserControl
                 }
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD已转动两次并完成对应测试，开始下一轮拍照…",
+                    $"第{cycleNumber}轮放料完成，DD已转动一次并完成对应测试，开始下一轮拍照…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -742,7 +743,7 @@ public partial class HomePage : UserControl
         }
     }
 
-    private async Task AdvanceCarouselTwoStationsWithTestsAsync(
+    private async Task AdvanceCarouselOneStationWithTestsAsync(
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
         IReadOnlyCollection<int>? allowedMovingAxisNos,
@@ -754,21 +755,18 @@ public partial class HomePage : UserControl
             throw new ArgumentException("转盘工位缓存长度无效。", nameof(carouselStations));
         }
 
-        for (var turn = 1; turn <= 2; turn++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            SetStartProductionStatus(
-                $"DD马达正在第 {turn}/2 次转动 {axis0PulseDistance:0.###} pulse…",
-                Color.FromRgb(242, 181, 68));
-            await MoveAxis0RelativeCoreAsync(
-                axis0PulseDistance,
-                cancellationToken,
-                allowedMovingAxisNos);
+        cancellationToken.ThrowIfCancellationRequested();
+        SetStartProductionStatus(
+            $"DD马达正在转动 {axis0PulseDistance:0.###} pulse…",
+            Color.FromRgb(242, 181, 68));
+        await MoveAxis0RelativeCoreAsync(
+            axis0PulseDistance,
+            cancellationToken,
+            allowedMovingAxisNos);
 
-            AdvanceCarouselOccupancy(carouselStations);
-            UpdateCarouselStationDisplay(carouselStations);
-            await RunOccupiedTestStationsAsync(carouselStations, xyReturnToCenterTask, cancellationToken);
-        }
+        AdvanceCarouselOccupancy(carouselStations);
+        UpdateCarouselStationDisplay(carouselStations);
+        await RunOccupiedTestStationsAsync(carouselStations, xyReturnToCenterTask, cancellationToken);
     }
 
     private async Task RunOccupiedTestStationsAsync(
@@ -781,7 +779,7 @@ public partial class HomePage : UserControl
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
         if (axisTargets.Count == 0)
         {
-            SetAxis13To15MoveStatus("4/5/6工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
+            SetAxis13To15MoveStatus("5/6/7工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
             return;
         }
 
@@ -804,7 +802,10 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        await motionController.MoveAxesAbsoluteAsync(axisTargets, cancellationToken);
+        await motionController.MoveAxesAbsoluteAsync(
+            axisTargets,
+            cancellationToken,
+            TestStationMoveTimeoutMilliseconds);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
@@ -1565,7 +1566,8 @@ public partial class HomePage : UserControl
 
             await motionController.MoveAxesAbsoluteAsync(
                 MoveOutAxisNos.ToDictionary(axisNo => axisNo, _ => MoveOutAbsolutePosition),
-                CancellationToken.None);
+                CancellationToken.None,
+                TestStationMoveTimeoutMilliseconds);
             SetAxis13To15MoveStatus(
                 $"轴{string.Join(" / 轴", MoveOutAxisNos)}已到移出绝对位置 {MoveOutAbsolutePosition:0.###} pulse。",
                 Color.FromRgb(73, 209, 125));

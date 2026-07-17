@@ -91,6 +91,14 @@ internal static class LeisaiNative
     internal static extern short dmc_pmove_unit(ushort cardNo, ushort axis, double distance, ushort positionMode);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_sync_pmove_unit(
+        ushort cardNo,
+        ushort axisNum,
+        ushort[] axisList,
+        double[] distanceList,
+        ushort[] positionModeList);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_vmove(ushort cardNo, ushort axis, ushort direction);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
@@ -134,6 +142,30 @@ internal static class LeisaiNative
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_write_outbit(ushort cardNo, ushort bitNo, ushort enabled);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_read_inport_extern(
+        ushort cardNo,
+        ushort channel,
+        ushort nodeId,
+        ushort portNo,
+        ref uint state);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_read_outport_extern(
+        ushort cardNo,
+        ushort channel,
+        ushort nodeId,
+        ushort portNo,
+        ref uint state);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_write_outbit_extern(
+        ushort cardNo,
+        ushort channel,
+        ushort nodeId,
+        ushort bitNo,
+        ushort value);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_get_ad_input(ushort cardNo, ushort channel, ref double value);

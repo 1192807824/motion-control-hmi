@@ -771,12 +771,13 @@ public partial class MotionControlPage : UserControl
         _calibrationOperationActive = true;
         try
         {
+            _motionCard.MoveRelativeSynchronized(
+                moves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                moves.Select(_ => pulseDistance).ToArray(),
+                moves.Select(move => move.Axis.JogSpeed).ToArray());
+
             foreach (var move in moves)
             {
-                _motionCard.MoveRelative(
-                    move.Axis.HardwareAxisNo,
-                    pulseDistance,
-                    move.Axis.JogSpeed);
                 commandedAxes.Add(move.Axis);
                 move.Axis.Target = move.Target;
                 move.Axis.IsMoving = true;
@@ -879,7 +880,8 @@ public partial class MotionControlPage : UserControl
     /// </summary>
     public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesAbsoluteAsync(
         IReadOnlyDictionary<int, double> targetPositions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int minimumTimeoutMilliseconds = 10_000)
     {
         ArgumentNullException.ThrowIfNull(targetPositions);
 
@@ -925,7 +927,7 @@ public partial class MotionControlPage : UserControl
         }
 
         var moves = new List<(AxisStatus Axis, double Target, double Tolerance)>();
-        var maximumTimeoutMilliseconds = 10_000d;
+        var maximumTimeoutMilliseconds = Math.Clamp((double)minimumTimeoutMilliseconds, 10_000d, 120_000d);
         foreach (var (hardwareAxisNo, target) in axisTargets)
         {
             var axis = Axes?.FirstOrDefault(item =>
@@ -1086,6 +1088,23 @@ public partial class MotionControlPage : UserControl
 
         var hardwareBitNo = GetDigitalIoStartBit(IoPointKind.DigitalOutput, count) + channel;
         _motionCard.WriteDigitalOutput(hardwareBitNo, enabled);
+        PollIoState();
+        return true;
+    }
+
+    public bool SetDigitalOutputHardwareBit(int bitNo, bool enabled)
+    {
+        if (bitNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bitNo));
+        }
+
+        if (!EnsureConnected())
+        {
+            return false;
+        }
+
+        _motionCard.WriteDigitalOutput(bitNo, enabled);
         PollIoState();
         return true;
     }
@@ -3349,6 +3368,18 @@ public partial class MotionControlPage : UserControl
         }
 
         if (!EnsureConnected())
+        {
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            Window.GetWindow(this),
+            "请确认各轴都在安全区域。\n\n确认后将执行一键复位测试。",
+            "一键复位安全确认",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+        if (confirmation != MessageBoxResult.OK)
         {
             return;
         }

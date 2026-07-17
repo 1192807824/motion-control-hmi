@@ -6,6 +6,7 @@ namespace ControlHub.Services.Motion;
 public sealed class LeisaiMotionCard : IMotionCard
 {
     private const ushort EtherCatPort = 2;
+    private const ushort ExternalIoNodeId = 1001;
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const ushort AllEtherCatAxesSentinel = 255;
     private const ushort EnabledStateMachine = 4;
@@ -257,7 +258,14 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
 
             uint state = 0;
-            EnsureSuccess(LeisaiNative.dmc_read_inport_ex(_cardNo, (ushort)portNo, ref state), "dmc_read_inport_ex");
+            EnsureSuccess(
+                LeisaiNative.nmc_read_inport_extern(
+                    _cardNo,
+                    EtherCatPort,
+                    ExternalIoNodeId,
+                    (ushort)portNo,
+                    ref state),
+                "nmc_read_inport_extern");
             return state;
         }
     }
@@ -273,7 +281,14 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
 
             uint state = 0;
-            EnsureSuccess(LeisaiNative.dmc_read_outport_ex(_cardNo, (ushort)portNo, ref state), "dmc_read_outport_ex");
+            EnsureSuccess(
+                LeisaiNative.nmc_read_outport_extern(
+                    _cardNo,
+                    EtherCatPort,
+                    ExternalIoNodeId,
+                    (ushort)portNo,
+                    ref state),
+                "nmc_read_outport_extern");
             return state;
         }
     }
@@ -290,8 +305,13 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
 
             EnsureSuccess(
-                LeisaiNative.dmc_write_outbit(_cardNo, (ushort)bitNo, enabled ? (ushort)1 : (ushort)0),
-                "dmc_write_outbit");
+                LeisaiNative.nmc_write_outbit_extern(
+                    _cardNo,
+                    EtherCatPort,
+                    ExternalIoNodeId,
+                    (ushort)bitNo,
+                    enabled ? (ushort)1 : (ushort)0),
+                "nmc_write_outbit_extern");
         }
     }
 
@@ -394,8 +414,12 @@ public sealed class LeisaiMotionCard : IMotionCard
                             continue;
                         }
 
-                        SetServoCommand(axis, true);
                         newlyEnabledAxes.Add(axis);
+                    }
+
+                    if (newlyEnabledAxes.Count > 0)
+                    {
+                        SetServoCommand(AllEtherCatAxesSentinel, true);
                     }
 
                     WaitForServoState(configuredAxes, true);
@@ -443,11 +467,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                     EnsureAxisStopped(axis);
                 }
 
-                foreach (var axis in hardwareAxes)
-                {
-                    SetServoCommand(axis, false);
-                }
-
+                SetServoCommand(AllEtherCatAxesSentinel, false);
                 WaitForServoState(hardwareAxes, false);
             }
         }
@@ -512,6 +532,60 @@ public sealed class LeisaiMotionCard : IMotionCard
             ConfigureMove(axis, velocity);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
             EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, distance, 0), "dmc_pmove_unit");
+        }
+    }
+
+    public void MoveRelativeSynchronized(
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> distances,
+        IReadOnlyList<double> velocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(distances);
+        ArgumentNullException.ThrowIfNull(velocities);
+
+        if (hardwareAxisNos.Count == 0 ||
+            hardwareAxisNos.Count != distances.Count ||
+            hardwareAxisNos.Count != velocities.Count)
+        {
+            throw new ArgumentException("同步相对移动的轴号、脉冲和速度数量必须一致且不能为空。");
+        }
+
+        lock (_sync)
+        {
+            var axisList = new ushort[hardwareAxisNos.Count];
+            var distanceList = new double[distances.Count];
+            var positionModeList = new ushort[hardwareAxisNos.Count];
+
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var distance = distances[index];
+                var velocity = velocities[index];
+                if (!double.IsFinite(distance) || distance == 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(distances), "同步相对位移必须是非零有限数值。");
+                }
+
+                ValidateVelocity(velocity, allowSigned: false);
+                var axis = GetAxis(hardwareAxisNos[index]);
+                EnsureAxisReadyForDirection(axis, Math.Sign(distance));
+                EnsureAxisStopped(axis);
+                ConfigureMove(axis, velocity);
+                EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+
+                axisList[index] = axis;
+                distanceList[index] = distance;
+                positionModeList[index] = 0;
+            }
+
+            EnsureSuccess(
+                LeisaiNative.nmc_sync_pmove_unit(
+                    _cardNo,
+                    checked((ushort)axisList.Length),
+                    axisList,
+                    distanceList,
+                    positionModeList),
+                "nmc_sync_pmove_unit");
         }
     }
 

@@ -46,6 +46,11 @@ public interface IMotionCard : IDisposable
 
     void MoveRelative(int hardwareAxisNo, double distance, double velocity);
 
+    void MoveRelativeSynchronized(
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> distances,
+        IReadOnlyList<double> velocities);
+
     void MoveAbsolute(int hardwareAxisNo, double position, double velocity);
 
     void Stop(int hardwareAxisNo, bool emergency = false);
