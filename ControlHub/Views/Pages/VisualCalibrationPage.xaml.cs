@@ -14,8 +14,6 @@ namespace ControlHub.Views.Pages;
 
 public partial class VisualCalibrationPage : UserControl
 {
-    private const int FirstSetXHardwareAxisNo = VisionCalibrationService.FirstSetXHardwareAxisNo;
-    private const int FirstSetYHardwareAxisNo = VisionCalibrationService.FirstSetYHardwareAxisNo;
     private const double PulsesPerVisionUnit = VisionCalibrationService.PulsesPerVisionUnit;
     private const double DefaultPositionTolerancePulses = 10d;
     private static readonly string DefaultCalibrationDirectory = Path.Combine(
@@ -24,6 +22,9 @@ public partial class VisualCalibrationPage : UserControl
     private static readonly string DefaultCalibrationFilePath = Path.Combine(
         DefaultCalibrationDirectory,
         "第一套XY标定.xml");
+    private static readonly string DefaultSecondCalibrationFilePath = Path.Combine(
+        DefaultCalibrationDirectory,
+        "第二套XY标定.xml");
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly VisionCalibrationProfileStore _profileStore = new();
     private readonly DispatcherTimer _settingsSaveTimer = new()
@@ -56,6 +57,10 @@ public partial class VisualCalibrationPage : UserControl
     private VisualCalibrationSettings _uiSettings = VisionCalibrationService.Shared.Settings;
     private bool _settingsLoaded;
 
+    private VisionCalibrationAxisPair ActiveAxisPair => _visionCalibration.ActiveAxisPair;
+
+    private VisionCalibrationAxisSet ActiveAxisSet => _visionCalibration.ActiveAxisSet;
+
     public VisualCalibrationPage()
     {
         InitializeComponent();
@@ -72,6 +77,189 @@ public partial class VisualCalibrationPage : UserControl
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
         UpdateCommandState();
+    }
+
+    private void AxisSet_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_settingsLoaded)
+        {
+            return;
+        }
+
+        if (_calibrationRunning || _clickMoveRunning || _centerSyncRunning)
+        {
+            AxisSetComboBox.SelectedItem = AxisSetComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag as string,
+                    VisionCalibrationService.ToSettingsValue(ActiveAxisSet),
+                    StringComparison.Ordinal));
+            return;
+        }
+
+        SaveCalibrationSettingsNoThrow();
+        _visionCalibration.ActiveAxisSet = VisionCalibrationService.ParseAxisSet(
+            (AxisSetComboBox.SelectedItem as ComboBoxItem)?.Tag as string);
+        _recordedCenter = null;
+        _nozzleTeachCameraPosition = null;
+        _nozzleTeachTool = null;
+        _nozzle1ClickVerified = false;
+        _nozzle2ClickVerified = false;
+        LoadCalibrationSettings();
+        _visionCalibration.Save();
+        UpdateVisionOffsetPreview();
+        UpdateCommandState();
+    }
+
+    private void SelectAxisSetComboBox()
+    {
+        if (AxisSetComboBox is null)
+        {
+            return;
+        }
+
+        var value = VisionCalibrationService.ToSettingsValue(ActiveAxisSet);
+        AxisSetComboBox.SelectedItem = AxisSetComboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, value, StringComparison.Ordinal))
+            ?? AxisSetComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
+    }
+
+    private string GetDefaultCalibrationFilePath()
+    {
+        return ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? DefaultSecondCalibrationFilePath
+            : DefaultCalibrationFilePath;
+    }
+
+    private void ResetActiveNozzleCalibration()
+    {
+        if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+        {
+            _uiSettings.SecondNozzleOffsetCalibrated = false;
+            _uiSettings.SecondNozzle2OffsetCalibrated = false;
+            _uiSettings.SecondCalibrationProfilePath = "";
+        }
+        else
+        {
+            _uiSettings.NozzleOffsetCalibrated = false;
+            _uiSettings.Nozzle2OffsetCalibrated = false;
+            _uiSettings.CalibrationProfilePath = "";
+        }
+    }
+
+    private void SetActiveNozzleOffset(VisionTargetTool nozzleTool, double offsetX, double offsetY)
+    {
+        if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+        {
+            if (nozzleTool == VisionTargetTool.Nozzle2)
+            {
+                _uiSettings.SecondNozzle2OffsetXPulses = offsetX;
+                _uiSettings.SecondNozzle2OffsetYPulses = offsetY;
+                _uiSettings.SecondNozzle2OffsetCalibrated = true;
+            }
+            else
+            {
+                _uiSettings.SecondNozzleOffsetXPulses = offsetX;
+                _uiSettings.SecondNozzleOffsetYPulses = offsetY;
+                _uiSettings.SecondNozzleOffsetCalibrated = true;
+                _uiSettings.SecondNozzle2OffsetCalibrated = false;
+            }
+
+            return;
+        }
+
+        if (nozzleTool == VisionTargetTool.Nozzle2)
+        {
+            _uiSettings.Nozzle2OffsetXPulses = offsetX;
+            _uiSettings.Nozzle2OffsetYPulses = offsetY;
+            _uiSettings.Nozzle2OffsetCalibrated = true;
+        }
+        else
+        {
+            _uiSettings.NozzleOffsetXPulses = offsetX;
+            _uiSettings.NozzleOffsetYPulses = offsetY;
+            _uiSettings.NozzleOffsetCalibrated = true;
+            _uiSettings.Nozzle2OffsetCalibrated = false;
+        }
+    }
+
+    private bool ActiveNozzle1Calibrated => ActiveAxisSet == VisionCalibrationAxisSet.Second
+        ? _uiSettings.SecondNozzleOffsetCalibrated
+        : _uiSettings.NozzleOffsetCalibrated;
+
+    private bool ActiveNozzle2Calibrated => ActiveAxisSet == VisionCalibrationAxisSet.Second
+        ? _uiSettings.SecondNozzle2OffsetCalibrated
+        : _uiSettings.Nozzle2OffsetCalibrated;
+
+    private double ActiveNozzle1OffsetX => ActiveAxisSet == VisionCalibrationAxisSet.Second
+        ? _uiSettings.SecondNozzleOffsetXPulses
+        : _uiSettings.NozzleOffsetXPulses;
+
+    private double ActiveNozzle1OffsetY => ActiveAxisSet == VisionCalibrationAxisSet.Second
+        ? _uiSettings.SecondNozzleOffsetYPulses
+        : _uiSettings.NozzleOffsetYPulses;
+
+    private double ActiveNozzle2OffsetX => ActiveAxisSet == VisionCalibrationAxisSet.Second
+        ? _uiSettings.SecondNozzle2OffsetXPulses
+        : _uiSettings.Nozzle2OffsetXPulses;
+
+    private double ActiveNozzle2OffsetY => ActiveAxisSet == VisionCalibrationAxisSet.Second
+        ? _uiSettings.SecondNozzle2OffsetYPulses
+        : _uiSettings.Nozzle2OffsetYPulses;
+
+    private string ActiveCalibrationProfilePath
+    {
+        get => ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondCalibrationProfilePath
+            : _uiSettings.CalibrationProfilePath;
+        set
+        {
+            if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+            {
+                _uiSettings.SecondCalibrationProfilePath = value;
+            }
+            else
+            {
+                _uiSettings.CalibrationProfilePath = value;
+            }
+        }
+    }
+
+    private string ActiveCalibrationFilePath
+    {
+        get => ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondCalibrationFilePath
+            : _uiSettings.CalibrationFilePath;
+        set
+        {
+            if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+            {
+                _uiSettings.SecondCalibrationFilePath = value;
+            }
+            else
+            {
+                _uiSettings.CalibrationFilePath = value;
+            }
+        }
+    }
+
+    private string ActiveClickTargetTool
+    {
+        get => ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondClickTargetTool
+            : _uiSettings.ClickTargetTool;
+        set
+        {
+            if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+            {
+                _uiSettings.SecondClickTargetTool = value;
+            }
+            else
+            {
+                _uiSettings.ClickTargetTool = value;
+            }
+        }
     }
 
     public void AttachInspectionDisplayHost(IntPtr displayHostWindow)
@@ -232,8 +420,8 @@ public partial class VisualCalibrationPage : UserControl
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             _recordedCenter = motionController.CaptureCalibrationCenter(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo);
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo);
             CenterXPulseText.Text = _recordedCenter.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
             CenterYPulseText.Text = _recordedCenter.ActualY.ToString("0.###", CultureInfo.CurrentCulture);
             CenterVmText.Text =
@@ -293,12 +481,10 @@ public partial class VisualCalibrationPage : UserControl
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             _nozzleTeachCameraPosition = motionController.CaptureCalibrationCenter(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo);
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo);
             _nozzleTeachTool = VisionTargetTool.Nozzle1;
-            _uiSettings.NozzleOffsetCalibrated = false;
-            _uiSettings.Nozzle2OffsetCalibrated = false;
-            _uiSettings.CalibrationProfilePath = "";
+            ResetActiveNozzleCalibration();
             _nozzle1ClickVerified = false;
             _nozzle2ClickVerified = false;
             SaveCalibrationSettingsNoThrow();
@@ -337,8 +523,8 @@ public partial class VisualCalibrationPage : UserControl
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             var nozzlePosition = motionController.CaptureCalibrationCenter(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo);
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo);
             var offsetX = nozzlePosition.ActualX - cameraPosition.ActualX;
             var offsetY = nozzlePosition.ActualY - cameraPosition.ActualY;
             if (!double.IsFinite(offsetX) || !double.IsFinite(offsetY))
@@ -346,18 +532,9 @@ public partial class VisualCalibrationPage : UserControl
                 throw new InvalidOperationException("计算得到的吸嘴偏移无效。");
             }
 
-            if (nozzleTool == VisionTargetTool.Nozzle2)
+            SetActiveNozzleOffset(nozzleTool, offsetX, offsetY);
+            if (nozzleTool != VisionTargetTool.Nozzle2)
             {
-                _uiSettings.Nozzle2OffsetXPulses = offsetX;
-                _uiSettings.Nozzle2OffsetYPulses = offsetY;
-                _uiSettings.Nozzle2OffsetCalibrated = true;
-            }
-            else
-            {
-                _uiSettings.NozzleOffsetXPulses = offsetX;
-                _uiSettings.NozzleOffsetYPulses = offsetY;
-                _uiSettings.NozzleOffsetCalibrated = true;
-                _uiSettings.Nozzle2OffsetCalibrated = false;
                 _nozzleTeachTool = VisionTargetTool.Nozzle2;
                 SaveCalibrationSettingsNoThrow();
                 UpdateNozzleTeachUi();
@@ -438,8 +615,8 @@ public partial class VisualCalibrationPage : UserControl
                 cancellationToken);
 
             var request = new NinePointMotionRequest(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo,
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo,
                 center.ActualX,
                 center.ActualY,
                 stepX,
@@ -503,9 +680,7 @@ public partial class VisualCalibrationPage : UserControl
         {
             _nozzleTeachCameraPosition = null;
             _nozzleTeachTool = null;
-            _uiSettings.NozzleOffsetCalibrated = false;
-            _uiSettings.Nozzle2OffsetCalibrated = false;
-            _uiSettings.CalibrationProfilePath = "";
+            ResetActiveNozzleCalibration();
             _nozzle1ClickVerified = false;
             _nozzle2ClickVerified = false;
             _visionCalibration.Save();
@@ -629,7 +804,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void LoadCalibrationProfile_Click(object sender, RoutedEventArgs e)
     {
-        var currentDirectory = Path.GetDirectoryName(_uiSettings.CalibrationProfilePath);
+        var currentDirectory = Path.GetDirectoryName(ActiveCalibrationProfilePath);
         var dialog = new OpenFileDialog
         {
             Title = "加载第一套XY双吸嘴配置",
@@ -867,7 +1042,7 @@ public partial class VisualCalibrationPage : UserControl
             if (_hostReady)
             {
                 var path = string.IsNullOrWhiteSpace(CalibrationFilePathTextBox.Text)
-                    ? DefaultCalibrationFilePath
+                    ? GetDefaultCalibrationFilePath()
                     : CalibrationFilePathTextBox.Text;
                 _ = await VisionHost.SetClickMoveModeAsync(false, path, CancellationToken.None);
             }
@@ -910,8 +1085,8 @@ public partial class VisualCalibrationPage : UserControl
                 SettleMillisecondsTextBox.Text,
                 "到位稳定等待");
             var current = motionController.CaptureCalibrationCenter(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo);
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo);
             var moveDeltaX = center.ActualX - current.ActualX;
             var moveDeltaY = center.ActualY - current.ActualY;
 
@@ -923,8 +1098,8 @@ public partial class VisualCalibrationPage : UserControl
                 WorkflowStatus.Running);
 
             var actual = await motionController.MoveCalibrationAxesToAsync(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo,
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo,
                 center.ActualX,
                 center.ActualY,
                 velocity,
@@ -978,8 +1153,8 @@ public partial class VisualCalibrationPage : UserControl
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "点击移动速度");
             var current = motionController.CaptureCalibrationCenter(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo);
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo);
             var deltaX = (e.CenterTransformedX - e.TransformedX) * PulsesPerVisionUnit;
             var deltaY = (e.CenterTransformedY - e.TransformedY) * PulsesPerVisionUnit;
             var targetTool = GetSelectedTargetTool();
@@ -1008,8 +1183,8 @@ public partial class VisualCalibrationPage : UserControl
             var moveDeltaY = targetY - current.ActualY;
 
             var actual = await motionController.MoveCalibrationAxesToAsync(
-                FirstSetXHardwareAxisNo,
-                FirstSetYHardwareAxisNo,
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo,
                 targetX,
                 targetY,
                 velocity,
@@ -1204,13 +1379,30 @@ public partial class VisualCalibrationPage : UserControl
     private void LoadCalibrationSettings()
     {
         _uiSettings = _visionCalibration.Settings;
-        StepXPulsesTextBox.Text = FormatPositiveSetting(_uiSettings.StepXPulses, 100_000);
-        StepYPulsesTextBox.Text = FormatPositiveSetting(_uiSettings.StepYPulses, 100_000);
-        VelocityTextBox.Text = FormatPositiveSetting(_uiSettings.VelocityPulsesPerSecond, 100_000);
-        SettleMillisecondsTextBox.Text = Math.Max(0, _uiSettings.SettleMilliseconds)
+        SelectAxisSetComboBox();
+        var stepX = ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondStepXPulses
+            : _uiSettings.StepXPulses;
+        var stepY = ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondStepYPulses
+            : _uiSettings.StepYPulses;
+        var velocity = ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondVelocityPulsesPerSecond
+            : _uiSettings.VelocityPulsesPerSecond;
+        var settleMilliseconds = ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondSettleMilliseconds
+            : _uiSettings.SettleMilliseconds;
+        var movePriority = ActiveAxisSet == VisionCalibrationAxisSet.Second
+            ? _uiSettings.SecondMovePriority
+            : _uiSettings.MovePriority;
+
+        StepXPulsesTextBox.Text = FormatPositiveSetting(stepX, 100_000);
+        StepYPulsesTextBox.Text = FormatPositiveSetting(stepY, 100_000);
+        VelocityTextBox.Text = FormatPositiveSetting(velocity, 100_000);
+        SettleMillisecondsTextBox.Text = Math.Max(0, settleMilliseconds)
             .ToString(CultureInfo.CurrentCulture);
 
-        var priority = string.Equals(_uiSettings.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)
+        var priority = string.Equals(movePriority, "Y", StringComparison.OrdinalIgnoreCase)
             ? "Y"
             : "X";
         MovePriorityComboBox.SelectedItem = MovePriorityComboBox.Items
@@ -1218,10 +1410,10 @@ public partial class VisualCalibrationPage : UserControl
             .First(item => string.Equals(item.Tag as string, priority, StringComparison.Ordinal));
 
         CalibrationFilePathTextBox.Text =
-            TryGetCalibrationFilePath(_uiSettings.CalibrationFilePath, out var savedPath)
+            TryGetCalibrationFilePath(ActiveCalibrationFilePath, out var savedPath)
                 ? savedPath
-                : DefaultCalibrationFilePath;
-        var targetTool = VisionCalibrationService.ParseTargetTool(_uiSettings.ClickTargetTool);
+                : GetDefaultCalibrationFilePath();
+        var targetTool = VisionCalibrationService.ParseTargetTool(ActiveClickTargetTool);
         SelectClickTargetTool(targetTool);
         UpdateCalibrationProfilePathDisplay();
         UpdateNozzleTeachUi();
@@ -1288,27 +1480,41 @@ public partial class VisualCalibrationPage : UserControl
 
     private void UpdateNozzleCalibrationDisplay()
     {
-        if (_uiSettings.NozzleOffsetCalibrated &&
-            (!double.IsFinite(_uiSettings.NozzleOffsetXPulses) ||
-             !double.IsFinite(_uiSettings.NozzleOffsetYPulses)))
+        if (ActiveNozzle1Calibrated &&
+            (!double.IsFinite(ActiveNozzle1OffsetX) ||
+             !double.IsFinite(ActiveNozzle1OffsetY)))
         {
-            _uiSettings.NozzleOffsetCalibrated = false;
+            if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+            {
+                _uiSettings.SecondNozzleOffsetCalibrated = false;
+            }
+            else
+            {
+                _uiSettings.NozzleOffsetCalibrated = false;
+            }
         }
 
-        if (_uiSettings.Nozzle2OffsetCalibrated &&
-            (!double.IsFinite(_uiSettings.Nozzle2OffsetXPulses) ||
-             !double.IsFinite(_uiSettings.Nozzle2OffsetYPulses)))
+        if (ActiveNozzle2Calibrated &&
+            (!double.IsFinite(ActiveNozzle2OffsetX) ||
+             !double.IsFinite(ActiveNozzle2OffsetY)))
         {
-            _uiSettings.Nozzle2OffsetCalibrated = false;
+            if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+            {
+                _uiSettings.SecondNozzle2OffsetCalibrated = false;
+            }
+            else
+            {
+                _uiSettings.Nozzle2OffsetCalibrated = false;
+            }
         }
 
-        var nozzle1Text = _uiSettings.NozzleOffsetCalibrated
-            ? $"吸嘴1：X {_uiSettings.NozzleOffsetXPulses:0.###}　Y {_uiSettings.NozzleOffsetYPulses:0.###} pulse"
+        var nozzle1Text = ActiveNozzle1Calibrated
+            ? $"吸嘴1：X {ActiveNozzle1OffsetX:0.###}　Y {ActiveNozzle1OffsetY:0.###} pulse"
             : "吸嘴1：未标定";
-        var nozzle2Text = _uiSettings.Nozzle2OffsetCalibrated
-            ? $"吸嘴2：X {_uiSettings.Nozzle2OffsetXPulses:0.###}　Y {_uiSettings.Nozzle2OffsetYPulses:0.###} pulse"
+        var nozzle2Text = ActiveNozzle2Calibrated
+            ? $"吸嘴2：X {ActiveNozzle2OffsetX:0.###}　Y {ActiveNozzle2OffsetY:0.###} pulse"
             : "吸嘴2：未标定";
-        var status = _uiSettings.NozzleOffsetCalibrated && _uiSettings.Nozzle2OffsetCalibrated
+        var status = ActiveNozzle1Calibrated && ActiveNozzle2Calibrated
             ? WorkflowStatus.Success
             : WorkflowStatus.Ready;
         SetNozzleCalibrationStatus($"{nozzle1Text}\n{nozzle2Text}", status);
@@ -1316,7 +1522,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private string SaveCurrentCalibrationProfile()
     {
-        if (!_uiSettings.NozzleOffsetCalibrated || !_uiSettings.Nozzle2OffsetCalibrated)
+        if (!ActiveNozzle1Calibrated || !ActiveNozzle2Calibrated)
         {
             throw new InvalidOperationException("请先按顺序完成吸嘴1和吸嘴2对位。");
         }
@@ -1338,21 +1544,23 @@ public partial class VisualCalibrationPage : UserControl
             $"{Path.GetFileNameWithoutExtension(calibrationFilePath)}.双吸嘴.json");
         var profile = new VisionCalibrationProfile
         {
+            XHardwareAxisNo = ActiveAxisPair.XHardwareAxisNo,
+            YHardwareAxisNo = ActiveAxisPair.YHardwareAxisNo,
             CalibrationFilePath = calibrationFilePath,
-            StepXPulses = _uiSettings.StepXPulses,
-            StepYPulses = _uiSettings.StepYPulses,
-            VelocityPulsesPerSecond = _uiSettings.VelocityPulsesPerSecond,
-            SettleMilliseconds = _uiSettings.SettleMilliseconds,
-            MovePriority = _uiSettings.MovePriority,
+            StepXPulses = ParsePositiveDouble(StepXPulsesTextBox.Text, "间距 X"),
+            StepYPulses = ParsePositiveDouble(StepYPulsesTextBox.Text, "间距 Y"),
+            VelocityPulsesPerSecond = ParsePositiveDouble(VelocityTextBox.Text, "标定速度"),
+            SettleMilliseconds = ParseNonNegativeInt(SettleMillisecondsTextBox.Text, "到位稳定等待"),
+            MovePriority = (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Y" ? "Y" : "X",
             Nozzle1Calibrated = true,
-            Nozzle1OffsetXPulses = _uiSettings.NozzleOffsetXPulses,
-            Nozzle1OffsetYPulses = _uiSettings.NozzleOffsetYPulses,
+            Nozzle1OffsetXPulses = ActiveNozzle1OffsetX,
+            Nozzle1OffsetYPulses = ActiveNozzle1OffsetY,
             Nozzle2Calibrated = true,
-            Nozzle2OffsetXPulses = _uiSettings.Nozzle2OffsetXPulses,
-            Nozzle2OffsetYPulses = _uiSettings.Nozzle2OffsetYPulses
+            Nozzle2OffsetXPulses = ActiveNozzle2OffsetX,
+            Nozzle2OffsetYPulses = ActiveNozzle2OffsetY
         };
         _profileStore.Save(profilePath, profile);
-        _uiSettings.CalibrationProfilePath = profilePath;
+        ActiveCalibrationProfilePath = profilePath;
         _visionCalibration.Save();
         UpdateCalibrationProfilePathDisplay();
         return profilePath;
@@ -1360,35 +1568,62 @@ public partial class VisualCalibrationPage : UserControl
 
     private void ApplyCalibrationProfile(VisionCalibrationProfile profile, string profilePath)
     {
-        _uiSettings.StepXPulses = profile.StepXPulses;
-        _uiSettings.StepYPulses = profile.StepYPulses;
-        _uiSettings.VelocityPulsesPerSecond = profile.VelocityPulsesPerSecond;
-        _uiSettings.SettleMilliseconds = profile.SettleMilliseconds;
-        _uiSettings.MovePriority = string.Equals(profile.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)
+        _visionCalibration.ActiveAxisSet = profile.XHardwareAxisNo == VisionCalibrationService.SecondSetXHardwareAxisNo &&
+            profile.YHardwareAxisNo == VisionCalibrationService.SecondSetYHardwareAxisNo
+                ? VisionCalibrationAxisSet.Second
+                : VisionCalibrationAxisSet.First;
+        SelectAxisSetComboBox();
+
+        var movePriority = string.Equals(profile.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)
             ? "Y"
             : "X";
-        _uiSettings.CalibrationFilePath = Path.GetFullPath(profile.CalibrationFilePath);
-        _uiSettings.CalibrationProfilePath = Path.GetFullPath(profilePath);
-        _uiSettings.NozzleOffsetCalibrated = profile.Nozzle1Calibrated;
-        _uiSettings.NozzleOffsetXPulses = profile.Nozzle1OffsetXPulses;
-        _uiSettings.NozzleOffsetYPulses = profile.Nozzle1OffsetYPulses;
-        _uiSettings.Nozzle2OffsetCalibrated = profile.Nozzle2Calibrated;
-        _uiSettings.Nozzle2OffsetXPulses = profile.Nozzle2OffsetXPulses;
-        _uiSettings.Nozzle2OffsetYPulses = profile.Nozzle2OffsetYPulses;
-        _uiSettings.ClickTargetTool = "Nozzle1";
+        if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+        {
+            _uiSettings.SecondStepXPulses = profile.StepXPulses;
+            _uiSettings.SecondStepYPulses = profile.StepYPulses;
+            _uiSettings.SecondVelocityPulsesPerSecond = profile.VelocityPulsesPerSecond;
+            _uiSettings.SecondSettleMilliseconds = profile.SettleMilliseconds;
+            _uiSettings.SecondMovePriority = movePriority;
+            _uiSettings.SecondCalibrationFilePath = Path.GetFullPath(profile.CalibrationFilePath);
+            _uiSettings.SecondCalibrationProfilePath = Path.GetFullPath(profilePath);
+            _uiSettings.SecondNozzleOffsetCalibrated = profile.Nozzle1Calibrated;
+            _uiSettings.SecondNozzleOffsetXPulses = profile.Nozzle1OffsetXPulses;
+            _uiSettings.SecondNozzleOffsetYPulses = profile.Nozzle1OffsetYPulses;
+            _uiSettings.SecondNozzle2OffsetCalibrated = profile.Nozzle2Calibrated;
+            _uiSettings.SecondNozzle2OffsetXPulses = profile.Nozzle2OffsetXPulses;
+            _uiSettings.SecondNozzle2OffsetYPulses = profile.Nozzle2OffsetYPulses;
+            _uiSettings.SecondClickTargetTool = "Nozzle1";
+        }
+        else
+        {
+            _uiSettings.StepXPulses = profile.StepXPulses;
+            _uiSettings.StepYPulses = profile.StepYPulses;
+            _uiSettings.VelocityPulsesPerSecond = profile.VelocityPulsesPerSecond;
+            _uiSettings.SettleMilliseconds = profile.SettleMilliseconds;
+            _uiSettings.MovePriority = movePriority;
+            _uiSettings.CalibrationFilePath = Path.GetFullPath(profile.CalibrationFilePath);
+            _uiSettings.CalibrationProfilePath = Path.GetFullPath(profilePath);
+            _uiSettings.NozzleOffsetCalibrated = profile.Nozzle1Calibrated;
+            _uiSettings.NozzleOffsetXPulses = profile.Nozzle1OffsetXPulses;
+            _uiSettings.NozzleOffsetYPulses = profile.Nozzle1OffsetYPulses;
+            _uiSettings.Nozzle2OffsetCalibrated = profile.Nozzle2Calibrated;
+            _uiSettings.Nozzle2OffsetXPulses = profile.Nozzle2OffsetXPulses;
+            _uiSettings.Nozzle2OffsetYPulses = profile.Nozzle2OffsetYPulses;
+            _uiSettings.ClickTargetTool = "Nozzle1";
+        }
         _nozzleTeachCameraPosition = null;
         _nozzleTeachTool = null;
         _nozzle1ClickVerified = false;
         _nozzle2ClickVerified = false;
 
-        StepXPulsesTextBox.Text = FormatPositiveSetting(_uiSettings.StepXPulses, 100_000);
-        StepYPulsesTextBox.Text = FormatPositiveSetting(_uiSettings.StepYPulses, 100_000);
-        VelocityTextBox.Text = FormatPositiveSetting(_uiSettings.VelocityPulsesPerSecond, 100_000);
-        SettleMillisecondsTextBox.Text = _uiSettings.SettleMilliseconds.ToString(CultureInfo.CurrentCulture);
+        StepXPulsesTextBox.Text = FormatPositiveSetting(profile.StepXPulses, 100_000);
+        StepYPulsesTextBox.Text = FormatPositiveSetting(profile.StepYPulses, 100_000);
+        VelocityTextBox.Text = FormatPositiveSetting(profile.VelocityPulsesPerSecond, 100_000);
+        SettleMillisecondsTextBox.Text = profile.SettleMilliseconds.ToString(CultureInfo.CurrentCulture);
         MovePriorityComboBox.SelectedItem = MovePriorityComboBox.Items
             .OfType<ComboBoxItem>()
-            .First(item => string.Equals(item.Tag as string, _uiSettings.MovePriority, StringComparison.Ordinal));
-        CalibrationFilePathTextBox.Text = _uiSettings.CalibrationFilePath;
+            .First(item => string.Equals(item.Tag as string, movePriority, StringComparison.Ordinal));
+        CalibrationFilePathTextBox.Text = ActiveCalibrationFilePath;
         SelectClickTargetTool(VisionTargetTool.Nozzle1);
         _visionCalibration.Save();
         UpdateVisionOffsetPreview();
@@ -1404,7 +1639,7 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        var path = _uiSettings.CalibrationProfilePath?.Trim() ?? "";
+        var path = ActiveCalibrationProfilePath?.Trim() ?? "";
         CalibrationProfilePathText.Text = string.IsNullOrWhiteSpace(path)
             ? "配置：完成双吸嘴后自动生成"
             : $"配置：{Path.GetFileName(path)}";
@@ -1450,17 +1685,38 @@ public partial class VisualCalibrationPage : UserControl
         {
             if (TryParseFiniteDouble(StepXPulsesTextBox.Text, out var stepX) && stepX > 0)
             {
-                _uiSettings.StepXPulses = stepX;
+                if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+                {
+                    _uiSettings.SecondStepXPulses = stepX;
+                }
+                else
+                {
+                    _uiSettings.StepXPulses = stepX;
+                }
             }
 
             if (TryParseFiniteDouble(StepYPulsesTextBox.Text, out var stepY) && stepY > 0)
             {
-                _uiSettings.StepYPulses = stepY;
+                if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+                {
+                    _uiSettings.SecondStepYPulses = stepY;
+                }
+                else
+                {
+                    _uiSettings.StepYPulses = stepY;
+                }
             }
 
             if (TryParseFiniteDouble(VelocityTextBox.Text, out var velocity) && velocity > 0)
             {
-                _uiSettings.VelocityPulsesPerSecond = velocity;
+                if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+                {
+                    _uiSettings.SecondVelocityPulsesPerSecond = velocity;
+                }
+                else
+                {
+                    _uiSettings.VelocityPulsesPerSecond = velocity;
+                }
             }
 
             if (int.TryParse(
@@ -1470,18 +1726,32 @@ public partial class VisualCalibrationPage : UserControl
                     out var settleMilliseconds) &&
                 settleMilliseconds >= 0)
             {
-                _uiSettings.SettleMilliseconds = settleMilliseconds;
+                if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+                {
+                    _uiSettings.SecondSettleMilliseconds = settleMilliseconds;
+                }
+                else
+                {
+                    _uiSettings.SettleMilliseconds = settleMilliseconds;
+                }
             }
 
-            _uiSettings.MovePriority =
-                (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Y"
-                    ? "Y"
-                    : "X";
-            _uiSettings.ClickTargetTool =
-                VisionCalibrationService.ToSettingsValue(GetSelectedTargetTool());
+            var movePriority = (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Y"
+                ? "Y"
+                : "X";
+            if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
+            {
+                _uiSettings.SecondMovePriority = movePriority;
+            }
+            else
+            {
+                _uiSettings.MovePriority = movePriority;
+            }
+
+            ActiveClickTargetTool = VisionCalibrationService.ToSettingsValue(GetSelectedTargetTool());
             if (TryGetCalibrationFilePath(CalibrationFilePathTextBox.Text, out var calibrationPath))
             {
-                _uiSettings.CalibrationFilePath = calibrationPath;
+                ActiveCalibrationFilePath = calibrationPath;
             }
 
             _visionCalibration.Save();
@@ -1512,6 +1782,7 @@ public partial class VisualCalibrationPage : UserControl
             ImportCalibrationFileButton is null ||
             LoadCalibrationProfileButton is null ||
             SaveCalibrationProfileButton is null ||
+            AxisSetComboBox is null ||
             ClickTargetToolComboBox is null)
         {
             return;
@@ -1522,8 +1793,8 @@ public partial class VisualCalibrationPage : UserControl
             out var calibrationFilePath);
         var clickTargetReady = _visionCalibration.IsToolCalibrated(GetSelectedTargetTool());
         var profileReadyToSave =
-            _uiSettings.NozzleOffsetCalibrated &&
-            _uiSettings.Nozzle2OffsetCalibrated &&
+            ActiveNozzle1Calibrated &&
+            ActiveNozzle2Calibrated &&
             _nozzle1ClickVerified &&
             _nozzle2ClickVerified &&
             calibrationPathValid &&
@@ -1545,6 +1816,12 @@ public partial class VisualCalibrationPage : UserControl
             _hostReady &&
             calibrationPathValid;
         StopCalibrationButton.IsEnabled = _calibrationRunning;
+        AxisSetComboBox.IsEnabled =
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_calibrationFileImporting;
         RestartHostButton.IsEnabled =
             !_calibrationRunning &&
             !_clickMoveRunning &&

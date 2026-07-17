@@ -45,8 +45,7 @@ public sealed class VisionCalibrationProfileStore
         }
 
         if (profile.Version != 1 ||
-            profile.XHardwareAxisNo != 1 ||
-            profile.YHardwareAxisNo != 2 ||
+            !IsSupportedAxisPair(profile.XHardwareAxisNo, profile.YHardwareAxisNo) ||
             Math.Abs(profile.PulsesPerVisionUnit - 10_000d) > 0.000001d ||
             !double.IsFinite(profile.StepXPulses) ||
             profile.StepXPulses <= 0 ||
@@ -93,6 +92,12 @@ public sealed class VisionCalibrationProfileStore
     private static bool AreFinite(params double[] values)
     {
         return values.All(double.IsFinite);
+    }
+
+    private static bool IsSupportedAxisPair(int xHardwareAxisNo, int yHardwareAxisNo)
+    {
+        return (xHardwareAxisNo == 1 && yHardwareAxisNo == 2) ||
+               (xHardwareAxisNo == 3 && yHardwareAxisNo == 4);
     }
 }
 

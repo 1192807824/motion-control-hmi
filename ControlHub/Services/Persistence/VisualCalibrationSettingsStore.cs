@@ -54,6 +54,8 @@ public sealed class VisualCalibrationSettingsStore
 
 public sealed class VisualCalibrationSettings
 {
+    public string ActiveAxisSet { get; set; } = "First";
+
     public double StepXPulses { get; set; } = 100_000;
 
     public double StepYPulses { get; set; } = 100_000;
@@ -81,4 +83,32 @@ public sealed class VisualCalibrationSettings
     public double Nozzle2OffsetYPulses { get; set; }
 
     public string ClickTargetTool { get; set; } = "Camera";
+
+    public double SecondStepXPulses { get; set; } = 100_000;
+
+    public double SecondStepYPulses { get; set; } = 100_000;
+
+    public double SecondVelocityPulsesPerSecond { get; set; } = 100_000;
+
+    public int SecondSettleMilliseconds { get; set; } = 300;
+
+    public string SecondMovePriority { get; set; } = "X";
+
+    public string SecondCalibrationFilePath { get; set; } = "";
+
+    public string SecondCalibrationProfilePath { get; set; } = "";
+
+    public bool SecondNozzleOffsetCalibrated { get; set; }
+
+    public double SecondNozzleOffsetXPulses { get; set; }
+
+    public double SecondNozzleOffsetYPulses { get; set; }
+
+    public bool SecondNozzle2OffsetCalibrated { get; set; }
+
+    public double SecondNozzle2OffsetXPulses { get; set; }
+
+    public double SecondNozzle2OffsetYPulses { get; set; }
+
+    public string SecondClickTargetTool { get; set; } = "Camera";
 }

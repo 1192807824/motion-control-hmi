@@ -154,72 +154,132 @@ public partial class HomePage : UserControl
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        // 如果当前已经在连续生产，再次点击按钮表示请求停止。
         if (_startSequenceRunning)
         {
+            // 下发停止请求，但不阻塞 UI 线程等待生产循环收尾。
             _ = RequestProductionStop();
+
+            // 停止请求已经发出，本次点击不再继续启动新流程。
             return;
         }
 
+        // 只要已有其它运动命令在执行，就不允许启动连续生产，避免多个轴命令互相抢控制权。
         if (_presetPositionMoveRunning ||
             _assignedNozzleMoveRunning ||
             _ddMoveRunning ||
             _axis13To15MoveRunning)
         {
+            // 当前设备还没空下来，直接忽略本次开始请求。
             return;
         }
 
         try
         {
+            // 连续生产必须依赖运动控制页面，未绑定时直接给出明确错误。
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+
+            // 连续生产必须依赖视觉标定页面，未绑定时直接给出明确错误。
             var visualCalibrationController = _visualCalibrationController
                 ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
-            var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+
+            // 从视觉标定配置中读取第一套 XY 轴的运动速度。
+            var velocity = VisionCalibration.VelocityPulsesPerSecond;
+
+            // 速度必须是有效正数，否则后续移动超时和下发速度都不可信。
             if (!double.IsFinite(velocity) || velocity <= 0)
             {
+                // 用异常中断启动流程，并统一进入下方错误提示。
                 throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
             }
 
             // 在任何轴开始运动前读取并验证完整自动流程参数，避免流程中途才发现输入缺失。
             var position1X = ParseFiniteCoordinate(PresetPosition1XTextBox.Text, "位置 1 X 轴绝对脉冲");
+
+            // 读取位置1的 Y 轴目标脉冲。
             var position1Y = ParseFiniteCoordinate(PresetPosition1YTextBox.Text, "位置 1 Y 轴绝对脉冲");
+
+            // 读取位置2的 X 轴目标脉冲。
             var position2X = ParseFiniteCoordinate(PresetPosition2XTextBox.Text, "位置 2 X 轴绝对脉冲");
+
+            // 读取位置2的 Y 轴目标脉冲。
             var position2Y = ParseFiniteCoordinate(PresetPosition2YTextBox.Text, "位置 2 Y 轴绝对脉冲");
+
+            // 读取 DD 马达每次相对转动的脉冲数。
             var axis0PulseDistance = ParseFiniteCoordinate(Axis0PulseTextBox.Text, "DD马达脉冲");
+
+            // DD 马达的相对运动距离不能为 0，否则连续生产会出现无效动作。
             if (axis0PulseDistance == 0)
             {
+                // 用异常提醒操作员先录入有效脉冲。
                 throw new InvalidOperationException("DD马达脉冲不能为 0。");
             }
 
             // 标定文件只在开始动作被明确触发后检查；路径失效时让用户重新选择一次。
             // 主页需要找芯片时按需加载桌面的“新纳方案.sol”，标定页离开后方案会关闭。
             var calibrationFile = GetOrSelectFirstSetCalibrationFile();
+
+            // 从第一套九点标定文件中读取机械中心点，作为每轮开始前的初始位置。
             var center = ReadFirstSetCalibrationCenter(calibrationFile.FilePath);
+
+            // 如果本次是用户重新选择的标定文件，就把新路径写回设置。
             if (calibrationFile.WasSelected)
             {
-                _visionCalibration.Settings.CalibrationFilePath = calibrationFile.FilePath;
+                // 保存新的标定文件路径，后续启动时优先复用。
+                if (_visionCalibration.ActiveAxisSet == VisionCalibrationAxisSet.Second)
+                {
+                    _visionCalibration.Settings.SecondCalibrationFilePath = calibrationFile.FilePath;
+                }
+                else
+                {
+                    _visionCalibration.Settings.CalibrationFilePath = calibrationFile.FilePath;
+                }
+
+                // 持久化视觉标定设置。
                 _visionCalibration.Save();
             }
 
+            // 创建本轮连续生产专用的取消源，停止按钮和急停都会通过它通知循环退出。
             _productionCancellation = new CancellationTokenSource();
+
+            // 创建完成信号，方便页面切换或停用时等待生产流程完全收尾。
             _productionCompletion = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // 清空停止标记，表示新的连续生产流程还没有收到停止请求。
             _productionStopRequested = false;
+
+            // 标记连续生产已进入运行状态。
             _startSequenceRunning = true;
+
+            // 刷新主页按钮状态，把“开始运行”切成“停止循环”，并锁住其它会冲突的操作。
             UpdateHomeCommandState();
 
+            // 从第 0 轮开始计数，进入循环后先自增为第 1 轮。
             var cycleNumber = 0;
+
+            // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
             {
+                // 每轮开始前先检查是否已经收到停止请求。
                 _productionCancellation.Token.ThrowIfCancellationRequested();
+
+                // 记录当前正在执行第几轮，便于状态栏提示和现场排查。
                 cycleNumber++;
+
+                // 清空上一轮的 Blob 识别显示，避免操作员误看旧结果。
                 ClearBlobInspectionResult();
+
+                // 清空上一轮缓存的吸嘴目标，避免异常重试时使用过期坐标。
                 ClearAssignedNozzleTargets();
 
                 // 当前反馈位置只用于估算本次移动所需的超时时间；读取本身不会使能或移动轴。
                 var current = motionController.CaptureCalibrationFeedback(
-                    VisionCalibrationService.FirstSetXHardwareAxisNo,
-                    VisionCalibrationService.FirstSetYHardwareAxisNo);
+                    VisionCalibration.XHardwareAxisNo,
+                    VisionCalibration.YHardwareAxisNo);
+
+                // 根据当前位置、目标中心点和配置速度估算本次回中心允许等待的最长时间。
                 var timeoutMilliseconds = CalculateStartMoveTimeout(
                     current.ActualX,
                     current.ActualY,
@@ -227,12 +287,15 @@ public partial class HomePage : UserControl
                     center.Y,
                     velocity);
 
+                // 告诉操作员第 1 步正在把第一套 XY 轴回到标定中心。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 1/8：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
+
+                // 下发第一套 XY 轴绝对移动，并等待控制器确认到位。
                 var actual = await motionController.MoveCalibrationAxesToAsync(
-                    VisionCalibrationService.FirstSetXHardwareAxisNo,
-                    VisionCalibrationService.FirstSetYHardwareAxisNo,
+                    VisionCalibration.XHardwareAxisNo,
+                    VisionCalibration.YHardwareAxisNo,
                     center.X,
                     center.Y,
                     velocity,
@@ -246,13 +309,21 @@ public partial class HomePage : UserControl
                     $"第{cycleNumber}轮 2/8：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                     $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
                     Color.FromRgb(242, 181, 68));
+
+                // 确保主页上的 VisionMaster 显示窗口已经切到 Blob 检测画面。
                 await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
 
+                // 执行一次矩形 Blob 检测，并把取消令牌传进去保证停止时能退出等待。
                 var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
                     _productionCancellation.Token);
+
+                // 把本次 Blob 识别结果显示到主页，方便操作员确认相机结果。
                 SetBlobInspectionResult(blobResult);
 
+                // 先声明吸嘴分配结果，后面 try 成功后再写入。
                 DualNozzleMechanicalTargets assignedTargets;
+
+                // 吸嘴目标换算失败时，本轮不能继续移动吸嘴，需要单独给出温和提示。
                 try
                 {
                     // 两个目标必须在本次拍照位置立即换算并缓存。后续吸嘴1移动后，
@@ -265,84 +336,139 @@ public partial class HomePage : UserControl
                 }
                 catch (Exception exception)
                 {
+                    // 换算失败后清掉吸嘴目标，防止手动重试按钮拿到旧坐标。
                     ClearAssignedNozzleTargets();
+
+                    // 在第一套 XY 状态区显示失败原因。
                     SetFirstSetPositionStatus($"吸嘴分配失败：{exception.Message}", false);
+
+                    // 在连续生产状态区提示 Blob 已经显示，但吸嘴目标换算未通过。
                     SetStartProductionStatus(
                         $"Blob已显示；吸嘴目标换算失败：{exception.Message}",
                         Color.FromRgb(242, 181, 68));
+
+                    // 本轮已经无法安全继续，退出连续生产流程。
                     return;
                 }
 
+                // 缓存本轮换算出的吸嘴目标，并同步更新吸嘴对位 UI。
                 SetAssignedNozzleTargets(assignedTargets);
+
+                // 提示第 3 步开始：吸嘴1对位物体1。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 3/8：Blob识别完成，吸嘴1正在对位物体1…",
                     Color.FromRgb(242, 181, 68));
+
+                // 执行吸嘴1对位动作。
                 await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
 
+                // 提示第 4 步开始：吸嘴2对位物体2。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 4/8：吸嘴1已到位，吸嘴2正在对位物体2…",
                     Color.FromRgb(242, 181, 68));
+
+                // 执行吸嘴2对位动作。
                 await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
 
+                // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 5/8：XY正在移动到位置1({position1X:0.###}, {position1Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
+
+                // 执行位置1的绝对移动。
                 await MovePresetPositionCoreAsync(
                     "位置 1",
                     position1X,
                     position1Y,
                     _productionCancellation.Token);
 
+                // 提示第 6 步开始：第一套 XY 移动到预设位置2。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 6/8：XY正在移动到位置2({position2X:0.###}, {position2Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
+
+                // 执行位置2的绝对移动。
                 await MovePresetPositionCoreAsync(
                     "位置 2",
                     position2X,
                     position2Y,
                     _productionCancellation.Token);
 
+                // 提示第 7 步开始：DD 马达执行第一次相对转动。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 7/8：DD马达第1次转动 {axis0PulseDistance:0.###} pulse…",
                     Color.FromRgb(242, 181, 68));
+
+                // 按配置脉冲转动 DD 马达第一次。
                 await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
 
+                // 提示第 8 步开始：DD 马达执行第二次相对转动。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮 8/8：DD马达第2次转动 {axis0PulseDistance:0.###} pulse…",
                     Color.FromRgb(242, 181, 68));
+
+                // 按同样脉冲转动 DD 马达第二次。
                 await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
 
+                // 本轮所有动作已完成，下一轮会重新回到标定中心并再次识别。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮完成，正在回初始点开始下一轮…",
                     Color.FromRgb(73, 209, 125));
+
+                // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
                 await Task.Yield();
             }
         }
         catch (OperationCanceledException)
         {
+            // 用户正常停止时显示绿色完成状态，不按异常处理。
             SetStartProductionStatus(
                 "连续运行已停止。",
                 Color.FromRgb(73, 209, 125));
         }
         catch (Exception exception)
         {
+            // 非取消异常统一显示为启动或运行失败，保留底层异常信息方便排查。
             SetStartProductionStatus(
                 $"开始流程失败：{exception.Message}",
                 Color.FromRgb(242, 122, 128));
         }
         finally
         {
+            // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
+
+            // 清除停止请求标记，保证下次启动从干净状态开始。
             _productionStopRequested = false;
+
+            // 释放取消源，避免持有旧流程资源。
             _productionCancellation?.Dispose();
+
+            // 清空取消源字段，表示当前没有正在运行的生产流程。
             _productionCancellation = null;
+
+            // 先取出完成信号，避免清空字段后无法通知等待方。
             var productionCompletion = _productionCompletion;
+
+            // 清空完成信号字段，表示当前没有可等待的生产流程。
             _productionCompletion = null;
+
+            // 恢复位置1按钮文字。
             MovePresetPosition1Button.Content = "移动";
+
+            // 恢复位置2按钮文字。
             MovePresetPosition2Button.Content = "移动";
+
+            // 恢复 DD 马达按钮文字。
             Axis0MoveButton.Content = "转动";
+
+            // 根据当前吸嘴步骤刷新吸嘴对位按钮文字。
             UpdateAssignedNozzleButtonText();
+
+            // 重新计算主页所有命令按钮的启用状态。
             UpdateHomeCommandState();
+
+            // 通知所有等待 DeactivateProductionAsync 的调用方：生产流程已经完全收尾。
             productionCompletion?.TrySetResult(true);
         }
     }
@@ -473,7 +599,7 @@ public partial class HomePage : UserControl
 
     private (string FilePath, bool WasSelected) GetOrSelectFirstSetCalibrationFile()
     {
-        var configuredPath = _visionCalibration.Settings.CalibrationFilePath?.Trim() ?? "";
+        var configuredPath = _visionCalibration.GetSnapshot().CalibrationFilePath.Trim();
         if (IsExistingFileWithExtension(configuredPath, ".xml"))
         {
             return (Path.GetFullPath(configuredPath), false);
@@ -572,8 +698,8 @@ public partial class HomePage : UserControl
             snapshot.CalibrationFilePath,
             cancellationToken);
         var current = motionController.CaptureCalibrationFeedback(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo);
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo);
         var cameraTargetX = current.ActualX +
             (transformed.CenterTransformedX - transformed.TransformedX) *
             VisionCalibrationService.PulsesPerVisionUnit;
@@ -792,7 +918,7 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+        var velocity = VisionCalibration.VelocityPulsesPerSecond;
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -807,8 +933,8 @@ public partial class HomePage : UserControl
             true);
 
         var current = motionController.CaptureCalibrationCenter(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo);
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo);
         var timeoutMilliseconds = CalculateStartMoveTimeout(
             current.ActualX,
             current.ActualY,
@@ -816,8 +942,8 @@ public partial class HomePage : UserControl
             target.Value.Y,
             velocity);
         var actual = await motionController.MoveCalibrationAxesToAsync(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo,
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo,
             target.Value.X,
             target.Value.Y,
             velocity,
@@ -1088,8 +1214,8 @@ public partial class HomePage : UserControl
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             var current = motionController.CaptureCalibrationFeedback(
-                VisionCalibrationService.FirstSetXHardwareAxisNo,
-                VisionCalibrationService.FirstSetYHardwareAxisNo);
+                VisionCalibration.XHardwareAxisNo,
+                VisionCalibration.YHardwareAxisNo);
 
             _loadingPresetPositions = true;
             xInput.Text = current.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
@@ -1144,7 +1270,7 @@ public partial class HomePage : UserControl
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y 轴绝对脉冲");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+            var velocity = VisionCalibration.VelocityPulsesPerSecond;
             if (!double.IsFinite(velocity) || velocity <= 0)
             {
                 throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -1184,7 +1310,7 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = _visionCalibration.Settings.VelocityPulsesPerSecond;
+        var velocity = VisionCalibration.VelocityPulsesPerSecond;
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -1194,8 +1320,8 @@ public partial class HomePage : UserControl
             $"正在绝对移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
             true);
         var current = motionController.CaptureCalibrationFeedback(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo);
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo);
         var timeoutMilliseconds = CalculateStartMoveTimeout(
             current.ActualX,
             current.ActualY,
@@ -1203,8 +1329,8 @@ public partial class HomePage : UserControl
             targetY,
             velocity);
         var actual = await motionController.MoveCalibrationAxesToAsync(
-            VisionCalibrationService.FirstSetXHardwareAxisNo,
-            VisionCalibrationService.FirstSetYHardwareAxisNo,
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo,
             targetX,
             targetY,
             velocity,
