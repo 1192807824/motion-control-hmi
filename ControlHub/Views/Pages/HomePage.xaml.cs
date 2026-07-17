@@ -27,6 +27,7 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
+    private const int TestStationDwellMilliseconds = 1_000;
     private static readonly int[] MoveOutAxisNos = [13, 14, 15];
     private static readonly IReadOnlyDictionary<int, int> TestStationAxisByStation =
         new Dictionary<int, int>
@@ -625,7 +626,13 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         await motionController.MoveAxesAbsoluteAsync(axisTargets, cancellationToken);
         SetAxis13To15MoveStatus(
-            $"{string.Join("，", stations)} 下压到位，正在按模式 {TestStationHomeMode} 回原…",
+            $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
+            Color.FromRgb(242, 181, 68));
+
+        await Task.Delay(TestStationDwellMilliseconds, cancellationToken);
+
+        SetAxis13To15MoveStatus(
+            $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原…",
             Color.FromRgb(242, 181, 68));
 
         await motionController.HomeAxesAsync(
