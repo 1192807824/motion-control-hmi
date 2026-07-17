@@ -32,6 +32,8 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int FirstUnloadStation = 13;
     private const int SecondUnloadStation = 14;
+    private const double FirstSetXyVelocity = 600_000d;
+    private const double SecondSetXyVelocity = 600_000d;
     private const double SecondSetNozzle1PickupX = 1_606_271d;
     private const double SecondSetNozzle1PickupY = -222_828d;
     private const double SecondSetNozzle2PickupX = 1_606_631d;
@@ -477,8 +479,8 @@ public partial class HomePage : UserControl
             var visualCalibrationController = _visualCalibrationController
                 ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
 
-            // 从视觉标定配置中读取第一套 XY 轴的运动速度。
-            var velocity = VisionCalibration.VelocityPulsesPerSecond;
+            // 主页生产流程固定使用第一套 XY 轴速度，不受视觉标定页配置影响。
+            var velocity = FirstSetXyVelocity;
 
             // 速度必须是有效正数，否则后续移动超时和下发速度都不可信。
             if (!double.IsFinite(velocity) || velocity <= 0)
@@ -957,7 +959,7 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = _visionCalibration.Settings.SecondVelocityPulsesPerSecond;
+        var velocity = SecondSetXyVelocity;
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第二套XY的移动速度配置无效。");
@@ -1709,7 +1711,7 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = VisionCalibration.VelocityPulsesPerSecond;
+        var velocity = FirstSetXyVelocity;
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -2037,7 +2039,7 @@ public partial class HomePage : UserControl
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y 轴绝对脉冲");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            var velocity = VisionCalibration.VelocityPulsesPerSecond;
+            var velocity = FirstSetXyVelocity;
             if (!double.IsFinite(velocity) || velocity <= 0)
             {
                 throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -2077,7 +2079,7 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = VisionCalibration.VelocityPulsesPerSecond;
+        var velocity = FirstSetXyVelocity;
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
