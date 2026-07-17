@@ -153,7 +153,7 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: true))
+        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: true, breakVacuumEnabled: true))
         {
             throw new InvalidOperationException($"Z{nozzleNumber}真空破开启失败。");
         }
@@ -166,11 +166,13 @@ public partial class HomePage : UserControl
         {
             if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: false))
             {
-                throw new InvalidOperationException($"Z{nozzleNumber}真空破关闭失败。");
+                throw new InvalidOperationException($"Z{nozzleNumber}真空破和真空吸关闭失败。");
             }
         }
 
-        SetFirstSetPositionStatus($"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms 并关闭。", true);
+        SetFirstSetPositionStatus(
+            $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
+            true);
     }
 
     /// <summary>
