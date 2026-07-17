@@ -397,6 +397,128 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    public Task<CalibrationCenterPosition> StartCalibrationAxesMoveToAsync(
+        int xHardwareAxisNo,
+        int yHardwareAxisNo,
+        double targetX,
+        double targetY,
+        double velocity,
+        double positionTolerance,
+        int moveTimeoutMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        if (xHardwareAxisNo < 0 || yHardwareAxisNo < 0 || xHardwareAxisNo == yHardwareAxisNo)
+        {
+            throw new ArgumentException("X/Y 轴号必须有效且不能相同。");
+        }
+
+        if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetX), "点击移动目标必须是有效数值。");
+        }
+
+        if (!double.IsFinite(velocity) || velocity <= 0 ||
+            !double.IsFinite(positionTolerance) || positionTolerance <= 0 ||
+            moveTimeoutMilliseconds < 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(velocity), "点击移动的速度、容差或超时参数无效。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能启动XY后台移动。");
+        }
+
+        var xAxis = GetCalibrationAxis(xHardwareAxisNo, "X");
+        var yAxis = GetCalibrationAxis(yHardwareAxisNo, "Y");
+        _ = ReadReadyCalibrationAxis(xAxis, "X");
+        _ = ReadReadyCalibrationAxis(yAxis, "Y");
+
+        var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _calibrationMotionCancellation = linkedCancellation;
+        return RunStartedCalibrationAxesMoveAsync(
+            xAxis,
+            yAxis,
+            xHardwareAxisNo,
+            yHardwareAxisNo,
+            targetX,
+            targetY,
+            velocity,
+            positionTolerance,
+            moveTimeoutMilliseconds,
+            linkedCancellation);
+    }
+
+    private async Task<CalibrationCenterPosition> RunStartedCalibrationAxesMoveAsync(
+        AxisStatus xAxis,
+        AxisStatus yAxis,
+        int xHardwareAxisNo,
+        int yHardwareAxisNo,
+        double targetX,
+        double targetY,
+        double velocity,
+        double positionTolerance,
+        int moveTimeoutMilliseconds,
+        CancellationTokenSource linkedCancellation)
+    {
+        var completed = false;
+        try
+        {
+            await MoveCalibrationAxesAsync(
+                xAxis,
+                yAxis,
+                targetX,
+                targetY,
+                velocity,
+                positionTolerance,
+                moveTimeoutMilliseconds,
+                linkedCancellation.Token);
+            var settled = ReadSettledCalibrationPosition(
+                xAxis,
+                yAxis,
+                targetX,
+                targetY,
+                positionTolerance);
+            completed = true;
+            return new CalibrationCenterPosition(
+                xHardwareAxisNo,
+                yHardwareAxisNo,
+                settled.X,
+                settled.Y);
+        }
+        finally
+        {
+            if (!completed && _motionCard.IsOpen)
+            {
+                StopCalibrationAxesNoThrow(xAxis, yAxis);
+            }
+
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            linkedCancellation.Dispose();
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
     /// <summary>
     /// 以相对脉冲方式移动指定硬件轴，并在到位或失败停止后返回最终轴快照。
     /// 该入口使用当前轴的速度与运动曲线配置，且与其它运动、回零、停止流程互斥。
@@ -404,7 +526,8 @@ public partial class MotionControlPage : UserControl
     public async Task<MotionAxisSnapshot> MoveAxisRelativeAsync(
         int hardwareAxisNo,
         double pulseDistance,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (hardwareAxisNo < 0)
         {
@@ -433,7 +556,7 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(allowedMovingAxisNos, hardwareAxisNo))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行相对脉冲移动。");
         }
@@ -4538,6 +4661,35 @@ public partial class MotionControlPage : UserControl
                _homeDeadlines.Count > 0 ||
                _homeSequenceCancellation is not null ||
                (Axes?.Any(axis => axis.IsAvailable && axis.IsMoving) ?? false);
+    }
+
+    private bool IsAnyMotionWorkflowActiveExcept(
+        IReadOnlyCollection<int>? ignoredAxisNos,
+        int activeHardwareAxisNo)
+    {
+        if (ignoredAxisNos is null || ignoredAxisNos.Count == 0)
+        {
+            return IsAnyMotionWorkflowActive();
+        }
+
+        var ignored = ignoredAxisNos
+            .Where(axisNo => axisNo >= 0 && axisNo != activeHardwareAxisNo)
+            .ToHashSet();
+        if (ignored.Count == 0)
+        {
+            return IsAnyMotionWorkflowActive();
+        }
+
+        return _calibrationOperationActive ||
+               (_activeJogAxisNo is { } activeJogAxisNo && !ignored.Contains(activeJogAxisNo)) ||
+               (_activePositionAxisNo is { } activePositionAxisNo && !ignored.Contains(activePositionAxisNo)) ||
+               _pendingStopAxisNos.Any(axisNo => !ignored.Contains(axisNo)) ||
+               _homeDeadlines.Keys.Any(axisNo => !ignored.Contains(axisNo)) ||
+               _homeSequenceCancellation is not null ||
+               (Axes?.Any(axis =>
+                   axis.IsAvailable &&
+                   axis.IsMoving &&
+                   !ignored.Contains(axis.HardwareAxisNo)) ?? false);
     }
 
     private bool IsAxisMotionWorkflowActive(int hardwareAxisNo)

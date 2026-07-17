@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
+using ControlHub.Services.Motion;
 using ControlHub.Services.Persistence;
 using ControlHub.Services.Vision;
 using ControlHub.Views.Controls;
@@ -28,6 +29,7 @@ public partial class HomePage : UserControl
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
     private const int TestStationDwellMilliseconds = 1_000;
+    private const int MoveAwayBeforeDdMilliseconds = 500;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
@@ -272,8 +274,8 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴取料；放料前按需要让 DD 转两工位并执行 4/5/6 测试站；
-    /// 然后放到 1/2 工位。放料完成后立即进入下一轮回中心拍照。
+    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴取料、放到 1/2 工位并关闭吸/破；
+    /// 然后XY先离开放料点 0.5 秒，DD 连续推进两工位并执行 4/5/6 测试站。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -379,9 +381,6 @@ public partial class HomePage : UserControl
             var carouselStations = CreateCarouselStationStates();
             _carouselVisualStepOffset = 0;
             UpdateCarouselStationDisplay(carouselStations);
-
-            // 第一轮直接放 1/2；之后每轮放料前先让转盘转两格，并对 4/5/6 已占料工位执行测试。
-            var advanceCarouselBeforePlacement = false;
 
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
@@ -500,18 +499,6 @@ public partial class HomePage : UserControl
                 // 吸嘴2到达物体2后，打开 Z2 对应真空吸。
                 EnableFirstSetNozzleVacuum(2, _productionCancellation.Token);
 
-                if (advanceCarouselBeforePlacement)
-                {
-                    SetStartProductionStatus(
-                        $"第{cycleNumber}轮：放料前 DD 正在转两工位，并执行 4/5/6 工位测试…",
-                        Color.FromRgb(242, 181, 68));
-                    await AdvanceCarouselTwoStationsWithTestsAsync(
-                        carouselStations,
-                        axis0PulseDistance,
-                        _productionCancellation.Token);
-                    advanceCarouselBeforePlacement = false;
-                }
-
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：Z2真空吸已开启，XY正在放料到1工位({position1X:0.###}, {position1Y:0.###})…",
@@ -552,11 +539,38 @@ public partial class HomePage : UserControl
                 carouselStations[1].SetLoaded();
                 carouselStations[2].SetLoaded();
                 UpdateCarouselStationDisplay(carouselStations);
-                advanceCarouselBeforePlacement = true;
 
-                // 放料后不等待 DD 转两次，下一轮立即回中心拍照；真正放下一组料前再转盘两工位。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，正在回初始点开始下一轮拍照…",
+                    $"第{cycleNumber}轮放料完成，Z1/Z2真空吸和真空破已关闭，XY正在离开放料点…",
+                    Color.FromRgb(73, 209, 125));
+                var xyReturnToCenterTask = StartFirstSetReturnToCenterAsync(
+                    motionController,
+                    center,
+                    velocity,
+                    _productionCancellation.Token);
+                try
+                {
+                    await Task.Delay(MoveAwayBeforeDdMilliseconds, _productionCancellation.Token);
+                    await AdvanceCarouselTwoStationsWithTestsAsync(
+                        carouselStations,
+                        axis0PulseDistance,
+                        [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
+                        xyReturnToCenterTask,
+                        _productionCancellation.Token);
+
+                    var returnedCenter = await xyReturnToCenterTask;
+                    SetFirstSetPositionStatus(
+                        $"放料后XY已回到中心：X={returnedCenter.ActualX:0.###}，Y={returnedCenter.ActualY:0.###} pulse。",
+                        true);
+                }
+                catch
+                {
+                    await ObserveTaskNoThrowAsync(xyReturnToCenterTask);
+                    throw;
+                }
+
+                SetStartProductionStatus(
+                    $"第{cycleNumber}轮放料完成，DD已转动两次并完成对应测试，开始下一轮拍照…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -633,9 +647,52 @@ public partial class HomePage : UserControl
         return true;
     }
 
+    private Task<CalibrationCenterPosition> StartFirstSetReturnToCenterAsync(
+        MotionControlPage motionController,
+        (double X, double Y) center,
+        double velocity,
+        CancellationToken cancellationToken)
+    {
+        var current = motionController.CaptureCalibrationFeedback(
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo);
+        var timeoutMilliseconds = CalculateStartMoveTimeout(
+            current.ActualX,
+            current.ActualY,
+            center.X,
+            center.Y,
+            velocity);
+
+        SetFirstSetPositionStatus(
+            $"放料后XY正在回中心：X={center.X:0.###}，Y={center.Y:0.###} pulse。",
+            true);
+        return motionController.StartCalibrationAxesMoveToAsync(
+            VisionCalibration.XHardwareAxisNo,
+            VisionCalibration.YHardwareAxisNo,
+            center.X,
+            center.Y,
+            velocity,
+            positionTolerance: 10d,
+            moveTimeoutMilliseconds: timeoutMilliseconds,
+            cancellationToken: cancellationToken);
+    }
+
+    private static async Task ObserveTaskNoThrowAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch
+        {
+        }
+    }
+
     private async Task AdvanceCarouselTwoStationsWithTestsAsync(
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
+        IReadOnlyCollection<int>? allowedMovingAxisNos,
+        Task? xyReturnToCenterTask,
         CancellationToken cancellationToken)
     {
         if (carouselStations.Length <= CarouselStationCount)
@@ -649,16 +706,20 @@ public partial class HomePage : UserControl
             SetStartProductionStatus(
                 $"DD马达正在第 {turn}/2 次转动 {axis0PulseDistance:0.###} pulse…",
                 Color.FromRgb(242, 181, 68));
-            await MoveAxis0RelativeCoreAsync(axis0PulseDistance, cancellationToken);
+            await MoveAxis0RelativeCoreAsync(
+                axis0PulseDistance,
+                cancellationToken,
+                allowedMovingAxisNos);
 
             AdvanceCarouselOccupancy(carouselStations);
             UpdateCarouselStationDisplay(carouselStations);
-            await RunOccupiedTestStationsAsync(carouselStations, cancellationToken);
+            await RunOccupiedTestStationsAsync(carouselStations, xyReturnToCenterTask, cancellationToken);
         }
     }
 
     private async Task RunOccupiedTestStationsAsync(
         CarouselStationState[] carouselStations,
+        Task? xyReturnToCenterTask,
         CancellationToken cancellationToken)
     {
         var axisTargets = TestStationAxisByStation
@@ -678,6 +739,14 @@ public partial class HomePage : UserControl
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 有料，测试轴同步下压 {MoveOutAbsolutePosition:0.###} pulse…",
             Color.FromRgb(242, 181, 68));
+
+        if (xyReturnToCenterTask is not null && !xyReturnToCenterTask.IsCompleted)
+        {
+            SetAxis13To15MoveStatus(
+                $"{string.Join("，", stations)} 有料，等待XY回中心完成后下压测试站…",
+                Color.FromRgb(242, 181, 68));
+            await xyReturnToCenterTask;
+        }
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
@@ -1379,7 +1448,8 @@ public partial class HomePage : UserControl
 
     private async Task MoveAxis0RelativeCoreAsync(
         double pulseDistance,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (!double.IsFinite(pulseDistance) || pulseDistance == 0)
         {
@@ -1395,7 +1465,8 @@ public partial class HomePage : UserControl
         var settled = await motionController.MoveAxisRelativeAsync(
             hardwareAxisNo: 0,
             pulseDistance: pulseDistance,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            allowedMovingAxisNos: allowedMovingAxisNos);
         SetAxis0MoveStatus(
             $"轴0完成：{pulseDistance:0.###} pulse，当前位置 {settled.FeedbackPosition:0.###}。",
             Color.FromRgb(73, 209, 125));
