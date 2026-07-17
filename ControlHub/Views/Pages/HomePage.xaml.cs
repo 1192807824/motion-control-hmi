@@ -31,6 +31,7 @@ public partial class HomePage : UserControl
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
     private const double TestStationHomeVelocity = 200_000d;
+    private const double TestStationHomeOffsetPosition = 0d;
     private const int TestStationDwellMilliseconds = 1_000;
     private const int MoveAwayBeforeDdMilliseconds = 500;
     private const string CarouselStatusLoaded = "有料";
@@ -843,13 +844,13 @@ public partial class HomePage : UserControl
             $"{string.Join("，", stations)} 停留完成，测试站正在回原，DD等待回原完成…",
             Color.FromRgb(242, 181, 68));
         SetAxis13To15MoveStatus(
-            $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原，低速/高速 {TestStationHomeVelocity:0.###} units/s…",
+            $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原点，低速/高速 {TestStationHomeVelocity:0.###} units/s…",
             Color.FromRgb(242, 181, 68));
 
         await motionController.HomeAxesAsync(
             axisTargets.Keys.ToArray(),
             TestStationHomeMode,
-            MoveOutAbsolutePosition,
+            TestStationHomeOffsetPosition,
             cancellationToken,
             TestStationHomeVelocity,
             TestStationHomeVelocity,
