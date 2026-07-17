@@ -1133,7 +1133,9 @@ public partial class MotionControlPage : UserControl
             throw new ArgumentOutOfRangeException(nameof(bitNo));
         }
 
-        if (!EnsureConnected())
+        // 该入口供自动流程控制真空阀。上下料会与其它轴组并行，不能因为
+        // _calibrationOperationActive 而阻止独立数字输出；安全锁和断线仍必须拦截。
+        if (!EnsureProcessIoWriteReady())
         {
             return false;
         }
@@ -4600,6 +4602,20 @@ public partial class MotionControlPage : UserControl
                 FormatException(exception));
             return false;
         }
+    }
+
+    private bool EnsureProcessIoWriteReady()
+    {
+        if (_motionSafetyLock)
+        {
+            RecordAlarmOnce(
+                "process-io-blocked-by-safety-lock",
+                "PROCESS-IO-SAFETY-LOCK",
+                $"生产真空IO已被安全锁阻止：{_motionSafetyLockReason ?? "停止安全链异常"}。请确认机构安全并重启程序。");
+            return false;
+        }
+
+        return _motionCard.IsOpen;
     }
 
     private bool EnsureConnected()
