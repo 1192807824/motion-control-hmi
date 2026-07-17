@@ -609,7 +609,7 @@ public partial class HomePage : UserControl
                 try
                 {
                     await Task.Delay(MoveAwayBeforeDdMilliseconds, _productionCancellation.Token);
-                    carouselAdvanceResult = await AdvanceCarouselUntilTestOrTwoStationsAsync(
+                    carouselAdvanceResult = await AdvanceCarouselExactlyTwoStationsAsync(
                         carouselStations,
                         axis0PulseDistance,
                         [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
@@ -745,7 +745,7 @@ public partial class HomePage : UserControl
         }
     }
 
-    private async Task<CarouselAdvanceResult> AdvanceCarouselUntilTestOrTwoStationsAsync(
+    private async Task<CarouselAdvanceResult> AdvanceCarouselExactlyTwoStationsAsync(
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
         IReadOnlyCollection<int>? allowedMovingAxisNos,
@@ -781,15 +781,15 @@ public partial class HomePage : UserControl
                 carouselStations,
                 cancellationToken);
             testedStationCount += testedThisTurn;
-            if (testedThisTurn > 0)
-            {
-                return new CarouselAdvanceResult(turn, testedStationCount);
-            }
         }
 
         SetAxis13To15MoveStatus(
-            $"DD已连续转动 {maximumTurnsBeforeReload} 次，5/6/7工位仍无料，返回继续上料。",
-            Color.FromRgb(159, 177, 191));
+            testedStationCount > 0
+                ? $"DD已固定转动 {maximumTurnsBeforeReload} 次，测试站共完成 {testedStationCount} 次测试，返回继续上料。"
+                : $"DD已固定转动 {maximumTurnsBeforeReload} 次，5/6/7工位当前无料，返回继续上料。",
+            testedStationCount > 0
+                ? Color.FromRgb(73, 209, 125)
+                : Color.FromRgb(159, 177, 191));
         return new CarouselAdvanceResult(maximumTurnsBeforeReload, testedStationCount);
     }
 

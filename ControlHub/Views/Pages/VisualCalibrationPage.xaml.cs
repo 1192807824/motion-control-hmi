@@ -1433,7 +1433,7 @@ public partial class VisualCalibrationPage : UserControl
 
         StepXPulsesTextBox.Text = FormatPositiveSetting(stepX, 100_000);
         StepYPulsesTextBox.Text = FormatPositiveSetting(stepY, 100_000);
-        VelocityTextBox.Text = FormatPositiveSetting(velocity, 100_000);
+        VelocityTextBox.Text = FormatPositiveSetting(velocity, 200_000);
         SettleMillisecondsTextBox.Text = Math.Max(0, settleMilliseconds)
             .ToString(CultureInfo.CurrentCulture);
 
@@ -1653,7 +1653,7 @@ public partial class VisualCalibrationPage : UserControl
 
         StepXPulsesTextBox.Text = FormatPositiveSetting(profile.StepXPulses, 100_000);
         StepYPulsesTextBox.Text = FormatPositiveSetting(profile.StepYPulses, 100_000);
-        VelocityTextBox.Text = FormatPositiveSetting(profile.VelocityPulsesPerSecond, 100_000);
+        VelocityTextBox.Text = FormatPositiveSetting(profile.VelocityPulsesPerSecond, 200_000);
         SettleMillisecondsTextBox.Text = profile.SettleMilliseconds.ToString(CultureInfo.CurrentCulture);
         MovePriorityComboBox.SelectedItem = MovePriorityComboBox.Items
             .OfType<ComboBoxItem>()

@@ -119,7 +119,7 @@ public sealed class VisionCalibrationProfile
 
     public double StepYPulses { get; set; } = 100_000d;
 
-    public double VelocityPulsesPerSecond { get; set; } = 100_000d;
+    public double VelocityPulsesPerSecond { get; set; } = 200_000d;
 
     public int SettleMilliseconds { get; set; } = 300;
 

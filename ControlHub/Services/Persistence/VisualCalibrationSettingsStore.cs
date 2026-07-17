@@ -60,7 +60,7 @@ public sealed class VisualCalibrationSettings
 
     public double StepYPulses { get; set; } = 100_000;
 
-    public double VelocityPulsesPerSecond { get; set; } = 100_000;
+    public double VelocityPulsesPerSecond { get; set; } = 200_000;
 
     public int SettleMilliseconds { get; set; } = 300;
 
@@ -88,7 +88,7 @@ public sealed class VisualCalibrationSettings
 
     public double SecondStepYPulses { get; set; } = 100_000;
 
-    public double SecondVelocityPulsesPerSecond { get; set; } = 100_000;
+    public double SecondVelocityPulsesPerSecond { get; set; } = 200_000;
 
     public int SecondSettleMilliseconds { get; set; } = 300;
 
