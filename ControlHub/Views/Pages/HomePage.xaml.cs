@@ -18,10 +18,10 @@ public partial class HomePage : UserControl
 {
     private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionBlobModuleName = "Blob分析1";
-    private const int FirstSetZ1VacuumOutputChannel = 7;
-    private const int FirstSetZ1BreakVacuumOutputChannel = 6;
-    private const int FirstSetZ2VacuumOutputChannel = 9;
-    private const int FirstSetZ2BreakVacuumOutputChannel = 8;
+    private const int FirstSetZ1VacuumOutputChannel = 6;
+    private const int FirstSetZ1BreakVacuumOutputChannel = 7;
+    private const int FirstSetZ2VacuumOutputChannel = 8;
+    private const int FirstSetZ2BreakVacuumOutputChannel = 9;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double MoveOutAbsolutePosition = 250_000d;
@@ -153,7 +153,7 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: true, breakVacuumEnabled: true))
+        if (!SetFirstSetNozzleVacuumOutputs(nozzleNumber, vacuumEnabled: false, breakVacuumEnabled: true))
         {
             throw new InvalidOperationException($"Z{nozzleNumber}真空破开启失败。");
         }
