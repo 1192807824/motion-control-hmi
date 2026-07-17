@@ -7,7 +7,9 @@
              mc:Ignorable="d"
              d:DesignWidth="1680"
              d:DesignHeight="854"
-             Background="#0F2335">
+             Background="#0F2335"
+             UseLayoutRounding="True"
+             SnapsToDevicePixels="True">
     <UserControl.Resources>
         <SolidColorBrush x:Key="PageBackground" Color="#0F2335" />
         <SolidColorBrush x:Key="PanelBackground" Color="#162E43" />
@@ -143,6 +145,38 @@
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
 
+        <Style x:Key="CarouselStationCard" TargetType="Border">
+            <Setter Property="Width" Value="78" />
+            <Setter Property="Height" Value="54" />
+            <Setter Property="Background" Value="#153B35" />
+            <Setter Property="BorderBrush" Value="#36C46A" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="6,5" />
+        </Style>
+
+        <Style x:Key="CarouselStationNumber" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#EAFBF0" />
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="CarouselStationResult" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#36C46A" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style x:Key="CarouselStationObject" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#9FB1BF" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+
         <Style x:Key="AlarmRow" TargetType="Border">
             <Setter Property="BorderBrush" Value="#2D4A61" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
@@ -205,8 +239,8 @@
                     <RowDefinition Height="176" />
                     <RowDefinition Height="8" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="8" />
-                    <RowDefinition Height="180" />
+                    <RowDefinition Height="0" />
+                    <RowDefinition Height="0" />
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Margin="2,0">
@@ -382,7 +416,14 @@
                 </Grid>
 
                 <!-- 本次海康拍照及 Blob 分析结果显示区。 -->
-                <Border Grid.Row="3" Style="{StaticResource Panel}" Padding="12,10">
+                <Grid Grid.Row="3">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Style="{StaticResource Panel}" Padding="12,10">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="36" />
@@ -431,14 +472,19 @@
                                 <Viewbox x:Name="BlobInspectionImageViewbox"
                                          Stretch="Uniform"
                                          StretchDirection="Both"
-                                         Visibility="Collapsed">
+                                         Visibility="Collapsed"
+                                         SnapsToDevicePixels="True"
+                                         RenderOptions.BitmapScalingMode="NearestNeighbor">
                                     <Grid x:Name="BlobInspectionImageSurface"
                                           Width="1"
                                           Height="1"
-                                          Background="Black">
+                                          Background="Black"
+                                          SnapsToDevicePixels="True"
+                                          RenderOptions.BitmapScalingMode="NearestNeighbor">
                                         <Image x:Name="BlobInspectionImage"
                                                Stretch="Fill"
-                                               SnapsToDevicePixels="True" />
+                                               SnapsToDevicePixels="True"
+                                               RenderOptions.BitmapScalingMode="NearestNeighbor" />
                                         <Canvas x:Name="BlobInspectionOverlayCanvas"
                                                 Width="1"
                                                 Height="1"
@@ -469,6 +515,143 @@
                         </Border>
                     </Grid>
                 </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="14,12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="36" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="34" />
+                            </Grid.RowDefinitions>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="4" Height="20" Background="{StaticResource SuccessGreen}" CornerRadius="2" Margin="0,0,9,0" />
+                                    <TextBlock Text="16工位转盘状态"
+                                               Foreground="{StaticResource TextPrimary}"
+                                               FontSize="14"
+                                               FontWeight="Bold"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Ellipse Width="7" Height="7" Fill="{StaticResource SuccessGreen}" Margin="0,0,6,0" />
+                                    <TextBlock Text="默认空工位" Foreground="{StaticResource SuccessGreen}" FontSize="11" FontWeight="Bold" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Viewbox Grid.Row="1"
+                                     Stretch="Uniform"
+                                     StretchDirection="DownOnly"
+                                     Margin="0,4,0,2">
+                                <Canvas Width="560" Height="560">
+                                    <Ellipse Width="360"
+                                             Height="360"
+                                             Canvas.Left="100"
+                                             Canvas.Top="100"
+                                             Fill="#10283A"
+                                             Stroke="#29465C"
+                                             StrokeThickness="2" />
+                                    <Ellipse Width="228"
+                                             Height="228"
+                                             Canvas.Left="166"
+                                             Canvas.Top="166"
+                                             Fill="#0C1F2F"
+                                             Stroke="#345269"
+                                             StrokeThickness="1" />
+                                    <StackPanel Width="160"
+                                                Height="72"
+                                                Canvas.Left="200"
+                                                Canvas.Top="244"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="一圈16工位"
+                                                   Foreground="{StaticResource TextPrimary}"
+                                                   FontSize="22"
+                                                   FontWeight="Bold"
+                                                   TextAlignment="Center" />
+                                        <TextBlock Text="待检测 / 有物体 / 检测完成"
+                                                   Foreground="{StaticResource TextSecondary}"
+                                                   FontSize="12"
+                                                   Margin="0,8,0,0"
+                                                   TextAlignment="Center" />
+                                    </StackPanel>
+
+                                    <Border Canvas.Left="241" Canvas.Top="16" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="01" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="327" Canvas.Top="33" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="02" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="400" Canvas.Top="82" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="03" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="449" Canvas.Top="155" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="04" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="466" Canvas.Top="241" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="05" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="449" Canvas.Top="327" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="06" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="400" Canvas.Top="400" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="07" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="327" Canvas.Top="449" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="08" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="241" Canvas.Top="466" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="09" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="155" Canvas.Top="449" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="10" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="82" Canvas.Top="400" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="11" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="33" Canvas.Top="327" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="12" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="16" Canvas.Top="241" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="13" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="33" Canvas.Top="155" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="14" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="82" Canvas.Top="82" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="15" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                    <Border Canvas.Left="155" Canvas.Top="33" Style="{StaticResource CarouselStationCard}">
+                                        <StackPanel><TextBlock Text="16" Style="{StaticResource CarouselStationNumber}" /><TextBlock Text="检测完成" Style="{StaticResource CarouselStationResult}" /><TextBlock Text="空工位" Style="{StaticResource CarouselStationObject}" /></StackPanel>
+                                    </Border>
+                                </Canvas>
+                            </Viewbox>
+
+                            <Grid Grid.Row="2" Margin="2,2,2,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Ellipse Width="8" Height="8" Fill="#6F8392" Margin="0,0,6,0" />
+                                    <TextBlock Text="待检测" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Ellipse Width="8" Height="8" Fill="{StaticResource WarningAmber}" Margin="0,0,6,0" />
+                                    <TextBlock Text="有物体" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessGreen}" Margin="0,0,6,0" />
+                                    <TextBlock Text="检测完成" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
 
                 <Grid Grid.Row="3" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
@@ -605,7 +788,7 @@
                     </Border>
                 </Grid>
 
-                <Border Grid.Row="5" Style="{StaticResource Panel}">
+                <Border Grid.Row="5" Visibility="Collapsed" Style="{StaticResource Panel}">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="42" />
