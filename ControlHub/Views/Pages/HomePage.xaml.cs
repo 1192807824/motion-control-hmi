@@ -603,10 +603,11 @@ public partial class HomePage : UserControl
                     center,
                     velocity,
                     _productionCancellation.Token);
+                CarouselAdvanceResult carouselAdvanceResult;
                 try
                 {
                     await Task.Delay(MoveAwayBeforeDdMilliseconds, _productionCancellation.Token);
-                    await AdvanceCarouselOneStationWithTestsAsync(
+                    carouselAdvanceResult = await AdvanceCarouselUntilTestOrTwoStationsAsync(
                         carouselStations,
                         axis0PulseDistance,
                         [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
@@ -625,7 +626,7 @@ public partial class HomePage : UserControl
                 }
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD已转动一次并完成对应测试，开始下一轮拍照…",
+                    $"第{cycleNumber}轮放料完成，DD已转动 {carouselAdvanceResult.Turns} 次，{carouselAdvanceResult.TestedStationCount} 个测试工位已处理，开始下一轮拍照…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -743,7 +744,7 @@ public partial class HomePage : UserControl
         }
     }
 
-    private async Task AdvanceCarouselOneStationWithTestsAsync(
+    private async Task<CarouselAdvanceResult> AdvanceCarouselUntilTestOrTwoStationsAsync(
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
         IReadOnlyCollection<int>? allowedMovingAxisNos,
@@ -755,21 +756,48 @@ public partial class HomePage : UserControl
             throw new ArgumentException("转盘工位缓存长度无效。", nameof(carouselStations));
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
-        SetStartProductionStatus(
-            $"DD马达正在转动 {axis0PulseDistance:0.###} pulse…",
-            Color.FromRgb(242, 181, 68));
-        await MoveAxis0RelativeCoreAsync(
-            axis0PulseDistance,
-            cancellationToken,
-            allowedMovingAxisNos);
+        var testedStationCount = 0;
+        const int maximumTurnsBeforeReload = 2;
+        for (var turn = 1; turn <= maximumTurnsBeforeReload; turn++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var loadedTestStationCount = CountLoadedTestStations(carouselStations);
+            SetStartProductionStatus(
+                loadedTestStationCount > 0
+                    ? $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse，测试站已有料，转后执行测试…"
+                    : $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse，有料工位未进测试站则继续补转…",
+                Color.FromRgb(242, 181, 68));
+            await MoveAxis0RelativeCoreAsync(
+                axis0PulseDistance,
+                cancellationToken,
+                allowedMovingAxisNos);
 
-        AdvanceCarouselOccupancy(carouselStations);
-        UpdateCarouselStationDisplay(carouselStations);
-        await RunOccupiedTestStationsAsync(carouselStations, xyReturnToCenterTask, cancellationToken);
+            AdvanceCarouselOccupancy(carouselStations);
+            UpdateCarouselStationDisplay(carouselStations);
+            var testedThisTurn = await RunOccupiedTestStationsAsync(
+                carouselStations,
+                xyReturnToCenterTask,
+                cancellationToken);
+            testedStationCount += testedThisTurn;
+            if (testedThisTurn > 0)
+            {
+                return new CarouselAdvanceResult(turn, testedStationCount);
+            }
+        }
+
+        SetAxis13To15MoveStatus(
+            $"DD已连续转动 {maximumTurnsBeforeReload} 次，5/6/7工位仍无料，返回继续上料。",
+            Color.FromRgb(159, 177, 191));
+        return new CarouselAdvanceResult(maximumTurnsBeforeReload, testedStationCount);
     }
 
-    private async Task RunOccupiedTestStationsAsync(
+    private int CountLoadedTestStations(IReadOnlyList<CarouselStationState> carouselStations)
+    {
+        return TestStationAxisByStation.Keys.Count(station =>
+            station < carouselStations.Count && carouselStations[station].Occupied);
+    }
+
+    private async Task<int> RunOccupiedTestStationsAsync(
         CarouselStationState[] carouselStations,
         Task? xyReturnToCenterTask,
         CancellationToken cancellationToken)
@@ -780,7 +808,7 @@ public partial class HomePage : UserControl
         if (axisTargets.Count == 0)
         {
             SetAxis13To15MoveStatus("5/6/7工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
-            return;
+            return 0;
         }
 
         var stations = TestStationAxisByStation
@@ -832,6 +860,7 @@ public partial class HomePage : UserControl
             $"{string.Join("，", stations)} 测试站已回原完成。",
             Color.FromRgb(73, 209, 125));
         UpdateCarouselStationDisplay(carouselStations);
+        return axisTargets.Count;
     }
 
     private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
@@ -960,6 +989,8 @@ public partial class HomePage : UserControl
 
         return states;
     }
+
+    private readonly record struct CarouselAdvanceResult(int Turns, int TestedStationCount);
 
     private sealed class CarouselStationState
     {
