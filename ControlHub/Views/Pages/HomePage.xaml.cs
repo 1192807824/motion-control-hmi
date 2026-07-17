@@ -25,7 +25,7 @@ public partial class HomePage : UserControl
     private const int FirstSetZ2BreakVacuumOutputBit = 16;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
-    private const double DdMotorCompletionTolerance = 5d;
+    private const double HomePageCompletionTolerance = 100d;
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const int CarouselStationCount = 16;
@@ -479,7 +479,7 @@ public partial class HomePage : UserControl
                     center.X,
                     center.Y,
                     velocity,
-                    positionTolerance: 10d,
+                    positionTolerance: HomePageCompletionTolerance,
                     moveTimeoutMilliseconds: timeoutMilliseconds,
                     cancellationToken: _productionCancellation.Token);
 
@@ -729,7 +729,7 @@ public partial class HomePage : UserControl
             center.X,
             center.Y,
             velocity,
-            positionTolerance: 10d,
+            positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken);
     }
@@ -831,7 +831,8 @@ public partial class HomePage : UserControl
             axisTargets,
             cancellationToken,
             TestStationMoveTimeoutMilliseconds,
-            [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo]);
+            [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
+            HomePageCompletionTolerance);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetAxis13To15MoveStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
@@ -1487,7 +1488,7 @@ public partial class HomePage : UserControl
             target.Value.X,
             target.Value.Y,
             velocity,
-            positionTolerance: 10d,
+            positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken);
 
@@ -1563,7 +1564,7 @@ public partial class HomePage : UserControl
             pulseDistance: pulseDistance,
             cancellationToken: cancellationToken,
             allowedMovingAxisNos: allowedMovingAxisNos,
-            minimumCompletionTolerance: DdMotorCompletionTolerance);
+            minimumCompletionTolerance: HomePageCompletionTolerance);
         SetAxis0MoveStatus(
             $"轴0完成：{pulseDistance:0.###} pulse，当前位置 {settled.FeedbackPosition:0.###}。",
             Color.FromRgb(73, 209, 125));
@@ -1608,7 +1609,8 @@ public partial class HomePage : UserControl
             await motionController.MoveAxesAbsoluteAsync(
                 MoveOutAxisNos.ToDictionary(axisNo => axisNo, _ => MoveOutAbsolutePosition),
                 CancellationToken.None,
-                TestStationMoveTimeoutMilliseconds);
+                TestStationMoveTimeoutMilliseconds,
+                minimumCompletionTolerance: HomePageCompletionTolerance);
             SetAxis13To15MoveStatus(
                 $"轴{string.Join(" / 轴", MoveOutAxisNos)}已到移出绝对位置 {MoveOutAbsolutePosition:0.###} pulse。",
                 Color.FromRgb(73, 209, 125));
@@ -1846,7 +1848,7 @@ public partial class HomePage : UserControl
             targetX,
             targetY,
             velocity,
-            positionTolerance: 10d,
+            positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken);
         SetFirstSetPositionStatus(

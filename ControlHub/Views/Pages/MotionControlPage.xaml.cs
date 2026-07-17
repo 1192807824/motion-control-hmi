@@ -882,7 +882,8 @@ public partial class MotionControlPage : UserControl
         IReadOnlyDictionary<int, double> targetPositions,
         CancellationToken cancellationToken,
         int minimumTimeoutMilliseconds = 10_000,
-        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? minimumCompletionTolerance = null)
     {
         ArgumentNullException.ThrowIfNull(targetPositions);
 
@@ -899,6 +900,14 @@ public partial class MotionControlPage : UserControl
         if (axisTargets.Any(pair => !double.IsFinite(pair.Value)))
         {
             throw new ArgumentOutOfRangeException(nameof(targetPositions), "绝对位置目标必须是有限数值。");
+        }
+
+        if (minimumCompletionTolerance is { } requestedCompletionTolerance &&
+            (!double.IsFinite(requestedCompletionTolerance) || requestedCompletionTolerance <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minimumCompletionTolerance),
+                "最小完成容差必须是大于 0 的有效数值。");
         }
 
         if (_closed)
@@ -953,7 +962,10 @@ public partial class MotionControlPage : UserControl
             maximumTimeoutMilliseconds = Math.Max(
                 maximumTimeoutMilliseconds,
                 Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
-            moves.Add((axis, target, profile.CompletionTolerance));
+            var completionTolerance = minimumCompletionTolerance is { } requestedTolerance
+                ? Math.Max(profile.CompletionTolerance, requestedTolerance)
+                : profile.CompletionTolerance;
+            moves.Add((axis, target, completionTolerance));
         }
 
         var moveTimeoutMilliseconds = (int)Math.Clamp(
