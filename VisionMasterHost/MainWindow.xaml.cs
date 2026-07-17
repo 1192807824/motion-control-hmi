@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private IMVSBlobFindModuTool? _standaloneBlobModule;
     private VmModule? _displayedModule;
     private VmModule? _crosshairModule;
+    private EventHandler? _crosshairModuleResultHandler;
     private NamedPipeServerStream? _activeCommandPipe;
     private Task? _commandPipeTask;
     private VisionCalibrationSession? _calibrationSession;
@@ -60,6 +61,8 @@ public partial class MainWindow : Window
     private int _clickImagePixelWidth;
     private int _clickImagePixelHeight;
     private int _clickCenterInitializationQueued;
+    private int _liveRenderGeneration;
+    private TaskCompletionSource<int>? _livePreviewFirstFrameSource;
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
     private bool _showingCalibrationRender;
@@ -220,6 +223,7 @@ public partial class MainWindow : Window
                 "ACTIVATE_CALIBRATION_VIEW" => await ActivateCalibrationViewAsync(),
                 "ACTIVATE_INSPECTION_VIEW" => await ActivateInspectionViewAsync(),
                 "DEACTIVATE_CALIBRATION_VIEW" => await DeactivateCalibrationViewAsync(),
+                "START_LIVE_PREVIEW" => await StartLivePreviewFromCommandAsync(),
                 "PREPARE" => await PrepareNinePointCalibrationAsync(command.Split('\t')),
                 "COMPLETE" => await CompleteNinePointCalibrationAsync(),
                 "ABORT" => await AbortNinePointCalibrationAsync(),
@@ -248,7 +252,7 @@ public partial class MainWindow : Window
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
             "SET_CALIBRATION_SAVE_FEEDBACK" => SetCalibrationSaveFeedback(parts),
             "SET_CALIBRATION_SIDEBAR_STATE" => SetCalibrationSidebarState(parts),
-            "START_LIVE_PREVIEW" => StartLivePreviewFromCommand(),
+            "START_LIVE_PREVIEW" => throw new InvalidOperationException("START_LIVE_PREVIEW must be executed asynchronously."),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
@@ -1778,14 +1782,19 @@ public partial class MainWindow : Window
         }
 
         _crosshairModule = _displayedModule;
+        var module = _crosshairModule;
+        var renderGeneration = Volatile.Read(ref _liveRenderGeneration);
+        _crosshairModuleResultHandler = (_, _) =>
+            CrosshairModule_ModuleResultCallBackArrived(module, renderGeneration);
         try
         {
-            _crosshairModule.EnableResultCallback();
-            _crosshairModule.ModuleResultCallBackArrived += CrosshairModule_ModuleResultCallBackArrived;
+            module.EnableResultCallback();
+            module.ModuleResultCallBackArrived += _crosshairModuleResultHandler;
         }
         catch
         {
             _crosshairModule = null;
+            _crosshairModuleResultHandler = null;
         }
     }
 
@@ -1798,19 +1807,36 @@ public partial class MainWindow : Window
 
         try
         {
-            _crosshairModule.ModuleResultCallBackArrived -= CrosshairModule_ModuleResultCallBackArrived;
+            if (_crosshairModuleResultHandler is not null)
+            {
+                _crosshairModule.ModuleResultCallBackArrived -= _crosshairModuleResultHandler;
+            }
         }
         catch
         {
         }
 
         _crosshairModule = null;
+        _crosshairModuleResultHandler = null;
     }
 
-    private void CrosshairModule_ModuleResultCallBackArrived(object? sender, EventArgs e)
+    private void CrosshairModule_ModuleResultCallBackArrived(VmModule module, int renderGeneration)
     {
+        if (!ReferenceEquals(module, _crosshairModule) ||
+            renderGeneration != Volatile.Read(ref _liveRenderGeneration))
+        {
+            return;
+        }
+
+        _livePreviewFirstFrameSource?.TrySetResult(renderGeneration);
         _ = Dispatcher.BeginInvoke(
-            () => ImagePlaceholder.Visibility = Visibility.Collapsed,
+            () =>
+            {
+                if (renderGeneration == Volatile.Read(ref _liveRenderGeneration))
+                {
+                    ImagePlaceholder.Visibility = Visibility.Collapsed;
+                }
+            },
             DispatcherPriority.Render);
         if (_clickCenterPixelReady)
         {
@@ -2434,7 +2460,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private string StartLivePreviewFromCommand()
+    private async Task<string> StartLivePreviewFromCommandAsync()
     {
         if (!EnsureProcedureReady())
         {
@@ -2443,13 +2469,58 @@ public partial class MainWindow : Window
 
         ApplyLiveRenderLayout();
         RefreshRenderLayout();
+
+        // ContinuousRunEnable returns before the camera has produced its first frame.
+        ImagePlaceholderText.Text = "正在连接相机，等待首帧…";
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        var firstFrameSource = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _livePreviewFirstFrameSource = firstFrameSource;
         if (!TryStartLivePreview(out var previewError))
         {
+            _livePreviewFirstFrameSource = null;
             throw new InvalidOperationException($"实时画面启动失败：{previewError}");
         }
 
-        SetStatus("实时画面已启动。", StatusKind.Success);
-        return "实时画面已启动。";
+        var expectedGeneration = _liveRenderGeneration;
+        var firstFrameWait = Stopwatch.StartNew();
+        try
+        {
+            while (true)
+            {
+                var remaining = TimeSpan.FromSeconds(10) - firstFrameWait.Elapsed;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    ImagePlaceholderText.Text = "等待首帧超时，请检查相机连接";
+                    throw new TimeoutException("实时相机在 10 秒内未返回图像数据。");
+                }
+
+                var completedTask = await Task.WhenAny(firstFrameSource.Task, Task.Delay(remaining));
+                if (!ReferenceEquals(completedTask, firstFrameSource.Task))
+                {
+                    ImagePlaceholderText.Text = "等待首帧超时，请检查相机连接";
+                    throw new TimeoutException("实时相机在 10 秒内未返回图像数据。");
+                }
+
+                var receivedGeneration = await firstFrameSource.Task;
+                if (receivedGeneration == expectedGeneration)
+                {
+                    break;
+                }
+
+                firstFrameSource = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _livePreviewFirstFrameSource = firstFrameSource;
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_livePreviewFirstFrameSource, firstFrameSource))
+            {
+                _livePreviewFirstFrameSource = null;
+            }
+        }
+
+        SetStatus("实时画面已就绪。", StatusKind.Success);
+        return "实时画面已就绪。";
     }
 
     private void StopRun_Click(object sender, RoutedEventArgs e)
@@ -2701,6 +2772,7 @@ public partial class MainWindow : Window
         _clickImagePixelWidth = 0;
         _clickImagePixelHeight = 0;
         _displayedModule = option.Module as VmModule;
+        Interlocked.Increment(ref _liveRenderGeneration);
         ImagePlaceholder.Visibility = Visibility.Visible;
         VisionRenderControl.ModuleSource = option.Module;
 
