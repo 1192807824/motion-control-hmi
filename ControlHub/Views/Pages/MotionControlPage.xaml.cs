@@ -737,6 +737,222 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 向多根硬件轴下发绝对位置命令，并等待全部轴到位。
+    /// </summary>
+    public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesAbsoluteAsync(
+        IReadOnlyDictionary<int, double> targetPositions,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(targetPositions);
+
+        var axisTargets = targetPositions
+            .GroupBy(pair => pair.Key)
+            .Select(group => new KeyValuePair<int, double>(group.Key, group.Last().Value))
+            .OrderBy(pair => pair.Key)
+            .ToArray();
+        if (axisTargets.Length == 0 || axisTargets.Any(pair => pair.Key < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(targetPositions));
+        }
+
+        if (axisTargets.Any(pair => !double.IsFinite(pair.Value)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetPositions), "绝对位置目标必须是有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行同步绝对位置移动。");
+        }
+
+        if (axisTargets.Any(pair => pair.Key >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"同步移动包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var moves = new List<(AxisStatus Axis, double Target, double Tolerance)>();
+        var maximumTimeoutMilliseconds = 10_000d;
+        foreach (var (hardwareAxisNo, target) in axisTargets)
+        {
+            var axis = Axes?.FirstOrDefault(item =>
+                           item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+            var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
+            profile.Validate();
+            if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+
+            var beforeMove = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, beforeMove);
+            var delta = target - beforeMove.CommandPosition;
+            EnsureRelativeAxisReady(axis, beforeMove, delta == 0 ? 1 : delta);
+
+            var estimatedTimeoutMilliseconds = Math.Ceiling(
+                Math.Abs(target - beforeMove.FeedbackPosition) / axis.JogSpeed * 1000d + 5000d);
+            maximumTimeoutMilliseconds = Math.Max(
+                maximumTimeoutMilliseconds,
+                Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
+            moves.Add((axis, target, profile.CompletionTolerance));
+        }
+
+        var moveTimeoutMilliseconds = (int)Math.Clamp(
+            maximumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var commandedAxes = new List<AxisStatus>();
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            foreach (var move in moves)
+            {
+                var current = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                ApplySnapshot(move.Axis, current);
+                if (Math.Abs(current.FeedbackPosition - move.Target) <= move.Tolerance)
+                {
+                    continue;
+                }
+
+                _motionCard.MoveAbsolute(move.Axis.HardwareAxisNo, move.Target, move.Axis.JogSpeed);
+                commandedAxes.Add(move.Axis);
+                move.Axis.IsMoving = true;
+                move.Axis.State = $"同步绝对位置命令已发送：{move.Target:0.###} {move.Axis.Unit}";
+            }
+
+            foreach (var move in moves)
+            {
+                move.Axis.Target = move.Target;
+            }
+
+            _commandStopwatch = Stopwatch.StartNew();
+            SetCommandStage(CommandStage.Issued, "同步绝对位置命令已下发");
+            var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
+            while (true)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var snapshots = new List<MotionAxisSnapshot>(moves.Count);
+                var allAtTarget = true;
+                foreach (var move in moves)
+                {
+                    var snapshot = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                    ApplySnapshot(move.Axis, snapshot);
+                    if (snapshot.Alarm || snapshot.EmergencyInput)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步绝对位置移动时发生报警或急停信号：{snapshot.StateText}。");
+                    }
+
+                    if (snapshot.StopReason != 0)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步绝对位置移动未正常到位，停止原因 {snapshot.StopReason}。",
+                            "同步绝对位置完成检查");
+                    }
+
+                    snapshots.Add(snapshot);
+                    if (snapshot.IsMoving ||
+                        Math.Abs(snapshot.FeedbackPosition - move.Target) > move.Tolerance)
+                    {
+                        allAtTarget = false;
+                    }
+                }
+
+                if (allAtTarget)
+                {
+                    SetCommandStage(CommandStage.Stopped, "同步绝对位置运动完成");
+                    return snapshots;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        $"同步绝对位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。");
+                }
+
+                SetCommandStage(CommandStage.Running, "轴组同步运动中");
+                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+            }
+        }
+        catch (Exception exception)
+        {
+            foreach (var axis in commandedAxes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-ABSOLUTE",
+                    "同步绝对位置移动异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisTargets.Select(pair => pair.Key.ToString("00")))}-EXTERNAL-ABSOLUTE",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
+    public bool SetDigitalOutputChannel(int channel, bool enabled)
+    {
+        if (channel < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(channel));
+        }
+
+        if (!EnsureConnected())
+        {
+            return false;
+        }
+
+        var count = _motionCard.DigitalOutputCount;
+        if (channel >= count)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(channel),
+                $"数字输出通道必须在 0 到 {count - 1} 之间。");
+        }
+
+        var hardwareBitNo = GetDigitalIoStartBit(IoPointKind.DigitalOutput, count) + channel;
+        _motionCard.WriteDigitalOutput(hardwareBitNo, enabled);
+        PollIoState();
+        return true;
+    }
+
     public async Task RunNinePointCalibrationAsync(
         NinePointMotionRequest request,
         Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,
