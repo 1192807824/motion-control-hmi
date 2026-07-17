@@ -32,8 +32,8 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int FirstUnloadStation = 13;
     private const int SecondUnloadStation = 14;
-    private const double FirstSetXyVelocity = 800_000d;
-    private const double SecondSetXyVelocity = 800_000d;
+    private const double FirstSetXyVelocity = 1_000_000d;
+    private const double SecondSetXyVelocity = 1_000_000d;
     private const double SecondSetNozzle1PickupX = 1_606_271d;
     private const double SecondSetNozzle1PickupY = -222_828d;
     private const double SecondSetNozzle2PickupX = 1_606_631d;
@@ -43,10 +43,10 @@ public partial class HomePage : UserControl
     private const double SecondSetNozzle2DropX = 592_498d;
     private const double SecondSetNozzle2DropY = 1_374_787d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
-    private const double TestStationPressVelocity = 600_000d;
+    private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
     private const int TestStationHomeMode = 21;
-    private const double TestStationHomeVelocity = 200_000d;
+    private const double TestStationHomeVelocity = 600_000d;
     private const double TestStationHomeOffsetPosition = 0d;
     private const int TestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
@@ -62,8 +62,8 @@ public partial class HomePage : UserControl
     private static readonly int[] FirstSetProductionPeerAxisNos =
         [0, .. SecondSetAxisNos, .. MoveOutAxisNos];
     private static readonly int[] SecondSetProductionPeerAxisNos =
-        [.. FirstSetAxisNos, .. MoveOutAxisNos];
-    private static readonly int[] TestStationPeerAxisNos =
+        [0, .. FirstSetAxisNos, .. MoveOutAxisNos];
+    private static readonly int[] ProductionXyAxisNos =
         [.. FirstSetAxisNos, .. SecondSetAxisNos];
     private static readonly Point[] CarouselStationCardSlots =
     [
@@ -454,6 +454,7 @@ public partial class HomePage : UserControl
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         Task activeSecondSetUnloadTask = Task.CompletedTask;
+        Task activeSecondSetPickupTask = Task.CompletedTask;
         Task<CalibrationCenterPosition>? activeFirstSetReturnToCenterTask = null;
         Task<CarouselAdvanceResult>? activeCarouselAdvanceTask = null;
         Task<int> activeFinalTestTask = Task.FromResult(0);
@@ -708,10 +709,22 @@ public partial class HomePage : UserControl
                         Color.FromRgb(73, 209, 125));
                 }
 
-                // DD停稳、工位状态确定后再启动第二套收料；它与第一套向1/2工位放料并行。
+                // 上一轮第二套放料通常已在DD转动和第一套取料期间完成；启动新收料前只确认第二套自身空闲。
+                if (!activeSecondSetUnloadTask.IsCompleted)
+                {
+                    SetFirstSetPositionStatus(
+                        "第一套两个料已吸取；第二套正在完成上一轮放料，完成后立即开始本轮收料。",
+                        true);
+                }
+
+                await activeSecondSetUnloadTask;
+                activeSecondSetUnloadTask = Task.CompletedTask;
+
+                // DD停稳、工位状态确定后启动第二套收料；它与第一套向1/2工位放料并行。
                 activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
                     carouselStations,
-                    _productionCancellation.Token);
+                    _productionCancellation.Token,
+                    out activeSecondSetPickupTask);
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
@@ -754,18 +767,15 @@ public partial class HomePage : UserControl
                 carouselStations[2].SetLoaded();
                 UpdateCarouselStationDisplay(carouselStations);
 
-                if (!activeSecondSetUnloadTask.IsCompleted)
+                if (!activeSecondSetPickupTask.IsCompleted)
                 {
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：两个新料已上完，正在等待第二套XY完成13/14工位收料，DD保持禁止转动…",
+                        $"第{cycleNumber}轮：第一套已放完并立即回中心；DD只等待第二套从13/14工位吸走两个料，不等待第二套放料…",
                         Color.FromRgb(242, 181, 68));
                 }
 
-                await activeSecondSetUnloadTask;
-                activeSecondSetUnloadTask = Task.CompletedTask;
-
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮上下料均已完成，XY立即回中心准备下一轮拍照；下一次DD在测试轴回原后自动启动…",
+                    $"第{cycleNumber}轮第一套放料完成，XY立即回中心准备下一轮拍照；第二套继续独立收料…",
                     Color.FromRgb(73, 209, 125));
                 activeFirstSetReturnToCenterTask = StartFirstSetReturnToCenterAsync(
                     motionController,
@@ -773,22 +783,25 @@ public partial class HomePage : UserControl
                     velocity,
                     _productionCancellation.Token);
 
-                // 最后一轮测试任务移交给DD安全门；主循环不在这里等待，直接进入下一轮回中、拍照和吸料。
+                // 测试回原与第二套双取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
                 var requiredFinalTestTask = activeFinalTestTask;
                 activeFinalTestTask = Task.FromResult(0);
+                var requiredSecondSetPickupTask = activeSecondSetPickupTask;
+                activeSecondSetPickupTask = Task.CompletedTask;
                 var xyMoveAwayDelayTask = Task.Delay(
                     MoveAwayBeforeDdMilliseconds,
                     _productionCancellation.Token);
                 activeCarouselAdvanceTask = StartCarouselAfterSafetyBarrierAsync(
                     requiredFinalTestTask,
+                    requiredSecondSetPickupTask,
                     xyMoveAwayDelayTask,
                     carouselStations,
                     axis0PulseDistance,
-                    [VisionCalibration.XHardwareAxisNo, VisionCalibration.YHardwareAxisNo],
+                    ProductionXyAxisNos,
                     _productionCancellation.Token);
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD开始固定转动两次；XY回中心后立即进行第{cycleNumber + 1}轮拍照吸料…",
+                    $"第{cycleNumber}轮放料完成，DD在测试回原且第二套双取料完成后固定转动两次；XY立即准备第{cycleNumber + 1}轮拍照吸料…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -813,6 +826,7 @@ public partial class HomePage : UserControl
         {
             _productionCancellation?.Cancel();
             await ObserveTaskNoThrowAsync(activeSecondSetUnloadTask);
+            await ObserveTaskNoThrowAsync(activeSecondSetPickupTask);
             if (activeFirstSetReturnToCenterTask is not null)
             {
                 await ObserveTaskNoThrowAsync(activeFirstSetReturnToCenterTask);
@@ -938,21 +952,26 @@ public partial class HomePage : UserControl
 
     private async Task<CarouselAdvanceResult> StartCarouselAfterSafetyBarrierAsync(
         Task<int> requiredFinalTestTask,
+        Task requiredSecondSetPickupTask,
         Task xyMoveAwayDelayTask,
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
         IReadOnlyCollection<int>? allowedMovingAxisNos,
         CancellationToken cancellationToken)
     {
-        if (!requiredFinalTestTask.IsCompleted)
+        if (!requiredFinalTestTask.IsCompleted || !requiredSecondSetPickupTask.IsCompleted)
         {
             SetAxis13To15MoveStatus(
-                "XY正在回中心准备下一轮拍照；下一次DD正在等待上一轮测试轴回原。",
+                "XY正在回中心准备下一轮拍照；下一次DD只等待测试轴回原及第二套完成双取料。",
                 Color.FromRgb(242, 181, 68));
         }
 
-        // DD必须同时满足：上一轮测试轴已回原，且XY已离开放料点至少0.5秒。
-        await Task.WhenAll(requiredFinalTestTask, xyMoveAwayDelayTask);
+        // DD必须同时满足：上一轮测试轴已回原、第二套已从13/14取走两个料、XY已离开放料点0.5秒。
+        // 第二套后续移动到两个收料位置并放料，不再阻塞DD。
+        await Task.WhenAll(
+            requiredFinalTestTask,
+            requiredSecondSetPickupTask,
+            xyMoveAwayDelayTask);
         cancellationToken.ThrowIfCancellationRequested();
         return await AdvanceCarouselExactlyTwoStationsAsync(
             carouselStations,
@@ -963,11 +982,13 @@ public partial class HomePage : UserControl
 
     private Task StartSecondSetUnloadIfReadyAsync(
         CarouselStationState[] carouselStations,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        out Task pickupCompletedTask)
     {
         if (!carouselStations[FirstUnloadStation].Occupied ||
             !carouselStations[SecondUnloadStation].Occupied)
         {
+            pickupCompletedTask = Task.CompletedTask;
             return Task.CompletedTask;
         }
 
@@ -976,11 +997,18 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行13/14工位收料。");
         }
 
-        return RunSecondSetUnloadAsync(carouselStations, cancellationToken);
+        var pickupCompletion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        pickupCompletedTask = pickupCompletion.Task;
+        return RunSecondSetUnloadAsync(
+            carouselStations,
+            pickupCompletion,
+            cancellationToken);
     }
 
     private async Task RunSecondSetUnloadAsync(
         CarouselStationState[] carouselStations,
+        TaskCompletionSource<bool> pickupCompletion,
         CancellationToken cancellationToken)
     {
         try
@@ -1002,6 +1030,12 @@ public partial class HomePage : UserControl
             // 第二套必须先完成两次取料。任一吸嘴未确认持料时，禁止进入任何放料动作。
             EnsureBothSecondSetNozzlesHolding();
 
+            // 两个产品已经离开13/14工位，此刻即可释放DD安全门；后续第二套放料继续独立执行。
+            carouselStations[FirstUnloadStation] = CarouselStationState.Empty();
+            carouselStations[SecondUnloadStation] = CarouselStationState.Empty();
+            UpdateCarouselStationDisplay(carouselStations);
+            pickupCompletion.TrySetResult(true);
+
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴1放料",
                 SecondSetNozzle1DropX,
@@ -1022,13 +1056,16 @@ public partial class HomePage : UserControl
                 2,
                 cancellationToken);
             CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet.Second);
-
-            carouselStations[FirstUnloadStation] = CarouselStationState.Empty();
-            carouselStations[SecondUnloadStation] = CarouselStationState.Empty();
-            UpdateCarouselStationDisplay(carouselStations);
         }
-        catch
+        catch (OperationCanceledException)
         {
+            pickupCompletion.TrySetCanceled(cancellationToken);
+            CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            pickupCompletion.TrySetException(exception);
             CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
             throw;
         }
@@ -1184,7 +1221,7 @@ public partial class HomePage : UserControl
             axisTargets,
             cancellationToken,
             TestStationMoveTimeoutMilliseconds,
-            TestStationPeerAxisNos,
+            ProductionXyAxisNos,
             HomePageCompletionTolerance,
             TestStationPressVelocity);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
@@ -1212,7 +1249,7 @@ public partial class HomePage : UserControl
             cancellationToken,
             TestStationHomeVelocity,
             TestStationHomeVelocity,
-            TestStationPeerAxisNos);
+            ProductionXyAxisNos);
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 21 模式回原点完成，DD可继续下一步。",
             Color.FromRgb(73, 209, 125));
