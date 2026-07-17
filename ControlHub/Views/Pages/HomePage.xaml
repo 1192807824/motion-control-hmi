@@ -1028,7 +1028,7 @@
                                                FontSize="21"
                                                FontWeight="Bold" />
                                     <TextBlock x:Name="StartProductionHintText"
-                                               Text="连续循环 · 真空吸放后DD马达转动一次"
+                                               Text="连续循环 · 放料前DD转两工位并测试"
                                                Foreground="#D7F4E5"
                                                FontSize="11"
                                                Margin="0,3,0,0"

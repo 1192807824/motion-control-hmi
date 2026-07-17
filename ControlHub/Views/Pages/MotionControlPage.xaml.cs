@@ -953,6 +953,158 @@ public partial class MotionControlPage : UserControl
         return true;
     }
 
+    public async Task HomeAxesAsync(
+        IReadOnlyCollection<int> hardwareAxisNos,
+        int homeMode,
+        double offsetPosition,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        var axisNumbers = hardwareAxisNos
+            .Distinct()
+            .OrderBy(axisNo => axisNo)
+            .ToArray();
+        if (axisNumbers.Length == 0 || axisNumbers.Any(axisNo => axisNo < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(hardwareAxisNos));
+        }
+
+        if (!double.IsFinite(offsetPosition))
+        {
+            throw new ArgumentOutOfRangeException(nameof(offsetPosition), "回原偏移必须是有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行轴组回原。");
+        }
+
+        if (axisNumbers.Any(axisNo => axisNo >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"轴组回原包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var axes = axisNumbers
+            .Select(axisNo => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == axisNo && axis.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {axisNo} 当前不可用。"))
+            .ToArray();
+        foreach (var axis in axes)
+        {
+            var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+            ApplySnapshot(axis, snapshot);
+            ProcessSnapshotAlarms(axis, snapshot);
+            if (snapshot.IsMoving || snapshot.Alarm || snapshot.EmergencyInput)
+            {
+                throw new MotionCardException($"{axis.Name} 正在运动或存在报警/急停输入，不能启动轴组回原。");
+            }
+
+            if (!axis.StatusReadHealthy)
+            {
+                throw new MotionCardException($"{axis.Name} 状态读取异常，不能启动轴组回原。");
+            }
+
+            if (!axis.ServoOn)
+            {
+                throw new MotionCardException($"{axis.Name} 未使能，不能启动轴组回原。");
+            }
+
+            if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+        }
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            foreach (var axis in axes)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var profile = new MotionHomeProfile
+                {
+                    Enabled = true,
+                    Mode = homeMode,
+                    LowVelocity = axis.JogSpeed * TestHomeLowSpeedRatio,
+                    HighVelocity = axis.JogSpeed,
+                    AccelerationSeconds = 0.1,
+                    DecelerationSeconds = 0.1,
+                    OffsetPosition = offsetPosition
+                };
+                profile.Validate(requireEnabled: true);
+                _motionCard.Home(axis.HardwareAxisNo, profile);
+                axis.Homed = false;
+                axis.IsMoving = true;
+                axis.State = $"轴组回原：模式 {homeMode} 回零中";
+                StartHomeTracking(axis.HardwareAxisNo, deadline);
+            }
+
+            SetCommandStage(CommandStage.Running, $"轴组模式 {homeMode} 回原中");
+            await Task.WhenAll(axes.Select(axis => WaitForHomeAsync(axis, deadline, linkedCancellation.Token)));
+            foreach (var axis in axes)
+            {
+                axis.State = $"轴组回原：模式 {homeMode} 回零完成";
+            }
+
+            SetCommandStage(CommandStage.Stopped, $"轴组模式 {homeMode} 回原完成");
+        }
+        catch (Exception exception)
+        {
+            foreach (var axis in axes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-HOME",
+                    "轴组回原异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisNumbers.Select(axisNo => axisNo.ToString("00")))}-EXTERNAL-HOME",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            foreach (var axis in axes)
+            {
+                ClearHomeTracking(axis.HardwareAxisNo);
+            }
+
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
     public async Task RunNinePointCalibrationAsync(
         NinePointMotionRequest request,
         Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,

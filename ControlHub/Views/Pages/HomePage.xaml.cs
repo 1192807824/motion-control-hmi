@@ -25,7 +25,16 @@ public partial class HomePage : UserControl
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double MoveOutAbsolutePosition = 250_000d;
+    private const int CarouselStationCount = 16;
+    private const int TestStationHomeMode = 21;
     private static readonly int[] MoveOutAxisNos = [13, 14, 15];
+    private static readonly IReadOnlyDictionary<int, int> TestStationAxisByStation =
+        new Dictionary<int, int>
+        {
+            [4] = 13,
+            [5] = 14,
+            [6] = 15
+        };
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
     private HomePageSettings _homeSettings = new();
@@ -213,8 +222,8 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴对位并开启对应真空吸、
-    /// XY位置1后Z1破真空、XY位置2后Z2破真空，最后让DD马达转动一次并进入下一轮。
+    /// 每轮依次执行：回标定中心、Blob识别、双吸嘴取料；放料前按需要让 DD 转两工位并执行 4/5/6 测试站；
+    /// 然后放到 1/2 工位。放料完成后立即进入下一轮回中心拍照。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -316,6 +325,12 @@ public partial class HomePage : UserControl
             // 从第 0 轮开始计数，进入循环后先自增为第 1 轮。
             var cycleNumber = 0;
 
+            // 转盘工位占料状态。启动时按空盘处理；放料到 1/2 后，后续每次 DD 转动推进一个工位。
+            var carouselOccupied = new bool[CarouselStationCount + 1];
+
+            // 第一轮直接放 1/2；之后每轮放料前先让转盘转两格，并对 4/5/6 已占料工位执行测试。
+            var advanceCarouselBeforePlacement = false;
+
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
             {
@@ -346,7 +361,7 @@ public partial class HomePage : UserControl
 
                 // 告诉操作员第 1 步正在把第一套 XY 轴回到标定中心。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 1/9：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
+                    $"第{cycleNumber}轮：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 下发第一套 XY 轴绝对移动，并等待控制器确认到位。
@@ -363,7 +378,7 @@ public partial class HomePage : UserControl
                 // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
                 // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 2/9：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+                    $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                     $"正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
                     Color.FromRgb(242, 181, 68));
 
@@ -413,7 +428,7 @@ public partial class HomePage : UserControl
 
                 // 提示第 3 步开始：吸嘴1对位物体1，到位后开启 Z1 真空吸。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 3/9：Blob识别完成，吸嘴1正在对位物体1…",
+                    $"第{cycleNumber}轮：Blob识别完成，吸嘴1正在对位物体1…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行吸嘴1对位动作。
@@ -424,7 +439,7 @@ public partial class HomePage : UserControl
 
                 // 提示第 4 步开始：吸嘴2对位物体2，到位后开启 Z2 真空吸。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 4/9：Z1真空吸已开启，吸嘴2正在对位物体2…",
+                    $"第{cycleNumber}轮：Z1真空吸已开启，吸嘴2正在对位物体2…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行吸嘴2对位动作。
@@ -433,9 +448,21 @@ public partial class HomePage : UserControl
                 // 吸嘴2到达物体2后，打开 Z2 对应真空吸。
                 EnableFirstSetNozzleVacuum(2, _productionCancellation.Token);
 
+                if (advanceCarouselBeforePlacement)
+                {
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：放料前 DD 正在转两工位，并执行 4/5/6 工位测试…",
+                        Color.FromRgb(242, 181, 68));
+                    await AdvanceCarouselTwoStationsWithTestsAsync(
+                        carouselOccupied,
+                        axis0PulseDistance,
+                        _productionCancellation.Token);
+                    advanceCarouselBeforePlacement = false;
+                }
+
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 5/9：Z2真空吸已开启，XY正在移动到位置1({position1X:0.###}, {position1Y:0.###})…",
+                    $"第{cycleNumber}轮：Z2真空吸已开启，XY正在放料到1工位({position1X:0.###}, {position1Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行位置1的绝对移动。
@@ -447,13 +474,13 @@ public partial class HomePage : UserControl
 
                 // 到达位置1后，Z1 先破真空，破一下就关闭。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 6/9：位置1已到位，Z1正在真空破…",
+                    $"第{cycleNumber}轮：1工位已到位，Z1正在真空破并关闭吸…",
                     Color.FromRgb(242, 181, 68));
                 await PulseFirstSetNozzleBreakVacuumAsync(1, _productionCancellation.Token);
 
                 // 提示第 7 步开始：第一套 XY 移动到预设位置2。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 7/9：Z1真空破已关闭，XY正在移动到位置2({position2X:0.###}, {position2Y:0.###})…",
+                    $"第{cycleNumber}轮：Z1已放料，XY正在放料到2工位({position2X:0.###}, {position2Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行位置2的绝对移动。
@@ -465,21 +492,17 @@ public partial class HomePage : UserControl
 
                 // 到达位置2后，Z2 再破真空，破一下就关闭。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮 8/9：位置2已到位，Z2正在真空破…",
+                    $"第{cycleNumber}轮：2工位已到位，Z2正在真空破并关闭吸…",
                     Color.FromRgb(242, 181, 68));
                 await PulseFirstSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
 
-                // 提示第 9 步开始：DD 马达只执行一次相对转动。
-                SetStartProductionStatus(
-                    $"第{cycleNumber}轮 9/9：Z2真空破已关闭，DD马达转动一次 {axis0PulseDistance:0.###} pulse…",
-                    Color.FromRgb(242, 181, 68));
+                carouselOccupied[1] = true;
+                carouselOccupied[2] = true;
+                advanceCarouselBeforePlacement = true;
 
-                // 按配置脉冲转动 DD 马达一次。
-                await MoveAxis0RelativeCoreAsync(axis0PulseDistance, _productionCancellation.Token);
-
-                // 本轮所有动作已完成，下一轮会重新回到标定中心并再次识别。
+                // 放料后不等待 DD 转两次，下一轮立即回中心拍照；真正放下一组料前再转盘两工位。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮完成，正在回初始点开始下一轮…",
+                    $"第{cycleNumber}轮放料完成，正在回初始点开始下一轮拍照…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -552,6 +575,78 @@ public partial class HomePage : UserControl
         SetStartProductionStatus("正在停止循环，请等待当前轴确认停止…", Color.FromRgb(242, 181, 68));
         UpdateHomeCommandState();
         return true;
+    }
+
+    private async Task AdvanceCarouselTwoStationsWithTestsAsync(
+        bool[] carouselOccupied,
+        double axis0PulseDistance,
+        CancellationToken cancellationToken)
+    {
+        if (carouselOccupied.Length <= CarouselStationCount)
+        {
+            throw new ArgumentException("转盘工位缓存长度无效。", nameof(carouselOccupied));
+        }
+
+        for (var turn = 1; turn <= 2; turn++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetStartProductionStatus(
+                $"DD马达正在第 {turn}/2 次转动 {axis0PulseDistance:0.###} pulse…",
+                Color.FromRgb(242, 181, 68));
+            await MoveAxis0RelativeCoreAsync(axis0PulseDistance, cancellationToken);
+
+            AdvanceCarouselOccupancy(carouselOccupied);
+            await RunOccupiedTestStationsAsync(carouselOccupied, cancellationToken);
+        }
+    }
+
+    private async Task RunOccupiedTestStationsAsync(
+        bool[] carouselOccupied,
+        CancellationToken cancellationToken)
+    {
+        var axisTargets = TestStationAxisByStation
+            .Where(pair => carouselOccupied[pair.Key])
+            .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
+        if (axisTargets.Count == 0)
+        {
+            SetAxis13To15MoveStatus("4/5/6工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
+            return;
+        }
+
+        var stations = TestStationAxisByStation
+            .Where(pair => carouselOccupied[pair.Key])
+            .Select(pair => $"{pair.Key}号→轴{pair.Value}")
+            .ToArray();
+        SetAxis13To15MoveStatus(
+            $"{string.Join("，", stations)} 有料，测试轴同步下压 {MoveOutAbsolutePosition:0.###} pulse…",
+            Color.FromRgb(242, 181, 68));
+
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        await motionController.MoveAxesAbsoluteAsync(axisTargets, cancellationToken);
+        SetAxis13To15MoveStatus(
+            $"{string.Join("，", stations)} 下压到位，正在按模式 {TestStationHomeMode} 回原…",
+            Color.FromRgb(242, 181, 68));
+
+        await motionController.HomeAxesAsync(
+            axisTargets.Keys.ToArray(),
+            TestStationHomeMode,
+            MoveOutAbsolutePosition,
+            cancellationToken);
+        SetAxis13To15MoveStatus(
+            $"{string.Join("，", stations)} 测试站已回原完成。",
+            Color.FromRgb(73, 209, 125));
+    }
+
+    private static void AdvanceCarouselOccupancy(bool[] carouselOccupied)
+    {
+        var station16Occupied = carouselOccupied[CarouselStationCount];
+        for (var station = CarouselStationCount; station >= 2; station--)
+        {
+            carouselOccupied[station] = carouselOccupied[station - 1];
+        }
+
+        carouselOccupied[1] = station16Occupied;
     }
 
     /// <summary>
