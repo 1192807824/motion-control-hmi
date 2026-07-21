@@ -98,6 +98,7 @@ public partial class HomePage : UserControl
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
     private bool _presetPositionMoveRunning;
+    private bool _oneKeyResetRunning;
     private bool _startSequenceRunning;
     private bool _assignedNozzleMoveRunning;
     private CancellationTokenSource? _productionCancellation;
@@ -467,7 +468,8 @@ public partial class HomePage : UserControl
         }
 
         // 只要已有其它运动命令在执行，就不允许启动连续生产，避免多个轴命令互相抢控制权。
-        if (_presetPositionMoveRunning ||
+        if (_oneKeyResetRunning ||
+            _presetPositionMoveRunning ||
             _assignedNozzleMoveRunning)
         {
             // 当前设备还没空下来，直接忽略本次开始请求。
@@ -2177,6 +2179,67 @@ public partial class HomePage : UserControl
             issued ? Color.FromRgb(255, 220, 220) : Color.FromRgb(255, 188, 93));
     }
 
+    private async void OneKeyReset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_oneKeyResetRunning ||
+            _startSequenceRunning ||
+            _presetPositionMoveRunning ||
+            _assignedNozzleMoveRunning)
+        {
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            Window.GetWindow(this),
+            "请确认所有机构都在安全区域，并且硬件轴 0～12 已使能。\n\n" +
+            "复位顺序：R/Z同时 → 上料X → 上料Y → 下料XY同时 → DD马达。",
+            "一键复位安全确认",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+        if (confirmation != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        var loadingAxisConfirmation = MessageBox.Show(
+            Window.GetWindow(this),
+            "请确认上料上轴在中间。",
+            "一键复位二级确认",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+        if (loadingAxisConfirmation != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+
+            _oneKeyResetRunning = true;
+            SetOneKeyResetStatus("正在执行：R/Z → 上料X → 上料Y → 下料XY → DD…", Color.FromRgb(242, 181, 68));
+            UpdateHomeCommandState();
+            await motionController.RunOneKeyResetAsync(CancellationToken.None);
+            SetOneKeyResetStatus("一键复位完成", Color.FromRgb(73, 209, 125));
+        }
+        catch (OperationCanceledException)
+        {
+            SetOneKeyResetStatus("一键复位已取消", Color.FromRgb(242, 181, 68));
+        }
+        catch (Exception exception)
+        {
+            SetOneKeyResetStatus($"复位失败：{exception.Message}", Color.FromRgb(242, 122, 128));
+        }
+        finally
+        {
+            _oneKeyResetRunning = false;
+            UpdateHomeCommandState();
+        }
+    }
+
     private VisionCalibrationSnapshot EnsureFirstSetToolsReady()
     {
         var snapshot = GetFirstSetCalibrationSnapshot();
@@ -2192,6 +2255,8 @@ public partial class HomePage : UserControl
     {
         if (StartProductionButton is null ||
             StartProductionTitleText is null ||
+            OneKeyResetButton is null ||
+            OneKeyResetHintText is null ||
             MoveAssignedNozzleButton is null ||
             PresetPosition1XTextBox is null ||
             PresetPosition1YTextBox is null ||
@@ -2215,6 +2280,7 @@ public partial class HomePage : UserControl
             _motionController is not null &&
             _visualCalibrationController is not null;
         var commandsIdle =
+            !_oneKeyResetRunning &&
             !_presetPositionMoveRunning &&
             !_startSequenceRunning &&
             !_assignedNozzleMoveRunning;
@@ -2240,6 +2306,7 @@ public partial class HomePage : UserControl
             _startSequenceRunning ? Color.FromRgb(181, 22, 35) : Color.FromRgb(22, 139, 80));
         StartProductionButton.BorderBrush = new SolidColorBrush(
             _startSequenceRunning ? Color.FromRgb(255, 98, 110) : Color.FromRgb(56, 185, 121));
+        OneKeyResetButton.IsEnabled = _motionController is not null && commandsIdle;
         MoveAssignedNozzleButton.IsEnabled =
             visionControllersReady &&
             commandsIdle &&
@@ -2305,6 +2372,13 @@ public partial class HomePage : UserControl
         StartProductionHintText.Text = message;
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
+    }
+
+    private void SetOneKeyResetStatus(string message, Color color)
+    {
+        OneKeyResetHintText.Text = message;
+        OneKeyResetHintText.ToolTip = message;
+        OneKeyResetHintText.Foreground = new SolidColorBrush(color);
     }
 
     private async Task PrepareBlobInspectionVisionDisplayAsync(VisualCalibrationPage visualCalibrationController)

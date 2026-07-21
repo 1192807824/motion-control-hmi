@@ -21,13 +21,14 @@ public partial class MotionControlPage : UserControl
     private const double TestHomeLowSpeedRatio = 0.25;
     private static readonly TestHomeStage[] TestOneKeyResetStages =
     [
-        new("4个R轴", [6, 8, 10, 12], 33, 30000),
-        new("4个Z轴", [5, 7, 9, 11], -1, 5000),
-        new("上料Y", [2], 33, 150000),
-        new("上料X", [1], 33, 150000),
-        new("下料X", [3], 33, 150000),
-        new("下料Y", [4], 33, 150000),
-        new("D马达", [0], 33, 25000, 600)
+        new("R/Z同时", [
+            new([6, 8, 10, 12], 33, 10_000, 10_000),
+            new([5, 7, 9, 11], -1, 10_000, 10_000)
+        ]),
+        new("上料X", [new([1], 33, 100_000, 100_000)]),
+        new("上料Y", [new([2], 33, 100_000, 100_000)]),
+        new("下料XY同时", [new([3, 4], 33, 100_000, 100_000)]),
+        new("DD马达", [new([0], 33, 50_000, 50_000, 600)])
     ];
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
@@ -3415,17 +3416,6 @@ public partial class MotionControlPage : UserControl
 
     private async void TestOneKeyReset_Click(object sender, RoutedEventArgs e)
     {
-        if (_homeSequenceCancellation is not null || IsAnyMotionWorkflowActive())
-        {
-            RecordAlarm("TEST-RESET-BUSY", "已有运动、回零或停止确认尚未结束，不能启动一键复位测试。");
-            return;
-        }
-
-        if (!EnsureConnected())
-        {
-            return;
-        }
-
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
             "请确认各轴都在安全区域。\n\n确认后将执行一键复位测试。",
@@ -3438,6 +3428,36 @@ public partial class MotionControlPage : UserControl
             return;
         }
 
+        try
+        {
+            await RunOneKeyResetAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm("TEST-RESET-UI", FormatException(exception));
+            }
+        }
+    }
+
+    public async Task RunOneKeyResetAsync(CancellationToken cancellationToken)
+    {
+        if (_homeSequenceCancellation is not null || IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("已有运动、回零或停止确认尚未结束，不能启动一键复位。");
+        }
+
+        if (_closed || !_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
         Dictionary<int, AxisStatus> axes;
         try
         {
@@ -3446,10 +3466,10 @@ public partial class MotionControlPage : UserControl
         catch (Exception exception)
         {
             RecordAlarm("TEST-RESET-PREFLIGHT", FormatException(exception));
-            return;
+            throw;
         }
 
-        _homeSequenceCancellation = new CancellationTokenSource();
+        _homeSequenceCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         TestOneKeyResetButton.SetCurrentValue(IsEnabledProperty, false);
         _commandStopwatch = Stopwatch.StartNew();
         try
@@ -3468,6 +3488,8 @@ public partial class MotionControlPage : UserControl
             {
                 axis.State = "一键复位测试已取消";
             }
+
+            throw;
         }
         catch (Exception exception)
         {
@@ -3491,6 +3513,7 @@ public partial class MotionControlPage : UserControl
 
             RecordAlarm("TEST-RESET", FormatException(exception));
             SetCommandStage(CommandStage.Failed, "一键复位测试失败");
+            throw;
         }
         finally
         {
@@ -3504,19 +3527,23 @@ public partial class MotionControlPage : UserControl
     private Dictionary<int, AxisStatus> PreflightTestOneKeyReset()
     {
         var requestedAxisNumbers = TestOneKeyResetStages
-            .SelectMany(stage => stage.HardwareAxisNumbers)
+            .SelectMany(stage => stage.Groups)
+            .SelectMany(group => group.HardwareAxisNumbers)
             .Distinct()
             .ToArray();
         var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
 
         foreach (var stage in TestOneKeyResetStages)
         {
-            CreateTestHomeProfile(stage).Validate(requireEnabled: true);
-            foreach (var hardwareAxisNo in stage.HardwareAxisNumbers)
+            foreach (var group in stage.Groups)
             {
-                if (!axisByHardwareNo.TryGetValue(hardwareAxisNo, out var axis) || !axis.IsAvailable)
+                CreateTestHomeProfile(group).Validate(requireEnabled: true);
+                foreach (var hardwareAxisNo in group.HardwareAxisNumbers)
                 {
-                    throw new MotionCardException($"一键复位测试需要的硬件轴 {hardwareAxisNo} 不可用。");
+                    if (!axisByHardwareNo.TryGetValue(hardwareAxisNo, out var axis) || !axis.IsAvailable)
+                    {
+                        throw new MotionCardException($"一键复位测试需要的硬件轴 {hardwareAxisNo} 不可用。");
+                    }
                 }
             }
         }
@@ -3557,40 +3584,45 @@ public partial class MotionControlPage : UserControl
         IReadOnlyDictionary<int, AxisStatus> axes,
         CancellationToken cancellationToken)
     {
-        var profile = CreateTestHomeProfile(stage);
         var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
-        var stageAxes = stage.HardwareAxisNumbers.Select(axisNo => axes[axisNo]).ToArray();
+        var stageAxes = stage.Groups
+            .SelectMany(group => group.HardwareAxisNumbers.Select(axisNo => new
+            {
+                Axis = axes[axisNo],
+                Profile = CreateTestHomeProfile(group)
+            }))
+            .ToArray();
 
-        foreach (var axis in stageAxes)
+        foreach (var item in stageAxes)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _motionCard.Home(axis.HardwareAxisNo, profile);
-            axis.Homed = false;
-            axis.IsMoving = true;
-            axis.State = $"一键复位测试：{stage.Name}回零中";
-            StartHomeTracking(axis.HardwareAxisNo, deadline);
+            _motionCard.Home(item.Axis.HardwareAxisNo, item.Profile);
+            item.Axis.Homed = false;
+            item.Axis.IsMoving = true;
+            item.Axis.State = $"一键复位测试：{stage.Name}回零中";
+            StartHomeTracking(item.Axis.HardwareAxisNo, deadline);
         }
 
         SetCommandStage(CommandStage.Running, $"一键复位测试：{stage.Name}回零中");
-        await Task.WhenAll(stageAxes.Select(axis => WaitForHomeAsync(axis, deadline, cancellationToken)));
-        foreach (var axis in stageAxes)
+        await Task.WhenAll(stageAxes.Select(item => WaitForHomeAsync(item.Axis, deadline, cancellationToken)));
+        foreach (var item in stageAxes)
         {
-            ClearHomeTracking(axis.HardwareAxisNo);
-            axis.State = $"一键复位测试：{stage.Name}回零完成";
+            ClearHomeTracking(item.Axis.HardwareAxisNo);
+            item.Axis.State = $"一键复位测试：{stage.Name}回零完成";
         }
     }
 
-    private static MotionHomeProfile CreateTestHomeProfile(TestHomeStage stage)
+    private static MotionHomeProfile CreateTestHomeProfile(TestHomeGroup group)
     {
         return new MotionHomeProfile
         {
             Enabled = true,
-            Mode = stage.Mode,
-            LowVelocity = stage.HighVelocity * TestHomeLowSpeedRatio,
-            HighVelocity = stage.HighVelocity,
+            Mode = group.Mode,
+            LowVelocity = group.LowVelocity,
+            HighVelocity = group.HighVelocity,
             AccelerationSeconds = 0.1,
             DecelerationSeconds = 0.1,
-            OffsetPosition = stage.OffsetPosition
+            OffsetPosition = group.OffsetPosition
         };
     }
 
@@ -4738,7 +4770,11 @@ public partial class MotionControlPage : UserControl
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
                !IsAnyMotionWorkflowActive() &&
-               TestOneKeyResetStages.SelectMany(stage => stage.HardwareAxisNumbers).Distinct().All(axisNo =>
+               TestOneKeyResetStages
+                   .SelectMany(stage => stage.Groups)
+                   .SelectMany(group => group.HardwareAxisNumbers)
+                   .Distinct()
+                   .All(axisNo =>
                    axisByHardwareNo.TryGetValue(axisNo, out var axis) &&
                    axis.IsAvailable &&
                    axis.StatusReadHealthy &&
@@ -4879,12 +4915,16 @@ public partial class MotionControlPage : UserControl
         };
     }
 
-    private sealed record TestHomeStage(
-        string Name,
+    private sealed record TestHomeGroup(
         int[] HardwareAxisNumbers,
         int Mode,
+        double LowVelocity,
         double HighVelocity,
         double OffsetPosition = 0);
+
+    private sealed record TestHomeStage(
+        string Name,
+        TestHomeGroup[] Groups);
 
     private static string FormatInitializationException(Exception exception)
     {

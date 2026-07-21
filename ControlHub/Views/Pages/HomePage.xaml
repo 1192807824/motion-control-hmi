@@ -931,6 +931,8 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="36" />
+                        <RowDefinition Height="70" />
+                        <RowDefinition Height="8" />
                         <RowDefinition Height="86" />
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
@@ -941,7 +943,33 @@
 
                     <TextBlock Text="设备操作" Style="{StaticResource SectionTitle}" FontSize="17" />
 
-                    <Grid Grid.Row="1">
+                    <Button Grid.Row="1"
+                            x:Name="OneKeyResetButton"
+                            Style="{StaticResource OperationButton}"
+                            Background="#B45309"
+                            BorderBrush="#F59E0B"
+                            IsEnabled="False"
+                            Click="OneKeyReset_Click"
+                            ToolTip="R/Z同时回原 → 上料X → 上料Y → 下料XY同时 → DD马达">
+                        <Grid Margin="14,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="42" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Image Width="29" Height="29" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="一键复位"
+                                           Foreground="White"
+                                           FontSize="18"
+                                           FontWeight="Bold" />
+                                <TextBlock x:Name="OneKeyResetHintText"
+                                           Text="R/Z同时 → 上料X → 上料Y → 下料XY → DD"
+                                           Foreground="#FFF1D6"
+                                           FontSize="10"
+                                           Margin="0,3,0,0"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+
+                    <Grid Grid.Row="3">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="10" />
@@ -996,7 +1024,7 @@
                         </Button>
                     </Grid>
 
-                    <Button Grid.Row="3"
+                    <Button Grid.Row="5"
                             x:Name="MoveAssignedNozzleButton"
                             Style="{StaticResource OperationButton}"
                             Background="#315873"
@@ -1023,7 +1051,7 @@
                             </Grid>
                     </Button>
 
-                    <Border Grid.Row="4"
+                    <Border Grid.Row="6"
                             Margin="0,8,0,8"
                             Padding="9,7"
                             Background="#12283A"
@@ -1203,7 +1231,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="5"
+                    <Border Grid.Row="7"
                             Background="#12283A"
                             BorderBrush="#2D4A61"
                             BorderThickness="1"
