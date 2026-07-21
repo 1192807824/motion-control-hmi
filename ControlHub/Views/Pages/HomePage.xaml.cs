@@ -33,6 +33,7 @@ public partial class HomePage : UserControl
     private const int SecondSetNozzle1ZHardwareAxisNo = 9;
     private const int SecondSetNozzle2ZHardwareAxisNo = 11;
     private const double NozzlePickupZPosition = 30_000d;
+    private const double NozzleDropZPosition = 4_800d;
     private const double NozzleSafeZPosition = -5_000d;
     private const double NozzleZVelocity = 10_000d;
     private const double DdMotorPulsePerTurn = 22_500d;
@@ -369,6 +370,28 @@ public partial class HomePage : UserControl
             cancellationToken);
     }
 
+    private async Task PlaceWithActiveSetNozzleAsync(
+        int nozzleNumber,
+        CancellationToken cancellationToken)
+    {
+        var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
+        await MoveNozzleZToAsync(
+            axisSet,
+            nozzleNumber,
+            NozzleDropZPosition,
+            "放料位",
+            cancellationToken);
+
+        await PulseNozzleBreakVacuumAsync(axisSet, nozzleNumber, cancellationToken);
+
+        await MoveNozzleZToAsync(
+            axisSet,
+            nozzleNumber,
+            NozzleSafeZPosition,
+            "安全位",
+            cancellationToken);
+    }
+
     private async Task MoveNozzleZToAsync(
         VisionCalibrationAxisSet axisSet,
         int nozzleNumber,
@@ -456,16 +479,6 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus($"Z{nozzleNumber}真空吸已开启。", true);
-    }
-
-    private async Task PulseActiveSetNozzleBreakVacuumAsync(
-        int nozzleNumber,
-        CancellationToken cancellationToken)
-    {
-        await PulseNozzleBreakVacuumAsync(
-            _productionAxisSet ?? _visionCalibration.ActiveAxisSet,
-            nozzleNumber,
-            cancellationToken);
     }
 
     private async Task PulseNozzleBreakVacuumAsync(
@@ -923,15 +936,15 @@ public partial class HomePage : UserControl
                     position1Y,
                     _productionCancellation.Token);
 
-                // 到达位置1后，Z1 先破真空，破一下就关闭。
+                // 到达位置1后，Z1 下降到4800，破真空放料后回到-5000安全位。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：1工位已到位，Z1正在真空破并关闭吸…",
+                    $"第{cycleNumber}轮：1工位已到位，Z1正在下降到4800放料位…",
                     Color.FromRgb(242, 181, 68));
-                await PulseActiveSetNozzleBreakVacuumAsync(1, _productionCancellation.Token);
+                await PlaceWithActiveSetNozzleAsync(1, _productionCancellation.Token);
 
                 // 提示第 7 步开始：第一套 XY 移动到预设位置2。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Z1已放料，XY正在放料到2工位({position2X:0.###}, {position2Y:0.###})…",
+                    $"第{cycleNumber}轮：Z1已放料并回到-5000，XY正在放料到2工位({position2X:0.###}, {position2Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行位置2的绝对移动。
@@ -941,11 +954,11 @@ public partial class HomePage : UserControl
                     position2Y,
                     _productionCancellation.Token);
 
-                // 到达位置2后，Z2 再破真空，破一下就关闭。
+                // 到达位置2后，Z2 下降到4800，破真空放料后回到-5000安全位。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：2工位已到位，Z2正在真空破并关闭吸…",
+                    $"第{cycleNumber}轮：2工位已到位，Z2正在下降到4800放料位…",
                     Color.FromRgb(242, 181, 68));
-                await PulseActiveSetNozzleBreakVacuumAsync(2, _productionCancellation.Token);
+                await PlaceWithActiveSetNozzleAsync(2, _productionCancellation.Token);
                 CloseAllActiveSetNozzleVacuumOutputs();
 
                 carouselStations[1].SetLoaded();
