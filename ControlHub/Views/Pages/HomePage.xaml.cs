@@ -42,8 +42,8 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int FirstUnloadStation = 13;
     private const int SecondUnloadStation = 14;
-    private const double FirstSetXyVelocity = 1_000_000d;
-    private const double SecondSetXyVelocity = 1_000_000d;
+    private const double FirstSetXyVelocity = 100_000d;
+    private const double SecondSetXyVelocity = 100_000d;
     private const double SecondSetNozzle1PickupX = 1_606_271d;
     private const double SecondSetNozzle1PickupY = -222_828d;
     private const double SecondSetNozzle2PickupX = 1_606_631d;

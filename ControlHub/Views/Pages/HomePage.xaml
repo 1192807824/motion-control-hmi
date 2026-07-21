@@ -1263,7 +1263,7 @@
                                     <TextBlock Text="轴1/2 · 第一套XY" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="FirstSetXyVelocityTextBox"
                                              Height="25"
-                                             Text="1000000"
+                                             Text="100000"
                                              TextAlignment="Center"
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
@@ -1274,7 +1274,7 @@
                                     <TextBlock Text="轴3/4 · 第二套XY" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="SecondSetXyVelocityTextBox"
                                              Height="25"
-                                             Text="1000000"
+                                             Text="100000"
                                              TextAlignment="Center"
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
