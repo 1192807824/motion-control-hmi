@@ -28,6 +28,7 @@ public partial class HomePage : UserControl
     private const int SecondSetZ2BreakVacuumOutputBit = 20;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const double DdMotorPulsePerTurn = 22_500d;
+    private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int FirstUnloadStation = 13;
@@ -99,8 +100,6 @@ public partial class HomePage : UserControl
     private bool _presetPositionMoveRunning;
     private bool _startSequenceRunning;
     private bool _assignedNozzleMoveRunning;
-    private bool _ddMoveRunning;
-    private bool _axis13To15MoveRunning;
     private CancellationTokenSource? _productionCancellation;
     private TaskCompletionSource<bool>? _productionCompletion;
     private bool _productionStopRequested;
@@ -116,8 +115,6 @@ public partial class HomePage : UserControl
     {
         InitializeComponent();
         LoadPresetPositions();
-        _visionCalibration.Changed += VisionCalibration_Changed;
-        RefreshVisionCalibrationStatus();
         UpdateCarouselStationDisplay(CreateCarouselStationStates());
     }
 
@@ -471,9 +468,7 @@ public partial class HomePage : UserControl
 
         // 只要已有其它运动命令在执行，就不允许启动连续生产，避免多个轴命令互相抢控制权。
         if (_presetPositionMoveRunning ||
-            _assignedNozzleMoveRunning ||
-            _ddMoveRunning ||
-            _axis13To15MoveRunning)
+            _assignedNozzleMoveRunning)
         {
             // 当前设备还没空下来，直接忽略本次开始请求。
             return;
@@ -490,7 +485,9 @@ public partial class HomePage : UserControl
                 ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
 
             // 主页生产流程固定使用第一套 XY 轴速度，不受视觉标定页配置影响。
-            var velocity = FirstSetXyVelocity;
+            var velocity = ParseProductionVelocity(
+                FirstSetXyVelocityTextBox.Text,
+                "轴1/2第一套XY速度");
 
             // 速度必须是有效正数，否则后续移动超时和下发速度都不可信。
             if (!double.IsFinite(velocity) || velocity <= 0)
@@ -861,9 +858,6 @@ public partial class HomePage : UserControl
             // 恢复位置2按钮文字。
             MovePresetPosition2Button.Content = "移动";
 
-            // 恢复 DD 马达按钮文字。
-            Axis0MoveButton.Content = "转动";
-
             // 根据当前吸嘴步骤刷新吸嘴对位按钮文字。
             UpdateAssignedNozzleButtonText();
 
@@ -961,7 +955,7 @@ public partial class HomePage : UserControl
     {
         if (!requiredFinalTestTask.IsCompleted || !requiredSecondSetPickupTask.IsCompleted)
         {
-            SetAxis13To15MoveStatus(
+            SetStartProductionStatus(
                 "XY正在回中心准备下一轮拍照；下一次DD只等待测试轴回原及第二套完成双取料。",
                 Color.FromRgb(242, 181, 68));
         }
@@ -1090,7 +1084,9 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = SecondSetXyVelocity;
+        var velocity = ParseProductionVelocity(
+            SecondSetXyVelocityTextBox.Text,
+            "轴3/4第二套XY速度");
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第二套XY的移动速度配置无效。");
@@ -1175,7 +1171,7 @@ public partial class HomePage : UserControl
             }
         }
 
-        SetAxis13To15MoveStatus(
+        SetStartProductionStatus(
             $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；最后一轮测试并行执行，XY可直接上下料。",
             Color.FromRgb(73, 209, 125));
         return new CarouselAdvanceResult(
@@ -1193,12 +1189,18 @@ public partial class HomePage : UserControl
         CarouselStationState[] carouselStations,
         CancellationToken cancellationToken)
     {
+        var pressVelocity = ParseProductionVelocity(
+            TestStationPressVelocityTextBox.Text,
+            "轴13–15下压速度");
+        var homeVelocity = ParseProductionVelocity(
+            TestStationHomeVelocityTextBox.Text,
+            "轴13–15回原速度");
         var axisTargets = TestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
         if (axisTargets.Count == 0)
         {
-            SetAxis13To15MoveStatus("5/6/7工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
+            SetStartProductionStatus("5/6/7工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
             return 0;
         }
 
@@ -1211,10 +1213,6 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 已进测试站，不等待XY回中心，立即下压测试…",
             Color.FromRgb(242, 181, 68));
-        SetAxis13To15MoveStatus(
-            $"{string.Join("，", stations)} 有料，测试轴同步下压 {MoveOutAbsolutePosition:0.###} pulse…",
-            Color.FromRgb(242, 181, 68));
-
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         await motionController.MoveAxesAbsoluteAsync(
@@ -1223,9 +1221,9 @@ public partial class HomePage : UserControl
             TestStationMoveTimeoutMilliseconds,
             ProductionXyAxisNos,
             HomePageCompletionTolerance,
-            TestStationPressVelocity);
+            pressVelocity);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
-        SetAxis13To15MoveStatus(
+        SetStartProductionStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
             Color.FromRgb(242, 181, 68));
 
@@ -1235,20 +1233,16 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 停留完成，测试站正在回原，DD等待回原完成…",
             Color.FromRgb(242, 181, 68));
-        SetAxis13To15MoveStatus(
-            $"{string.Join("，", stations)} 停留完成，正在按模式 {TestStationHomeMode} 回原点，低速/高速 {TestStationHomeVelocity:0.###} units/s…",
-            Color.FromRgb(242, 181, 68));
-
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 正在下发 21 模式回原点命令，速度 {TestStationHomeVelocity:0.###} units/s…",
+            $"{string.Join("，", stations)} 正在下发 21 模式回原点命令，速度 {homeVelocity:0.###} pulse/s…",
             Color.FromRgb(242, 181, 68));
         await motionController.HomeAxesAsync(
             axisTargets.Keys.ToArray(),
             TestStationHomeMode,
             TestStationHomeOffsetPosition,
             cancellationToken,
-            TestStationHomeVelocity,
-            TestStationHomeVelocity,
+            homeVelocity,
+            homeVelocity,
             ProductionXyAxisNos);
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 21 模式回原点完成，DD可继续下一步。",
@@ -1258,9 +1252,6 @@ public partial class HomePage : UserControl
             carouselStations[station].SetTested($"BIN{Random.Shared.Next(0, 4)}");
         }
 
-        SetAxis13To15MoveStatus(
-            $"{string.Join("，", stations)} 测试站已回原完成。",
-            Color.FromRgb(73, 209, 125));
         UpdateCarouselStationDisplay(carouselStations);
         return axisTargets.Count;
     }
@@ -1804,9 +1795,7 @@ public partial class HomePage : UserControl
     {
         if (_assignedNozzleMoveRunning ||
             _presetPositionMoveRunning ||
-            _startSequenceRunning ||
-            _ddMoveRunning ||
-            _axis13To15MoveRunning)
+            _startSequenceRunning)
         {
             return;
         }
@@ -1852,7 +1841,9 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = FirstSetXyVelocity;
+        var velocity = ParseProductionVelocity(
+            FirstSetXyVelocityTextBox.Text,
+            "轴1/2第一套XY速度");
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -1906,38 +1897,6 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
-    private async void Axis0Move_Click(object sender, RoutedEventArgs e)
-    {
-        if (_ddMoveRunning ||
-            _presetPositionMoveRunning ||
-            _startSequenceRunning ||
-            _assignedNozzleMoveRunning ||
-            _axis13To15MoveRunning)
-        {
-            return;
-        }
-
-        try
-        {
-            var motionController = _motionController
-                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            _ddMoveRunning = true;
-            UpdateHomeCommandState();
-            Axis0MoveButton.Content = "转动中";
-            await MoveAxis0RelativeCoreAsync(DdMotorPulsePerTurn, CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            SetAxis0MoveStatus($"轴0移动失败：{exception.Message}", Color.FromRgb(242, 122, 128));
-        }
-        finally
-        {
-            _ddMoveRunning = false;
-            Axis0MoveButton.Content = "转动";
-            UpdateHomeCommandState();
-        }
-    }
-
     private async Task MoveAxis0RelativeCoreAsync(
         double pulseDistance,
         CancellationToken cancellationToken,
@@ -1950,131 +1909,16 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        SetAxis0MoveStatus(
-            $"轴0正在相对移动 {pulseDistance:0.###} pulse…",
-            Color.FromRgb(242, 181, 68));
-
-        var settled = await motionController.MoveAxisRelativeAsync(
+        var velocity = ParseProductionVelocity(
+            Axis0VelocityTextBox.Text,
+            "轴0 DD马达速度");
+        await motionController.MoveAxisRelativeAsync(
             hardwareAxisNo: 0,
             pulseDistance: pulseDistance,
             cancellationToken: cancellationToken,
             allowedMovingAxisNos: allowedMovingAxisNos,
-            minimumCompletionTolerance: HomePageCompletionTolerance);
-        SetAxis0MoveStatus(
-            $"轴0完成：{pulseDistance:0.###} pulse，当前位置 {settled.FeedbackPosition:0.###}。",
-            Color.FromRgb(73, 209, 125));
-    }
-
-    private void RecordAxis0Pulse_Click(object sender, RoutedEventArgs e)
-    {
-        Axis0PulseTextBox.Text = FormatPresetCoordinate(DdMotorPulsePerTurn);
-        SetAxis0MoveStatus(
-            $"DD马达每转固定脉冲：{DdMotorPulsePerTurn:0.###} pulse（代码配置）。",
-            Color.FromRgb(73, 209, 125));
-        UpdateHomeCommandState();
-    }
-
-    private void Axis0PulseTextBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        UpdateHomeCommandState();
-    }
-
-    private async void Axis13To15Move_Click(object sender, RoutedEventArgs e)
-    {
-        if (_axis13To15MoveRunning ||
-            _presetPositionMoveRunning ||
-            _startSequenceRunning ||
-            _assignedNozzleMoveRunning ||
-            _ddMoveRunning)
-        {
-            return;
-        }
-
-        try
-        {
-            var motionController = _motionController
-                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            _axis13To15MoveRunning = true;
-            UpdateHomeCommandState();
-            Axis13To15MoveButton.Content = "移出中";
-            SetAxis13To15MoveStatus(
-                $"轴{string.Join(" / 轴", MoveOutAxisNos)}正在绝对移动到 {MoveOutAbsolutePosition:0.###} pulse…",
-                Color.FromRgb(242, 181, 68));
-
-            await motionController.MoveAxesAbsoluteAsync(
-                MoveOutAxisNos.ToDictionary(axisNo => axisNo, _ => MoveOutAbsolutePosition),
-                CancellationToken.None,
-                TestStationMoveTimeoutMilliseconds,
-                minimumCompletionTolerance: HomePageCompletionTolerance,
-                velocityOverride: TestStationPressVelocity);
-            SetAxis13To15MoveStatus(
-                $"轴{string.Join(" / 轴", MoveOutAxisNos)}已到移出绝对位置 {MoveOutAbsolutePosition:0.###} pulse。",
-                Color.FromRgb(73, 209, 125));
-        }
-        catch (Exception exception)
-        {
-            SetAxis13To15MoveStatus(
-                $"移出轴组绝对移动失败：{exception.Message}",
-                Color.FromRgb(242, 122, 128));
-        }
-        finally
-        {
-            _axis13To15MoveRunning = false;
-            Axis13To15MoveButton.Content = "移出";
-            UpdateHomeCommandState();
-        }
-    }
-
-    private void Axis13To15PulseTextBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        UpdateHomeCommandState();
-    }
-
-    private void VisionCalibration_Changed(object? sender, EventArgs e)
-    {
-        if (!Dispatcher.CheckAccess())
-        {
-            Dispatcher.BeginInvoke(RefreshVisionCalibrationStatus);
-            return;
-        }
-
-        RefreshVisionCalibrationStatus();
-    }
-
-    private void RefreshVisionCalibrationStatus()
-    {
-        var snapshot = _visionCalibration.GetSnapshot();
-        string statusText;
-        Color statusColor;
-
-        if (!snapshot.CalibrationFileExists)
-        {
-            statusText = "标定文件缺失";
-            statusColor = Color.FromRgb(242, 122, 128);
-        }
-        else if (!snapshot.CalibrationProfileExists)
-        {
-            statusText = "第一套XY配置未保存";
-            statusColor = Color.FromRgb(242, 181, 68);
-        }
-        else if (snapshot.Nozzle1Calibrated && snapshot.Nozzle2Calibrated)
-        {
-            statusText = "双吸嘴标定就绪";
-            statusColor = Color.FromRgb(57, 197, 107);
-        }
-        else if (snapshot.Nozzle1Calibrated || snapshot.Nozzle2Calibrated)
-        {
-            statusText = snapshot.Nozzle1Calibrated ? "吸嘴1标定就绪" : "吸嘴2标定就绪";
-            statusColor = Color.FromRgb(242, 181, 68);
-        }
-        else
-        {
-            statusText = "相机标定就绪";
-            statusColor = Color.FromRgb(61, 163, 255);
-        }
-
-        VisionCalibrationStatusText.Text = statusText;
-        VisionCalibrationStatusIndicator.Fill = new SolidColorBrush(statusColor);
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverride: velocity);
     }
 
     private async void MovePresetPosition1_Click(object sender, RoutedEventArgs e)
@@ -2167,9 +2011,7 @@ public partial class HomePage : UserControl
     {
         if (_presetPositionMoveRunning ||
             _startSequenceRunning ||
-            _assignedNozzleMoveRunning ||
-            _ddMoveRunning ||
-            _axis13To15MoveRunning)
+            _assignedNozzleMoveRunning)
         {
             return;
         }
@@ -2180,7 +2022,9 @@ public partial class HomePage : UserControl
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y 轴绝对脉冲");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            var velocity = FirstSetXyVelocity;
+            var velocity = ParseProductionVelocity(
+                FirstSetXyVelocityTextBox.Text,
+                "轴1/2第一套XY速度");
             if (!double.IsFinite(velocity) || velocity <= 0)
             {
                 throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -2220,7 +2064,9 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = FirstSetXyVelocity;
+        var velocity = ParseProductionVelocity(
+            FirstSetXyVelocityTextBox.Text,
+            "轴1/2第一套XY速度");
         if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
@@ -2260,6 +2106,14 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void ProductionVelocityTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_loadingPresetPositions)
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
     private void LoadPresetPositions()
     {
         _homeSettings = _homeSettingsStore.Load();
@@ -2268,8 +2122,11 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1Y);
         PresetPosition2XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2X);
         PresetPosition2YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2Y);
-        Axis0PulseTextBox.Text = FormatPresetCoordinate(DdMotorPulsePerTurn);
-        Axis13To15PulseTextBox.Text = FormatPresetCoordinate(MoveOutAbsolutePosition);
+        Axis0VelocityTextBox.Text = FormatPresetCoordinate(Axis0Velocity);
+        FirstSetXyVelocityTextBox.Text = FormatPresetCoordinate(FirstSetXyVelocity);
+        SecondSetXyVelocityTextBox.Text = FormatPresetCoordinate(SecondSetXyVelocity);
+        TestStationPressVelocityTextBox.Text = FormatPresetCoordinate(TestStationPressVelocity);
+        TestStationHomeVelocityTextBox.Text = FormatPresetCoordinate(TestStationHomeVelocity);
         _loadingPresetPositions = false;
     }
 
@@ -2336,15 +2193,15 @@ public partial class HomePage : UserControl
         if (StartProductionButton is null ||
             StartProductionTitleText is null ||
             MoveAssignedNozzleButton is null ||
-            Axis0PulseTextBox is null ||
-            RecordAxis0PulseButton is null ||
-            Axis0MoveButton is null ||
-            Axis13To15PulseTextBox is null ||
-            Axis13To15MoveButton is null ||
             PresetPosition1XTextBox is null ||
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
+            Axis0VelocityTextBox is null ||
+            FirstSetXyVelocityTextBox is null ||
+            SecondSetXyVelocityTextBox is null ||
+            TestStationPressVelocityTextBox is null ||
+            TestStationHomeVelocityTextBox is null ||
             RecordPresetPosition1Button is null ||
             RecordPresetPosition2Button is null ||
             MovePresetPosition1Button is null ||
@@ -2360,11 +2217,21 @@ public partial class HomePage : UserControl
         var commandsIdle =
             !_presetPositionMoveRunning &&
             !_startSequenceRunning &&
-            !_assignedNozzleMoveRunning &&
-            !_ddMoveRunning &&
-            !_axis13To15MoveRunning;
+            !_assignedNozzleMoveRunning;
+        var axis0VelocityValid = TryParseProductionVelocity(Axis0VelocityTextBox.Text, out _);
+        var firstSetVelocityValid = TryParseProductionVelocity(FirstSetXyVelocityTextBox.Text, out _);
+        var secondSetVelocityValid = TryParseProductionVelocity(SecondSetXyVelocityTextBox.Text, out _);
+        var pressVelocityValid = TryParseProductionVelocity(TestStationPressVelocityTextBox.Text, out _);
+        var homeVelocityValid = TryParseProductionVelocity(TestStationHomeVelocityTextBox.Text, out _);
+        var allProductionVelocitiesValid =
+            axis0VelocityValid &&
+            firstSetVelocityValid &&
+            secondSetVelocityValid &&
+            pressVelocityValid &&
+            homeVelocityValid;
         StartProductionButton.IsEnabled =
             visionControllersReady &&
+            allProductionVelocitiesValid &&
             (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
         StartProductionTitleText.Text = _startSequenceRunning
             ? (_productionStopRequested ? "正在停止" : "停止循环")
@@ -2376,35 +2243,33 @@ public partial class HomePage : UserControl
         MoveAssignedNozzleButton.IsEnabled =
             visionControllersReady &&
             commandsIdle &&
+            firstSetVelocityValid &&
             ((_nextAssignedNozzleMoveStep == 1 && _blob1Nozzle1Target is not null) ||
              (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
         PresetPosition1XTextBox.IsEnabled = commandsIdle;
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
+        Axis0VelocityTextBox.IsEnabled = commandsIdle;
+        FirstSetXyVelocityTextBox.IsEnabled = commandsIdle;
+        SecondSetXyVelocityTextBox.IsEnabled = commandsIdle;
+        TestStationPressVelocityTextBox.IsEnabled = commandsIdle;
+        TestStationHomeVelocityTextBox.IsEnabled = commandsIdle;
         RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         MovePresetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
+            firstSetVelocityValid &&
             TryParseCoordinate(PresetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition1YTextBox.Text, out _);
         MovePresetPosition2Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
+            firstSetVelocityValid &&
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
         HomeEmergencyStopButton.IsEnabled = _motionController is not null;
-        Axis0PulseTextBox.IsEnabled = false;
-        RecordAxis0PulseButton.IsEnabled =
-            commandsIdle;
-        Axis0MoveButton.IsEnabled =
-            _motionController is not null &&
-            commandsIdle;
-        Axis13To15PulseTextBox.IsEnabled = false;
-        Axis13To15MoveButton.IsEnabled =
-            _motionController is not null &&
-            commandsIdle;
     }
 
     private void UpdateAssignedNozzleButtonText()
@@ -2440,20 +2305,6 @@ public partial class HomePage : UserControl
         StartProductionHintText.Text = message;
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
-    }
-
-    private void SetAxis0MoveStatus(string message, Color color)
-    {
-        Axis0MoveStatusText.Text = message;
-        Axis0MoveStatusText.ToolTip = message;
-        Axis0MoveStatusText.Foreground = new SolidColorBrush(color);
-    }
-
-    private void SetAxis13To15MoveStatus(string message, Color color)
-    {
-        Axis13To15MoveStatusText.Text = message;
-        Axis13To15MoveStatusText.ToolTip = message;
-        Axis13To15MoveStatusText.Foreground = new SolidColorBrush(color);
     }
 
     private async Task PrepareBlobInspectionVisionDisplayAsync(VisualCalibrationPage visualCalibrationController)
@@ -2713,6 +2564,21 @@ public partial class HomePage : UserControl
         }
 
         return parsed;
+    }
+
+    private static double ParseProductionVelocity(string? value, string fieldName)
+    {
+        if (!TryParseProductionVelocity(value, out var velocity))
+        {
+            throw new ArgumentException($"{fieldName}必须是大于 0 的有效数字。");
+        }
+
+        return velocity;
+    }
+
+    private static bool TryParseProductionVelocity(string? value, out double velocity)
+    {
+        return TryParseCoordinate(value, out velocity) && velocity > 0;
     }
 
     private static bool TryParseCoordinate(string? value, out double parsed)

@@ -530,14 +530,15 @@ public partial class MotionControlPage : UserControl
 
     /// <summary>
     /// 以相对脉冲方式移动指定硬件轴，并在到位或失败停止后返回最终轴快照。
-    /// 该入口使用当前轴的速度与运动曲线配置，且与其它运动、回零、停止流程互斥。
+    /// 该入口默认使用当前轴速度，也允许调用方覆盖运行速度；运动曲线仍使用当前轴配置。
     /// </summary>
     public async Task<MotionAxisSnapshot> MoveAxisRelativeAsync(
         int hardwareAxisNo,
         double pulseDistance,
         CancellationToken cancellationToken,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null,
-        double? minimumCompletionTolerance = null)
+        double? minimumCompletionTolerance = null,
+        double? velocityOverride = null)
     {
         if (hardwareAxisNo < 0)
         {
@@ -595,7 +596,8 @@ public partial class MotionControlPage : UserControl
             completionTolerance = Math.Max(completionTolerance, requestedCompletionTolerance);
         }
 
-        if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+        var velocity = velocityOverride ?? axis.JogSpeed;
+        if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
         }
@@ -610,7 +612,7 @@ public partial class MotionControlPage : UserControl
         }
 
         var estimatedTimeoutMilliseconds = Math.Ceiling(
-            Math.Abs(pulseDistance) / axis.JogSpeed * 1000d + 5000d);
+            Math.Abs(pulseDistance) / velocity * 1000d + 5000d);
         var moveTimeoutMilliseconds = (int)Math.Clamp(
             Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds),
             10_000d,
@@ -619,7 +621,7 @@ public partial class MotionControlPage : UserControl
         var commandIssued = false;
         try
         {
-            _motionCard.MoveRelative(hardwareAxisNo, pulseDistance, axis.JogSpeed);
+            _motionCard.MoveRelative(hardwareAxisNo, pulseDistance, velocity);
             commandIssued = true;
             _activePositionAxisNo = hardwareAxisNo;
             _activePositionTarget = expectedTarget;
