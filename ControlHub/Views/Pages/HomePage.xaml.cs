@@ -27,6 +27,7 @@ public partial class HomePage : UserControl
     private const int SecondSetZ1VacuumOutputBit = 19;
     private const int SecondSetZ2VacuumControlOutputBit = 21;
     private const int VacuumBreakPulseMilliseconds = 150;
+    private const int VacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
     private const int FirstSetNozzle2ZHardwareAxisNo = 7;
     private const int SecondSetNozzle1ZHardwareAxisNo = 9;
@@ -354,6 +355,11 @@ public partial class HomePage : UserControl
             cancellationToken);
 
         EnableNozzleVacuum(axisSet, nozzleNumber, cancellationToken);
+
+        SetFirstSetPositionStatus(
+            $"Z{nozzleNumber}真空吸已开启，保持 {VacuumPickupDwellMilliseconds} ms 等待吸附稳定…",
+            true);
+        await Task.Delay(VacuumPickupDwellMilliseconds, cancellationToken);
 
         await MoveNozzleZToAsync(
             axisSet,
