@@ -14,7 +14,7 @@
   "SimulationAnalogOutputCount": 2,
   "AnalogOutputMinimum": -10.0,
   "AnalogOutputMaximum": 10.0,
-  "ServoEnableTimeoutMilliseconds": 1500,
+  "ServoEnableTimeoutMilliseconds": 5000,
   "StopConfirmationTimeoutMilliseconds": 5000,
   "HomeTimeoutSeconds": 60,
   "MoveProfile": {

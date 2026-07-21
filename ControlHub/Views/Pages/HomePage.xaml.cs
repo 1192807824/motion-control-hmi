@@ -24,9 +24,16 @@ public partial class HomePage : UserControl
     private const int FirstSetZ2VacuumOutputBit = 17;
     private const int FirstSetZ2BreakVacuumOutputBit = 16;
     private const int SecondSetZ1BreakVacuumOutputBit = 18;
-    private const int SecondSetSharedVacuumOutputBit = 19;
-    private const int SecondSetZ2BreakVacuumOutputBit = 20;
+    private const int SecondSetZ1VacuumOutputBit = 19;
+    private const int SecondSetZ2VacuumControlOutputBit = 21;
     private const int VacuumBreakPulseMilliseconds = 150;
+    private const int FirstSetNozzle1ZHardwareAxisNo = 5;
+    private const int FirstSetNozzle2ZHardwareAxisNo = 7;
+    private const int SecondSetNozzle1ZHardwareAxisNo = 9;
+    private const int SecondSetNozzle2ZHardwareAxisNo = 11;
+    private const double NozzlePickupZPosition = 29_810d;
+    private const double NozzleSafeZPosition = -5_000d;
+    private const double NozzleZVelocity = 10_000d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
@@ -199,16 +206,22 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+
+        if (axisSet == VisionCalibrationAxisSet.Second)
+        {
+            return SetSecondSetNozzleVacuumOutputs(
+                motionController,
+                nozzleNumber,
+                vacuumEnabled,
+                breakVacuumEnabled);
+        }
+
         var (vacuumBit, breakVacuumBit) = (axisSet, nozzleNumber) switch
         {
             (VisionCalibrationAxisSet.First, 1) =>
                 (FirstSetZ1VacuumOutputBit, FirstSetZ1BreakVacuumOutputBit),
             (VisionCalibrationAxisSet.First, 2) =>
                 (FirstSetZ2VacuumOutputBit, FirstSetZ2BreakVacuumOutputBit),
-            (VisionCalibrationAxisSet.Second, 1) =>
-                (SecondSetSharedVacuumOutputBit, SecondSetZ1BreakVacuumOutputBit),
-            (VisionCalibrationAxisSet.Second, 2) =>
-                (SecondSetSharedVacuumOutputBit, SecondSetZ2BreakVacuumOutputBit),
             _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
         };
 
@@ -219,16 +232,12 @@ public partial class HomePage : UserControl
         var nextNozzle2VacuumEnabled = nozzleNumber == 2
             ? vacuumEnabled
             : _nozzleVacuumEnabledBySet[axisSetIndex, 2];
-        var effectiveVacuumEnabled = axisSet == VisionCalibrationAxisSet.Second
-            ? nextNozzle1VacuumEnabled || nextNozzle2VacuumEnabled
-            : vacuumEnabled;
-
         var vacuumSet = false;
         var breakVacuumSet = false;
         Exception? firstFailure = null;
         try
         {
-            vacuumSet = motionController.SetDigitalOutputHardwareBit(vacuumBit, !effectiveVacuumEnabled);
+            vacuumSet = motionController.SetDigitalOutputHardwareBit(vacuumBit, !vacuumEnabled);
             if (vacuumSet)
             {
                 _nozzleVacuumEnabledBySet[axisSetIndex, 1] = nextNozzle1VacuumEnabled;
@@ -252,21 +261,177 @@ public partial class HomePage : UserControl
         if (firstFailure is not null)
         {
             throw new InvalidOperationException(
-                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumBit:00}={FormatIoState(effectiveVacuumEnabled)}，破Y{breakVacuumBit:00}={FormatIoState(breakVacuumEnabled)}。",
+                $"Z{nozzleNumber}真空IO写入失败：吸Y{vacuumBit:00}={FormatIoState(vacuumEnabled)}，破Y{breakVacuumBit:00}={FormatIoState(breakVacuumEnabled)}。",
                 firstFailure);
         }
 
         return vacuumSet & breakVacuumSet;
     }
 
+    private bool SetSecondSetNozzleVacuumOutputs(
+        MotionControlPage motionController,
+        int nozzleNumber,
+        bool vacuumEnabled,
+        bool breakVacuumEnabled)
+    {
+        if (vacuumEnabled && breakVacuumEnabled)
+        {
+            throw new ArgumentException("同一个吸嘴不能同时开启真空吸和真空破。");
+        }
+
+        var outputSet = false;
+        Exception? firstFailure = null;
+        try
+        {
+            if (nozzleNumber == 1)
+            {
+                // 第二套 Z1：Y18=1 为破真空，Y19=1 为真空吸。
+                // 切换状态时先关闭相反输出，避免两个电磁阀短暂同时得电。
+                var oppositeSet = vacuumEnabled
+                    ? motionController.SetDigitalOutputHardwareBit(
+                        SecondSetZ1BreakVacuumOutputBit,
+                        false)
+                    : motionController.SetDigitalOutputHardwareBit(
+                        SecondSetZ1VacuumOutputBit,
+                        false);
+                var requestedSet = vacuumEnabled
+                    ? motionController.SetDigitalOutputHardwareBit(
+                        SecondSetZ1VacuumOutputBit,
+                        true)
+                    : motionController.SetDigitalOutputHardwareBit(
+                        SecondSetZ1BreakVacuumOutputBit,
+                        breakVacuumEnabled);
+                outputSet = oppositeSet & requestedSet;
+            }
+            else if (nozzleNumber == 2)
+            {
+                // 第二套 Z2 使用单点换向：Y21=1 为吸，Y21=0 为破。
+                outputSet = motionController.SetDigitalOutputHardwareBit(
+                    SecondSetZ2VacuumControlOutputBit,
+                    vacuumEnabled);
+            }
+            else
+            {
+                throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。");
+            }
+        }
+        catch (Exception exception)
+        {
+            firstFailure = exception;
+        }
+
+        if (firstFailure is not null)
+        {
+            var expectedOutput = nozzleNumber == 1
+                ? $"破Y{SecondSetZ1BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 1 : 0)}，吸Y{SecondSetZ1VacuumOutputBit:00}={(vacuumEnabled ? 1 : 0)}"
+                : $"Y{SecondSetZ2VacuumControlOutputBit:00}={(vacuumEnabled ? 1 : 0)}";
+            throw new InvalidOperationException(
+                $"第二套Z{nozzleNumber}真空IO写入失败：{expectedOutput}。",
+                firstFailure);
+        }
+
+        if (outputSet)
+        {
+            _nozzleVacuumEnabledBySet[(int)VisionCalibrationAxisSet.Second, nozzleNumber] =
+                vacuumEnabled;
+        }
+
+        return outputSet;
+    }
+
     private static string FormatIoState(bool enabled) => enabled ? "ON" : "OFF";
 
-    private void EnableActiveSetNozzleVacuum(int nozzleNumber, CancellationToken cancellationToken)
+    private async Task PickWithActiveSetNozzleAsync(
+        int nozzleNumber,
+        CancellationToken cancellationToken)
     {
-        EnableNozzleVacuum(
-            _productionAxisSet ?? _visionCalibration.ActiveAxisSet,
+        var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
+        await MoveNozzleZToAsync(
+            axisSet,
             nozzleNumber,
+            NozzlePickupZPosition,
+            "取料位",
             cancellationToken);
+
+        EnableNozzleVacuum(axisSet, nozzleNumber, cancellationToken);
+
+        await MoveNozzleZToAsync(
+            axisSet,
+            nozzleNumber,
+            NozzleSafeZPosition,
+            "安全位",
+            cancellationToken);
+    }
+
+    private async Task MoveNozzleZToAsync(
+        VisionCalibrationAxisSet axisSet,
+        int nozzleNumber,
+        double targetPosition,
+        string positionName,
+        CancellationToken cancellationToken)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var zHardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, nozzleNumber);
+        SetFirstSetPositionStatus(
+            $"Z{nozzleNumber}正在移动到{positionName}{targetPosition:0.###} pulse，速度 {NozzleZVelocity:0.###}…",
+            true);
+
+        var result = await motionController.MoveAxesAbsoluteAsync(
+            new Dictionary<int, double> { [zHardwareAxisNo] = targetPosition },
+            cancellationToken,
+            allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverride: NozzleZVelocity);
+        var actual = result.Single();
+        SetFirstSetPositionStatus(
+            $"Z{nozzleNumber}已到{positionName}：{actual.FeedbackPosition:0.###} pulse。",
+            true);
+    }
+
+    private async Task EnsureActiveSetNozzlesAtSafeZAsync(CancellationToken cancellationToken)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
+        var z1HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 1);
+        var z2HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 2);
+        SetFirstSetPositionStatus("XY放料前正在确认 Z1/Z2 的 -5000 安全位…", true);
+
+        await motionController.MoveAxesAbsoluteAsync(
+            new Dictionary<int, double>
+            {
+                [z1HardwareAxisNo] = NozzleSafeZPosition,
+                [z2HardwareAxisNo] = NozzleSafeZPosition
+            },
+            cancellationToken,
+            allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverride: NozzleZVelocity);
+
+        SetFirstSetPositionStatus("Z1/Z2均已到 -5000 pulse 安全位，允许 XY 前往位置1/2。", true);
+    }
+
+    private static int GetNozzleZHardwareAxisNo(
+        VisionCalibrationAxisSet axisSet,
+        int nozzleNumber)
+    {
+        return (axisSet, nozzleNumber) switch
+        {
+            (VisionCalibrationAxisSet.First, 1) => FirstSetNozzle1ZHardwareAxisNo,
+            (VisionCalibrationAxisSet.First, 2) => FirstSetNozzle2ZHardwareAxisNo,
+            (VisionCalibrationAxisSet.Second, 1) => SecondSetNozzle1ZHardwareAxisNo,
+            (VisionCalibrationAxisSet.Second, 2) => SecondSetNozzle2ZHardwareAxisNo,
+            _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
+        };
+    }
+
+    private static IReadOnlyCollection<int> GetProductionPeerAxisNos(
+        VisionCalibrationAxisSet axisSet)
+    {
+        return axisSet == VisionCalibrationAxisSet.First
+            ? FirstSetProductionPeerAxisNos
+            : SecondSetProductionPeerAxisNos;
     }
 
     private void EnableNozzleVacuum(
@@ -328,13 +493,9 @@ public partial class HomePage : UserControl
             }
         }
 
-        var axisSetIndex = (int)axisSet;
-        var sharedVacuumStillEnabled = axisSet == VisionCalibrationAxisSet.Second &&
-            (_nozzleVacuumEnabledBySet[axisSetIndex, 1] ||
-             _nozzleVacuumEnabledBySet[axisSetIndex, 2]);
         SetFirstSetPositionStatus(
-            sharedVacuumStillEnabled
-                ? $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms；另一吸嘴仍在持料，共享真空吸Y{SecondSetSharedVacuumOutputBit:00}保持开启。"
+            axisSet == VisionCalibrationAxisSet.Second && nozzleNumber == 2
+                ? $"Z2已切换为真空破Y{SecondSetZ2VacuumControlOutputBit:00}=0。"
                 : $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
             true);
     }
@@ -684,7 +845,7 @@ public partial class HomePage : UserControl
                 // 缓存本轮换算出的吸嘴目标，并同步更新吸嘴对位 UI。
                 SetAssignedNozzleTargets(assignedTargets);
 
-                // 提示第 3 步开始：吸嘴1对位物体1，到位后开启 Z1 真空吸。
+                // 提示第 3 步开始：吸嘴1对位物体1，到位后 Z1 下探取料并安全回缩。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：Blob识别完成，吸嘴1正在对位物体1…",
                     Color.FromRgb(242, 181, 68));
@@ -692,19 +853,22 @@ public partial class HomePage : UserControl
                 // 执行吸嘴1对位动作。
                 await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
 
-                // 吸嘴1到达物体1后，打开 Z1 对应真空吸。
-                EnableActiveSetNozzleVacuum(1, _productionCancellation.Token);
+                // 吸嘴1到达物体1后，Z1 到取料位、开吸，然后回到安全位。
+                await PickWithActiveSetNozzleAsync(1, _productionCancellation.Token);
 
-                // 提示第 4 步开始：吸嘴2对位物体2，到位后开启 Z2 真空吸。
+                // 提示第 4 步开始：吸嘴2对位物体2，到位后 Z2 下探取料并安全回缩。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Z1真空吸已开启，吸嘴2正在对位物体2…",
+                    $"第{cycleNumber}轮：Z1已取料并回到-5000，吸嘴2正在对位物体2…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行吸嘴2对位动作。
                 await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
 
-                // 吸嘴2到达物体2后，打开 Z2 对应真空吸。
-                EnableActiveSetNozzleVacuum(2, _productionCancellation.Token);
+                // 吸嘴2到达物体2后，Z2 到取料位、开吸，然后回到安全位。
+                await PickWithActiveSetNozzleAsync(2, _productionCancellation.Token);
+
+                // 放料 XY 动作的安全门：必须再次确认两根 Z 轴都在 -5000 脉冲位置。
+                await EnsureActiveSetNozzlesAtSafeZAsync(_productionCancellation.Token);
 
                 // 拍照和双吸嘴取料不等待DD或测试站；真正放料前只等待DD完成固定两次转动。
                 if (activeCarouselAdvanceTask is not null)
@@ -743,7 +907,7 @@ public partial class HomePage : UserControl
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Z2真空吸已开启，XY正在放料到1工位({position1X:0.###}, {position1Y:0.###})…",
+                    $"第{cycleNumber}轮：Z1/Z2均已回到-5000安全位，XY正在放料到1工位({position1X:0.###}, {position1Y:0.###})…",
                     Color.FromRgb(242, 181, 68));
 
                 // 执行位置1的绝对移动。

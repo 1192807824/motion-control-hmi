@@ -35,7 +35,7 @@ public sealed class MotionCardOptions
 
     public double AnalogOutputMaximum { get; init; } = 10;
 
-    public int ServoEnableTimeoutMilliseconds { get; init; } = 1500;
+    public int ServoEnableTimeoutMilliseconds { get; init; } = 5000;
 
     public int StopConfirmationTimeoutMilliseconds { get; init; } = 5000;
 
