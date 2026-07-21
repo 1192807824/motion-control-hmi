@@ -19,7 +19,10 @@ public partial class MotionControlPage : UserControl
 {
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const double TestHomeLowSpeedRatio = 0.25;
+    private const double OneKeyResetRzHomeVelocity = 100_000;
+    private const double OneKeyResetXyHomeVelocity = 300_000;
     private const double OneKeyResetTestStationHomeVelocity = 300_000;
+    private const double OneKeyResetDdHomeVelocity = 80_000;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -3623,16 +3626,16 @@ public partial class MotionControlPage : UserControl
         return
         [
             new("R/Z同时", [
-                new([6, 8, 10, 12], 33, 10_000, 10_000),
-                new([5, 7, 9, 11], -1, 10_000, 10_000)
+                new([6, 8, 10, 12], 33, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity),
+                new([5, 7, 9, 11], -1, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity)
             ]),
-            new("上料X", [new([1], 33, 100_000, 100_000)]),
+            new("上料X", [new([1], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
             new("上料Y/下料XY/三个测试站同时", [
-                new([2], 33, 100_000, 100_000),
-                new([3, 4], 33, 100_000, 100_000),
+                new([2], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new([3, 4], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
                 new([13, 14, 15], 21, OneKeyResetTestStationHomeVelocity, OneKeyResetTestStationHomeVelocity)
             ]),
-            new("DD马达", [new([0], 33, 50_000, 50_000, 600)])
+            new("DD马达", [new([0], 33, OneKeyResetDdHomeVelocity, OneKeyResetDdHomeVelocity, 600)])
         ];
     }
 
