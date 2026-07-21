@@ -3612,17 +3612,20 @@ public partial class MotionControlPage : UserControl
             ProcessSnapshotAlarms(item.Axis, snapshot);
             EnsureOneKeyResetAxisCanStart(stage, item, snapshot);
 
-            if (snapshot.Homed)
+            if (IsOneKeyResetAxisAtHome(item, snapshot))
             {
-                item.Axis.State = $"一键复位：{stage.Name}已回原，跳过";
+                item.Axis.State = $"一键复位：{stage.Name}当前仍在原点，跳过";
                 continue;
             }
 
+            var isReturningAfterLeavingHome = snapshot.Homed;
             _motionCard.Home(item.Axis.HardwareAxisNo, item.Profile);
             commandedAxes.Add(item);
             item.Axis.Homed = false;
             item.Axis.IsMoving = true;
-            item.Axis.State = $"一键复位：{stage.Name}回原中";
+            item.Axis.State = isReturningAfterLeavingHome
+                ? $"一键复位：{stage.Name}已离开原点，正在重新回原"
+                : $"一键复位：{stage.Name}回原中";
             StartHomeTracking(item.Axis.HardwareAxisNo, deadline);
         }
 
@@ -3666,16 +3669,9 @@ public partial class MotionControlPage : UserControl
                 $"负限位={snapshot.NegativeLimit}，停止原因={snapshot.StopReason}。命令未下发。");
         }
 
-        var positionError = Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition);
-        if (snapshot.Homed && positionError > OneKeyResetHomePositionTolerance)
+        if (IsOneKeyResetAxisAtHome(item, snapshot))
         {
-            throw new MotionCardException(
-                $"{axisDescription}显示已回原，但编码器位置误差为 {positionError:F0} 脉冲，" +
-                $"超过允许值 ±{OneKeyResetHomePositionTolerance:F0} 脉冲，禁止继续一键复位。");
-        }
-
-        if (snapshot.Homed)
-        {
+            // dmc_get_home_result 表示历史上曾成功回原；只有当前位置仍在目标容差内才可跳过。
             return;
         }
 
@@ -3694,6 +3690,15 @@ public partial class MotionControlPage : UserControl
                 $"{axisDescription}尚未取得回原完成状态，但{activeInput}已有效；" +
                 "模式 34 会继续向正方向寻找编码器零位，已禁止启动以防撞机。");
         }
+    }
+
+    private static bool IsOneKeyResetAxisAtHome(
+        TestHomeAxisCommand item,
+        MotionAxisSnapshot snapshot)
+    {
+        return snapshot.Homed &&
+               Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition) <=
+               OneKeyResetHomePositionTolerance;
     }
 
     private static void EnsureOneKeyResetAxisCompleted(
@@ -3857,8 +3862,13 @@ public partial class MotionControlPage : UserControl
 
     private async Task WaitForHomeAsync(AxisStatus axis, DateTime deadline, CancellationToken cancellationToken)
     {
-        var issuedAt = DateTime.UtcNow;
+        var issuedAt = _homeIssuedAtUtc.TryGetValue(axis.HardwareAxisNo, out var trackedIssuedAt)
+            ? trackedIssuedAt
+            : DateTime.UtcNow;
+        var startConfirmationDeadline = issuedAt.AddMilliseconds(
+            Math.Max(1000, _motionOptions.PollIntervalMilliseconds * 3));
         var observedMoving = false;
+        var observedHomeResultCleared = false;
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -3876,7 +3886,15 @@ public partial class MotionControlPage : UserControl
                 observedMoving = true;
             }
 
-            if (!snapshot.IsMoving && snapshot.Homed)
+            if (!snapshot.Homed)
+            {
+                observedHomeResultCleared = true;
+            }
+
+            if (!snapshot.IsMoving && snapshot.Homed &&
+                (observedMoving ||
+                 observedHomeResultCleared ||
+                 DateTime.UtcNow >= startConfirmationDeadline))
             {
                 return;
             }
@@ -3884,7 +3902,7 @@ public partial class MotionControlPage : UserControl
             if (!snapshot.IsMoving && !snapshot.Homed &&
                 (snapshot.StopReason != 0 ||
                  observedMoving ||
-                 DateTime.UtcNow >= issuedAt.AddMilliseconds(Math.Max(1000, _motionOptions.PollIntervalMilliseconds * 3))))
+                 DateTime.UtcNow >= startConfirmationDeadline))
             {
                 throw new MotionCardException(
                     $"{axis.Name} 回零未完成即停止，停止原因 {snapshot.StopReason}。",
