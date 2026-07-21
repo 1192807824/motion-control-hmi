@@ -20,9 +20,10 @@ public partial class MotionControlPage : UserControl
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const double TestHomeLowSpeedRatio = 0.25;
     private const double OneKeyResetRzHomeVelocity = 50_000;
-    private const double OneKeyResetXyHomeVelocity = 150_000;
+    private const double OneKeyResetXyHomeVelocity = 100_000;
     private const double OneKeyResetTestStationHomeVelocity = 100_000;
     private const double OneKeyResetDdHomeVelocity = 50_000;
+    private const double OneKeyResetHomePositionTolerance = 100;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -3527,6 +3528,7 @@ public partial class MotionControlPage : UserControl
             .Distinct()
             .ToArray();
         var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
+        var snapshotsByHardwareNo = new Dictionary<int, MotionAxisSnapshot>();
 
         foreach (var stage in resetStages)
         {
@@ -3554,6 +3556,7 @@ public partial class MotionControlPage : UserControl
             var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
             ApplySnapshot(axis, snapshot);
             ProcessSnapshotAlarms(axis, snapshot);
+            snapshotsByHardwareNo[axis.HardwareAxisNo] = snapshot;
             if (snapshot.IsMoving || snapshot.Alarm || snapshot.EmergencyInput)
             {
                 throw new MotionCardException($"{axis.Name} 正在运动或存在报警/急停输入，不能启动一键复位测试。");
@@ -3571,6 +3574,21 @@ public partial class MotionControlPage : UserControl
             throw new MotionCardException("一键复位测试前必须先使能硬件轴 0～15。");
         }
 
+        foreach (var stage in resetStages)
+        {
+            foreach (var group in stage.Groups)
+            {
+                var profile = CreateTestHomeProfile(group);
+                foreach (var hardwareAxisNo in group.HardwareAxisNumbers)
+                {
+                    EnsureOneKeyResetAxisCanStart(
+                        stage,
+                        new TestHomeAxisCommand(requestedAxes[hardwareAxisNo], profile),
+                        snapshotsByHardwareNo[hardwareAxisNo]);
+                }
+            }
+        }
+
         return requestedAxes;
     }
 
@@ -3581,29 +3599,123 @@ public partial class MotionControlPage : UserControl
     {
         var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
         var stageAxes = stage.Groups
-            .SelectMany(group => group.HardwareAxisNumbers.Select(axisNo => new
-            {
-                Axis = axes[axisNo],
-                Profile = CreateTestHomeProfile(group)
-            }))
+            .SelectMany(group => group.HardwareAxisNumbers.Select(axisNo =>
+                new TestHomeAxisCommand(axes[axisNo], CreateTestHomeProfile(group))))
             .ToArray();
+        var commandedAxes = new List<TestHomeAxisCommand>(stageAxes.Length);
 
         foreach (var item in stageAxes)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = _motionCard.ReadAxis(item.Axis.HardwareAxisNo);
+            ApplySnapshot(item.Axis, snapshot);
+            ProcessSnapshotAlarms(item.Axis, snapshot);
+            EnsureOneKeyResetAxisCanStart(stage, item, snapshot);
+
+            if (snapshot.Homed)
+            {
+                item.Axis.State = $"一键复位：{stage.Name}已回原，跳过";
+                continue;
+            }
+
             _motionCard.Home(item.Axis.HardwareAxisNo, item.Profile);
+            commandedAxes.Add(item);
             item.Axis.Homed = false;
             item.Axis.IsMoving = true;
-            item.Axis.State = $"一键复位测试：{stage.Name}回零中";
+            item.Axis.State = $"一键复位：{stage.Name}回原中";
             StartHomeTracking(item.Axis.HardwareAxisNo, deadline);
         }
 
-        SetCommandStage(CommandStage.Running, $"一键复位测试：{stage.Name}回零中");
-        await Task.WhenAll(stageAxes.Select(item => WaitForHomeAsync(item.Axis, deadline, cancellationToken)));
-        foreach (var item in stageAxes)
+        if (commandedAxes.Count == 0)
         {
+            SetCommandStage(CommandStage.Stopped, $"一键复位：{stage.Name}已在原点，跳过");
+            return;
+        }
+
+        SetCommandStage(CommandStage.Running, $"一键复位：{stage.Name}回原中");
+        await Task.WhenAll(commandedAxes.Select(item => WaitForHomeAsync(item.Axis, deadline, cancellationToken)));
+        foreach (var item in commandedAxes)
+        {
+            var snapshot = _motionCard.ReadAxis(item.Axis.HardwareAxisNo);
+            ApplySnapshot(item.Axis, snapshot);
+            ProcessSnapshotAlarms(item.Axis, snapshot);
+            EnsureOneKeyResetAxisCompleted(stage, item, snapshot);
             ClearHomeTracking(item.Axis.HardwareAxisNo);
-            item.Axis.State = $"一键复位测试：{stage.Name}回零完成";
+            item.Axis.State = $"一键复位：{stage.Name}回原完成";
+        }
+    }
+
+    private static void EnsureOneKeyResetAxisCanStart(
+        TestHomeStage stage,
+        TestHomeAxisCommand item,
+        MotionAxisSnapshot snapshot)
+    {
+        var axisDescription = $"{item.Axis.Name}（硬件轴 {item.Axis.HardwareAxisNo}）";
+        if (snapshot.IsMoving ||
+            !snapshot.ServoEnabled ||
+            snapshot.Alarm ||
+            snapshot.EmergencyInput ||
+            snapshot.PositiveLimit ||
+            snapshot.NegativeLimit ||
+            snapshot.StopReason != 0)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}状态不允许执行{stage.Name}回原：" +
+                $"运动={snapshot.IsMoving}，使能={snapshot.ServoEnabled}，" +
+                $"报警=0x{snapshot.AxisErrorCode:X4}，正限位={snapshot.PositiveLimit}，" +
+                $"负限位={snapshot.NegativeLimit}，停止原因={snapshot.StopReason}。命令未下发。");
+        }
+
+        var positionError = Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition);
+        if (snapshot.Homed && positionError > OneKeyResetHomePositionTolerance)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}显示已回原，但编码器位置误差为 {positionError:F0} 脉冲，" +
+                $"超过允许值 ±{OneKeyResetHomePositionTolerance:F0} 脉冲，禁止继续一键复位。");
+        }
+
+        if (snapshot.Homed)
+        {
+            return;
+        }
+
+        if (item.Profile.Mode == 33 && (snapshot.OriginInput || snapshot.NegativeLimit))
+        {
+            var activeInput = snapshot.NegativeLimit ? "负限位" : "原点输入";
+            throw new MotionCardException(
+                $"{axisDescription}尚未取得回原完成状态，但{activeInput}已有效；" +
+                "模式 33 会继续向负方向寻找编码器零位，已禁止启动以防撞机。");
+        }
+
+        if (item.Profile.Mode == 34 && (snapshot.OriginInput || snapshot.PositiveLimit))
+        {
+            var activeInput = snapshot.PositiveLimit ? "正限位" : "原点输入";
+            throw new MotionCardException(
+                $"{axisDescription}尚未取得回原完成状态，但{activeInput}已有效；" +
+                "模式 34 会继续向正方向寻找编码器零位，已禁止启动以防撞机。");
+        }
+    }
+
+    private static void EnsureOneKeyResetAxisCompleted(
+        TestHomeStage stage,
+        TestHomeAxisCommand item,
+        MotionAxisSnapshot snapshot)
+    {
+        var axisDescription = $"{item.Axis.Name}（硬件轴 {item.Axis.HardwareAxisNo}）";
+        if (snapshot.IsMoving || !snapshot.Homed || snapshot.Alarm || snapshot.EmergencyInput || snapshot.StopReason != 0)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}{stage.Name}回原结果无效：" +
+                $"运动={snapshot.IsMoving}，回原完成={snapshot.Homed}，" +
+                $"报警=0x{snapshot.AxisErrorCode:X4}，停止原因={snapshot.StopReason}。");
+        }
+
+        var positionError = Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition);
+        if (positionError > OneKeyResetHomePositionTolerance)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}{stage.Name}回原后的编码器位置误差为 {positionError:F0} 脉冲，" +
+                $"超过允许值 ±{OneKeyResetHomePositionTolerance:F0} 脉冲。");
         }
     }
 
@@ -4934,6 +5046,10 @@ public partial class MotionControlPage : UserControl
         double LowVelocity,
         double HighVelocity,
         double OffsetPosition = 0);
+
+    private sealed record TestHomeAxisCommand(
+        AxisStatus Axis,
+        MotionHomeProfile Profile);
 
     private sealed record TestHomeStage(
         string Name,

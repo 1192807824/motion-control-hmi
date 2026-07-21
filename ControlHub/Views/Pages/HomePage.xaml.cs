@@ -556,6 +556,22 @@ public partial class HomePage : UserControl
             // 刷新主页按钮状态，把“开始运行”切成“停止循环”，并锁住其它会冲突的操作。
             UpdateHomeCommandState();
 
+            // 启动生产前先经过位置2这个安全过渡点。必须严格先走Y、确认到位后再走X，
+            // 避免从任意停机位置直接沿XY斜线路径前往拍照取料中心。
+            var productionAxes = VisionCalibration;
+            var startupSafePosition = await MoveToStartupPosition2SafelyAsync(
+                motionController,
+                productionAxes.XHardwareAxisNo,
+                productionAxes.YHardwareAxisNo,
+                position2X,
+                position2Y,
+                velocity,
+                _productionCancellation.Token);
+            SetStartProductionStatus(
+                $"启动安全定位完成：已按Y后X到达位置2" +
+                $"({startupSafePosition.ActualX:0.###}, {startupSafePosition.ActualY:0.###})，准备进入取料流程…",
+                Color.FromRgb(73, 209, 125));
+
             // 从第 0 轮开始计数，进入循环后先自增为第 1 轮。
             var cycleNumber = 0;
 
@@ -883,6 +899,84 @@ public partial class HomePage : UserControl
         SetStartProductionStatus("正在停止循环，请等待当前轴确认停止…", Color.FromRgb(242, 181, 68));
         UpdateHomeCommandState();
         return true;
+    }
+
+    private async Task<CalibrationCenterPosition> MoveToStartupPosition2SafelyAsync(
+        MotionControlPage motionController,
+        int xHardwareAxisNo,
+        int yHardwareAxisNo,
+        double targetX,
+        double targetY,
+        double velocity,
+        CancellationToken cancellationToken)
+    {
+        var current = motionController.CaptureCalibrationFeedback(
+            xHardwareAxisNo,
+            yHardwareAxisNo);
+
+        SetStartProductionStatus(
+            $"启动安全定位：Y轴先移动到位置2 Y={targetY:0.###}，X轴保持不动…",
+            Color.FromRgb(242, 181, 68));
+        SetFirstSetPositionStatus(
+            $"正在先走Y到位置2：当前X={current.ActualX:0.###}，目标Y={targetY:0.###} pulse。",
+            false);
+        var yTimeoutMilliseconds = CalculateStartMoveTimeout(
+            current.ActualX,
+            current.ActualY,
+            current.ActualX,
+            targetY,
+            velocity);
+        await motionController.MoveAxesAbsoluteAsync(
+            new Dictionary<int, double> { [yHardwareAxisNo] = targetY },
+            cancellationToken,
+            minimumTimeoutMilliseconds: yTimeoutMilliseconds,
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverride: velocity);
+
+        var afterY = motionController.CaptureCalibrationFeedback(
+            xHardwareAxisNo,
+            yHardwareAxisNo);
+        var yError = Math.Abs(afterY.ActualY - targetY);
+        if (yError > HomePageCompletionTolerance)
+        {
+            throw new InvalidOperationException(
+                $"启动安全定位Y轴误差为 {yError:0.###} 脉冲，超过允许值 ±{HomePageCompletionTolerance:0.###}，X轴未启动。");
+        }
+
+        SetStartProductionStatus(
+            $"启动安全定位：Y轴已到位置2，X轴开始移动到 X={targetX:0.###}…",
+            Color.FromRgb(242, 181, 68));
+        SetFirstSetPositionStatus(
+            $"Y已到位({afterY.ActualY:0.###})，正在走X到位置2：目标X={targetX:0.###} pulse。",
+            false);
+        var xTimeoutMilliseconds = CalculateStartMoveTimeout(
+            afterY.ActualX,
+            afterY.ActualY,
+            targetX,
+            afterY.ActualY,
+            velocity);
+        await motionController.MoveAxesAbsoluteAsync(
+            new Dictionary<int, double> { [xHardwareAxisNo] = targetX },
+            cancellationToken,
+            minimumTimeoutMilliseconds: xTimeoutMilliseconds,
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverride: velocity);
+
+        var actual = motionController.CaptureCalibrationFeedback(
+            xHardwareAxisNo,
+            yHardwareAxisNo);
+        var xError = Math.Abs(actual.ActualX - targetX);
+        yError = Math.Abs(actual.ActualY - targetY);
+        if (xError > HomePageCompletionTolerance || yError > HomePageCompletionTolerance)
+        {
+            throw new InvalidOperationException(
+                $"启动安全位置2到位误差超限：X误差={xError:0.###}，Y误差={yError:0.###} 脉冲，生产流程未启动。");
+        }
+
+        SetFirstSetPositionStatus(
+            $"启动安全位置2已到位（先Y后X）：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
+            true);
+        return actual;
     }
 
     private Task<CalibrationCenterPosition> StartFirstSetReturnToCenterAsync(
