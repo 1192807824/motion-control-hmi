@@ -19,10 +19,10 @@ public partial class MotionControlPage : UserControl
 {
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const double TestHomeLowSpeedRatio = 0.25;
-    private const double OneKeyResetRzHomeVelocity = 100_000;
-    private const double OneKeyResetXyHomeVelocity = 300_000;
-    private const double OneKeyResetTestStationHomeVelocity = 300_000;
-    private const double OneKeyResetDdHomeVelocity = 80_000;
+    private const double OneKeyResetRzHomeVelocity = 50_000;
+    private const double OneKeyResetXyHomeVelocity = 150_000;
+    private const double OneKeyResetTestStationHomeVelocity = 100_000;
+    private const double OneKeyResetDdHomeVelocity = 50_000;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
