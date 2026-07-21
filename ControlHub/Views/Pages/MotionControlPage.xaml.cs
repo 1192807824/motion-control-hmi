@@ -19,17 +19,7 @@ public partial class MotionControlPage : UserControl
 {
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const double TestHomeLowSpeedRatio = 0.25;
-    private static readonly TestHomeStage[] TestOneKeyResetStages =
-    [
-        new("R/Z同时", [
-            new([6, 8, 10, 12], 33, 10_000, 10_000),
-            new([5, 7, 9, 11], -1, 10_000, 10_000)
-        ]),
-        new("上料X", [new([1], 33, 100_000, 100_000)]),
-        new("上料Y", [new([2], 33, 100_000, 100_000)]),
-        new("下料XY同时", [new([3, 4], 33, 100_000, 100_000)]),
-        new("DD马达", [new([0], 33, 50_000, 50_000, 600)])
-    ];
+    private const double OneKeyResetTestStationHomeVelocity = 300_000;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -3459,9 +3449,10 @@ public partial class MotionControlPage : UserControl
         }
 
         Dictionary<int, AxisStatus> axes;
+        var resetStages = CreateTestOneKeyResetStages();
         try
         {
-            axes = PreflightTestOneKeyReset();
+            axes = PreflightTestOneKeyReset(resetStages);
         }
         catch (Exception exception)
         {
@@ -3474,7 +3465,7 @@ public partial class MotionControlPage : UserControl
         _commandStopwatch = Stopwatch.StartNew();
         try
         {
-            foreach (var stage in TestOneKeyResetStages)
+            foreach (var stage in resetStages)
             {
                 _homeSequenceCancellation.Token.ThrowIfCancellationRequested();
                 await RunTestHomeStageAsync(stage, axes, _homeSequenceCancellation.Token);
@@ -3524,16 +3515,17 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private Dictionary<int, AxisStatus> PreflightTestOneKeyReset()
+    private Dictionary<int, AxisStatus> PreflightTestOneKeyReset(
+        IReadOnlyCollection<TestHomeStage> resetStages)
     {
-        var requestedAxisNumbers = TestOneKeyResetStages
+        var requestedAxisNumbers = resetStages
             .SelectMany(stage => stage.Groups)
             .SelectMany(group => group.HardwareAxisNumbers)
             .Distinct()
             .ToArray();
         var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
 
-        foreach (var stage in TestOneKeyResetStages)
+        foreach (var stage in resetStages)
         {
             foreach (var group in stage.Groups)
             {
@@ -3573,7 +3565,7 @@ public partial class MotionControlPage : UserControl
 
         if (requestedAxes.Values.Any(axis => !axis.ServoOn))
         {
-            throw new MotionCardException("一键复位测试前必须先使能硬件轴 0～12。");
+            throw new MotionCardException("一键复位测试前必须先使能硬件轴 0～15。");
         }
 
         return requestedAxes;
@@ -3624,6 +3616,24 @@ public partial class MotionControlPage : UserControl
             DecelerationSeconds = 0.1,
             OffsetPosition = group.OffsetPosition
         };
+    }
+
+    private static TestHomeStage[] CreateTestOneKeyResetStages()
+    {
+        return
+        [
+            new("R/Z同时", [
+                new([6, 8, 10, 12], 33, 10_000, 10_000),
+                new([5, 7, 9, 11], -1, 10_000, 10_000)
+            ]),
+            new("上料X", [new([1], 33, 100_000, 100_000)]),
+            new("上料Y/下料XY/三个测试站同时", [
+                new([2], 33, 100_000, 100_000),
+                new([3, 4], 33, 100_000, 100_000),
+                new([13, 14, 15], 21, OneKeyResetTestStationHomeVelocity, OneKeyResetTestStationHomeVelocity)
+            ]),
+            new("DD马达", [new([0], 33, 50_000, 50_000, 600)])
+        ];
     }
 
     private void IoMode_Click(object sender, RoutedEventArgs e)
@@ -4770,7 +4780,7 @@ public partial class MotionControlPage : UserControl
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
                !IsAnyMotionWorkflowActive() &&
-               TestOneKeyResetStages
+               CreateTestOneKeyResetStages()
                    .SelectMany(stage => stage.Groups)
                    .SelectMany(group => group.HardwareAxisNumbers)
                    .Distinct()

@@ -2191,8 +2191,8 @@ public partial class HomePage : UserControl
 
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
-            "请确认所有机构都在安全区域，并且硬件轴 0～12 已使能。\n\n" +
-            "复位顺序：R/Z同时 → 上料X → 上料Y → 下料XY同时 → DD马达。",
+            "请确认所有机构都在安全区域，并且硬件轴 0～15 已使能。\n\n" +
+            "复位顺序：R/Z同时 → 上料X → 上料Y、下料XY、三个测试站同时 → DD马达。",
             "一键复位安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -2220,7 +2220,7 @@ public partial class HomePage : UserControl
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
             _oneKeyResetRunning = true;
-            SetOneKeyResetStatus("正在执行：R/Z → 上料X → 上料Y → 下料XY → DD…", Color.FromRgb(242, 181, 68));
+            SetOneKeyResetStatus("正在执行：R/Z → 上料X → Y/下料XY/测试站同时 → DD…", Color.FromRgb(242, 181, 68));
             UpdateHomeCommandState();
             await motionController.RunOneKeyResetAsync(CancellationToken.None);
             SetOneKeyResetStatus("一键复位完成", Color.FromRgb(73, 209, 125));

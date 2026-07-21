@@ -950,7 +950,7 @@
                             BorderBrush="#F59E0B"
                             IsEnabled="False"
                             Click="OneKeyReset_Click"
-                            ToolTip="R/Z同时回原 → 上料X → 上料Y → 下料XY同时 → DD马达">
+                            ToolTip="R/Z同时回原 → 上料X → 上料Y、下料XY、三个测试站同时 → DD马达">
                         <Grid Margin="14,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="42" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="29" Height="29" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
@@ -960,7 +960,7 @@
                                            FontSize="18"
                                            FontWeight="Bold" />
                                 <TextBlock x:Name="OneKeyResetHintText"
-                                           Text="R/Z同时 → 上料X → 上料Y → 下料XY → DD"
+                                           Text="R/Z → 上料X → Y/下料XY/测试站同时 → DD"
                                            Foreground="#FFF1D6"
                                            FontSize="10"
                                            Margin="0,3,0,0"
