@@ -31,7 +31,7 @@ public partial class HomePage : UserControl
     private const int FirstSetNozzle2ZHardwareAxisNo = 7;
     private const int SecondSetNozzle1ZHardwareAxisNo = 9;
     private const int SecondSetNozzle2ZHardwareAxisNo = 11;
-    private const double NozzlePickupZPosition = 29_810d;
+    private const double NozzlePickupZPosition = 30_000d;
     private const double NozzleSafeZPosition = -5_000d;
     private const double NozzleZVelocity = 10_000d;
     private const double DdMotorPulsePerTurn = 22_500d;
