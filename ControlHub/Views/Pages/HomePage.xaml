@@ -936,9 +936,9 @@
                         <RowDefinition Height="86" />
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
-                        <RowDefinition Height="202" />
-                        <RowDefinition Height="142" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="0" />
+                        <RowDefinition Height="0" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Text="设备操作" Style="{StaticResource SectionTitle}" FontSize="17" />
@@ -1051,8 +1051,11 @@
                             </Grid>
                     </Button>
 
-                    <Border Grid.Row="6"
-                            Margin="0,8,0,8"
+                    <ScrollViewer Grid.Row="6"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                    <Border Margin="0,8,0,8"
                             Padding="9,7"
                             Background="#12283A"
                             BorderBrush="#2D4A61"
@@ -1231,7 +1234,108 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="7"
+                    <Border Margin="0,0,0,8"
+                            Padding="9,7"
+                            Background="#12283A"
+                            BorderBrush="#2D4A61"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="24" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="52" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock Text="第二套 XY 绝对位置（pulse）"
+                                           Foreground="#EAF2F7"
+                                           FontSize="12"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="原下料固定放料位置"
+                                           Foreground="#49D17D"
+                                           FontSize="10"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Grid.Row="1" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="位置 1"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="SecondSetPosition1XTextBox"
+                                             Height="25"
+                                             Text="592474"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="SecondSetPosition1YTextBox"
+                                             Height="25"
+                                             Text="204106"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid Grid.Row="2" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="位置 2"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="SecondSetPosition2XTextBox"
+                                             Height="25"
+                                             Text="592498"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="SecondSetPosition2YTextBox"
+                                             Height="25"
+                                             Text="1374787"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border
                             Background="#12283A"
                             BorderBrush="#2D4A61"
                             BorderThickness="1"
@@ -1312,10 +1416,6 @@
                         </Grid>
                     </Border>
 
-                    <ScrollViewer Grid.Row="8"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel>
                             <Border Margin="0,8,0,0"
                                     Background="#12283A"
                                     BorderBrush="#2D4A61"
@@ -1403,154 +1503,6 @@
                                 </Grid>
                             </Border>
 
-                            <Border Margin="0,8,0,0"
-                                    Background="#12283A"
-                                    BorderBrush="#2D4A61"
-                                    BorderThickness="1"
-                                    CornerRadius="3"
-                                    Padding="9,7">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="24" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Text="第二套XY下料位置（pulse）"
-                                               Foreground="#EAF2F7"
-                                               FontSize="12"
-                                               FontWeight="Bold"
-                                               VerticalAlignment="Center" />
-                                    <UniformGrid Grid.Row="1" Rows="2" Columns="2">
-                                        <StackPanel Margin="0,2,8,2">
-                                            <TextBlock Text="吸嘴2取12工位" Foreground="#9FB1BF" FontSize="9" />
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="1"
-                                                         x:Name="SecondSetNozzle2PickupXTextBox"
-                                                         Height="25"
-                                                         Text="1606631"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="4"
-                                                         x:Name="SecondSetNozzle2PickupYTextBox"
-                                                         Height="25"
-                                                         Text="330321"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                            </Grid>
-                                        </StackPanel>
-                                        <StackPanel Margin="0,2,0,2">
-                                            <TextBlock Text="吸嘴1取13工位" Foreground="#9FB1BF" FontSize="9" />
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="1"
-                                                         x:Name="SecondSetNozzle1PickupXTextBox"
-                                                         Height="25"
-                                                         Text="1606271"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="4"
-                                                         x:Name="SecondSetNozzle1PickupYTextBox"
-                                                         Height="25"
-                                                         Text="-222828"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                            </Grid>
-                                        </StackPanel>
-                                        <StackPanel Margin="0,2,8,2">
-                                            <TextBlock Text="吸嘴1放料" Foreground="#9FB1BF" FontSize="9" />
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="1"
-                                                         x:Name="SecondSetNozzle1DropXTextBox"
-                                                         Height="25"
-                                                         Text="592474"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="4"
-                                                         x:Name="SecondSetNozzle1DropYTextBox"
-                                                         Height="25"
-                                                         Text="204106"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                            </Grid>
-                                        </StackPanel>
-                                        <StackPanel Margin="0,2,0,2">
-                                            <TextBlock Text="吸嘴2放料" Foreground="#9FB1BF" FontSize="9" />
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="5" />
-                                                    <ColumnDefinition Width="14" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="1"
-                                                         x:Name="SecondSetNozzle2DropXTextBox"
-                                                         Height="25"
-                                                         Text="592498"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
-                                                <TextBox Grid.Column="4"
-                                                         x:Name="SecondSetNozzle2DropYTextBox"
-                                                         Height="25"
-                                                         Text="1374787"
-                                                         TextAlignment="Center"
-                                                         VerticalContentAlignment="Center"
-                                                         Foreground="#10263A"
-                                                         Background="#F7FAFC"
-                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
-                                            </Grid>
-                                        </StackPanel>
-                                    </UniformGrid>
-                                </Grid>
-                            </Border>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>

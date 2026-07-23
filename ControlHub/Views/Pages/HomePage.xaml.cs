@@ -46,14 +46,14 @@ public partial class HomePage : UserControl
     private const int SecondSetNozzle1UnloadStation = 13;
     private const double FirstSetXyVelocity = 100_000d;
     private const double SecondSetXyVelocity = 100_000d;
-    private const double DefaultSecondSetNozzle1PickupX = 1_606_271d;
-    private const double DefaultSecondSetNozzle1PickupY = -222_828d;
-    private const double DefaultSecondSetNozzle2PickupX = 1_606_631d;
-    private const double DefaultSecondSetNozzle2PickupY = 330_321d;
-    private const double DefaultSecondSetNozzle1DropX = 592_474d;
-    private const double DefaultSecondSetNozzle1DropY = 204_106d;
-    private const double DefaultSecondSetNozzle2DropX = 592_498d;
-    private const double DefaultSecondSetNozzle2DropY = 1_374_787d;
+    private const double SecondSetNozzle1PickupX = 1_606_271d;
+    private const double SecondSetNozzle1PickupY = -222_828d;
+    private const double SecondSetNozzle2PickupX = 1_606_631d;
+    private const double SecondSetNozzle2PickupY = 330_321d;
+    private const double DefaultSecondSetPosition1X = 592_474d;
+    private const double DefaultSecondSetPosition1Y = 204_106d;
+    private const double DefaultSecondSetPosition2X = 592_498d;
+    private const double DefaultSecondSetPosition2Y = 1_374_787d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
@@ -1432,8 +1432,8 @@ public partial class HomePage : UserControl
             var xyPositions = GetSecondSetXyPositions();
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴2取12工位",
-                xyPositions.Nozzle2PickupX,
-                xyPositions.Nozzle2PickupY,
+                SecondSetNozzle2PickupX,
+                SecondSetNozzle2PickupY,
                 cancellationToken);
             await PickSecondSetNozzleFromStationAsync(
                 2,
@@ -1444,8 +1444,8 @@ public partial class HomePage : UserControl
 
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴1取13工位",
-                xyPositions.Nozzle1PickupX,
-                xyPositions.Nozzle1PickupY,
+                SecondSetNozzle1PickupX,
+                SecondSetNozzle1PickupY,
                 cancellationToken);
             await PickSecondSetNozzleFromStationAsync(
                 1,
@@ -1464,9 +1464,9 @@ public partial class HomePage : UserControl
             pickupCompletion.TrySetResult(true);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "吸嘴1放料",
-                xyPositions.Nozzle1DropX,
-                xyPositions.Nozzle1DropY,
+                "第二套位置1",
+                xyPositions.Position1X,
+                xyPositions.Position1Y,
                 cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
@@ -1476,9 +1476,9 @@ public partial class HomePage : UserControl
                 cancellationToken);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "吸嘴2放料",
-                xyPositions.Nozzle2DropX,
-                xyPositions.Nozzle2DropY,
+                "第二套位置2",
+                xyPositions.Position2X,
+                xyPositions.Position2Y,
                 cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
@@ -2594,22 +2594,14 @@ public partial class HomePage : UserControl
             _homeSettings.SecondSetDropZPosition ?? DefaultNozzleDropZPosition);
         SecondSetSafeZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetSafeZPosition ?? DefaultNozzleSafeZPosition);
-        SecondSetNozzle2PickupXTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle2PickupX ?? DefaultSecondSetNozzle2PickupX);
-        SecondSetNozzle2PickupYTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle2PickupY ?? DefaultSecondSetNozzle2PickupY);
-        SecondSetNozzle1PickupXTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle1PickupX ?? DefaultSecondSetNozzle1PickupX);
-        SecondSetNozzle1PickupYTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle1PickupY ?? DefaultSecondSetNozzle1PickupY);
-        SecondSetNozzle1DropXTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle1DropX ?? DefaultSecondSetNozzle1DropX);
-        SecondSetNozzle1DropYTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle1DropY ?? DefaultSecondSetNozzle1DropY);
-        SecondSetNozzle2DropXTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle2DropX ?? DefaultSecondSetNozzle2DropX);
-        SecondSetNozzle2DropYTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetNozzle2DropY ?? DefaultSecondSetNozzle2DropY);
+        SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetPosition1X ?? DefaultSecondSetPosition1X);
+        SecondSetPosition1YTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetPosition1Y ?? DefaultSecondSetPosition1Y);
+        SecondSetPosition2XTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetPosition2X ?? DefaultSecondSetPosition2X);
+        SecondSetPosition2YTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetPosition2Y ?? DefaultSecondSetPosition2Y);
         _loadingPresetPositions = false;
     }
 
@@ -2627,14 +2619,10 @@ public partial class HomePage : UserControl
     private SecondSetXyPositions ReadSecondSetXyPositions()
     {
         return new SecondSetXyPositions(
-            ParseFiniteCoordinate(SecondSetNozzle1PickupXTextBox.Text, "第二套吸嘴1取13工位X位置"),
-            ParseFiniteCoordinate(SecondSetNozzle1PickupYTextBox.Text, "第二套吸嘴1取13工位Y位置"),
-            ParseFiniteCoordinate(SecondSetNozzle2PickupXTextBox.Text, "第二套吸嘴2取12工位X位置"),
-            ParseFiniteCoordinate(SecondSetNozzle2PickupYTextBox.Text, "第二套吸嘴2取12工位Y位置"),
-            ParseFiniteCoordinate(SecondSetNozzle1DropXTextBox.Text, "第二套吸嘴1放料X位置"),
-            ParseFiniteCoordinate(SecondSetNozzle1DropYTextBox.Text, "第二套吸嘴1放料Y位置"),
-            ParseFiniteCoordinate(SecondSetNozzle2DropXTextBox.Text, "第二套吸嘴2放料X位置"),
-            ParseFiniteCoordinate(SecondSetNozzle2DropYTextBox.Text, "第二套吸嘴2放料Y位置"));
+            ParseFiniteCoordinate(SecondSetPosition1XTextBox.Text, "第二套位置1 X轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition1YTextBox.Text, "第二套位置1 Y轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition2XTextBox.Text, "第二套位置2 X轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2 Y轴绝对脉冲"));
     }
 
     private void SaveProductionZPositionsFromInputs()
@@ -2675,34 +2663,22 @@ public partial class HomePage : UserControl
     private void SaveSecondSetXyPositionsFromInputs()
     {
         if (_loadingPresetPositions ||
-            SecondSetNozzle1PickupXTextBox is null ||
-            SecondSetNozzle1PickupYTextBox is null ||
-            SecondSetNozzle2PickupXTextBox is null ||
-            SecondSetNozzle2PickupYTextBox is null ||
-            SecondSetNozzle1DropXTextBox is null ||
-            SecondSetNozzle1DropYTextBox is null ||
-            SecondSetNozzle2DropXTextBox is null ||
-            SecondSetNozzle2DropYTextBox is null ||
-            !TryParseCoordinate(SecondSetNozzle1PickupXTextBox.Text, out var nozzle1PickupX) ||
-            !TryParseCoordinate(SecondSetNozzle1PickupYTextBox.Text, out var nozzle1PickupY) ||
-            !TryParseCoordinate(SecondSetNozzle2PickupXTextBox.Text, out var nozzle2PickupX) ||
-            !TryParseCoordinate(SecondSetNozzle2PickupYTextBox.Text, out var nozzle2PickupY) ||
-            !TryParseCoordinate(SecondSetNozzle1DropXTextBox.Text, out var nozzle1DropX) ||
-            !TryParseCoordinate(SecondSetNozzle1DropYTextBox.Text, out var nozzle1DropY) ||
-            !TryParseCoordinate(SecondSetNozzle2DropXTextBox.Text, out var nozzle2DropX) ||
-            !TryParseCoordinate(SecondSetNozzle2DropYTextBox.Text, out var nozzle2DropY))
+            SecondSetPosition1XTextBox is null ||
+            SecondSetPosition1YTextBox is null ||
+            SecondSetPosition2XTextBox is null ||
+            SecondSetPosition2YTextBox is null ||
+            !TryParseCoordinate(SecondSetPosition1XTextBox.Text, out var position1X) ||
+            !TryParseCoordinate(SecondSetPosition1YTextBox.Text, out var position1Y) ||
+            !TryParseCoordinate(SecondSetPosition2XTextBox.Text, out var position2X) ||
+            !TryParseCoordinate(SecondSetPosition2YTextBox.Text, out var position2Y))
         {
             return;
         }
 
-        _homeSettings.SecondSetNozzle1PickupX = nozzle1PickupX;
-        _homeSettings.SecondSetNozzle1PickupY = nozzle1PickupY;
-        _homeSettings.SecondSetNozzle2PickupX = nozzle2PickupX;
-        _homeSettings.SecondSetNozzle2PickupY = nozzle2PickupY;
-        _homeSettings.SecondSetNozzle1DropX = nozzle1DropX;
-        _homeSettings.SecondSetNozzle1DropY = nozzle1DropY;
-        _homeSettings.SecondSetNozzle2DropX = nozzle2DropX;
-        _homeSettings.SecondSetNozzle2DropY = nozzle2DropY;
+        _homeSettings.SecondSetPosition1X = position1X;
+        _homeSettings.SecondSetPosition1Y = position1Y;
+        _homeSettings.SecondSetPosition2X = position2X;
+        _homeSettings.SecondSetPosition2Y = position2Y;
         try
         {
             _homeSettingsStore.Save(_homeSettings);
@@ -2854,14 +2830,10 @@ public partial class HomePage : UserControl
              SecondSetPickupZPositionTextBox is null ||
              SecondSetDropZPositionTextBox is null ||
              SecondSetSafeZPositionTextBox is null ||
-             SecondSetNozzle1PickupXTextBox is null ||
-             SecondSetNozzle1PickupYTextBox is null ||
-             SecondSetNozzle2PickupXTextBox is null ||
-             SecondSetNozzle2PickupYTextBox is null ||
-             SecondSetNozzle1DropXTextBox is null ||
-             SecondSetNozzle1DropYTextBox is null ||
-             SecondSetNozzle2DropXTextBox is null ||
-             SecondSetNozzle2DropYTextBox is null ||
+             SecondSetPosition1XTextBox is null ||
+             SecondSetPosition1YTextBox is null ||
+             SecondSetPosition2XTextBox is null ||
+             SecondSetPosition2YTextBox is null ||
              RecordPresetPosition1Button is null ||
             RecordPresetPosition2Button is null ||
             MovePresetPosition1Button is null ||
@@ -2892,14 +2864,10 @@ public partial class HomePage : UserControl
             TryParseCoordinate(SecondSetDropZPositionTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out _);
         var allSecondSetXyPositionsValid =
-            TryParseCoordinate(SecondSetNozzle1PickupXTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle1PickupYTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle2PickupXTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle2PickupYTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle1DropXTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle1DropYTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle2DropXTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetNozzle2DropYTextBox.Text, out _);
+            TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
         var allProductionVelocitiesValid =
             axis0VelocityValid &&
             firstSetVelocityValid &&
@@ -2941,14 +2909,10 @@ public partial class HomePage : UserControl
         SecondSetPickupZPositionTextBox.IsEnabled = commandsIdle;
         SecondSetDropZPositionTextBox.IsEnabled = commandsIdle;
         SecondSetSafeZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1PickupXTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1PickupYTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2PickupXTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2PickupYTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1DropXTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1DropYTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2DropXTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2DropYTextBox.IsEnabled = commandsIdle;
+        SecondSetPosition1XTextBox.IsEnabled = commandsIdle;
+        SecondSetPosition1YTextBox.IsEnabled = commandsIdle;
+        SecondSetPosition2XTextBox.IsEnabled = commandsIdle;
+        SecondSetPosition2YTextBox.IsEnabled = commandsIdle;
         RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         MovePresetPosition1Button.IsEnabled =
@@ -3331,12 +3295,8 @@ public partial class HomePage : UserControl
         double SecondSetSafe);
 
     private readonly record struct SecondSetXyPositions(
-        double Nozzle1PickupX,
-        double Nozzle1PickupY,
-        double Nozzle2PickupX,
-        double Nozzle2PickupY,
-        double Nozzle1DropX,
-        double Nozzle1DropY,
-        double Nozzle2DropX,
-        double Nozzle2DropY);
+        double Position1X,
+        double Position1Y,
+        double Position2X,
+        double Position2Y);
 }
