@@ -64,4 +64,32 @@ public sealed class HomePageSettings
     public double? PresetPosition2Y { get; set; }
 
     public double? Axis0RelativePulse { get; set; }
+
+    public double? FirstSetPickupZPosition { get; set; }
+
+    public double? FirstSetDropZPosition { get; set; }
+
+    public double? FirstSetSafeZPosition { get; set; }
+
+    public double? SecondSetPickupZPosition { get; set; }
+
+    public double? SecondSetDropZPosition { get; set; }
+
+    public double? SecondSetSafeZPosition { get; set; }
+
+    public double? SecondSetNozzle1PickupX { get; set; }
+
+    public double? SecondSetNozzle1PickupY { get; set; }
+
+    public double? SecondSetNozzle2PickupX { get; set; }
+
+    public double? SecondSetNozzle2PickupY { get; set; }
+
+    public double? SecondSetNozzle1DropX { get; set; }
+
+    public double? SecondSetNozzle1DropY { get; set; }
+
+    public double? SecondSetNozzle2DropX { get; set; }
+
+    public double? SecondSetNozzle2DropY { get; set; }
 }

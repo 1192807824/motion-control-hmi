@@ -1311,6 +1311,248 @@
                             </UniformGrid>
                         </Grid>
                     </Border>
+
+                    <ScrollViewer Grid.Row="8"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <Border Margin="0,8,0,0"
+                                    Background="#12283A"
+                                    BorderBrush="#2D4A61"
+                                    BorderThickness="1"
+                                    CornerRadius="3"
+                                    Padding="9,7">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="24" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="Z轴生产高度（pulse）"
+                                               Foreground="#EAF2F7"
+                                               FontSize="12"
+                                               FontWeight="Bold"
+                                               VerticalAlignment="Center" />
+                                    <UniformGrid Grid.Row="1" Rows="2" Columns="3">
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="上料 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetPickupZPositionTextBox"
+                                             Height="25"
+                                             Text="30000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="上料 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetDropZPositionTextBox"
+                                             Height="25"
+                                             Text="4800"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="上料 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetSafeZPositionTextBox"
+                                             Height="25"
+                                             Text="-5000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetPickupZPositionTextBox"
+                                             Height="25"
+                                             Text="30000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetDropZPositionTextBox"
+                                             Height="25"
+                                             Text="4800"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="下料 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetSafeZPositionTextBox"
+                                             Height="25"
+                                             Text="-5000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                    </UniformGrid>
+                                </Grid>
+                            </Border>
+
+                            <Border Margin="0,8,0,0"
+                                    Background="#12283A"
+                                    BorderBrush="#2D4A61"
+                                    BorderThickness="1"
+                                    CornerRadius="3"
+                                    Padding="9,7">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="24" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="第二套XY下料位置（pulse）"
+                                               Foreground="#EAF2F7"
+                                               FontSize="12"
+                                               FontWeight="Bold"
+                                               VerticalAlignment="Center" />
+                                    <UniformGrid Grid.Row="1" Rows="2" Columns="2">
+                                        <StackPanel Margin="0,2,8,2">
+                                            <TextBlock Text="吸嘴2取12工位" Foreground="#9FB1BF" FontSize="9" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="1"
+                                                         x:Name="SecondSetNozzle2PickupXTextBox"
+                                                         Height="25"
+                                                         Text="1606631"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="4"
+                                                         x:Name="SecondSetNozzle2PickupYTextBox"
+                                                         Height="25"
+                                                         Text="330321"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                            </Grid>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,2,0,2">
+                                            <TextBlock Text="吸嘴1取13工位" Foreground="#9FB1BF" FontSize="9" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="1"
+                                                         x:Name="SecondSetNozzle1PickupXTextBox"
+                                                         Height="25"
+                                                         Text="1606271"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="4"
+                                                         x:Name="SecondSetNozzle1PickupYTextBox"
+                                                         Height="25"
+                                                         Text="-222828"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                            </Grid>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,2,8,2">
+                                            <TextBlock Text="吸嘴1放料" Foreground="#9FB1BF" FontSize="9" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="1"
+                                                         x:Name="SecondSetNozzle1DropXTextBox"
+                                                         Height="25"
+                                                         Text="592474"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="4"
+                                                         x:Name="SecondSetNozzle1DropYTextBox"
+                                                         Height="25"
+                                                         Text="204106"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                            </Grid>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,2,0,2">
+                                            <TextBlock Text="吸嘴2放料" Foreground="#9FB1BF" FontSize="9" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="5" />
+                                                    <ColumnDefinition Width="14" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="X" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="1"
+                                                         x:Name="SecondSetNozzle2DropXTextBox"
+                                                         Height="25"
+                                                         Text="592498"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                                <TextBlock Grid.Column="3" Text="Y" Foreground="#9FB1BF" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="4"
+                                                         x:Name="SecondSetNozzle2DropYTextBox"
+                                                         Height="25"
+                                                         Text="1374787"
+                                                         TextAlignment="Center"
+                                                         VerticalContentAlignment="Center"
+                                                         Foreground="#10263A"
+                                                         Background="#F7FAFC"
+                                                         TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </UniformGrid>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>
