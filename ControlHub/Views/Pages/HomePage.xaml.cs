@@ -71,10 +71,14 @@ public partial class HomePage : UserControl
         [VisionCalibrationService.FirstSetXHardwareAxisNo, VisionCalibrationService.FirstSetYHardwareAxisNo];
     private static readonly int[] SecondSetAxisNos =
         [VisionCalibrationService.SecondSetXHardwareAxisNo, VisionCalibrationService.SecondSetYHardwareAxisNo];
+    private static readonly int[] FirstSetZAxisNos =
+        [FirstSetNozzle1ZHardwareAxisNo, FirstSetNozzle2ZHardwareAxisNo];
+    private static readonly int[] SecondSetZAxisNos =
+        [SecondSetNozzle1ZHardwareAxisNo, SecondSetNozzle2ZHardwareAxisNo];
     private static readonly int[] FirstSetProductionPeerAxisNos =
-        [0, .. SecondSetAxisNos, .. MoveOutAxisNos];
+        [0, .. SecondSetAxisNos, .. SecondSetZAxisNos, .. MoveOutAxisNos];
     private static readonly int[] SecondSetProductionPeerAxisNos =
-        [0, .. FirstSetAxisNos, .. MoveOutAxisNos];
+        [0, .. FirstSetAxisNos, .. FirstSetZAxisNos, .. MoveOutAxisNos];
     private static readonly int[] ProductionXyAxisNos =
         [.. FirstSetAxisNos, .. SecondSetAxisNos];
     private static readonly Point[] CarouselStationCardSlots =
@@ -1058,12 +1062,6 @@ public partial class HomePage : UserControl
                 await activeSecondSetUnloadTask;
                 activeSecondSetUnloadTask = Task.CompletedTask;
 
-                // DD停稳、工位状态确定后启动第二套收料；它与第一套向1/2工位放料并行。
-                activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
-                    carouselStations,
-                    _productionCancellation.Token,
-                    out activeSecondSetPickupTask);
-
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，XY正在放料到1工位({position1X:0.###}, {position1Y:0.###})…",
@@ -1104,6 +1102,13 @@ public partial class HomePage : UserControl
                 carouselStations[1].SetLoaded();
                 carouselStations[2].SetLoaded();
                 UpdateCarouselStationDisplay(carouselStations);
+
+                // 本轮两个新料写入1/2工位后再判断12/13；第7轮形成14个在盘物料时必须在本轮立即收料，
+                // 不能因为判断发生在放料前而延迟到第8轮。
+                activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
+                    carouselStations,
+                    _productionCancellation.Token,
+                    out activeSecondSetPickupTask);
 
                 if (!activeSecondSetPickupTask.IsCompleted)
                 {
