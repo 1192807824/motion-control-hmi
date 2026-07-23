@@ -1469,11 +1469,17 @@
                                              Background="#F7FAFC"
                                              TextChanged="ProductionVelocityTextBox_TextChanged" />
                                 </StackPanel>
-                                <TextBlock Text="默认值来自程序配置；修改后下一次动作生效。"
-                                           Foreground="#6F8392"
-                                           FontSize="9"
-                                           TextWrapping="Wrap"
-                                           VerticalAlignment="Center" />
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="轴5/7/9/11 · Z轴" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="NozzleZVelocityTextBox"
+                                             Height="25"
+                                             Text="20000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
+                                </StackPanel>
                             </UniformGrid>
                         </Grid>
                     </Border>

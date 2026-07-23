@@ -37,7 +37,7 @@ public partial class HomePage : UserControl
     private const double DefaultNozzlePickupZPosition = 30_000d;
     private const double DefaultNozzleDropZPosition = 4_800d;
     private const double DefaultNozzleSafeZPosition = -5_000d;
-    private const double NozzleZVelocity = 20_000d;
+    private const double DefaultNozzleZVelocity = 20_000d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
@@ -474,8 +474,11 @@ public partial class HomePage : UserControl
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         var zHardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, nozzleNumber);
+        var zVelocity = ParseProductionVelocity(
+            NozzleZVelocityTextBox.Text,
+            "Z轴速度");
         SetFirstSetPositionStatus(
-            $"Z{nozzleNumber}正在移动到{positionName}{targetPosition:0.###} pulse，速度 {NozzleZVelocity:0.###}…",
+            $"Z{nozzleNumber}正在移动到{positionName}{targetPosition:0.###} pulse，速度 {zVelocity:0.###}…",
             true);
 
         var result = await motionController.MoveAxesAbsoluteAsync(
@@ -483,7 +486,7 @@ public partial class HomePage : UserControl
             cancellationToken,
             allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
             minimumCompletionTolerance: HomePageCompletionTolerance,
-            velocityOverride: NozzleZVelocity);
+            velocityOverride: zVelocity);
         var actual = result.Single();
         SetFirstSetPositionStatus(
             $"Z{nozzleNumber}已到{positionName}：{actual.FeedbackPosition:0.###} pulse。",
@@ -499,6 +502,9 @@ public partial class HomePage : UserControl
         var safePosition = axisSet == VisionCalibrationAxisSet.First
             ? positions.FirstSetSafe
             : positions.SecondSetSafe;
+        var zVelocity = ParseProductionVelocity(
+            NozzleZVelocityTextBox.Text,
+            "Z轴速度");
         var z1HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 1);
         var z2HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 2);
         SetFirstSetPositionStatus(
@@ -514,7 +520,7 @@ public partial class HomePage : UserControl
             cancellationToken,
             allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
             minimumCompletionTolerance: HomePageCompletionTolerance,
-            velocityOverride: NozzleZVelocity);
+            velocityOverride: zVelocity);
 
         SetFirstSetPositionStatus(
             $"Z1/Z2均已到 {safePosition:0.###} pulse 安全位，允许 XY 前往位置1/2。",
@@ -2719,6 +2725,7 @@ public partial class HomePage : UserControl
     {
         if (!_loadingPresetPositions)
         {
+            SaveNozzleZVelocityFromInput();
             UpdateHomeCommandState();
         }
     }
@@ -2754,6 +2761,8 @@ public partial class HomePage : UserControl
         SecondSetXyVelocityTextBox.Text = FormatPresetCoordinate(SecondSetXyVelocity);
         TestStationPressVelocityTextBox.Text = FormatPresetCoordinate(TestStationPressVelocity);
         TestStationHomeVelocityTextBox.Text = FormatPresetCoordinate(TestStationHomeVelocity);
+        NozzleZVelocityTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.NozzleZVelocity ?? DefaultNozzleZVelocity);
         FirstSetPickupZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetPickupZPosition ?? DefaultNozzlePickupZPosition);
         FirstSetDropZPositionTextBox.Text = FormatPresetCoordinate(
@@ -2829,6 +2838,26 @@ public partial class HomePage : UserControl
         catch (Exception exception)
         {
             SetFirstSetPositionStatus($"保存Z轴生产高度失败：{exception.Message}", false);
+        }
+    }
+
+    private void SaveNozzleZVelocityFromInput()
+    {
+        if (_loadingPresetPositions ||
+            NozzleZVelocityTextBox is null ||
+            !TryParseProductionVelocity(NozzleZVelocityTextBox.Text, out var zVelocity))
+        {
+            return;
+        }
+
+        _homeSettings.NozzleZVelocity = zVelocity;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"保存Z轴生产速度失败：{exception.Message}", false);
         }
     }
 
@@ -3002,6 +3031,7 @@ public partial class HomePage : UserControl
             SecondSetXyVelocityTextBox is null ||
             TestStationPressVelocityTextBox is null ||
             TestStationHomeVelocityTextBox is null ||
+            NozzleZVelocityTextBox is null ||
             FirstSetPickupZPositionTextBox is null ||
             FirstSetDropZPositionTextBox is null ||
             FirstSetSafeZPositionTextBox is null ||
@@ -3038,6 +3068,7 @@ public partial class HomePage : UserControl
         var secondSetVelocityValid = TryParseProductionVelocity(SecondSetXyVelocityTextBox.Text, out _);
         var pressVelocityValid = TryParseProductionVelocity(TestStationPressVelocityTextBox.Text, out _);
         var homeVelocityValid = TryParseProductionVelocity(TestStationHomeVelocityTextBox.Text, out _);
+        var nozzleZVelocityValid = TryParseProductionVelocity(NozzleZVelocityTextBox.Text, out _);
         var allZPositionsValid =
             TryParseCoordinate(FirstSetPickupZPositionTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetDropZPositionTextBox.Text, out _) &&
@@ -3055,7 +3086,8 @@ public partial class HomePage : UserControl
             firstSetVelocityValid &&
             secondSetVelocityValid &&
             pressVelocityValid &&
-            homeVelocityValid;
+            homeVelocityValid &&
+            nozzleZVelocityValid;
         StartProductionButton.IsEnabled =
             visionControllersReady &&
             allProductionVelocitiesValid &&
@@ -3085,6 +3117,7 @@ public partial class HomePage : UserControl
         SecondSetXyVelocityTextBox.IsEnabled = commandsIdle;
         TestStationPressVelocityTextBox.IsEnabled = commandsIdle;
         TestStationHomeVelocityTextBox.IsEnabled = commandsIdle;
+        NozzleZVelocityTextBox.IsEnabled = commandsIdle;
         FirstSetPickupZPositionTextBox.IsEnabled = commandsIdle;
         FirstSetDropZPositionTextBox.IsEnabled = commandsIdle;
         FirstSetSafeZPositionTextBox.IsEnabled = commandsIdle;

@@ -77,6 +77,8 @@ public sealed class HomePageSettings
 
     public double? SecondSetSafeZPosition { get; set; }
 
+    public double? NozzleZVelocity { get; set; }
+
     public double? SecondSetPickupPosition1X { get; set; }
 
     public double? SecondSetPickupPosition1Y { get; set; }
