@@ -80,8 +80,8 @@ public partial class HomePage : UserControl
         [0, .. SecondSetAxisNos, .. SecondSetZAxisNos, .. MoveOutAxisNos];
     private static readonly int[] SecondSetProductionPeerAxisNos =
         [0, .. FirstSetAxisNos, .. FirstSetZAxisNos, .. MoveOutAxisNos];
-    private static readonly int[] ProductionXyAxisNos =
-        [.. FirstSetAxisNos, .. SecondSetAxisNos];
+    private static readonly int[] ProductionHandlingAxisNos =
+        [.. FirstSetAxisNos, .. SecondSetAxisNos, .. FirstSetZAxisNos, .. SecondSetZAxisNos];
     private static readonly Point[] CarouselStationCardSlots =
     [
         new(241, 16),
@@ -1178,7 +1178,7 @@ public partial class HomePage : UserControl
                     xyMoveAwayDelayTask,
                     carouselStations,
                     axis0PulseDistance,
-                    ProductionXyAxisNos,
+                    ProductionHandlingAxisNos,
                     _productionCancellation.Token);
 
                 SetStartProductionStatus(
@@ -1704,7 +1704,7 @@ public partial class HomePage : UserControl
             axisTargets,
             cancellationToken,
             TestStationMoveTimeoutMilliseconds,
-            ProductionXyAxisNos,
+            ProductionHandlingAxisNos,
             HomePageCompletionTolerance,
             pressVelocity);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
@@ -1728,7 +1728,7 @@ public partial class HomePage : UserControl
             cancellationToken,
             homeVelocity,
             homeVelocity,
-            ProductionXyAxisNos);
+            ProductionHandlingAxisNos);
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 21 模式回原点完成，DD可继续下一步。",
             Color.FromRgb(73, 209, 125));
