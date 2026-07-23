@@ -2394,6 +2394,137 @@ public partial class HomePage : UserControl
             PresetPosition2YTextBox);
     }
 
+    private async void MoveSecondSetPosition1_Click(object sender, RoutedEventArgs e)
+    {
+        await MoveSecondSetPositionAsync(
+            "第二套位置 1（吸嘴2取12）",
+            SecondSetPosition1XTextBox,
+            SecondSetPosition1YTextBox,
+            MoveSecondSetPosition1Button);
+    }
+
+    private void RecordSecondSetPosition1_Click(object sender, RoutedEventArgs e)
+    {
+        RecordSecondSetPosition(
+            1,
+            "第二套位置 1（吸嘴2取12）",
+            SecondSetPosition1XTextBox,
+            SecondSetPosition1YTextBox);
+    }
+
+    private async void MoveSecondSetPosition2_Click(object sender, RoutedEventArgs e)
+    {
+        await MoveSecondSetPositionAsync(
+            "第二套位置 2（吸嘴1取13）",
+            SecondSetPosition2XTextBox,
+            SecondSetPosition2YTextBox,
+            MoveSecondSetPosition2Button);
+    }
+
+    private void RecordSecondSetPosition2_Click(object sender, RoutedEventArgs e)
+    {
+        RecordSecondSetPosition(
+            2,
+            "第二套位置 2（吸嘴1取13）",
+            SecondSetPosition2XTextBox,
+            SecondSetPosition2YTextBox);
+    }
+
+    private void RecordSecondSetPosition(
+        int positionNumber,
+        string positionName,
+        TextBox xInput,
+        TextBox yInput)
+    {
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.SecondSetXHardwareAxisNo,
+                VisionCalibrationService.SecondSetYHardwareAxisNo);
+
+            _loadingPresetPositions = true;
+            xInput.Text = current.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
+            yInput.Text = current.ActualY.ToString("0.###", CultureInfo.CurrentCulture);
+            _loadingPresetPositions = false;
+
+            if (positionNumber == 1)
+            {
+                _homeSettings.SecondSetPickupPosition1X = current.ActualX;
+                _homeSettings.SecondSetPickupPosition1Y = current.ActualY;
+            }
+            else
+            {
+                _homeSettings.SecondSetPickupPosition2X = current.ActualX;
+                _homeSettings.SecondSetPickupPosition2Y = current.ActualY;
+            }
+
+            _homeSettingsStore.Save(_homeSettings);
+            SetFirstSetPositionStatus(
+                $"{positionName}已记录并保存：X={current.ActualX:0.###}，Y={current.ActualY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            _loadingPresetPositions = false;
+            SetFirstSetPositionStatus($"{positionName}记录失败：{exception.Message}", false);
+        }
+        finally
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
+    private async Task MoveSecondSetPositionAsync(
+        string positionName,
+        TextBox xInput,
+        TextBox yInput,
+        Button moveButton)
+    {
+        if (_presetPositionMoveRunning ||
+            _oneKeyResetRunning ||
+            _startSequenceRunning ||
+            _assignedNozzleMoveRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
+            var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
+            _ = ParseProductionVelocity(
+                SecondSetXyVelocityTextBox.Text,
+                "轴3/4第二套XY速度");
+
+            _presetPositionMoveRunning = true;
+            UpdateHomeCommandState();
+            moveButton.Content = "移动中";
+            SetFirstSetPositionStatus(
+                $"正在绝对移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
+                true);
+            await MoveSecondSetUnloadAxesToAsync(
+                positionName,
+                targetX,
+                targetY,
+                CancellationToken.None);
+            SetFirstSetPositionStatus(
+                $"{positionName}已到位：X={targetX:0.###}，Y={targetY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"{positionName}移动失败：{exception.Message}", false);
+        }
+        finally
+        {
+            _presetPositionMoveRunning = false;
+            moveButton.Content = "移动";
+            UpdateHomeCommandState();
+        }
+    }
+
     private void RecordPresetPosition(
         int positionNumber,
         string positionName,
@@ -2834,6 +2965,10 @@ public partial class HomePage : UserControl
              SecondSetPosition1YTextBox is null ||
              SecondSetPosition2XTextBox is null ||
              SecondSetPosition2YTextBox is null ||
+             RecordSecondSetPosition1Button is null ||
+             RecordSecondSetPosition2Button is null ||
+             MoveSecondSetPosition1Button is null ||
+             MoveSecondSetPosition2Button is null ||
              RecordPresetPosition1Button is null ||
             RecordPresetPosition2Button is null ||
             MovePresetPosition1Button is null ||
@@ -2915,6 +3050,8 @@ public partial class HomePage : UserControl
         SecondSetPosition2YTextBox.IsEnabled = commandsIdle;
         RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
+        RecordSecondSetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
+        RecordSecondSetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         MovePresetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
@@ -2927,6 +3064,18 @@ public partial class HomePage : UserControl
             firstSetVelocityValid &&
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
+        MoveSecondSetPosition1Button.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            secondSetVelocityValid &&
+            TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _);
+        MoveSecondSetPosition2Button.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            secondSetVelocityValid &&
+            TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
         HomeEmergencyStopButton.IsEnabled = _motionController is not null;
     }
 

@@ -1265,6 +1265,8 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="位置 1"
                                            Foreground="#62B5FF"
@@ -1282,6 +1284,35 @@
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
                                              TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="6">
+                                    <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="RecordSecondSetPosition1Button"
+                                                Height="25"
+                                                Content="记录"
+                                                Foreground="White"
+                                                Background="#166A52"
+                                                BorderBrush="#49D17D"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="RecordSecondSetPosition1_Click" />
+                                        <Button Grid.Column="2"
+                                                x:Name="MoveSecondSetPosition1Button"
+                                                Height="25"
+                                                Content="移动"
+                                                Foreground="White"
+                                                Background="#1674D1"
+                                                BorderBrush="#62B5FF"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="MoveSecondSetPosition1_Click" />
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="4">
                                     <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
@@ -1302,6 +1333,8 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="位置 2"
                                            Foreground="#62B5FF"
@@ -1330,6 +1363,35 @@
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
                                              TextChanged="SecondSetXyPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="6">
+                                    <TextBlock Text="操作" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="4" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="RecordSecondSetPosition2Button"
+                                                Height="25"
+                                                Content="记录"
+                                                Foreground="White"
+                                                Background="#166A52"
+                                                BorderBrush="#49D17D"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="RecordSecondSetPosition2_Click" />
+                                        <Button Grid.Column="2"
+                                                x:Name="MoveSecondSetPosition2Button"
+                                                Height="25"
+                                                Content="移动"
+                                                Foreground="White"
+                                                Background="#1674D1"
+                                                BorderBrush="#62B5FF"
+                                                Cursor="Hand"
+                                                IsEnabled="False"
+                                                Click="MoveSecondSetPosition2_Click" />
+                                    </Grid>
                                 </StackPanel>
                             </Grid>
                         </Grid>
