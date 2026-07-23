@@ -37,7 +37,7 @@ public partial class HomePage : UserControl
     private const double DefaultNozzlePickupZPosition = 30_000d;
     private const double DefaultNozzleDropZPosition = 4_800d;
     private const double DefaultNozzleSafeZPosition = -5_000d;
-    private const double NozzleZVelocity = 10_000d;
+    private const double NozzleZVelocity = 20_000d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
