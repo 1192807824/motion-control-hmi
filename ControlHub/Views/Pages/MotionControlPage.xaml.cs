@@ -30,6 +30,7 @@ public partial class MotionControlPage : UserControl
     private readonly AxisSettingsStore _axisSettingsStore = new();
     private readonly DispatcherTimer _pollTimer;
     private readonly HashSet<string> _activeAlarmKeys = [];
+    private readonly HashSet<int> _activeEmergencyInputAxisNos = [];
     private readonly Dictionary<int, DateTime> _homeDeadlines = [];
     private readonly Dictionary<int, DateTime> _homeIssuedAtUtc = [];
     private readonly HashSet<int> _homeObservedMovingAxisNos = [];
@@ -67,6 +68,8 @@ public partial class MotionControlPage : UserControl
     private bool _calibrationOperationActive;
     private string? _motionSafetyLockReason;
     private Window? _ownerWindow;
+
+    public event EventHandler? EmergencyStopIssued;
 
     public MotionControlPage()
     {
@@ -133,7 +136,7 @@ public partial class MotionControlPage : UserControl
         {
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
             }
             catch (Exception exception)
             {
@@ -2494,7 +2497,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionCard.EmergencyStop();
+            IssueEmergencyStopAndNotify();
             _homeSequenceCancellation?.Cancel();
             ClearAllHomeTracking();
             ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
@@ -2559,7 +2562,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionCard.EmergencyStop();
+            IssueEmergencyStopAndNotify();
             return true;
         }
         catch (Exception exception)
@@ -2567,6 +2570,12 @@ public partial class MotionControlPage : UserControl
             ActivateMotionSafetyLock(reason, exception, alarmCode);
             return false;
         }
+    }
+
+    private void IssueEmergencyStopAndNotify()
+    {
+        _motionCard.EmergencyStop();
+        EmergencyStopIssued?.Invoke(this, EventArgs.Empty);
     }
 
     private void ActivateMotionSafetyLock(
@@ -3278,7 +3287,7 @@ public partial class MotionControlPage : UserControl
         {
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
                 ClearAllHomeTracking();
                 ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
                 foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
@@ -3347,6 +3356,8 @@ public partial class MotionControlPage : UserControl
             return false;
         }
 
+        // 急停只停止运动轴。全轴急停下发时已先通知生产流程冻结 IO 状态，
+        // 此处再取消各运动任务，防止异步任务进入 finally 后改写真空吸、破真空等输出。
         _homeSequenceCancellation?.Cancel();
         _activeJogAxisNo = null;
         _activeJogInputOwner = null;
@@ -3490,7 +3501,7 @@ public partial class MotionControlPage : UserControl
         {
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
                 ClearAllHomeTracking();
                 ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
                 foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
@@ -4049,7 +4060,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionCard.EmergencyStop();
+            IssueEmergencyStopAndNotify();
             _homeSequenceCancellation?.Cancel();
             ClearAllHomeTracking();
             ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
@@ -4146,7 +4157,7 @@ public partial class MotionControlPage : UserControl
 
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
                 _homeSequenceCancellation?.Cancel();
                 ClearAllHomeTracking();
                 var availableAxes = (Axes ?? []).Where(axis => axis.IsAvailable).ToArray();
@@ -4434,6 +4445,21 @@ public partial class MotionControlPage : UserControl
 
     private void ApplySnapshot(AxisStatus axis, MotionAxisSnapshot snapshot)
     {
+        if (snapshot.EmergencyInput)
+        {
+            var firstActiveEmergencyInput = _activeEmergencyInputAxisNos.Count == 0;
+            _activeEmergencyInputAxisNos.Add(axis.HardwareAxisNo);
+            if (firstActiveEmergencyInput)
+            {
+                // 硬件急停输入同样只停止轴；先冻结生产收尾的 IO 写入。
+                EmergencyStopIssued?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else
+        {
+            _activeEmergencyInputAxisNos.Remove(axis.HardwareAxisNo);
+        }
+
         axis.Position = snapshot.FeedbackPosition;
         axis.Target = snapshot.TargetPosition;
         axis.Speed = snapshot.Speed;

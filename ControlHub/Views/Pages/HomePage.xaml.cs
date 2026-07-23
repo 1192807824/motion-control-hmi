@@ -120,6 +120,7 @@ public partial class HomePage : UserControl
     private CancellationTokenSource? _productionCancellation;
     private TaskCompletionSource<bool>? _productionCompletion;
     private bool _productionStopRequested;
+    private bool _preserveIoOnEmergencyStop;
     private VisionCalibrationAxisSet? _productionAxisSet;
     private ProductionZPositions? _productionZPositions;
     private SecondSetXyPositions? _secondSetXyPositions;
@@ -139,8 +140,21 @@ public partial class HomePage : UserControl
 
     public void AttachMotionController(MotionControlPage motionController)
     {
-        _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
+        ArgumentNullException.ThrowIfNull(motionController);
+        if (_motionController is not null)
+        {
+            _motionController.EmergencyStopIssued -= MotionController_EmergencyStopIssued;
+        }
+
+        _motionController = motionController;
+        _motionController.EmergencyStopIssued += MotionController_EmergencyStopIssued;
         UpdateHomeCommandState();
+    }
+
+    private void MotionController_EmergencyStopIssued(object? sender, EventArgs e)
+    {
+        _preserveIoOnEmergencyStop = true;
+        _ = RequestProductionStop();
     }
 
     public void AttachVisionCalibrationController(VisualCalibrationPage visualCalibrationController)
@@ -215,6 +229,11 @@ public partial class HomePage : UserControl
         bool vacuumEnabled,
         bool breakVacuumEnabled)
     {
+        if (_preserveIoOnEmergencyStop)
+        {
+            return true;
+        }
+
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
@@ -594,6 +613,11 @@ public partial class HomePage : UserControl
 
     private void SetUnloadStationBreakVacuum(int stationNumber, bool enabled)
     {
+        if (_preserveIoOnEmergencyStop)
+        {
+            return;
+        }
+
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         var outputBit = stationNumber switch
@@ -665,6 +689,11 @@ public partial class HomePage : UserControl
 
     private void CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet axisSet)
     {
+        if (_preserveIoOnEmergencyStop)
+        {
+            return;
+        }
+
         var z1Closed = false;
         var z2Closed = false;
         Exception? firstFailure = null;
@@ -864,6 +893,7 @@ public partial class HomePage : UserControl
 
             // 创建本轮连续生产专用的取消源，停止按钮和急停都会通过它通知循环退出。
             _productionCancellation = new CancellationTokenSource();
+            _preserveIoOnEmergencyStop = false;
 
             // 创建完成信号，方便页面切换或停用时等待生产流程完全收尾。
             _productionCompletion = new TaskCompletionSource<bool>(
@@ -1180,6 +1210,7 @@ public partial class HomePage : UserControl
             await ObserveCarouselAdvanceTaskNoThrowAsync(activeCarouselAdvanceTask);
             await ObserveTaskNoThrowAsync(activeFinalTestTask);
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
+            _preserveIoOnEmergencyStop = false;
             _productionAxisSet = null;
             _productionZPositions = null;
             _secondSetXyPositions = null;
@@ -2861,7 +2892,6 @@ public partial class HomePage : UserControl
 
     private void HomeEmergencyStop_Click(object sender, RoutedEventArgs e)
     {
-        _ = RequestProductionStop();
         var motionController = _motionController;
         if (motionController is null)
         {
@@ -2870,6 +2900,13 @@ public partial class HomePage : UserControl
         }
 
         var issued = motionController.EmergencyStopAllAxes("主页操作员请求全轴急停");
+        if (!issued)
+        {
+            // 即使全轴急停命令下发失败，也要停止软件生产流程；收尾仍不得改写现有 IO。
+            _preserveIoOnEmergencyStop = true;
+            _ = RequestProductionStop();
+        }
+
         HomeEmergencyStopHintText.Text = issued
             ? "急停已下发，正在确认所有轴停止"
             : "急停下发失败，请立即按硬件急停";
