@@ -2574,8 +2574,34 @@ public partial class MotionControlPage : UserControl
 
     private void IssueEmergencyStopAndNotify()
     {
+        // 必须在控制卡急停和各运动任务取消之前通知生产流程冻结IO。
+        // 否则运动任务可能先进入catch/finally并改写真空输出。
+        NotifyEmergencyStopIssuedNoThrow();
         _motionCard.EmergencyStop();
-        EmergencyStopIssued?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void NotifyEmergencyStopIssuedNoThrow()
+    {
+        var handlers = EmergencyStopIssued;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, EventArgs.Empty);
+            }
+            catch (Exception exception)
+            {
+                // 急停通知失败不能阻止真正的控制卡急停命令继续下发。
+                RecordAlarm(
+                    "EMERGENCY-STOP-NOTIFICATION-FAILED",
+                    $"急停前冻结生产IO的通知失败：{FormatException(exception)}");
+            }
+        }
     }
 
     private void ActivateMotionSafetyLock(
@@ -4452,7 +4478,7 @@ public partial class MotionControlPage : UserControl
             if (firstActiveEmergencyInput)
             {
                 // 硬件急停输入同样只停止轴；先冻结生产收尾的 IO 写入。
-                EmergencyStopIssued?.Invoke(this, EventArgs.Empty);
+                NotifyEmergencyStopIssuedNoThrow();
             }
         }
         else

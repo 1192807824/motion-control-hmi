@@ -26,8 +26,8 @@ public partial class HomePage : UserControl
     private const int SecondSetZ1BreakVacuumOutputBit = 18;
     private const int SecondSetZ1VacuumOutputBit = 19;
     private const int SecondSetZ2VacuumControlOutputBit = 21;
-    private const int Station12BreakVacuumOutputBit = 22;
-    private const int Station13BreakVacuumOutputBit = 23;
+    private const int Station13BreakVacuumOutputBit = 22;
+    private const int Station14BreakVacuumOutputBit = 23;
     private const int VacuumBreakPulseMilliseconds = 150;
     private const int VacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
@@ -42,8 +42,8 @@ public partial class HomePage : UserControl
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
     private const double MoveOutAbsolutePosition = 250_000d;
-    private const int SecondSetNozzle2UnloadStation = 12;
-    private const int SecondSetNozzle1UnloadStation = 13;
+    private const int SecondSetNozzle2UnloadStation = 13;
+    private const int SecondSetNozzle1UnloadStation = 14;
     private const int FirstUnloadCycleNumber = 7;
     private const double FirstSetXyVelocity = 100_000d;
     private const double SecondSetXyVelocity = 100_000d;
@@ -628,14 +628,14 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         var outputBit = stationNumber switch
         {
-            SecondSetNozzle2UnloadStation => Station12BreakVacuumOutputBit,
-            SecondSetNozzle1UnloadStation => Station13BreakVacuumOutputBit,
+            SecondSetNozzle2UnloadStation => Station13BreakVacuumOutputBit,
+            SecondSetNozzle1UnloadStation => Station14BreakVacuumOutputBit,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(stationNumber),
-                "下料破真空工位只能是12或13。")
+                "下料破真空工位只能是13或14。")
         };
 
-        // 12/13工位的破真空输出为低电平有效：0=打开，1=关闭。
+        // 13/14工位的破真空输出为低电平有效：13号=Y22，14号=Y23；0=打开，1=关闭。
         if (!motionController.SetDigitalOutputHardwareBit(outputBit, !enabled))
         {
             throw new InvalidOperationException(
@@ -800,7 +800,7 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 每轮由第一套XY向1/2工位上两个新料；12/13同时有料时，第二套XY并行完成双吸嘴收料。
+    /// 每轮由第一套XY向1/2工位上两个新料；13/14到达收料节拍时，第二套XY并行完成双吸嘴收料。
     /// XY回中心后立即准备下一轮物料；DD固定推进两个工位，停稳即可上下料，末次测试并行完成。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -1140,7 +1140,7 @@ public partial class HomePage : UserControl
                 carouselStations[2].SetLoaded();
                 UpdateCarouselStationDisplay(carouselStations);
 
-                // 本轮两个新料写入1/2工位后再判断12/13；第7轮形成14个在盘物料时必须在本轮立即收料，
+                // 本轮两个新料写入1/2工位后再启动13/14收料；第7轮形成14个在盘物料时必须在本轮立即收料，
                 // 不能因为判断发生在放料前而延迟到第8轮。
                 activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
                     carouselStations,
@@ -1151,7 +1151,7 @@ public partial class HomePage : UserControl
                 if (!activeSecondSetPickupTask.IsCompleted)
                 {
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：第一套已放完并立即回中心；DD只等待第二套从12/13工位吸走两个料，不等待第二套放料…",
+                        $"第{cycleNumber}轮：第一套已放完并立即回中心；DD只等待第二套从13/14工位吸走两个料，不等待第二套放料…",
                         Color.FromRgb(242, 181, 68));
                 }
 
@@ -1216,7 +1216,8 @@ public partial class HomePage : UserControl
             await ObserveCarouselAdvanceTaskNoThrowAsync(activeCarouselAdvanceTask);
             await ObserveTaskNoThrowAsync(activeFinalTestTask);
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
-            _preserveIoOnEmergencyStop = false;
+            // 急停后的 IO 冻结保持到下一次明确启动生产，不能在本轮 finally 收尾时提前解除。
+            // 否则尚未退出的取消回调仍可能把低电平有效的真空输出写成相反状态。
             _productionAxisSet = null;
             _productionZPositions = null;
             _secondSetXyPositions = null;
@@ -1425,7 +1426,7 @@ public partial class HomePage : UserControl
                 Color.FromRgb(242, 181, 68));
         }
 
-        // DD必须同时满足：上一轮测试轴已回原、第二套已从12/13取走两个料、XY已离开放料点0.5秒。
+        // DD必须同时满足：上一轮测试轴已回原、第二套已从13/14取走两个料、XY已离开放料点0.5秒。
         // 第二套后续移动到两个收料位置并放料，不再阻塞DD。
         await Task.WhenAll(
             requiredFinalTestTask,
@@ -1446,7 +1447,7 @@ public partial class HomePage : UserControl
         out Task pickupCompletedTask)
     {
         // 连续无传感器流程采用确定节拍：第7轮完成上料后盘上累计14个料，
-        // 此时必须开始12/13工位收料；后续每完成一轮上料都执行一次。
+        // 此时必须开始13/14工位收料；后续每完成一轮上料都执行一次。
         // 工位缓存只用于画面显示，不能因为显示状态不同步而跳过实际下料。
         if (completedLoadCycleNumber < FirstUnloadCycleNumber)
         {
@@ -1456,7 +1457,7 @@ public partial class HomePage : UserControl
 
         if (_productionAxisSet != VisionCalibrationAxisSet.First)
         {
-            throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行12/13工位收料。");
+            throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行13/14工位收料。");
         }
 
         var pickupCompletion = new TaskCompletionSource<bool>(
@@ -1478,7 +1479,7 @@ public partial class HomePage : UserControl
             var zPositions = GetProductionZPositions();
             var xyPositions = GetSecondSetXyPositions();
             await MoveSecondSetUnloadAxesToAsync(
-                "吸嘴2取12工位",
+                "吸嘴2取13工位",
                 xyPositions.Position1X,
                 xyPositions.Position1Y,
                 cancellationToken);
@@ -1490,7 +1491,7 @@ public partial class HomePage : UserControl
                 cancellationToken);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "吸嘴1取13工位",
+                "吸嘴1取14工位",
                 xyPositions.Position2X,
                 xyPositions.Position2Y,
                 cancellationToken);
@@ -1504,7 +1505,7 @@ public partial class HomePage : UserControl
             // 第二套必须先完成两次取料。任一吸嘴未确认持料时，禁止进入任何放料动作。
             EnsureBothSecondSetNozzlesHolding();
 
-            // 两个产品已经离开12/13工位，此刻即可释放DD安全门；后续第二套放料继续独立执行。
+            // 两个产品已经离开13/14工位，此刻即可释放DD安全门；后续第二套放料继续独立执行。
             carouselStations[SecondSetNozzle2UnloadStation] = CarouselStationState.Empty();
             carouselStations[SecondSetNozzle1UnloadStation] = CarouselStationState.Empty();
             UpdateCarouselStationDisplay(carouselStations);
@@ -2444,7 +2445,7 @@ public partial class HomePage : UserControl
     private async void MoveSecondSetPosition1_Click(object sender, RoutedEventArgs e)
     {
         await MoveSecondSetPositionAsync(
-            "第二套位置 1（吸嘴2取12）",
+            "第二套位置 1（吸嘴2取13）",
             SecondSetPosition1XTextBox,
             SecondSetPosition1YTextBox,
             MoveSecondSetPosition1Button);
@@ -2454,7 +2455,7 @@ public partial class HomePage : UserControl
     {
         RecordSecondSetPosition(
             1,
-            "第二套位置 1（吸嘴2取12）",
+            "第二套位置 1（吸嘴2取13）",
             SecondSetPosition1XTextBox,
             SecondSetPosition1YTextBox);
     }
@@ -2462,7 +2463,7 @@ public partial class HomePage : UserControl
     private async void MoveSecondSetPosition2_Click(object sender, RoutedEventArgs e)
     {
         await MoveSecondSetPositionAsync(
-            "第二套位置 2（吸嘴1取13）",
+            "第二套位置 2（吸嘴1取14）",
             SecondSetPosition2XTextBox,
             SecondSetPosition2YTextBox,
             MoveSecondSetPosition2Button);
@@ -2472,7 +2473,7 @@ public partial class HomePage : UserControl
     {
         RecordSecondSetPosition(
             2,
-            "第二套位置 2（吸嘴1取13）",
+            "第二套位置 2（吸嘴1取14）",
             SecondSetPosition2XTextBox,
             SecondSetPosition2YTextBox);
     }
@@ -2800,10 +2801,10 @@ public partial class HomePage : UserControl
     private SecondSetXyPositions ReadSecondSetXyPositions()
     {
         return new SecondSetXyPositions(
-            ParseFiniteCoordinate(SecondSetPosition1XTextBox.Text, "第二套位置1（吸嘴2取12）X轴绝对脉冲"),
-            ParseFiniteCoordinate(SecondSetPosition1YTextBox.Text, "第二套位置1（吸嘴2取12）Y轴绝对脉冲"),
-            ParseFiniteCoordinate(SecondSetPosition2XTextBox.Text, "第二套位置2（吸嘴1取13）X轴绝对脉冲"),
-            ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2（吸嘴1取13）Y轴绝对脉冲"));
+            ParseFiniteCoordinate(SecondSetPosition1XTextBox.Text, "第二套位置1（吸嘴2取13）X轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition1YTextBox.Text, "第二套位置1（吸嘴2取13）Y轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition2XTextBox.Text, "第二套位置2（吸嘴1取14）X轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2（吸嘴1取14）Y轴绝对脉冲"));
     }
 
     private void SaveProductionZPositionsFromInputs()
@@ -2928,13 +2929,11 @@ public partial class HomePage : UserControl
             return;
         }
 
+        // 必须先冻结IO再向控制卡下发急停。原先依赖控制器急停完成后的事件通知，
+        // 取消回调可能抢先进入finally并改写真空输出，形成急停瞬间IO变化的竞态。
+        _preserveIoOnEmergencyStop = true;
+        _ = RequestProductionStop();
         var issued = motionController.EmergencyStopAllAxes("主页操作员请求全轴急停");
-        if (!issued)
-        {
-            // 即使全轴急停命令下发失败，也要停止软件生产流程；收尾仍不得改写现有 IO。
-            _preserveIoOnEmergencyStop = true;
-            _ = RequestProductionStop();
-        }
 
         HomeEmergencyStopHintText.Text = issued
             ? "急停已下发，正在确认所有轴停止"
