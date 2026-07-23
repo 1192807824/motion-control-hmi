@@ -44,6 +44,7 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int SecondSetNozzle2UnloadStation = 12;
     private const int SecondSetNozzle1UnloadStation = 13;
+    private const int FirstUnloadCycleNumber = 7;
     private const double FirstSetXyVelocity = 100_000d;
     private const double SecondSetXyVelocity = 100_000d;
     private const double DefaultSecondSetPickupPosition1X = 1_606_631d;
@@ -1107,6 +1108,7 @@ public partial class HomePage : UserControl
                 // 不能因为判断发生在放料前而延迟到第8轮。
                 activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
                     carouselStations,
+                    cycleNumber,
                     _productionCancellation.Token,
                     out activeSecondSetPickupTask);
 
@@ -1402,11 +1404,14 @@ public partial class HomePage : UserControl
 
     private Task StartSecondSetUnloadIfReadyAsync(
         CarouselStationState[] carouselStations,
+        int completedLoadCycleNumber,
         CancellationToken cancellationToken,
         out Task pickupCompletedTask)
     {
-        if (!carouselStations[SecondSetNozzle2UnloadStation].Occupied ||
-            !carouselStations[SecondSetNozzle1UnloadStation].Occupied)
+        // 连续无传感器流程采用确定节拍：第7轮完成上料后盘上累计14个料，
+        // 此时必须开始12/13工位收料；后续每完成一轮上料都执行一次。
+        // 工位缓存只用于画面显示，不能因为显示状态不同步而跳过实际下料。
+        if (completedLoadCycleNumber < FirstUnloadCycleNumber)
         {
             pickupCompletedTask = Task.CompletedTask;
             return Task.CompletedTask;
