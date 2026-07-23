@@ -77,11 +77,11 @@ public sealed class HomePageSettings
 
     public double? SecondSetSafeZPosition { get; set; }
 
-    public double? SecondSetPosition1X { get; set; }
+    public double? SecondSetPickupPosition1X { get; set; }
 
-    public double? SecondSetPosition1Y { get; set; }
+    public double? SecondSetPickupPosition1Y { get; set; }
 
-    public double? SecondSetPosition2X { get; set; }
+    public double? SecondSetPickupPosition2X { get; set; }
 
-    public double? SecondSetPosition2Y { get; set; }
+    public double? SecondSetPickupPosition2Y { get; set; }
 }

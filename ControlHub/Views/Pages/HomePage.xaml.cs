@@ -46,14 +46,14 @@ public partial class HomePage : UserControl
     private const int SecondSetNozzle1UnloadStation = 13;
     private const double FirstSetXyVelocity = 100_000d;
     private const double SecondSetXyVelocity = 100_000d;
-    private const double SecondSetNozzle1PickupX = 1_606_271d;
-    private const double SecondSetNozzle1PickupY = -222_828d;
-    private const double SecondSetNozzle2PickupX = 1_606_631d;
-    private const double SecondSetNozzle2PickupY = 330_321d;
-    private const double DefaultSecondSetPosition1X = 592_474d;
-    private const double DefaultSecondSetPosition1Y = 204_106d;
-    private const double DefaultSecondSetPosition2X = 592_498d;
-    private const double DefaultSecondSetPosition2Y = 1_374_787d;
+    private const double DefaultSecondSetPickupPosition1X = 1_606_631d;
+    private const double DefaultSecondSetPickupPosition1Y = 330_321d;
+    private const double DefaultSecondSetPickupPosition2X = 1_606_271d;
+    private const double DefaultSecondSetPickupPosition2Y = -222_828d;
+    private const double SecondSetNozzle1DropX = 592_474d;
+    private const double SecondSetNozzle1DropY = 204_106d;
+    private const double SecondSetNozzle2DropX = 592_498d;
+    private const double SecondSetNozzle2DropY = 1_374_787d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
@@ -506,7 +506,7 @@ public partial class HomePage : UserControl
     private SecondSetXyPositions GetSecondSetXyPositions()
     {
         return _secondSetXyPositions
-            ?? throw new InvalidOperationException("本轮生产的第二套 XY 下料位置尚未锁定。");
+            ?? throw new InvalidOperationException("本轮生产的第二套 XY 取料位置尚未锁定。");
     }
 
     private static int GetNozzleZHardwareAxisNo(
@@ -815,7 +815,7 @@ public partial class HomePage : UserControl
             // 生产启动时一次性校验并锁定两套 Z 轴取料、放料和安全高度。
             _productionZPositions = ReadProductionZPositions();
 
-            // 第二套下料XY位置同样在启动时锁定，运行中修改不会影响当前生产轮次。
+            // 第二套取料前XY位置同样在启动时锁定，运行中修改不会影响当前生产轮次。
             _secondSetXyPositions = ReadSecondSetXyPositions();
 
             // 在任何轴开始运动前读取并验证完整自动流程参数，避免流程中途才发现输入缺失。
@@ -1432,8 +1432,8 @@ public partial class HomePage : UserControl
             var xyPositions = GetSecondSetXyPositions();
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴2取12工位",
-                SecondSetNozzle2PickupX,
-                SecondSetNozzle2PickupY,
+                xyPositions.Position1X,
+                xyPositions.Position1Y,
                 cancellationToken);
             await PickSecondSetNozzleFromStationAsync(
                 2,
@@ -1444,8 +1444,8 @@ public partial class HomePage : UserControl
 
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴1取13工位",
-                SecondSetNozzle1PickupX,
-                SecondSetNozzle1PickupY,
+                xyPositions.Position2X,
+                xyPositions.Position2Y,
                 cancellationToken);
             await PickSecondSetNozzleFromStationAsync(
                 1,
@@ -1464,9 +1464,9 @@ public partial class HomePage : UserControl
             pickupCompletion.TrySetResult(true);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "第二套位置1",
-                xyPositions.Position1X,
-                xyPositions.Position1Y,
+                "吸嘴1放料",
+                SecondSetNozzle1DropX,
+                SecondSetNozzle1DropY,
                 cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
@@ -1476,9 +1476,9 @@ public partial class HomePage : UserControl
                 cancellationToken);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "第二套位置2",
-                xyPositions.Position2X,
-                xyPositions.Position2Y,
+                "吸嘴2放料",
+                SecondSetNozzle2DropX,
+                SecondSetNozzle2DropY,
                 cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
@@ -2595,13 +2595,13 @@ public partial class HomePage : UserControl
         SecondSetSafeZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetSafeZPosition ?? DefaultNozzleSafeZPosition);
         SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetPosition1X ?? DefaultSecondSetPosition1X);
+            _homeSettings.SecondSetPickupPosition1X ?? DefaultSecondSetPickupPosition1X);
         SecondSetPosition1YTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetPosition1Y ?? DefaultSecondSetPosition1Y);
+            _homeSettings.SecondSetPickupPosition1Y ?? DefaultSecondSetPickupPosition1Y);
         SecondSetPosition2XTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetPosition2X ?? DefaultSecondSetPosition2X);
+            _homeSettings.SecondSetPickupPosition2X ?? DefaultSecondSetPickupPosition2X);
         SecondSetPosition2YTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetPosition2Y ?? DefaultSecondSetPosition2Y);
+            _homeSettings.SecondSetPickupPosition2Y ?? DefaultSecondSetPickupPosition2Y);
         _loadingPresetPositions = false;
     }
 
@@ -2619,10 +2619,10 @@ public partial class HomePage : UserControl
     private SecondSetXyPositions ReadSecondSetXyPositions()
     {
         return new SecondSetXyPositions(
-            ParseFiniteCoordinate(SecondSetPosition1XTextBox.Text, "第二套位置1 X轴绝对脉冲"),
-            ParseFiniteCoordinate(SecondSetPosition1YTextBox.Text, "第二套位置1 Y轴绝对脉冲"),
-            ParseFiniteCoordinate(SecondSetPosition2XTextBox.Text, "第二套位置2 X轴绝对脉冲"),
-            ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2 Y轴绝对脉冲"));
+            ParseFiniteCoordinate(SecondSetPosition1XTextBox.Text, "第二套位置1（吸嘴2取12）X轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition1YTextBox.Text, "第二套位置1（吸嘴2取12）Y轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition2XTextBox.Text, "第二套位置2（吸嘴1取13）X轴绝对脉冲"),
+            ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2（吸嘴1取13）Y轴绝对脉冲"));
     }
 
     private void SaveProductionZPositionsFromInputs()
@@ -2675,10 +2675,10 @@ public partial class HomePage : UserControl
             return;
         }
 
-        _homeSettings.SecondSetPosition1X = position1X;
-        _homeSettings.SecondSetPosition1Y = position1Y;
-        _homeSettings.SecondSetPosition2X = position2X;
-        _homeSettings.SecondSetPosition2Y = position2Y;
+        _homeSettings.SecondSetPickupPosition1X = position1X;
+        _homeSettings.SecondSetPickupPosition1Y = position1Y;
+        _homeSettings.SecondSetPickupPosition2X = position2X;
+        _homeSettings.SecondSetPickupPosition2Y = position2Y;
         try
         {
             _homeSettingsStore.Save(_homeSettings);
