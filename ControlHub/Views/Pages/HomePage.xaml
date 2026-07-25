@@ -1611,6 +1611,7 @@
                     </Border>
 
                     <Border
+                            Tag="FullWidth"
                             Background="#12283A"
                             BorderBrush="#2D4A61"
                             BorderThickness="1"
@@ -1633,6 +1634,7 @@
                     </Border>
 
                     <Border Margin="0,8,0,0"
+                            Tag="FullWidth"
                             Background="#12283A"
                             BorderBrush="#2D4A61"
                             BorderThickness="1"

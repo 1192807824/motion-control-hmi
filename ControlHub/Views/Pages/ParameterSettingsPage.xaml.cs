@@ -44,7 +44,8 @@ public partial class ParameterSettingsPage : UserControl
         cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
         cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
 
-        var cardIndex = 0;
+        var rowIndex = 0;
+        var columnIndex = 0;
         while (sourcePanel.Children.Count > 0)
         {
             var child = sourcePanel.Children[0];
@@ -57,17 +58,33 @@ public partial class ParameterSettingsPage : UserControl
                 card.MinHeight = 202;
             }
 
-            var rowIndex = cardIndex / 2;
-            if (cardIndex % 2 == 0)
+            var fullWidth =
+                child is FrameworkElement element &&
+                string.Equals(element.Tag as string, "FullWidth", StringComparison.Ordinal);
+            if (fullWidth && columnIndex != 0)
             {
-                cardGrid.RowDefinitions.Add(
-                    new RowDefinition { Height = GridLength.Auto });
+                rowIndex++;
+                columnIndex = 0;
+            }
+
+            while (cardGrid.RowDefinitions.Count <= rowIndex)
+            {
+                cardGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             }
 
             Grid.SetRow(child, rowIndex);
-            Grid.SetColumn(child, cardIndex % 2);
+            Grid.SetColumn(child, columnIndex);
+            Grid.SetColumnSpan(child, fullWidth ? 2 : 1);
             cardGrid.Children.Add(child);
-            cardIndex++;
+            if (fullWidth || columnIndex == 1)
+            {
+                rowIndex++;
+                columnIndex = 0;
+            }
+            else
+            {
+                columnIndex = 1;
+            }
         }
 
         scrollViewer.Content = cardGrid;
@@ -82,6 +99,18 @@ public partial class ParameterSettingsPage : UserControl
             var child = VisualTreeHelper.GetChild(parent, index);
             switch (child)
             {
+                case TextBox textBox when
+                    string.Equals(textBox.Tag as string, "CompactParameter", StringComparison.Ordinal):
+                    textBox.Height = 30;
+                    textBox.FontSize = 12;
+                    textBox.Padding = new Thickness(5, 0, 5, 0);
+                    textBox.BorderThickness = new Thickness(1);
+                    textBox.Background = new SolidColorBrush(Color.FromRgb(23, 52, 74));
+                    textBox.Foreground = new SolidColorBrush(Color.FromRgb(234, 242, 247));
+                    textBox.BorderBrush = new SolidColorBrush(Color.FromRgb(59, 95, 120));
+                    textBox.CaretBrush = Brushes.White;
+                    textBox.SelectionBrush = new SolidColorBrush(Color.FromRgb(31, 117, 200));
+                    break;
                 case TextBox textBox:
                     textBox.Height = 34;
                     textBox.FontSize = 13;

@@ -2,7 +2,6 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
@@ -160,60 +159,103 @@ public partial class HomePage : UserControl
 
     private void InitializeProductionMotionParameterEditors()
     {
-        foreach (var group in ProductionAxisDefinitions.GroupBy(item => item.GroupName))
+        var motionTable = new StackPanel();
+        motionTable.Children.Add(CreateParameterTableHeader(
+            [
+                "轴 / 机构",
+                "运行速度\npulse/s",
+                "初始速度\npulse/s",
+                "停止速度\npulse/s",
+                "加速\nms",
+                "减速\nms",
+                "S曲线\nms",
+                "减停\nms"
+            ],
+            8));
+        for (var index = 0; index < ProductionAxisDefinitions.Length; index++)
         {
-            ProductionMotionParametersPanel.Children.Add(CreateParameterGroupTitle(group.Key));
-            var groupGrid = new UniformGrid
-            {
-                Columns = group.Count() == 1 ? 1 : 2
-            };
-            foreach (var definition in group)
-            {
-                var editors = CreateProductionAxisMotionEditors(definition);
-                _productionAxisMotionEditors[definition.AxisNo] = editors;
-                groupGrid.Children.Add(editors.Container);
-            }
-
-            ProductionMotionParametersPanel.Children.Add(groupGrid);
+            var definition = ProductionAxisDefinitions[index];
+            var editors = CreateProductionAxisMotionEditors(definition, index);
+            _productionAxisMotionEditors[definition.AxisNo] = editors;
+            motionTable.Children.Add(editors.Container);
         }
 
-        foreach (var axisNo in TestStationHomeAxisNos)
+        ProductionMotionParametersPanel.Children.Add(motionTable);
+
+        var homeTable = new StackPanel();
+        homeTable.Children.Add(CreateParameterTableHeader(
+            [
+                "测试站轴",
+                "模式",
+                "低速 pulse/s",
+                "高速 pulse/s",
+                "加速 ms",
+                "减速 ms",
+                "偏移 pulse"
+            ],
+            7));
+        for (var index = 0; index < TestStationHomeAxisNos.Length; index++)
         {
+            var axisNo = TestStationHomeAxisNos[index];
             var definition = ProductionAxisDefinitions.Single(item => item.AxisNo == axisNo);
-            var editors = CreateProductionAxisHomeEditors(definition);
+            var editors = CreateProductionAxisHomeEditors(definition, index);
             _productionAxisHomeEditors[axisNo] = editors;
-            TestStationHomeParametersPanel.Children.Add(editors.Container);
+            homeTable.Children.Add(editors.Container);
         }
+
+        TestStationHomeParametersPanel.Children.Add(homeTable);
     }
 
-    private static TextBlock CreateParameterGroupTitle(string title)
+    private static Border CreateParameterTableHeader(
+        IReadOnlyList<string> labels,
+        int columnCount)
     {
-        return new TextBlock
+        var grid = CreateParameterTableGrid(columnCount);
+        for (var column = 0; column < labels.Count; column++)
         {
-            Text = title,
-            Margin = new Thickness(2, 8, 2, 4),
-            Foreground = new SolidColorBrush(Color.FromRgb(119, 190, 255)),
-            FontSize = 12,
-            FontWeight = FontWeights.Bold
+            var label = new TextBlock
+            {
+                Text = labels[column],
+                Margin = new Thickness(6, 0, 6, 0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Foreground = new SolidColorBrush(Color.FromRgb(159, 190, 213)),
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold
+            };
+            Grid.SetColumn(label, column);
+            grid.Children.Add(label);
+        }
+
+        return new Border
+        {
+            Height = 38,
+            Margin = new Thickness(0, 0, 0, 3),
+            Background = new SolidColorBrush(Color.FromRgb(20, 57, 82)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(52, 82, 105)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Child = grid
         };
     }
 
     private ProductionAxisMotionEditors CreateProductionAxisMotionEditors(
-        ProductionAxisDefinition definition)
+        ProductionAxisDefinition definition,
+        int rowIndex)
     {
-        var fields = new UniformGrid { Columns = 4 };
-        var runVelocity = AddProductionParameterField(fields, "运行速度", "pulse/s");
-        var startVelocity = AddProductionParameterField(fields, "初始速度", "pulse/s");
-        var stopVelocity = AddProductionParameterField(fields, "停止速度", "pulse/s");
-        var acceleration = AddProductionParameterField(fields, "加速时间", "ms");
-        var deceleration = AddProductionParameterField(fields, "减速时间", "ms");
-        var sTime = AddProductionParameterField(fields, "S曲线时间", "ms，范围0–1000");
-        var decelerationStop = AddProductionParameterField(fields, "减速停止时间", "ms");
+        var row = CreateParameterTableGrid(8);
+        AddAxisNameCell(row, definition);
+        var runVelocity = AddCompactParameterInput(row, 1, "运行速度，pulse/s");
+        var startVelocity = AddCompactParameterInput(row, 2, "初始速度，pulse/s");
+        var stopVelocity = AddCompactParameterInput(row, 3, "停止速度，pulse/s");
+        var acceleration = AddCompactParameterInput(row, 4, "加速时间，ms");
+        var deceleration = AddCompactParameterInput(row, 5, "减速时间，ms");
+        var sTime = AddCompactParameterInput(row, 6, "S曲线时间，0–1000 ms");
+        var decelerationStop = AddCompactParameterInput(row, 7, "减速停止时间，ms");
 
         return new ProductionAxisMotionEditors(
-            CreateAxisParameterCard(
-                $"轴{definition.AxisNo} · {definition.DisplayName}",
-                fields),
+            CreateParameterTableRow(row, rowIndex),
             runVelocity,
             startVelocity,
             stopVelocity,
@@ -224,20 +266,20 @@ public partial class HomePage : UserControl
     }
 
     private ProductionAxisHomeEditors CreateProductionAxisHomeEditors(
-        ProductionAxisDefinition definition)
+        ProductionAxisDefinition definition,
+        int rowIndex)
     {
-        var fields = new UniformGrid { Columns = 3 };
-        var mode = AddProductionParameterField(fields, "回原模式", "整数模式号");
-        var lowVelocity = AddProductionParameterField(fields, "回原低速", "pulse/s");
-        var highVelocity = AddProductionParameterField(fields, "回原高速", "pulse/s");
-        var acceleration = AddProductionParameterField(fields, "加速时间", "ms");
-        var deceleration = AddProductionParameterField(fields, "减速时间", "ms");
-        var offset = AddProductionParameterField(fields, "回原偏移", "pulse");
+        var row = CreateParameterTableGrid(7);
+        AddAxisNameCell(row, definition);
+        var mode = AddCompactParameterInput(row, 1, "回原模式，整数");
+        var lowVelocity = AddCompactParameterInput(row, 2, "回原低速，pulse/s");
+        var highVelocity = AddCompactParameterInput(row, 3, "回原高速，pulse/s");
+        var acceleration = AddCompactParameterInput(row, 4, "回原加速时间，ms");
+        var deceleration = AddCompactParameterInput(row, 5, "回原减速时间，ms");
+        var offset = AddCompactParameterInput(row, 6, "回原偏移，pulse");
 
         return new ProductionAxisHomeEditors(
-            CreateAxisParameterCard(
-                $"轴{definition.AxisNo} · {definition.DisplayName}",
-                fields),
+            CreateParameterTableRow(row, rowIndex),
             mode,
             lowVelocity,
             highVelocity,
@@ -246,65 +288,74 @@ public partial class HomePage : UserControl
             offset);
     }
 
-    private static Border CreateAxisParameterCard(string title, UIElement fields)
+    private static Grid CreateParameterTableGrid(int columnCount)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(172) });
+        for (var index = 1; index < columnCount; index++)
+        {
+            grid.ColumnDefinitions.Add(
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        return grid;
+    }
+
+    private static Border CreateParameterTableRow(Grid row, int rowIndex)
     {
         return new Border
         {
-            Margin = new Thickness(0, 0, 0, 6),
-            Padding = new Thickness(8, 6, 8, 7),
-            Background = new SolidColorBrush(Color.FromRgb(18, 48, 69)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(45, 74, 97)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(5),
-            Child = new StackPanel
-            {
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = title,
-                        Margin = new Thickness(2, 0, 2, 4),
-                        Foreground = new SolidColorBrush(Color.FromRgb(234, 242, 247)),
-                        FontSize = 11,
-                        FontWeight = FontWeights.SemiBold
-                    },
-                    fields
-                }
-            }
+            Height = 38,
+            Margin = new Thickness(0, 1, 0, 1),
+            Padding = new Thickness(0, 2, 0, 2),
+            Background = new SolidColorBrush(
+                rowIndex % 2 == 0
+                    ? Color.FromRgb(17, 43, 62)
+                    : Color.FromRgb(19, 48, 69)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(39, 68, 89)),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Child = row
         };
     }
 
-    private TextBox AddProductionParameterField(
-        Panel panel,
-        string label,
-        string unitOrHint)
+    private static void AddAxisNameCell(
+        Grid row,
+        ProductionAxisDefinition definition)
+    {
+        var label = new TextBlock
+        {
+            Text = $"{definition.DisplayName}  ·  轴{definition.AxisNo}",
+            Margin = new Thickness(10, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(226, 237, 244)),
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold
+        };
+        Grid.SetColumn(label, 0);
+        row.Children.Add(label);
+    }
+
+    private TextBox AddCompactParameterInput(
+        Grid row,
+        int column,
+        string tooltip)
     {
         var textBox = new TextBox
         {
-            Height = 25,
-            Margin = new Thickness(0, 2, 6, 0),
+            Tag = "CompactParameter",
+            Height = 30,
+            Margin = new Thickness(5, 1, 5, 1),
             TextAlignment = TextAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(234, 242, 247)),
             Background = new SolidColorBrush(Color.FromRgb(23, 52, 74)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(59, 95, 120)),
-            ToolTip = unitOrHint
+            BorderThickness = new Thickness(1),
+            ToolTip = tooltip
         };
         textBox.TextChanged += ProductionAxisParameterTextBox_TextChanged;
-        panel.Children.Add(new StackPanel
-        {
-            Margin = new Thickness(0, 1, 0, 3),
-            Children =
-            {
-                new TextBlock
-                {
-                    Text = label,
-                    Foreground = new SolidColorBrush(Color.FromRgb(159, 177, 191)),
-                    FontSize = 9
-                },
-                textBox
-            }
-        });
+        Grid.SetColumn(textBox, column);
+        row.Children.Add(textBox);
         return textBox;
     }
 
