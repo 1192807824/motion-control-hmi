@@ -51,10 +51,7 @@ public partial class HomePage : UserControl
     private const double DefaultSecondSetPickupPosition1Y = 330_321d;
     private const double DefaultSecondSetPickupPosition2X = 1_606_271d;
     private const double DefaultSecondSetPickupPosition2Y = -222_828d;
-    private const double SecondSetNozzle1DropX = 592_474d;
-    private const double SecondSetNozzle1DropY = 204_106d;
-    private const double SecondSetNozzle2DropX = 592_498d;
-    private const double SecondSetNozzle2DropY = 1_374_787d;
+    private const double SecondSetNozzleBinYOffset = 77_000d;
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
@@ -124,6 +121,7 @@ public partial class HomePage : UserControl
     private VisionCalibrationAxisSet? _productionAxisSet;
     private ProductionZPositions? _productionZPositions;
     private SecondSetXyPositions? _secondSetXyPositions;
+    private BinDropPositions? _binDropPositions;
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
@@ -565,6 +563,12 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("本轮生产的第二套 XY 取料位置尚未锁定。");
     }
 
+    private BinDropPositions GetBinDropPositions()
+    {
+        return _binDropPositions
+            ?? throw new InvalidOperationException("本轮生产的 BIN0-BIN3 下料位置尚未锁定。");
+    }
+
     private static int GetNozzleZHardwareAxisNo(
         VisionCalibrationAxisSet axisSet,
         int nozzleNumber)
@@ -881,6 +885,9 @@ public partial class HomePage : UserControl
 
             // 第二套取料前XY位置同样在启动时锁定，运行中修改不会影响当前生产轮次。
             _secondSetXyPositions = ReadSecondSetXyPositions();
+
+            // BIN配置点是两个吸嘴的中间位置，启动时锁定，避免运行中修改导致下料点变化。
+            _binDropPositions = ReadBinDropPositions();
 
             // 在任何轴开始运动前读取并验证完整自动流程参数，避免流程中途才发现输入缺失。
             var position1X = ParseFiniteCoordinate(PresetPosition1XTextBox.Text, "位置 1 X 轴绝对脉冲");
@@ -1231,6 +1238,7 @@ public partial class HomePage : UserControl
             _productionAxisSet = null;
             _productionZPositions = null;
             _secondSetXyPositions = null;
+            _binDropPositions = null;
 
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
@@ -1521,6 +1529,16 @@ public partial class HomePage : UserControl
         {
             var zPositions = GetProductionZPositions();
             var xyPositions = GetSecondSetXyPositions();
+            var binDropPositions = GetBinDropPositions();
+            var nozzle2Bin = carouselStations[SecondSetNozzle2UnloadStation].Bin;
+            var nozzle1Bin = carouselStations[SecondSetNozzle1UnloadStation].Bin;
+            var nozzle2BinCenter = binDropPositions.Resolve(
+                nozzle2Bin,
+                SecondSetNozzle2UnloadStation);
+            var nozzle1BinCenter = binDropPositions.Resolve(
+                nozzle1Bin,
+                SecondSetNozzle1UnloadStation);
+
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴2取13工位",
                 xyPositions.Position1X,
@@ -1555,9 +1573,9 @@ public partial class HomePage : UserControl
             pickupCompletion.TrySetResult(true);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "吸嘴1放料",
-                SecondSetNozzle1DropX,
-                SecondSetNozzle1DropY,
+                $"吸嘴1放料到{nozzle1Bin}",
+                nozzle1BinCenter.X,
+                nozzle1BinCenter.Y + SecondSetNozzleBinYOffset,
                 cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
@@ -1567,9 +1585,9 @@ public partial class HomePage : UserControl
                 cancellationToken);
 
             await MoveSecondSetUnloadAxesToAsync(
-                "吸嘴2放料",
-                SecondSetNozzle2DropX,
-                SecondSetNozzle2DropY,
+                $"吸嘴2放料到{nozzle2Bin}",
+                nozzle2BinCenter.X,
+                nozzle2BinCenter.Y - SecondSetNozzleBinYOffset,
                 cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
@@ -2871,6 +2889,23 @@ public partial class HomePage : UserControl
             ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2（吸嘴1取14）Y轴绝对脉冲"));
     }
 
+    private BinDropPositions ReadBinDropPositions()
+    {
+        return new BinDropPositions(
+            new BinDropPosition(
+                ParseFiniteCoordinate(Bin0PositionXTextBox.Text, "BIN0位置X轴绝对脉冲"),
+                ParseFiniteCoordinate(Bin0PositionYTextBox.Text, "BIN0位置Y轴绝对脉冲")),
+            new BinDropPosition(
+                ParseFiniteCoordinate(Bin1PositionXTextBox.Text, "BIN1位置X轴绝对脉冲"),
+                ParseFiniteCoordinate(Bin1PositionYTextBox.Text, "BIN1位置Y轴绝对脉冲")),
+            new BinDropPosition(
+                ParseFiniteCoordinate(Bin2PositionXTextBox.Text, "BIN2位置X轴绝对脉冲"),
+                ParseFiniteCoordinate(Bin2PositionYTextBox.Text, "BIN2位置Y轴绝对脉冲")),
+            new BinDropPosition(
+                ParseFiniteCoordinate(Bin3PositionXTextBox.Text, "BIN3位置X轴绝对脉冲"),
+                ParseFiniteCoordinate(Bin3PositionYTextBox.Text, "BIN3位置Y轴绝对脉冲")));
+    }
+
     private void SaveProductionZPositionsFromInputs()
     {
         if (_loadingPresetPositions ||
@@ -3193,6 +3228,15 @@ public partial class HomePage : UserControl
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
+        var allBinDropPositionsValid =
+            TryParseCoordinate(Bin0PositionXTextBox.Text, out _) &&
+            TryParseCoordinate(Bin0PositionYTextBox.Text, out _) &&
+            TryParseCoordinate(Bin1PositionXTextBox.Text, out _) &&
+            TryParseCoordinate(Bin1PositionYTextBox.Text, out _) &&
+            TryParseCoordinate(Bin2PositionXTextBox.Text, out _) &&
+            TryParseCoordinate(Bin2PositionYTextBox.Text, out _) &&
+            TryParseCoordinate(Bin3PositionXTextBox.Text, out _) &&
+            TryParseCoordinate(Bin3PositionYTextBox.Text, out _);
         var allProductionVelocitiesValid =
             axis0VelocityValid &&
             firstSetVelocityValid &&
@@ -3205,6 +3249,7 @@ public partial class HomePage : UserControl
             allProductionVelocitiesValid &&
             allZPositionsValid &&
             allSecondSetXyPositionsValid &&
+            allBinDropPositionsValid &&
             (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
         StartProductionTitleText.Text = _startSequenceRunning
             ? (_productionStopRequested ? "正在停止" : "停止循环")
@@ -3648,4 +3693,26 @@ public partial class HomePage : UserControl
         double Position1Y,
         double Position2X,
         double Position2Y);
+
+    private readonly record struct BinDropPosition(double X, double Y);
+
+    private sealed record BinDropPositions(
+        BinDropPosition Bin0,
+        BinDropPosition Bin1,
+        BinDropPosition Bin2,
+        BinDropPosition Bin3)
+    {
+        public BinDropPosition Resolve(string? bin, int stationNumber)
+        {
+            return bin?.Trim().ToUpperInvariant() switch
+            {
+                "BIN0" => Bin0,
+                "BIN1" => Bin1,
+                "BIN2" => Bin2,
+                "BIN3" => Bin3,
+                _ => throw new InvalidOperationException(
+                    $"{stationNumber}工位的分BIN结果无效：{bin ?? "空"}。")
+            };
+        }
+    }
 }
