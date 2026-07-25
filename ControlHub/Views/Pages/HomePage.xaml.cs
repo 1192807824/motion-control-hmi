@@ -45,7 +45,6 @@ public partial class HomePage : UserControl
     private const double MoveOutAbsolutePosition = 250_000d;
     private const int SecondSetNozzle2UnloadStation = 13;
     private const int SecondSetNozzle1UnloadStation = 14;
-    private const int FirstUnloadCycleNumber = 7;
     private const double FirstSetXyVelocity = 100_000d;
     private const double SecondSetXyVelocity = 100_000d;
     private const double DefaultSecondSetPickupPosition1X = 1_606_631d;
@@ -1113,16 +1112,32 @@ public partial class HomePage : UserControl
                         Color.FromRgb(73, 209, 125));
                 }
 
-                // 上一轮第二套放料通常已在DD转动和第一套取料期间完成；启动新收料前只确认第二套自身空闲。
+                // DD停稳后，13/14工位的占料状态已经更新。启动本次收料前，
+                // 先确认上一轮第二套放料已经结束，避免轴3/4被两次下料任务同时占用。
                 if (!activeSecondSetUnloadTask.IsCompleted)
                 {
                     SetFirstSetPositionStatus(
-                        "第一套两个料已吸取；第二套正在完成上一轮放料，完成后立即开始本轮收料。",
+                        "DD已停稳；第二套正在完成上一轮放料，完成后立即检查13/14工位。",
                         true);
                 }
 
                 await activeSecondSetUnloadTask;
                 activeSecondSetUnloadTask = Task.CompletedTask;
+
+                // 不能等到第一套完成1/2工位放料后再判断，否则13/14会白等一整轮。
+                // 此处DD已经停稳，只要13和14同时有料就立即启动第二套取料；
+                // 第二套轴3/4与第一套轴1/2相互独立，可与下面的第一套放料并行执行。
+                activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
+                    carouselStations,
+                    _productionCancellation.Token,
+                    out activeSecondSetPickupTask);
+
+                if (!activeSecondSetPickupTask.IsCompleted)
+                {
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：DD停稳且13/14工位均有料，第二套立即开始取料；第一套同步向1/2工位放料…",
+                        Color.FromRgb(242, 181, 68));
+                }
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
@@ -1164,14 +1179,6 @@ public partial class HomePage : UserControl
                 carouselStations[1].SetLoaded();
                 carouselStations[2].SetLoaded();
                 UpdateCarouselStationDisplay(carouselStations);
-
-                // 本轮两个新料写入1/2工位后再启动13/14收料；第7轮形成14个在盘物料时必须在本轮立即收料，
-                // 不能因为判断发生在放料前而延迟到第8轮。
-                activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
-                    carouselStations,
-                    cycleNumber,
-                    _productionCancellation.Token,
-                    out activeSecondSetPickupTask);
 
                 if (!activeSecondSetPickupTask.IsCompleted)
                 {
@@ -1467,14 +1474,14 @@ public partial class HomePage : UserControl
 
     private Task StartSecondSetUnloadIfReadyAsync(
         CarouselStationState[] carouselStations,
-        int completedLoadCycleNumber,
         CancellationToken cancellationToken,
         out Task pickupCompletedTask)
     {
-        // 连续无传感器流程采用确定节拍：第7轮完成上料后盘上累计14个料，
-        // 此时必须开始13/14工位收料；后续每完成一轮上料都执行一次。
-        // 工位缓存只用于画面显示，不能因为显示状态不同步而跳过实际下料。
-        if (completedLoadCycleNumber < FirstUnloadCycleNumber)
+        // DD每次转动后会同步更新工位缓存。只有13、14工位同时有料时才启动双吸嘴收料，
+        // 并且本方法必须在DD停稳后立即调用，不能拖到下一轮第一套放料结束。
+        if (carouselStations.Length <= SecondSetNozzle1UnloadStation ||
+            !carouselStations[SecondSetNozzle2UnloadStation].Occupied ||
+            !carouselStations[SecondSetNozzle1UnloadStation].Occupied)
         {
             pickupCompletedTask = Task.CompletedTask;
             return Task.CompletedTask;
