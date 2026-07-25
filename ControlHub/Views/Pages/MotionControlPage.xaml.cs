@@ -24,7 +24,6 @@ public partial class MotionControlPage : UserControl
     private const double OneKeyResetTestStationHomeVelocity = 100_000;
     private const double OneKeyResetDdHomeVelocity = 50_000;
     private const double OneKeyResetHomePositionTolerance = 100;
-    private const double OneKeyResetDdHomePositionTolerance = 600;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -3873,7 +3872,7 @@ public partial class MotionControlPage : UserControl
                     33,
                     OneKeyResetDdHomeVelocity,
                     OneKeyResetDdHomeVelocity,
-                    CompletionTolerance: OneKeyResetDdHomePositionTolerance)
+                    OffsetPosition: 600)
             ])
         ];
     }
