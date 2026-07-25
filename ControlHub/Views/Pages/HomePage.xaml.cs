@@ -333,16 +333,40 @@ public partial class HomePage : UserControl
                     "吸嘴编号只能是 1 或 2。")
             };
 
-            // 第二套两个吸嘴均使用独立的高电平有效真空吸/真空破输出。
-            // 切换状态时必须先关闭相反输出，避免两个电磁阀短暂同时得电。
-            var oppositeSet = vacuumEnabled
-                ? motionController.SetDigitalOutputHardwareBit(breakVacuumBit, false)
-                : motionController.SetDigitalOutputHardwareBit(vacuumBit, false);
-            var requestedSet = vacuumEnabled
-                ? motionController.SetDigitalOutputHardwareBit(vacuumBit, true)
-                : motionController.SetDigitalOutputHardwareBit(
+            // 第二套两个吸嘴均为低电平有效：
+            // Z1：Y18=破、Y19=吸；Z2：Y20=破、Y21=吸。0=开，1=关。
+            // 切换时先把相反阀写 1 关闭，再把目标阀写 0 打开，
+            // 避免真空吸和真空破在切换瞬间同时开启。
+            bool oppositeSet;
+            bool requestedSet;
+            if (vacuumEnabled)
+            {
+                oppositeSet = motionController.SetDigitalOutputHardwareBit(
                     breakVacuumBit,
-                    breakVacuumEnabled);
+                    true);
+                requestedSet = motionController.SetDigitalOutputHardwareBit(
+                    vacuumBit,
+                    false);
+            }
+            else if (breakVacuumEnabled)
+            {
+                oppositeSet = motionController.SetDigitalOutputHardwareBit(
+                    vacuumBit,
+                    true);
+                requestedSet = motionController.SetDigitalOutputHardwareBit(
+                    breakVacuumBit,
+                    false);
+            }
+            else
+            {
+                oppositeSet = motionController.SetDigitalOutputHardwareBit(
+                    vacuumBit,
+                    true);
+                requestedSet = motionController.SetDigitalOutputHardwareBit(
+                    breakVacuumBit,
+                    true);
+            }
+
             outputSet = oppositeSet & requestedSet;
         }
         catch (Exception exception)
@@ -354,8 +378,8 @@ public partial class HomePage : UserControl
         {
             var expectedOutput = nozzleNumber switch
             {
-                1 => $"破Y{SecondSetZ1BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 1 : 0)}，吸Y{SecondSetZ1VacuumOutputBit:00}={(vacuumEnabled ? 1 : 0)}",
-                2 => $"破Y{SecondSetZ2BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 1 : 0)}，吸Y{SecondSetZ2VacuumOutputBit:00}={(vacuumEnabled ? 1 : 0)}",
+                1 => $"破Y{SecondSetZ1BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 0 : 1)}，吸Y{SecondSetZ1VacuumOutputBit:00}={(vacuumEnabled ? 0 : 1)}",
+                2 => $"破Y{SecondSetZ2BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 0 : 1)}，吸Y{SecondSetZ2VacuumOutputBit:00}={(vacuumEnabled ? 0 : 1)}",
                 _ => $"吸嘴{nozzleNumber}"
             };
             throw new InvalidOperationException(
