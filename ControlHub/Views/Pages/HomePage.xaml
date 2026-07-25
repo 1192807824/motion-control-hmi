@@ -1633,29 +1633,6 @@
                         </Grid>
                     </Border>
 
-                    <Border Margin="0,8,0,0"
-                            Tag="FullWidth"
-                            Background="#12283A"
-                            BorderBrush="#2D4A61"
-                            BorderThickness="1"
-                            CornerRadius="3"
-                            Padding="9,7">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="24" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="测试站逐轴回原参数"
-                                       Foreground="#EAF2F7"
-                                       FontSize="12"
-                                       FontWeight="Bold"
-                                       VerticalAlignment="Center" />
-                            <StackPanel Grid.Row="1"
-                                        x:Name="TestStationHomeParametersPanel"
-                                        Margin="0,4,0,0" />
-                        </Grid>
-                    </Border>
-
                             <Border Margin="0,8,0,0"
                                     Background="#12283A"
                                     BorderBrush="#2D4A61"

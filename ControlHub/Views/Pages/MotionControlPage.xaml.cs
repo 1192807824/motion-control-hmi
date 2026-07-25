@@ -24,6 +24,7 @@ public partial class MotionControlPage : UserControl
     private const double OneKeyResetTestStationHomeVelocity = 100_000;
     private const double OneKeyResetDdHomeVelocity = 50_000;
     private const double OneKeyResetHomePositionTolerance = 100;
+    private const double OneKeyResetDdHomePositionTolerance = 600;
     private readonly IMotionCard _motionCard;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
@@ -3691,7 +3692,10 @@ public partial class MotionControlPage : UserControl
                 {
                     EnsureOneKeyResetAxisCanStart(
                         stage,
-                        new TestHomeAxisCommand(requestedAxes[hardwareAxisNo], profile),
+                        new TestHomeAxisCommand(
+                            requestedAxes[hardwareAxisNo],
+                            profile,
+                            group.CompletionTolerance),
                         snapshotsByHardwareNo[hardwareAxisNo]);
                 }
             }
@@ -3708,7 +3712,10 @@ public partial class MotionControlPage : UserControl
         var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
         var stageAxes = stage.Groups
             .SelectMany(group => group.HardwareAxisNumbers.Select(axisNo =>
-                new TestHomeAxisCommand(axes[axisNo], CreateTestHomeProfile(group))))
+                new TestHomeAxisCommand(
+                    axes[axisNo],
+                    CreateTestHomeProfile(group),
+                    group.CompletionTolerance)))
             .ToArray();
         var commandedAxes = new List<TestHomeAxisCommand>(stageAxes.Length);
 
@@ -3806,7 +3813,7 @@ public partial class MotionControlPage : UserControl
     {
         return snapshot.Homed &&
                Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition) <=
-               OneKeyResetHomePositionTolerance;
+               item.CompletionTolerance;
     }
 
     private static void EnsureOneKeyResetAxisCompleted(
@@ -3824,11 +3831,11 @@ public partial class MotionControlPage : UserControl
         }
 
         var positionError = Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition);
-        if (positionError > OneKeyResetHomePositionTolerance)
+        if (positionError > item.CompletionTolerance)
         {
             throw new MotionCardException(
                 $"{axisDescription}{stage.Name}回原后的编码器位置误差为 {positionError:F0} 脉冲，" +
-                $"超过允许值 ±{OneKeyResetHomePositionTolerance:F0} 脉冲。");
+                $"超过允许值 ±{item.CompletionTolerance:F0} 脉冲。");
         }
     }
 
@@ -3860,7 +3867,14 @@ public partial class MotionControlPage : UserControl
                 new([3, 4], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
                 new([13, 14, 15], 21, OneKeyResetTestStationHomeVelocity, OneKeyResetTestStationHomeVelocity)
             ]),
-            new("DD马达", [new([0], 33, OneKeyResetDdHomeVelocity, OneKeyResetDdHomeVelocity, 600)])
+            new("DD马达", [
+                new(
+                    [0],
+                    33,
+                    OneKeyResetDdHomeVelocity,
+                    OneKeyResetDdHomeVelocity,
+                    CompletionTolerance: OneKeyResetDdHomePositionTolerance)
+            ])
         ];
     }
 
@@ -5186,11 +5200,13 @@ public partial class MotionControlPage : UserControl
         int Mode,
         double LowVelocity,
         double HighVelocity,
-        double OffsetPosition = 0);
+        double OffsetPosition = 0,
+        double CompletionTolerance = OneKeyResetHomePositionTolerance);
 
     private sealed record TestHomeAxisCommand(
         AxisStatus Axis,
-        MotionHomeProfile Profile);
+        MotionHomeProfile Profile,
+        double CompletionTolerance);
 
     private sealed record TestHomeStage(
         string Name,

@@ -108,8 +108,6 @@ public sealed class HomePageSettings
     public double? Bin3PositionY { get; set; }
 
     public Dictionary<int, ProductionAxisMotionSettings> ProductionAxisMotionSettings { get; set; } = [];
-
-    public Dictionary<int, ProductionAxisHomeSettings> ProductionAxisHomeSettings { get; set; } = [];
 }
 
 public sealed class ProductionAxisMotionSettings
@@ -127,19 +125,4 @@ public sealed class ProductionAxisMotionSettings
     public double STimeMilliseconds { get; set; }
 
     public double DecelerationStopMilliseconds { get; set; } = 100;
-}
-
-public sealed class ProductionAxisHomeSettings
-{
-    public int Mode { get; set; } = 21;
-
-    public double LowVelocity { get; set; } = 600_000;
-
-    public double HighVelocity { get; set; } = 600_000;
-
-    public double AccelerationMilliseconds { get; set; } = 100;
-
-    public double DecelerationMilliseconds { get; set; } = 100;
-
-    public double OffsetPosition { get; set; }
 }

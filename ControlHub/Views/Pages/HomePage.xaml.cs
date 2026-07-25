@@ -43,6 +43,7 @@ public partial class HomePage : UserControl
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
     private const double MoveOutAbsolutePosition = 250_000d;
+    private const double TestStationReturnAbsolutePosition = 200_000d;
     private const int SecondSetNozzle2UnloadStation = 13;
     private const int SecondSetNozzle1UnloadStation = 14;
     private const double FirstSetXyVelocity = 100_000d;
@@ -55,15 +56,12 @@ public partial class HomePage : UserControl
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
-    private const int TestStationHomeMode = 21;
-    private const double TestStationHomeVelocity = 600_000d;
-    private const double TestStationHomeOffsetPosition = 0d;
     private const int TestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
-    private const string CarouselStatusHoming = "回原";
+    private const string CarouselStatusReturning = "回待机位";
     private static readonly int[] MoveOutAxisNos = [13, 14, 15];
     private static readonly int[] FirstSetAxisNos =
         [VisionCalibrationService.FirstSetXHardwareAxisNo, VisionCalibrationService.FirstSetYHardwareAxisNo];
@@ -94,7 +92,6 @@ public partial class HomePage : UserControl
         new(14, "测试站", "6号测试站", TestStationPressVelocity),
         new(15, "测试站", "7号测试站", TestStationPressVelocity)
     ];
-    private static readonly int[] TestStationHomeAxisNos = [13, 14, 15];
     private static readonly Point[] CarouselStationCardSlots =
     [
         new(241, 16),
@@ -140,9 +137,7 @@ public partial class HomePage : UserControl
     private SecondSetXyPositions? _secondSetXyPositions;
     private BinDropPositions? _binDropPositions;
     private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
-    private IReadOnlyDictionary<int, ProductionAxisHomeSettings>? _productionAxisHomeSettings;
     private readonly Dictionary<int, ProductionAxisMotionEditors> _productionAxisMotionEditors = [];
-    private readonly Dictionary<int, ProductionAxisHomeEditors> _productionAxisHomeEditors = [];
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
@@ -182,29 +177,6 @@ public partial class HomePage : UserControl
         }
 
         ProductionMotionParametersPanel.Children.Add(motionTable);
-
-        var homeTable = new StackPanel();
-        homeTable.Children.Add(CreateParameterTableHeader(
-            [
-                "测试站轴",
-                "模式",
-                "低速 pulse/s",
-                "高速 pulse/s",
-                "加速 ms",
-                "减速 ms",
-                "偏移 pulse"
-            ],
-            7));
-        for (var index = 0; index < TestStationHomeAxisNos.Length; index++)
-        {
-            var axisNo = TestStationHomeAxisNos[index];
-            var definition = ProductionAxisDefinitions.Single(item => item.AxisNo == axisNo);
-            var editors = CreateProductionAxisHomeEditors(definition, index);
-            _productionAxisHomeEditors[axisNo] = editors;
-            homeTable.Children.Add(editors.Container);
-        }
-
-        TestStationHomeParametersPanel.Children.Add(homeTable);
     }
 
     private static Border CreateParameterTableHeader(
@@ -264,29 +236,6 @@ public partial class HomePage : UserControl
             deceleration,
             sTime,
             decelerationStop);
-    }
-
-    private ProductionAxisHomeEditors CreateProductionAxisHomeEditors(
-        ProductionAxisDefinition definition,
-        int rowIndex)
-    {
-        var row = CreateParameterTableGrid(7);
-        AddAxisNameCell(row, definition);
-        var mode = AddCompactParameterInput(row, 1, "回原模式，整数");
-        var lowVelocity = AddCompactParameterInput(row, 2, "回原低速，pulse/s");
-        var highVelocity = AddCompactParameterInput(row, 3, "回原高速，pulse/s");
-        var acceleration = AddCompactParameterInput(row, 4, "回原加速时间，ms");
-        var deceleration = AddCompactParameterInput(row, 5, "回原减速时间，ms");
-        var offset = AddCompactParameterInput(row, 6, "回原偏移，pulse");
-
-        return new ProductionAxisHomeEditors(
-            CreateParameterTableRow(row, rowIndex),
-            mode,
-            lowVelocity,
-            highVelocity,
-            acceleration,
-            deceleration,
-            offset);
     }
 
     private static Grid CreateParameterTableGrid(int columnCount)
@@ -1101,7 +1050,6 @@ public partial class HomePage : UserControl
 
             // 启动前锁定全部逐轴参数，并把控制卡曲线参数应用到对应硬件轴。
             _productionAxisMotionSettings = ReadProductionAxisMotionSettings();
-            _productionAxisHomeSettings = ReadProductionAxisHomeSettings();
             ApplyProductionAxisMotionSettings(
                 motionController,
                 _productionAxisMotionSettings);
@@ -1412,7 +1360,7 @@ public partial class HomePage : UserControl
                     firstSetYVelocity,
                     _productionCancellation.Token);
 
-                // 测试回原与第二套双取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
+                // 测试站返回待机位与第二套双取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
                 var requiredFinalTestTask = activeFinalTestTask;
                 activeFinalTestTask = Task.FromResult(0);
                 var requiredSecondSetPickupTask = activeSecondSetPickupTask;
@@ -1433,7 +1381,7 @@ public partial class HomePage : UserControl
                     _productionCancellation.Token);
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD在测试回原且第二套双取料完成后固定转动两次；XY立即准备第{cycleNumber + 1}轮拍照吸料…",
+                    $"第{cycleNumber}轮放料完成，DD在测试站返回200000且第二套双取料完成后固定转动两次；XY立即准备第{cycleNumber + 1}轮拍照吸料…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -1475,8 +1423,6 @@ public partial class HomePage : UserControl
             _secondSetXyPositions = null;
             _binDropPositions = null;
             _productionAxisMotionSettings = null;
-            _productionAxisHomeSettings = null;
-
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
 
@@ -2019,23 +1965,22 @@ public partial class HomePage : UserControl
 
         await Task.Delay(TestStationDwellMilliseconds, cancellationToken);
 
-        UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusHoming);
+        UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusReturning);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 停留完成，测试站正在回原，DD等待回原完成…",
+            $"{string.Join("，", stations)} 停留完成，正在返回绝对位置 {TestStationReturnAbsolutePosition:0.###}，DD等待返回完成…",
             Color.FromRgb(242, 181, 68));
-        var homeProfiles = GetProductionHomeProfiles(axisTargets.Keys);
-        SetStartProductionStatus(
-            $"{string.Join("，", stations)} 正在按逐轴参数下发回原点命令…",
-            Color.FromRgb(242, 181, 68));
-        await motionController.HomeAxesAsync(
-            axisTargets.Keys.ToArray(),
-            TestStationHomeMode,
-            TestStationHomeOffsetPosition,
+        var returnTargets = axisTargets.Keys.ToDictionary(
+            axisNo => axisNo,
+            _ => TestStationReturnAbsolutePosition);
+        await motionController.MoveAxesAbsoluteAsync(
+            returnTargets,
             cancellationToken,
-            allowedMovingAxisNos: ProductionHandlingAxisNos,
-            profileOverrides: homeProfiles);
+            TestStationMoveTimeoutMilliseconds,
+            ProductionHandlingAxisNos,
+            HomePageCompletionTolerance,
+            velocityOverrides: pressVelocities);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 逐轴回原点完成，DD可继续下一步。",
+            $"{string.Join("，", stations)} 已返回绝对位置 {TestStationReturnAbsolutePosition:0.###}，DD可继续下一步。",
             Color.FromRgb(73, 209, 125));
         foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
         {
@@ -3101,7 +3046,6 @@ public partial class HomePage : UserControl
     private void LoadProductionAxisParameterEditors()
     {
         _homeSettings.ProductionAxisMotionSettings ??= [];
-        _homeSettings.ProductionAxisHomeSettings ??= [];
         foreach (var definition in ProductionAxisDefinitions)
         {
             var settings = _homeSettings.ProductionAxisMotionSettings.GetValueOrDefault(
@@ -3119,21 +3063,6 @@ public partial class HomePage : UserControl
                 FormatPresetCoordinate(settings.STimeMilliseconds);
             editors.DecelerationStopMilliseconds.Text =
                 FormatPresetCoordinate(settings.DecelerationStopMilliseconds);
-        }
-
-        foreach (var axisNo in TestStationHomeAxisNos)
-        {
-            var settings = _homeSettings.ProductionAxisHomeSettings.GetValueOrDefault(axisNo)
-                           ?? new ProductionAxisHomeSettings();
-            var editors = _productionAxisHomeEditors[axisNo];
-            editors.Mode.Text = settings.Mode.ToString(CultureInfo.CurrentCulture);
-            editors.LowVelocity.Text = FormatPresetCoordinate(settings.LowVelocity);
-            editors.HighVelocity.Text = FormatPresetCoordinate(settings.HighVelocity);
-            editors.AccelerationMilliseconds.Text =
-                FormatPresetCoordinate(settings.AccelerationMilliseconds);
-            editors.DecelerationMilliseconds.Text =
-                FormatPresetCoordinate(settings.DecelerationMilliseconds);
-            editors.OffsetPosition.Text = FormatPresetCoordinate(settings.OffsetPosition);
         }
     }
 
@@ -3243,48 +3172,6 @@ public partial class HomePage : UserControl
         return settingsByAxis;
     }
 
-    private IReadOnlyDictionary<int, ProductionAxisHomeSettings>
-        ReadProductionAxisHomeSettings()
-    {
-        var settingsByAxis = new Dictionary<int, ProductionAxisHomeSettings>();
-        foreach (var axisNo in TestStationHomeAxisNos)
-        {
-            var editors = _productionAxisHomeEditors[axisNo];
-            if (!int.TryParse(
-                    editors.Mode.Text,
-                    NumberStyles.Integer,
-                    CultureInfo.CurrentCulture,
-                    out var mode))
-            {
-                throw new ArgumentException($"轴{axisNo}回原模式必须是整数。");
-            }
-
-            var settings = new ProductionAxisHomeSettings
-            {
-                Mode = mode,
-                LowVelocity = ParseProductionVelocity(
-                    editors.LowVelocity.Text,
-                    $"轴{axisNo}回原低速"),
-                HighVelocity = ParseProductionVelocity(
-                    editors.HighVelocity.Text,
-                    $"轴{axisNo}回原高速"),
-                AccelerationMilliseconds = ParseProductionVelocity(
-                    editors.AccelerationMilliseconds.Text,
-                    $"轴{axisNo}回原加速时间"),
-                DecelerationMilliseconds = ParseProductionVelocity(
-                    editors.DecelerationMilliseconds.Text,
-                    $"轴{axisNo}回原减速时间"),
-                OffsetPosition = ParseFiniteCoordinate(
-                    editors.OffsetPosition.Text,
-                    $"轴{axisNo}回原偏移")
-            };
-            ValidateProductionAxisHomeSettings(axisNo, settings);
-            settingsByAxis[axisNo] = settings;
-        }
-
-        return settingsByAxis;
-    }
-
     private static void ValidateProductionAxisMotionSettings(
         ProductionAxisDefinition definition,
         ProductionAxisMotionSettings settings)
@@ -3308,29 +3195,11 @@ public partial class HomePage : UserControl
         }
     }
 
-    private static void ValidateProductionAxisHomeSettings(
-        int axisNo,
-        ProductionAxisHomeSettings settings)
-    {
-        if (settings.Mode is < short.MinValue or > ushort.MaxValue)
-        {
-            throw new ArgumentException(
-                $"轴{axisNo}回原模式必须在{short.MinValue}–{ushort.MaxValue}之间。");
-        }
-
-        if (settings.HighVelocity < settings.LowVelocity)
-        {
-            throw new ArgumentException(
-                $"轴{axisNo}回原高速不能小于回原低速。");
-        }
-    }
-
     private bool AllProductionAxisParametersValid()
     {
         try
         {
             _ = ReadProductionAxisMotionSettings();
-            _ = ReadProductionAxisHomeSettings();
             return true;
         }
         catch (ArgumentException)
@@ -3350,10 +3219,6 @@ public partial class HomePage : UserControl
         {
             _homeSettings.ProductionAxisMotionSettings =
                 ReadProductionAxisMotionSettings().ToDictionary(
-                    pair => pair.Key,
-                    pair => pair.Value);
-            _homeSettings.ProductionAxisHomeSettings =
-                ReadProductionAxisHomeSettings().ToDictionary(
                     pair => pair.Key,
                     pair => pair.Value);
             _homeSettingsStore.Save(_homeSettings);
@@ -3413,33 +3278,6 @@ public partial class HomePage : UserControl
             .ToDictionary(
                 axisNo => axisNo,
                 axisNo => GetProductionAxisMotionSettings(axisNo).RunVelocity);
-    }
-
-    private IReadOnlyDictionary<int, MotionHomeProfile> GetProductionHomeProfiles(
-        IEnumerable<int> axisNos)
-    {
-        var settingsByAxis = _productionAxisHomeSettings
-                             ?? ReadProductionAxisHomeSettings();
-        return axisNos
-            .Distinct()
-            .ToDictionary(
-                axisNo => axisNo,
-                axisNo =>
-                {
-                    var settings = settingsByAxis.GetValueOrDefault(axisNo)
-                                   ?? throw new InvalidOperationException(
-                                       $"轴{axisNo}生产回原参数不存在。");
-                    return new MotionHomeProfile
-                    {
-                        Enabled = true,
-                        Mode = settings.Mode,
-                        LowVelocity = settings.LowVelocity,
-                        HighVelocity = settings.HighVelocity,
-                        AccelerationSeconds = settings.AccelerationMilliseconds / 1000d,
-                        DecelerationSeconds = settings.DecelerationMilliseconds / 1000d,
-                        OffsetPosition = settings.OffsetPosition
-                    };
-                });
     }
 
     private void SaveProductionZPositionsFromInputs()
@@ -3782,10 +3620,6 @@ public partial class HomePage : UserControl
             editors.SetEnabled(commandsIdle);
         }
 
-        foreach (var editors in _productionAxisHomeEditors.Values)
-        {
-            editors.SetEnabled(commandsIdle);
-        }
         FirstSetPickupZPositionTextBox.IsEnabled = commandsIdle;
         FirstSetDropZPositionTextBox.IsEnabled = commandsIdle;
         FirstSetSafeZPositionTextBox.IsEnabled = commandsIdle;
@@ -4291,23 +4125,4 @@ public partial class HomePage : UserControl
         }
     }
 
-    private sealed record ProductionAxisHomeEditors(
-        Border Container,
-        TextBox Mode,
-        TextBox LowVelocity,
-        TextBox HighVelocity,
-        TextBox AccelerationMilliseconds,
-        TextBox DecelerationMilliseconds,
-        TextBox OffsetPosition)
-    {
-        public void SetEnabled(bool enabled)
-        {
-            Mode.IsEnabled = enabled;
-            LowVelocity.IsEnabled = enabled;
-            HighVelocity.IsEnabled = enabled;
-            AccelerationMilliseconds.IsEnabled = enabled;
-            DecelerationMilliseconds.IsEnabled = enabled;
-            OffsetPosition.IsEnabled = enabled;
-        }
-    }
 }
