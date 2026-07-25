@@ -1596,6 +1596,14 @@ public partial class HomePage : UserControl
                 zPositions.SecondSetSafe,
                 cancellationToken);
             CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet.Second);
+
+            // 两个BIN放料全部完成后，立即回到下一轮首先使用的取料位等待，
+            // 避免第二套XY停留在最后一个BIN位置，下一轮才开始长距离回程。
+            await MoveSecondSetUnloadAxesToAsync(
+                "BIN放料完成后回13工位取料位等待",
+                xyPositions.Position1X,
+                xyPositions.Position1Y,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1797,7 +1805,8 @@ public partial class HomePage : UserControl
             Color.FromRgb(73, 209, 125));
         foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
         {
-            carouselStations[station].SetTested($"BIN{Random.Shared.Next(0, 4)}");
+            // 当前联调阶段只模拟 BIN1-BIN3，暂不生成 BIN0。
+            carouselStations[station].SetTested($"BIN{Random.Shared.Next(1, 4)}");
         }
 
         UpdateCarouselStationDisplay(carouselStations);
