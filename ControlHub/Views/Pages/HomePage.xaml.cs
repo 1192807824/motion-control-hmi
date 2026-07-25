@@ -29,8 +29,8 @@ public partial class HomePage : UserControl
     private const int SecondSetZ2VacuumOutputBit = 21;
     private const int Station13BreakVacuumOutputBit = 22;
     private const int Station14BreakVacuumOutputBit = 23;
-    private const int VacuumBreakPulseMilliseconds = 150;
-    private const int VacuumPickupDwellMilliseconds = 500;
+    private const int DefaultVacuumBreakPulseMilliseconds = 150;
+    private const int DefaultVacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
     private const int FirstSetNozzle2ZHardwareAxisNo = 7;
     private const int SecondSetNozzle1ZHardwareAxisNo = 9;
@@ -136,6 +136,7 @@ public partial class HomePage : UserControl
     private bool _preserveIoOnEmergencyStop;
     private VisionCalibrationAxisSet? _productionAxisSet;
     private ProductionZPositions? _productionZPositions;
+    private ProductionZDwellTimes? _productionZDwellTimes;
     private SecondSetXyPositions? _secondSetXyPositions;
     private BinDropPositions? _binDropPositions;
     private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
@@ -654,10 +655,11 @@ public partial class HomePage : UserControl
 
         EnableNozzleVacuum(axisSet, nozzleNumber, cancellationToken);
 
+        var pickupDwellMilliseconds = GetProductionZDwellTimes().PickupMilliseconds;
         SetFirstSetPositionStatus(
-            $"Z{nozzleNumber}真空吸已开启，保持 {VacuumPickupDwellMilliseconds} ms 等待吸附稳定…",
+            $"Z{nozzleNumber}真空吸已开启，保持 {pickupDwellMilliseconds} ms 等待吸附稳定…",
             true);
-        await Task.Delay(VacuumPickupDwellMilliseconds, cancellationToken);
+        await Task.Delay(pickupDwellMilliseconds, cancellationToken);
 
         await MoveNozzleZToAsync(
             axisSet,
@@ -779,6 +781,11 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("本轮生产的 Z 轴高度参数尚未锁定。");
     }
 
+    private ProductionZDwellTimes GetProductionZDwellTimes()
+    {
+        return _productionZDwellTimes ?? ReadProductionZDwellTimes();
+    }
+
     private SecondSetXyPositions GetSecondSetXyPositions()
     {
         return _secondSetXyPositions
@@ -837,6 +844,7 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var breakPulseMilliseconds = GetProductionZDwellTimes().BreakVacuumMilliseconds;
         if (!SetNozzleVacuumOutputs(
                 axisSet,
                 nozzleNumber,
@@ -848,7 +856,7 @@ public partial class HomePage : UserControl
 
         try
         {
-            await Task.Delay(VacuumBreakPulseMilliseconds, cancellationToken);
+            await Task.Delay(breakPulseMilliseconds, cancellationToken);
         }
         finally
         {
@@ -863,7 +871,7 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus(
-            $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
+            $"Z{nozzleNumber}真空破已脉冲 {breakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
             true);
     }
 
@@ -919,10 +927,11 @@ public partial class HomePage : UserControl
                 nozzleNumber,
                 cancellationToken);
 
+            var pickupDwellMilliseconds = GetProductionZDwellTimes().PickupMilliseconds;
             SetFirstSetPositionStatus(
-                $"Z{nozzleNumber}真空吸已开启，保持 {VacuumPickupDwellMilliseconds} ms 等待吸附稳定…",
+                $"Z{nozzleNumber}真空吸已开启，保持 {pickupDwellMilliseconds} ms 等待吸附稳定…",
                 true);
-            await Task.Delay(VacuumPickupDwellMilliseconds, cancellationToken);
+            await Task.Delay(pickupDwellMilliseconds, cancellationToken);
 
             await MoveNozzleZToAsync(
                 VisionCalibrationAxisSet.Second,
@@ -1103,6 +1112,7 @@ public partial class HomePage : UserControl
 
             // 生产启动时一次性校验并锁定两套 Z 轴取料、放料和安全高度。
             _productionZPositions = ReadProductionZPositions();
+            _productionZDwellTimes = ReadProductionZDwellTimes();
 
             // 第二套取料前XY位置同样在启动时锁定，运行中修改不会影响当前生产轮次。
             _secondSetXyPositions = ReadSecondSetXyPositions();
@@ -1461,6 +1471,7 @@ public partial class HomePage : UserControl
             // 否则尚未退出的取消回调仍可能把低电平有效的真空输出写成相反状态。
             _productionAxisSet = null;
             _productionZPositions = null;
+            _productionZDwellTimes = null;
             _secondSetXyPositions = null;
             _binDropPositions = null;
             _productionAxisMotionSettings = null;
@@ -3062,6 +3073,12 @@ public partial class HomePage : UserControl
             _homeSettings.SecondSetDropZPosition ?? DefaultNozzleDropZPosition);
         SecondSetSafeZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetSafeZPosition ?? DefaultNozzleSafeZPosition);
+        VacuumPickupDwellTextBox.Text = (
+            _homeSettings.VacuumPickupDwellMilliseconds
+            ?? DefaultVacuumPickupDwellMilliseconds).ToString(CultureInfo.CurrentCulture);
+        VacuumBreakPulseTextBox.Text = (
+            _homeSettings.VacuumBreakPulseMilliseconds
+            ?? DefaultVacuumBreakPulseMilliseconds).ToString(CultureInfo.CurrentCulture);
         SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetPickupPosition1X ?? DefaultSecondSetPickupPosition1X);
         SecondSetPosition1YTextBox.Text = FormatPresetCoordinate(
@@ -3149,6 +3166,17 @@ public partial class HomePage : UserControl
             ParseFiniteCoordinate(SecondSetPickupZPositionTextBox.Text, "第二套取料Z高度"),
             ParseFiniteCoordinate(SecondSetDropZPositionTextBox.Text, "第二套放料Z高度"),
             ParseFiniteCoordinate(SecondSetSafeZPositionTextBox.Text, "第二套安全Z高度"));
+    }
+
+    private ProductionZDwellTimes ReadProductionZDwellTimes()
+    {
+        return new ProductionZDwellTimes(
+            ParseMilliseconds(
+                VacuumPickupDwellTextBox.Text,
+                "吸料停留时间"),
+            ParseMilliseconds(
+                VacuumBreakPulseTextBox.Text,
+                "破真空停留时间"));
     }
 
     private SecondSetXyPositions ReadSecondSetXyPositions()
@@ -3423,12 +3451,16 @@ public partial class HomePage : UserControl
             SecondSetPickupZPositionTextBox is null ||
             SecondSetDropZPositionTextBox is null ||
             SecondSetSafeZPositionTextBox is null ||
+            VacuumPickupDwellTextBox is null ||
+            VacuumBreakPulseTextBox is null ||
             !TryParseCoordinate(FirstSetPickupZPositionTextBox.Text, out var firstSetPickup) ||
             !TryParseCoordinate(FirstSetDropZPositionTextBox.Text, out var firstSetDrop) ||
             !TryParseCoordinate(FirstSetSafeZPositionTextBox.Text, out var firstSetSafe) ||
             !TryParseCoordinate(SecondSetPickupZPositionTextBox.Text, out var secondSetPickup) ||
             !TryParseCoordinate(SecondSetDropZPositionTextBox.Text, out var secondSetDrop) ||
-            !TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out var secondSetSafe))
+            !TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out var secondSetSafe) ||
+            !TryParseMilliseconds(VacuumPickupDwellTextBox.Text, out var pickupDwell) ||
+            !TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out var breakPulse))
         {
             return;
         }
@@ -3439,13 +3471,15 @@ public partial class HomePage : UserControl
         _homeSettings.SecondSetPickupZPosition = secondSetPickup;
         _homeSettings.SecondSetDropZPosition = secondSetDrop;
         _homeSettings.SecondSetSafeZPosition = secondSetSafe;
+        _homeSettings.VacuumPickupDwellMilliseconds = pickupDwell;
+        _homeSettings.VacuumBreakPulseMilliseconds = breakPulse;
         try
         {
             _homeSettingsStore.Save(_homeSettings);
         }
         catch (Exception exception)
         {
-            SetFirstSetPositionStatus($"保存Z轴生产高度失败：{exception.Message}", false);
+            SetFirstSetPositionStatus($"保存Z轴高度或停留时间失败：{exception.Message}", false);
         }
     }
 
@@ -3659,6 +3693,8 @@ public partial class HomePage : UserControl
              SecondSetPickupZPositionTextBox is null ||
              SecondSetDropZPositionTextBox is null ||
              SecondSetSafeZPositionTextBox is null ||
+             VacuumPickupDwellTextBox is null ||
+             VacuumBreakPulseTextBox is null ||
              SecondSetPosition1XTextBox is null ||
              SecondSetPosition1YTextBox is null ||
              SecondSetPosition2XTextBox is null ||
@@ -3699,7 +3735,9 @@ public partial class HomePage : UserControl
             TryParseCoordinate(FirstSetSafeZPositionTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPickupZPositionTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetDropZPositionTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out _);
+            TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out _) &&
+            TryParseMilliseconds(VacuumPickupDwellTextBox.Text, out _) &&
+            TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out _);
         var allSecondSetXyPositionsValid =
             TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
@@ -3754,6 +3792,8 @@ public partial class HomePage : UserControl
         SecondSetPickupZPositionTextBox.IsEnabled = commandsIdle;
         SecondSetDropZPositionTextBox.IsEnabled = commandsIdle;
         SecondSetSafeZPositionTextBox.IsEnabled = commandsIdle;
+        VacuumPickupDwellTextBox.IsEnabled = commandsIdle;
+        VacuumBreakPulseTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1XTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1YTextBox.IsEnabled = commandsIdle;
         SecondSetPosition2XTextBox.IsEnabled = commandsIdle;
@@ -4118,6 +4158,26 @@ public partial class HomePage : UserControl
         return parsed;
     }
 
+    private static int ParseMilliseconds(string? value, string fieldName)
+    {
+        if (!TryParseMilliseconds(value, out var milliseconds))
+        {
+            throw new ArgumentException($"{fieldName}必须是0–60000之间的整数毫秒。");
+        }
+
+        return milliseconds;
+    }
+
+    private static bool TryParseMilliseconds(string? value, out int milliseconds)
+    {
+        return int.TryParse(
+                   value,
+                   NumberStyles.Integer,
+                   CultureInfo.CurrentCulture,
+                   out milliseconds) &&
+               milliseconds is >= 0 and <= 60_000;
+    }
+
     private static bool TryParseProductionVelocity(string? value, out double velocity)
     {
         return TryParseCoordinate(value, out velocity) && velocity > 0;
@@ -4170,6 +4230,10 @@ public partial class HomePage : UserControl
         double SecondSetPickup,
         double SecondSetDrop,
         double SecondSetSafe);
+
+    private readonly record struct ProductionZDwellTimes(
+        int PickupMilliseconds,
+        int BreakVacuumMilliseconds);
 
     private readonly record struct SecondSetXyPositions(
         double Position1X,

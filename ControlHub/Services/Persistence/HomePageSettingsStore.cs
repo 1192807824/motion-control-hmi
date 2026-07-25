@@ -79,6 +79,10 @@ public sealed class HomePageSettings
 
     public double? NozzleZVelocity { get; set; }
 
+    public int? VacuumPickupDwellMilliseconds { get; set; }
+
+    public int? VacuumBreakPulseMilliseconds { get; set; }
+
     public double? SecondSetPickupPosition1X { get; set; }
 
     public double? SecondSetPickupPosition1Y { get; set; }

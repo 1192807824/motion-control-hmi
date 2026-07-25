@@ -1667,12 +1667,12 @@
                                         <RowDefinition Height="24" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
-                                    <TextBlock Text="Z轴生产高度（pulse）"
+                                    <TextBlock Text="Z轴高度与停留时间"
                                                Foreground="#EAF2F7"
                                                FontSize="12"
                                                FontWeight="Bold"
                                                VerticalAlignment="Center" />
-                                    <UniformGrid Grid.Row="1" Rows="2" Columns="3">
+                                    <UniformGrid Grid.Row="1" Rows="2" Columns="4">
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="上料 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="FirstSetPickupZPositionTextBox"
@@ -1706,6 +1706,18 @@
                                              Background="#F7FAFC"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="吸料停留（ms）" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="VacuumPickupDwellTextBox"
+                                             Height="25"
+                                             Text="500"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="Z轴到取料位并开启真空吸后的保持时间"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="下料 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="SecondSetPickupZPositionTextBox"
@@ -1737,6 +1749,18 @@
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="破真空停留（ms）" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="VacuumBreakPulseTextBox"
+                                             Height="25"
+                                             Text="150"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="Z轴到放料位并开启破真空后的保持时间"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                     </UniformGrid>
