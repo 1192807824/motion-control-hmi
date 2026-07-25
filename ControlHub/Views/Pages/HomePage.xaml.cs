@@ -1107,36 +1107,11 @@ public partial class HomePage : UserControl
                     var carouselAdvanceResult = await activeCarouselAdvanceTask;
                     activeCarouselAdvanceTask = null;
                     activeFinalTestTask = carouselAdvanceResult.FinalTestTask;
+                    activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
+                    activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，立即开始上下料；最后一轮测试可并行继续…",
                         Color.FromRgb(73, 209, 125));
-                }
-
-                // DD停稳后，13/14工位的占料状态已经更新。启动本次收料前，
-                // 先确认上一轮第二套放料已经结束，避免轴3/4被两次下料任务同时占用。
-                if (!activeSecondSetUnloadTask.IsCompleted)
-                {
-                    SetFirstSetPositionStatus(
-                        "DD已停稳；第二套正在完成上一轮放料，完成后立即检查13/14工位。",
-                        true);
-                }
-
-                await activeSecondSetUnloadTask;
-                activeSecondSetUnloadTask = Task.CompletedTask;
-
-                // 不能等到第一套完成1/2工位放料后再判断，否则13/14会白等一整轮。
-                // 此处DD已经停稳，只要13和14同时有料就立即启动第二套取料；
-                // 第二套轴3/4与第一套轴1/2相互独立，可与下面的第一套放料并行执行。
-                activeSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
-                    carouselStations,
-                    _productionCancellation.Token,
-                    out activeSecondSetPickupTask);
-
-                if (!activeSecondSetPickupTask.IsCompleted)
-                {
-                    SetStartProductionStatus(
-                        $"第{cycleNumber}轮：DD停稳且13/14工位均有料，第二套立即开始取料；第一套同步向1/2工位放料…",
-                        Color.FromRgb(242, 181, 68));
                 }
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
@@ -1201,12 +1176,15 @@ public partial class HomePage : UserControl
                 activeFinalTestTask = Task.FromResult(0);
                 var requiredSecondSetPickupTask = activeSecondSetPickupTask;
                 activeSecondSetPickupTask = Task.CompletedTask;
+                var requiredPreviousSecondSetUnloadTask = activeSecondSetUnloadTask;
+                activeSecondSetUnloadTask = Task.CompletedTask;
                 var xyMoveAwayDelayTask = Task.Delay(
                     MoveAwayBeforeDdMilliseconds,
                     _productionCancellation.Token);
                 activeCarouselAdvanceTask = StartCarouselAfterSafetyBarrierAsync(
                     requiredFinalTestTask,
                     requiredSecondSetPickupTask,
+                    requiredPreviousSecondSetUnloadTask,
                     xyMoveAwayDelayTask,
                     carouselStations,
                     axis0PulseDistance,
@@ -1436,6 +1414,8 @@ public partial class HomePage : UserControl
         {
             var result = await carouselAdvanceTask;
             await ObserveTaskNoThrowAsync(result.FinalTestTask);
+            await ObserveTaskNoThrowAsync(result.SecondSetUnloadTask);
+            await ObserveTaskNoThrowAsync(result.SecondSetPickupTask);
         }
         catch
         {
@@ -1445,6 +1425,7 @@ public partial class HomePage : UserControl
     private async Task<CarouselAdvanceResult> StartCarouselAfterSafetyBarrierAsync(
         Task<int> requiredFinalTestTask,
         Task requiredSecondSetPickupTask,
+        Task requiredPreviousSecondSetUnloadTask,
         Task xyMoveAwayDelayTask,
         CarouselStationState[] carouselStations,
         double axis0PulseDistance,
@@ -1465,11 +1446,41 @@ public partial class HomePage : UserControl
             requiredSecondSetPickupTask,
             xyMoveAwayDelayTask);
         cancellationToken.ThrowIfCancellationRequested();
-        return await AdvanceCarouselExactlyTwoStationsAsync(
+        var carouselAdvanceResult = await AdvanceCarouselExactlyTwoStationsAsync(
             carouselStations,
             axis0PulseDistance,
             allowedMovingAxisNos,
             cancellationToken);
+
+        // 13/14工位状态在DD停稳的这一刻已经更新。这里直接启动第二套收料，
+        // 不经过主循环，因此不等待第一套下一轮的拍照、取料或放料动作。
+        // 若上一批第二套仍在向BIN位放料，只等待它释放轴3/4，避免同一轴组冲突。
+        if (!requiredPreviousSecondSetUnloadTask.IsCompleted)
+        {
+            SetFirstSetPositionStatus(
+                "DD已停稳且13/14工位已更新；等待第二套完成上一批BIN放料后立即取料。",
+                true);
+        }
+
+        await requiredPreviousSecondSetUnloadTask;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var secondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
+            carouselStations,
+            cancellationToken,
+            out var secondSetPickupTask);
+        if (!secondSetPickupTask.IsCompleted)
+        {
+            SetFirstSetPositionStatus(
+                "DD已停稳，13/14工位均有料；第二套已立即启动取料，不等待第一套上料。",
+                true);
+        }
+
+        return carouselAdvanceResult with
+        {
+            SecondSetUnloadTask = secondSetUnloadTask,
+            SecondSetPickupTask = secondSetPickupTask
+        };
     }
 
     private Task StartSecondSetUnloadIfReadyAsync(
@@ -1693,7 +1704,9 @@ public partial class HomePage : UserControl
             Color.FromRgb(73, 209, 125));
         return new CarouselAdvanceResult(
             maximumTurnsBeforeReload,
-            finalTestTask);
+            finalTestTask,
+            Task.CompletedTask,
+            Task.CompletedTask);
     }
 
     private int CountLoadedTestStations(IReadOnlyList<CarouselStationState> carouselStations)
@@ -1902,7 +1915,9 @@ public partial class HomePage : UserControl
 
     private sealed record CarouselAdvanceResult(
         int Turns,
-        Task<int> FinalTestTask);
+        Task<int> FinalTestTask,
+        Task SecondSetUnloadTask,
+        Task SecondSetPickupTask);
 
     private sealed class CarouselStationState
     {
