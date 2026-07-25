@@ -25,7 +25,8 @@ public partial class HomePage : UserControl
     private const int FirstSetZ2BreakVacuumOutputBit = 16;
     private const int SecondSetZ1BreakVacuumOutputBit = 18;
     private const int SecondSetZ1VacuumOutputBit = 19;
-    private const int SecondSetZ2VacuumControlOutputBit = 21;
+    private const int SecondSetZ2BreakVacuumOutputBit = 20;
+    private const int SecondSetZ2VacuumOutputBit = 21;
     private const int Station13BreakVacuumOutputBit = 22;
     private const int Station14BreakVacuumOutputBit = 23;
     private const int VacuumBreakPulseMilliseconds = 150;
@@ -136,6 +137,16 @@ public partial class HomePage : UserControl
         InitializeComponent();
         LoadPresetPositions();
         UpdateCarouselStationDisplay(CreateCarouselStationStates());
+    }
+
+    public FrameworkElement DetachParameterSettingsPanel()
+    {
+        if (ParameterSettingsPanel.Parent is Panel parent)
+        {
+            parent.Children.Remove(ParameterSettingsPanel);
+        }
+
+        return ParameterSettingsPanel;
     }
 
     public void AttachMotionController(MotionControlPage motionController)
@@ -313,37 +324,26 @@ public partial class HomePage : UserControl
         Exception? firstFailure = null;
         try
         {
-            if (nozzleNumber == 1)
+            var (breakVacuumBit, vacuumBit) = nozzleNumber switch
             {
-                // 第二套 Z1：Y18=1 为破真空，Y19=1 为真空吸。
-                // 切换状态时先关闭相反输出，避免两个电磁阀短暂同时得电。
-                var oppositeSet = vacuumEnabled
-                    ? motionController.SetDigitalOutputHardwareBit(
-                        SecondSetZ1BreakVacuumOutputBit,
-                        false)
-                    : motionController.SetDigitalOutputHardwareBit(
-                        SecondSetZ1VacuumOutputBit,
-                        false);
-                var requestedSet = vacuumEnabled
-                    ? motionController.SetDigitalOutputHardwareBit(
-                        SecondSetZ1VacuumOutputBit,
-                        true)
-                    : motionController.SetDigitalOutputHardwareBit(
-                        SecondSetZ1BreakVacuumOutputBit,
-                        breakVacuumEnabled);
-                outputSet = oppositeSet & requestedSet;
-            }
-            else if (nozzleNumber == 2)
-            {
-                // 第二套 Z2 使用单点换向：Y21=1 为吸，Y21=0 为破。
-                outputSet = motionController.SetDigitalOutputHardwareBit(
-                    SecondSetZ2VacuumControlOutputBit,
-                    vacuumEnabled);
-            }
-            else
-            {
-                throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。");
-            }
+                1 => (SecondSetZ1BreakVacuumOutputBit, SecondSetZ1VacuumOutputBit),
+                2 => (SecondSetZ2BreakVacuumOutputBit, SecondSetZ2VacuumOutputBit),
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(nozzleNumber),
+                    "吸嘴编号只能是 1 或 2。")
+            };
+
+            // 第二套两个吸嘴均使用独立的高电平有效真空吸/真空破输出。
+            // 切换状态时必须先关闭相反输出，避免两个电磁阀短暂同时得电。
+            var oppositeSet = vacuumEnabled
+                ? motionController.SetDigitalOutputHardwareBit(breakVacuumBit, false)
+                : motionController.SetDigitalOutputHardwareBit(vacuumBit, false);
+            var requestedSet = vacuumEnabled
+                ? motionController.SetDigitalOutputHardwareBit(vacuumBit, true)
+                : motionController.SetDigitalOutputHardwareBit(
+                    breakVacuumBit,
+                    breakVacuumEnabled);
+            outputSet = oppositeSet & requestedSet;
         }
         catch (Exception exception)
         {
@@ -352,9 +352,12 @@ public partial class HomePage : UserControl
 
         if (firstFailure is not null)
         {
-            var expectedOutput = nozzleNumber == 1
-                ? $"破Y{SecondSetZ1BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 1 : 0)}，吸Y{SecondSetZ1VacuumOutputBit:00}={(vacuumEnabled ? 1 : 0)}"
-                : $"Y{SecondSetZ2VacuumControlOutputBit:00}={(vacuumEnabled ? 1 : 0)}";
+            var expectedOutput = nozzleNumber switch
+            {
+                1 => $"破Y{SecondSetZ1BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 1 : 0)}，吸Y{SecondSetZ1VacuumOutputBit:00}={(vacuumEnabled ? 1 : 0)}",
+                2 => $"破Y{SecondSetZ2BreakVacuumOutputBit:00}={(breakVacuumEnabled ? 1 : 0)}，吸Y{SecondSetZ2VacuumOutputBit:00}={(vacuumEnabled ? 1 : 0)}",
+                _ => $"吸嘴{nozzleNumber}"
+            };
             throw new InvalidOperationException(
                 $"第二套Z{nozzleNumber}真空IO写入失败：{expectedOutput}。",
                 firstFailure);
@@ -611,9 +614,7 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus(
-            axisSet == VisionCalibrationAxisSet.Second && nozzleNumber == 2
-                ? $"Z2已切换为真空破Y{SecondSetZ2VacuumControlOutputBit:00}=0。"
-                : $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
+            $"Z{nozzleNumber}真空破已脉冲 {VacuumBreakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
             true);
     }
 
@@ -2749,6 +2750,15 @@ public partial class HomePage : UserControl
         }
     }
 
+    private void BinPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SaveBinPositionsFromInputs();
+        if (!_loadingPresetPositions)
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
     private void LoadPresetPositions()
     {
         _homeSettings = _homeSettingsStore.Load();
@@ -2784,6 +2794,14 @@ public partial class HomePage : UserControl
             _homeSettings.SecondSetPickupPosition2X ?? DefaultSecondSetPickupPosition2X);
         SecondSetPosition2YTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetPickupPosition2Y ?? DefaultSecondSetPickupPosition2Y);
+        Bin0PositionXTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin0PositionX);
+        Bin0PositionYTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin0PositionY);
+        Bin1PositionXTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin1PositionX);
+        Bin1PositionYTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin1PositionY);
+        Bin2PositionXTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin2PositionX);
+        Bin2PositionYTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin2PositionY);
+        Bin3PositionXTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin3PositionX);
+        Bin3PositionYTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin3PositionY);
         _loadingPresetPositions = false;
     }
 
@@ -2888,6 +2906,47 @@ public partial class HomePage : UserControl
         catch (Exception exception)
         {
             SetFirstSetPositionStatus($"保存第二套XY下料位置失败：{exception.Message}", false);
+        }
+    }
+
+    private void SaveBinPositionsFromInputs()
+    {
+        if (_loadingPresetPositions ||
+            Bin0PositionXTextBox is null ||
+            Bin0PositionYTextBox is null ||
+            Bin1PositionXTextBox is null ||
+            Bin1PositionYTextBox is null ||
+            Bin2PositionXTextBox is null ||
+            Bin2PositionYTextBox is null ||
+            Bin3PositionXTextBox is null ||
+            Bin3PositionYTextBox is null ||
+            !TryParseOptionalCoordinate(Bin0PositionXTextBox.Text, out var bin0PositionX) ||
+            !TryParseOptionalCoordinate(Bin0PositionYTextBox.Text, out var bin0PositionY) ||
+            !TryParseOptionalCoordinate(Bin1PositionXTextBox.Text, out var bin1PositionX) ||
+            !TryParseOptionalCoordinate(Bin1PositionYTextBox.Text, out var bin1PositionY) ||
+            !TryParseOptionalCoordinate(Bin2PositionXTextBox.Text, out var bin2PositionX) ||
+            !TryParseOptionalCoordinate(Bin2PositionYTextBox.Text, out var bin2PositionY) ||
+            !TryParseOptionalCoordinate(Bin3PositionXTextBox.Text, out var bin3PositionX) ||
+            !TryParseOptionalCoordinate(Bin3PositionYTextBox.Text, out var bin3PositionY))
+        {
+            return;
+        }
+
+        _homeSettings.Bin0PositionX = bin0PositionX;
+        _homeSettings.Bin0PositionY = bin0PositionY;
+        _homeSettings.Bin1PositionX = bin1PositionX;
+        _homeSettings.Bin1PositionY = bin1PositionY;
+        _homeSettings.Bin2PositionX = bin2PositionX;
+        _homeSettings.Bin2PositionY = bin2PositionY;
+        _homeSettings.Bin3PositionX = bin3PositionX;
+        _homeSettings.Bin3PositionY = bin3PositionY;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"保存BIN分料位置失败：{exception.Message}", false);
         }
     }
 
@@ -3041,6 +3100,14 @@ public partial class HomePage : UserControl
              SecondSetPosition1YTextBox is null ||
              SecondSetPosition2XTextBox is null ||
              SecondSetPosition2YTextBox is null ||
+             Bin0PositionXTextBox is null ||
+             Bin0PositionYTextBox is null ||
+             Bin1PositionXTextBox is null ||
+             Bin1PositionYTextBox is null ||
+             Bin2PositionXTextBox is null ||
+             Bin2PositionYTextBox is null ||
+             Bin3PositionXTextBox is null ||
+             Bin3PositionYTextBox is null ||
              RecordSecondSetPosition1Button is null ||
              RecordSecondSetPosition2Button is null ||
              MoveSecondSetPosition1Button is null ||
@@ -3127,6 +3194,14 @@ public partial class HomePage : UserControl
         SecondSetPosition1YTextBox.IsEnabled = commandsIdle;
         SecondSetPosition2XTextBox.IsEnabled = commandsIdle;
         SecondSetPosition2YTextBox.IsEnabled = commandsIdle;
+        Bin0PositionXTextBox.IsEnabled = commandsIdle;
+        Bin0PositionYTextBox.IsEnabled = commandsIdle;
+        Bin1PositionXTextBox.IsEnabled = commandsIdle;
+        Bin1PositionYTextBox.IsEnabled = commandsIdle;
+        Bin2PositionXTextBox.IsEnabled = commandsIdle;
+        Bin2PositionYTextBox.IsEnabled = commandsIdle;
+        Bin3PositionXTextBox.IsEnabled = commandsIdle;
+        Bin3PositionYTextBox.IsEnabled = commandsIdle;
         RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordSecondSetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;

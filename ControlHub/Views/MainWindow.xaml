@@ -183,7 +183,9 @@
                             <TextBlock Text="&#x8FDE;&#x63A5;&#x914D;&#x7F6E;" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource MenuButton}">
+                    <Button x:Name="ParameterSettingsMenuButton"
+                            Style="{StaticResource MenuButton}"
+                            Click="ParameterSettingsMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
                                    Height="20"
@@ -230,5 +232,9 @@
             <pages:ConnectionConfigPage x:Name="ConnectionConfigContent"
                                         Grid.Row="2"
                                         Visibility="Collapsed" />
+
+            <pages:ParameterSettingsPage x:Name="ParameterSettingsContent"
+                                         Grid.Row="2"
+                                         Visibility="Collapsed" />
     </Grid>
 </Window>

@@ -3,28 +3,48 @@ using System.Runtime.CompilerServices;
 
 namespace ControlHub.Services.Devices;
 
-public sealed class VibrationFeederSettings : INotifyPropertyChanged
+public sealed class SerialConnectionSettings : INotifyPropertyChanged
 {
-    private string _host = "192.168.1.100";
-    private int _port = 4001;
+    private string _portName = "COM1";
+    private int _baudRate = 9600;
+    private int _dataBits = 8;
+    private string _parity = "None";
+    private string _stopBits = "One";
     private string _newLine = "\\r\\n";
     private string _manualSendText = "";
     private bool _appendNewLine = true;
-    private int _lightOnBrightness = 99;
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public string Host
+    public string PortName
     {
-        get => _host;
-        set => SetField(ref _host, value);
+        get => _portName;
+        set => SetField(ref _portName, value);
     }
 
-    public int Port
+    public int BaudRate
     {
-        get => _port;
-        set => SetField(ref _port, value);
+        get => _baudRate;
+        set => SetField(ref _baudRate, value);
+    }
+
+    public int DataBits
+    {
+        get => _dataBits;
+        set => SetField(ref _dataBits, value);
+    }
+
+    public string Parity
+    {
+        get => _parity;
+        set => SetField(ref _parity, value);
+    }
+
+    public string StopBits
+    {
+        get => _stopBits;
+        set => SetField(ref _stopBits, value);
     }
 
     public string NewLine
@@ -43,12 +63,6 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     {
         get => _appendNewLine;
         set => SetField(ref _appendNewLine, value);
-    }
-
-    public int LightOnBrightness
-    {
-        get => _lightOnBrightness;
-        set => SetField(ref _lightOnBrightness, Math.Clamp(value, 0, 99));
     }
 
     public string? LastSuccessfulConnectionSignature

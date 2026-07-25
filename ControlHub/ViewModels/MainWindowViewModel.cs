@@ -13,6 +13,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _nowText = "";
     private string _userPermissionText = "用户权限：未登录";
     private string _feederConnectionStatusText = "\u672a\u8fde\u63a5";
+    private string _tcpConnectionStatusText = "\u672a\u8fde\u63a5";
+    private string _serialConnectionStatusText = "\u672a\u8fde\u63a5";
     private string _motionConnectionText = "运动控制：未连接";
     private string _motionDetectedCardsText = "未检测卡";
     private string _motionAxisSummaryText = "■ 轴状态监控";
@@ -40,6 +42,10 @@ public sealed class MainWindowViewModel : ObservableObject
         Logs = [];
         FeederSettings = new VibrationFeederSettingsStore().Load();
         FeederConnectionLogs = [];
+        TcpConnectionSettings = new TcpConnectionSettingsStore().Load();
+        TcpConnectionLogs = [];
+        SerialConnectionSettings = new SerialConnectionSettingsStore().Load();
+        SerialConnectionLogs = [];
 
         NowText = DateTime.Now.ToString("yyyy-MM-dd  HH:mm:ss");
     }
@@ -84,6 +90,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> FeederConnectionLogs { get; }
 
+    public TcpConnectionSettings TcpConnectionSettings { get; }
+
+    public ObservableCollection<string> TcpConnectionLogs { get; }
+
+    public SerialConnectionSettings SerialConnectionSettings { get; }
+
+    public ObservableCollection<string> SerialConnectionLogs { get; }
+
     public string? AxisSettingsLoadWarning { get; }
 
     public AxisStatus? SelectedAxis
@@ -108,6 +122,18 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _feederConnectionStatusText;
         set => SetField(ref _feederConnectionStatusText, value);
+    }
+
+    public string TcpConnectionStatusText
+    {
+        get => _tcpConnectionStatusText;
+        set => SetField(ref _tcpConnectionStatusText, value);
+    }
+
+    public string SerialConnectionStatusText
+    {
+        get => _serialConnectionStatusText;
+        set => SetField(ref _serialConnectionStatusText, value);
     }
 
     public string MotionConnectionText

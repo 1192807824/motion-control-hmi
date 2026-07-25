@@ -50,6 +50,118 @@
             <Setter Property="Foreground" Value="#F4F8FB" />
         </Style>
 
+        <Style x:Key="ConfigComboBoxItem" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#F4F8FB" />
+            <Setter Property="Background" Value="#132B40" />
+            <Setter Property="Padding" Value="9,7" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#0C4C88" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#0D6EE8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ConfigComboBox" TargetType="ComboBox">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="BorderBrush" Value="#45647A" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="#132B40" />
+            <Setter Property="Foreground" Value="#F4F8FB" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ConfigComboBoxItem}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="DropDownToggle"
+                                          Focusable="False"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="ComboBorder"
+                                                Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                BorderBrush="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                BorderThickness="{Binding BorderThickness, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                CornerRadius="2">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="30" />
+                                                </Grid.ColumnDefinitions>
+                                                <ContentPresenter Margin="9,0,4,0"
+                                                                  VerticalAlignment="Center"
+                                                                  Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                                  TextElement.Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBox}}" />
+                                                <Border Grid.Column="1"
+                                                        Background="#1B374F"
+                                                        BorderBrush="#45647A"
+                                                        BorderThickness="1,0,0,0">
+                                                    <Path Width="10"
+                                                          Height="6"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"
+                                                          Fill="#A9C7DC"
+                                                          Data="M 0 0 L 5 5 L 10 0 Z" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#0D6EE8" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#62B5FF" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup"
+                                   Placement="Bottom"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   PopupAnimation="Slide">
+                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="260"
+                                        Margin="0,2,0,0"
+                                        Background="#132B40"
+                                        BorderBrush="#45647A"
+                                        BorderThickness="1"
+                                        CornerRadius="3">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  CanContentScroll="True">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="PrimaryButton" TargetType="Button">
             <Setter Property="MinWidth" Value="92" />
             <Setter Property="Height" Value="34" />
@@ -271,7 +383,8 @@
                         CornerRadius="6">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Ellipse Width="12" Height="12" Fill="#39C56B" Margin="0,0,10,0" />
-                        <TextBlock Text="{Binding FeederConnectionStatusText}"
+                        <TextBlock x:Name="ActiveConnectionStatusText"
+                                   Text="{Binding FeederConnectionStatusText}"
                                    Width="286"
                                    FontSize="16"
                                    FontWeight="Bold"
@@ -300,7 +413,10 @@
                     <TextBlock Text="&#x8FDE;&#x63A5;&#x5BF9;&#x8C61;" Style="{StaticResource PanelTitle}" />
 
                     <StackPanel Grid.Row="1">
-                        <Border Style="{StaticResource ActiveConnectionItem}">
+                        <Border x:Name="FeederConnectionItem"
+                                Style="{StaticResource ActiveConnectionItem}"
+                                Cursor="Hand"
+                                MouseLeftButtonDown="FeederConnectionItem_MouseLeftButtonDown">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="44" />
@@ -338,12 +454,94 @@
                             </Grid>
                         </Border>
 
+                        <Border x:Name="TcpConnectionItem"
+                                Style="{StaticResource ConnectionItem}"
+                                Cursor="Hand"
+                                MouseLeftButtonDown="TcpConnectionItem_MouseLeftButtonDown">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="34"
+                                        Height="34"
+                                        Background="#1B8F4D"
+                                        CornerRadius="4"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="TCP"
+                                               Foreground="White"
+                                               FontSize="12"
+                                               FontWeight="Bold"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="TCP 连接"
+                                               FontSize="15"
+                                               FontWeight="Bold"
+                                               Foreground="#F4F8FB" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               Foreground="#62B5FF">
+                                        <TextBlock.Text>
+                                            <MultiBinding StringFormat="TCP  {0}:{1}">
+                                                <Binding Path="TcpConnectionSettings.Host" />
+                                                <Binding Path="TcpConnectionSettings.Port" />
+                                            </MultiBinding>
+                                        </TextBlock.Text>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="SerialConnectionItem"
+                                Style="{StaticResource ConnectionItem}"
+                                Cursor="Hand"
+                                MouseLeftButtonDown="SerialConnectionItem_MouseLeftButtonDown">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="34"
+                                        Height="34"
+                                        Background="#8C5FD3"
+                                        CornerRadius="4"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="COM"
+                                               Foreground="White"
+                                               FontSize="11"
+                                               FontWeight="Bold"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="串口连接"
+                                               FontSize="15"
+                                               FontWeight="Bold"
+                                               Foreground="#F4F8FB" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               Foreground="#62B5FF">
+                                        <TextBlock.Text>
+                                            <MultiBinding StringFormat="{}{0}  {1} bps">
+                                                <Binding Path="SerialConnectionSettings.PortName" />
+                                                <Binding Path="SerialConnectionSettings.BaudRate" />
+                                            </MultiBinding>
+                                        </TextBlock.Text>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                     </StackPanel>
 
                 </Grid>
             </Border>
 
-            <Grid Grid.Column="2">
+            <Grid x:Name="FeederDetailPanel" Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="82" />
                     <RowDefinition Height="10" />
@@ -658,6 +856,429 @@
                         </ListBox>
                     </Grid>
                 </Border>
+                </Grid>
+            </Grid>
+
+            <Grid x:Name="TcpDetailPanel" Grid.Column="2" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="82" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource Panel}" Padding="14,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="330" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="连接对象" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="TCP 连接" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="设备地址" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="{Binding TcpConnectionSettings.Host}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                            <TextBlock Text="TCP 端口" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="{Binding TcpConnectionSettings.Port}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                            <TextBlock Text="协议" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="TCP Client" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center">
+                            <Button Content="保存"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="SaveTcpSettings_Click" />
+                            <Button Content="连接"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Background="{StaticResource AccentGreen}"
+                                    BorderBrush="#16723F"
+                                    Click="ConnectTcp_Click" />
+                            <Button Content="断开"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Background="#294A64"
+                                    BorderBrush="#45647A"
+                                    Margin="0"
+                                    Click="DisconnectTcp_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="560" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="220" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource Panel}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="44" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border Background="{StaticResource PanelHeader}"
+                                        BorderBrush="{StaticResource PanelBorder}"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="6,6,0,0"
+                                        Padding="14,0">
+                                    <TextBlock Text="TCP 客户端参数" Style="{StaticResource PanelTitle}" />
+                                </Border>
+                                <Grid Grid.Row="1" Margin="14,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="22" />
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="42" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="设备地址" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Column="1"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding TcpConnectionSettings.Host, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Column="3" Text="TCP 端口" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Column="4"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding TcpConnectionSettings.Port, UpdateSourceTrigger=LostFocus}" />
+                                    <TextBlock Grid.Row="1" Text="结束符" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Row="1"
+                                             Grid.Column="1"
+                                             Grid.ColumnSpan="4"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding TcpConnectionSettings.NewLine, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="2" Style="{StaticResource Panel}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="44" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="42" />
+                                    <RowDefinition Height="54" />
+                                </Grid.RowDefinitions>
+                                <Border Background="{StaticResource PanelHeader}"
+                                        BorderBrush="{StaticResource PanelBorder}"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="6,6,0,0"
+                                        Padding="14,0">
+                                    <TextBlock Text="数据收发" Style="{StaticResource PanelTitle}" />
+                                </Border>
+                                <TextBox Grid.Row="1"
+                                         Margin="14,12,14,0"
+                                         Padding="10,8"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         BorderBrush="#45647A"
+                                         Background="#132B40"
+                                         Foreground="#F4F8FB"
+                                         FontFamily="Consolas"
+                                         FontSize="14"
+                                         Text="{Binding TcpConnectionSettings.ManualSendText, UpdateSourceTrigger=PropertyChanged}" />
+                                <CheckBox Grid.Row="2"
+                                          Margin="14,10,14,0"
+                                          Style="{StaticResource ConfigCheckBox}"
+                                          Content="发送时追加结束符"
+                                          IsChecked="{Binding TcpConnectionSettings.AppendNewLine, UpdateSourceTrigger=PropertyChanged}" />
+                                <StackPanel Grid.Row="3"
+                                            Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Center"
+                                            Margin="14,6,6,10">
+                                    <Button Content="发送"
+                                            Style="{StaticResource PrimaryButton}"
+                                            Background="{StaticResource AccentGreen}"
+                                            BorderBrush="#16723F"
+                                            Click="SendTcpMessage_Click" />
+                                    <Button Content="清空日志"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Click="ClearTcpLog_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <Border Grid.Column="2" Style="{StaticResource Panel}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource PanelHeader}"
+                                    BorderBrush="{StaticResource PanelBorder}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="6,6,0,0"
+                                    Padding="14,0">
+                                <TextBlock Text="通讯日志" Style="{StaticResource PanelTitle}" />
+                            </Border>
+                            <ListBox x:Name="TcpConnectionLogListBox"
+                                     Grid.Row="1"
+                                     ItemsSource="{Binding TcpConnectionLogs}"
+                                     BorderThickness="0"
+                                     Background="#132B40"
+                                     Padding="8"
+                                     FontSize="13">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}"
+                                                   Foreground="#D8E4EC"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,2" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <Grid x:Name="SerialDetailPanel" Grid.Column="2" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="82" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource Panel}" Padding="14,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="330" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="连接对象" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="串口连接" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="串口" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="{Binding SerialConnectionSettings.PortName}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                            <TextBlock Text="波特率" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="{Binding SerialConnectionSettings.BaudRate}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                            <TextBlock Text="数据格式" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Style="{StaticResource MetricValue}" Margin="0,6,0,0">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="{}{0}-{1}-{2}">
+                                        <Binding Path="SerialConnectionSettings.DataBits" />
+                                        <Binding Path="SerialConnectionSettings.Parity" />
+                                        <Binding Path="SerialConnectionSettings.StopBits" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center">
+                            <Button Content="保存"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Click="SaveSerialSettings_Click" />
+                            <Button Content="连接"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Background="{StaticResource AccentGreen}"
+                                    BorderBrush="#16723F"
+                                    Click="ConnectSerial_Click" />
+                            <Button Content="断开"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Background="#294A64"
+                                    BorderBrush="#45647A"
+                                    Margin="0"
+                                    Click="DisconnectSerial_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="560" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="260" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource Panel}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="44" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border Background="{StaticResource PanelHeader}"
+                                        BorderBrush="{StaticResource PanelBorder}"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="6,6,0,0"
+                                        Padding="14,0">
+                                    <TextBlock Text="串口参数" Style="{StaticResource PanelTitle}" />
+                                </Border>
+                                <Grid Grid.Row="1" Margin="14,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="22" />
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="42" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="串口名称" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="SerialPortComboBox"
+                                              Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              IsEditable="False"
+                                              DropDownOpened="SerialPortComboBox_DropDownOpened"
+                                              SelectedItem="{Binding SerialConnectionSettings.PortName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Column="3" Text="波特率" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="SerialBaudRateComboBox"
+                                              Grid.Column="4"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedItem="{Binding SerialConnectionSettings.BaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Row="1" Text="数据位" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="SerialDataBitsComboBox"
+                                              Grid.Row="1"
+                                              Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedItem="{Binding SerialConnectionSettings.DataBits, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="校验位" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="SerialParityComboBox"
+                                              Grid.Row="1"
+                                              Grid.Column="4"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedItem="{Binding SerialConnectionSettings.Parity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Row="2" Text="停止位" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="SerialStopBitsComboBox"
+                                              Grid.Row="2"
+                                              Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedItem="{Binding SerialConnectionSettings.StopBits, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Row="2" Grid.Column="3" Text="结束符" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="SerialNewLineComboBox"
+                                              Grid.Row="2"
+                                              Grid.Column="4"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedItem="{Binding SerialConnectionSettings.NewLine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="2" Style="{StaticResource Panel}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="44" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="42" />
+                                    <RowDefinition Height="54" />
+                                </Grid.RowDefinitions>
+                                <Border Background="{StaticResource PanelHeader}"
+                                        BorderBrush="{StaticResource PanelBorder}"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="6,6,0,0"
+                                        Padding="14,0">
+                                    <TextBlock Text="数据收发" Style="{StaticResource PanelTitle}" />
+                                </Border>
+                                <TextBox Grid.Row="1"
+                                         Margin="14,12,14,0"
+                                         Padding="10,8"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         BorderBrush="#45647A"
+                                         Background="#132B40"
+                                         Foreground="#F4F8FB"
+                                         FontFamily="Consolas"
+                                         FontSize="14"
+                                         Text="{Binding SerialConnectionSettings.ManualSendText, UpdateSourceTrigger=PropertyChanged}" />
+                                <CheckBox Grid.Row="2"
+                                          Margin="14,10,14,0"
+                                          Style="{StaticResource ConfigCheckBox}"
+                                          Content="发送时追加结束符"
+                                          IsChecked="{Binding SerialConnectionSettings.AppendNewLine, UpdateSourceTrigger=PropertyChanged}" />
+                                <StackPanel Grid.Row="3"
+                                            Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Center"
+                                            Margin="14,6,6,10">
+                                    <Button Content="发送"
+                                            Style="{StaticResource PrimaryButton}"
+                                            Background="{StaticResource AccentGreen}"
+                                            BorderBrush="#16723F"
+                                            Click="SendSerialMessage_Click" />
+                                    <Button Content="清空日志"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Click="ClearSerialLog_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <Border Grid.Column="2" Style="{StaticResource Panel}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource PanelHeader}"
+                                    BorderBrush="{StaticResource PanelBorder}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="6,6,0,0"
+                                    Padding="14,0">
+                                <TextBlock Text="通讯日志" Style="{StaticResource PanelTitle}" />
+                            </Border>
+                            <ListBox x:Name="SerialConnectionLogListBox"
+                                     Grid.Row="1"
+                                     ItemsSource="{Binding SerialConnectionLogs}"
+                                     BorderThickness="0"
+                                     Background="#132B40"
+                                     Padding="8"
+                                     FontSize="13">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}"
+                                                   Foreground="#D8E4EC"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,2" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
                 </Grid>
             </Grid>
         </Grid>

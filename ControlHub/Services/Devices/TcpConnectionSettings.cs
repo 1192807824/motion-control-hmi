@@ -3,14 +3,13 @@ using System.Runtime.CompilerServices;
 
 namespace ControlHub.Services.Devices;
 
-public sealed class VibrationFeederSettings : INotifyPropertyChanged
+public sealed class TcpConnectionSettings : INotifyPropertyChanged
 {
-    private string _host = "192.168.1.100";
-    private int _port = 4001;
+    private string _host = "127.0.0.1";
+    private int _port = 5000;
     private string _newLine = "\\r\\n";
     private string _manualSendText = "";
     private bool _appendNewLine = true;
-    private int _lightOnBrightness = 99;
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -43,12 +42,6 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     {
         get => _appendNewLine;
         set => SetField(ref _appendNewLine, value);
-    }
-
-    public int LightOnBrightness
-    {
-        get => _lightOnBrightness;
-        set => SetField(ref _lightOnBrightness, Math.Clamp(value, 0, 99));
     }
 
     public string? LastSuccessfulConnectionSignature

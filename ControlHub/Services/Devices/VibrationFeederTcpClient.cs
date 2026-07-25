@@ -30,15 +30,25 @@ public sealed class VibrationFeederTcpClient : IDisposable
 
     public async Task ConnectAsync(VibrationFeederSettings settings, CancellationToken cancellationToken = default)
     {
+        await ConnectAsync(settings.Host, settings.Port, cancellationToken);
+    }
+
+    public async Task ConnectAsync(TcpConnectionSettings settings, CancellationToken cancellationToken = default)
+    {
+        await ConnectAsync(settings.Host, settings.Port, cancellationToken);
+    }
+
+    private async Task ConnectAsync(string? configuredHost, int port, CancellationToken cancellationToken)
+    {
         Close();
 
-        var host = settings.Host?.Trim();
+        var host = configuredHost?.Trim();
         if (string.IsNullOrWhiteSpace(host))
         {
             throw new InvalidOperationException("设备 IP 或主机名不能为空。");
         }
 
-        if (settings.Port is < 1 or > 65535)
+        if (port is < 1 or > 65535)
         {
             throw new InvalidOperationException("TCP 端口必须在 1 到 65535 之间。");
         }
@@ -59,7 +69,7 @@ public sealed class VibrationFeederTcpClient : IDisposable
 
         try
         {
-            await client.ConnectAsync(host, settings.Port, connectCancellation.Token);
+            await client.ConnectAsync(host, port, connectCancellation.Token);
 
             var stream = client.GetStream();
             var receiveCancellation = new CancellationTokenSource();
@@ -111,7 +121,7 @@ public sealed class VibrationFeederTcpClient : IDisposable
                 throw;
             }
 
-            throw new TimeoutException($"连接 {host}:{settings.Port} 超时。");
+            throw new TimeoutException($"连接 {host}:{port} 超时。");
         }
         catch
         {

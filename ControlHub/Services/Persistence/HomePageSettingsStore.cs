@@ -86,4 +86,20 @@ public sealed class HomePageSettings
     public double? SecondSetPickupPosition2X { get; set; }
 
     public double? SecondSetPickupPosition2Y { get; set; }
+
+    public double? Bin0PositionX { get; set; }
+
+    public double? Bin0PositionY { get; set; }
+
+    public double? Bin1PositionX { get; set; }
+
+    public double? Bin1PositionY { get; set; }
+
+    public double? Bin2PositionX { get; set; }
+
+    public double? Bin2PositionY { get; set; }
+
+    public double? Bin3PositionX { get; set; }
+
+    public double? Bin3PositionY { get; set; }
 }
