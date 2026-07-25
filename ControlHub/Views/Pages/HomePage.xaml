@@ -1621,79 +1621,36 @@
                                 <RowDefinition Height="24" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="生产运动速度（pulse/s）"
+                            <TextBlock Text="生产轴运动参数"
                                        Foreground="#EAF2F7"
                                        FontSize="12"
                                        FontWeight="Bold"
                                        VerticalAlignment="Center" />
-                            <UniformGrid Grid.Row="1" Rows="2" Columns="3">
-                                <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="轴0 · DD马达" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="Axis0VelocityTextBox"
-                                             Height="25"
-                                             Text="10000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
-                                </StackPanel>
-                                <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="轴1/2 · 第一套XY" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="FirstSetXyVelocityTextBox"
-                                             Height="25"
-                                             Text="100000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
-                                </StackPanel>
-                                <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="轴3/4 · 第二套XY" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="SecondSetXyVelocityTextBox"
-                                             Height="25"
-                                             Text="100000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
-                                </StackPanel>
-                                <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="轴13–15 · 下压" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="TestStationPressVelocityTextBox"
-                                             Height="25"
-                                             Text="800000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
-                                </StackPanel>
-                                <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="轴13–15 · 回原" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="TestStationHomeVelocityTextBox"
-                                             Height="25"
-                                             Text="600000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
-                                </StackPanel>
-                                <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="轴5/7/9/11 · Z轴" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="NozzleZVelocityTextBox"
-                                             Height="25"
-                                             Text="20000"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             TextChanged="ProductionVelocityTextBox_TextChanged" />
-                                </StackPanel>
-                            </UniformGrid>
+                            <StackPanel Grid.Row="1"
+                                        x:Name="ProductionMotionParametersPanel"
+                                        Margin="0,4,0,0" />
+                        </Grid>
+                    </Border>
+
+                    <Border Margin="0,8,0,0"
+                            Background="#12283A"
+                            BorderBrush="#2D4A61"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Padding="9,7">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="24" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="测试站逐轴回原参数"
+                                       Foreground="#EAF2F7"
+                                       FontSize="12"
+                                       FontWeight="Bold"
+                                       VerticalAlignment="Center" />
+                            <StackPanel Grid.Row="1"
+                                        x:Name="TestStationHomeParametersPanel"
+                                        Margin="0,4,0,0" />
                         </Grid>
                     </Border>
 

@@ -308,6 +308,30 @@ public partial class MotionControlPage : UserControl
             y.FeedbackPosition);
     }
 
+    public void ConfigureAxisMoveParameters(
+        int hardwareAxisNo,
+        double startVelocity,
+        double stopVelocity,
+        double accelerationSeconds,
+        double decelerationSeconds,
+        double sTimeSeconds,
+        double decelerationStopSeconds)
+    {
+        if (hardwareAxisNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        var profile = _motionOptions.GetOrCreateMoveProfile(hardwareAxisNo);
+        profile.StartVelocity = startVelocity;
+        profile.StopVelocity = stopVelocity;
+        profile.AccelerationSeconds = accelerationSeconds;
+        profile.DecelerationSeconds = decelerationSeconds;
+        profile.STimeSeconds = sTimeSeconds;
+        profile.DecelerationStopSeconds = decelerationStopSeconds;
+        profile.Validate();
+    }
+
     public async Task<CalibrationCenterPosition> MoveCalibrationAxesToAsync(
         int xHardwareAxisNo,
         int yHardwareAxisNo,
@@ -317,7 +341,8 @@ public partial class MotionControlPage : UserControl
         double positionTolerance,
         int moveTimeoutMilliseconds,
         CancellationToken cancellationToken,
-        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? yVelocityOverride = null)
     {
         if (xHardwareAxisNo < 0 || yHardwareAxisNo < 0 || xHardwareAxisNo == yHardwareAxisNo)
         {
@@ -330,6 +355,8 @@ public partial class MotionControlPage : UserControl
         }
 
         if (!double.IsFinite(velocity) || velocity <= 0 ||
+            (yVelocityOverride is { } yVelocity &&
+             (!double.IsFinite(yVelocity) || yVelocity <= 0)) ||
             !double.IsFinite(positionTolerance) || positionTolerance <= 0 ||
             moveTimeoutMilliseconds < 100)
         {
@@ -377,7 +404,8 @@ public partial class MotionControlPage : UserControl
                 velocity,
                 positionTolerance,
                 moveTimeoutMilliseconds,
-                linkedCancellation.Token);
+                linkedCancellation.Token,
+                yVelocityOverride);
             var settled = ReadSettledCalibrationPosition(
                 xAxis,
                 yAxis,
@@ -893,7 +921,8 @@ public partial class MotionControlPage : UserControl
         int minimumTimeoutMilliseconds = 10_000,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null,
         double? minimumCompletionTolerance = null,
-        double? velocityOverride = null)
+        double? velocityOverride = null,
+        IReadOnlyDictionary<int, double>? velocityOverrides = null)
     {
         ArgumentNullException.ThrowIfNull(targetPositions);
 
@@ -926,6 +955,17 @@ public partial class MotionControlPage : UserControl
             throw new ArgumentOutOfRangeException(
                 nameof(velocityOverride),
                 "统一运行速度必须是大于 0 的有效数值。");
+        }
+
+        if (velocityOverrides is not null &&
+            velocityOverrides.Any(pair =>
+                pair.Key < 0 ||
+                !double.IsFinite(pair.Value) ||
+                pair.Value <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(velocityOverrides),
+                "逐轴运行速度必须使用有效轴号和大于 0 的有限数值。");
         }
 
         if (_closed)
@@ -965,7 +1005,9 @@ public partial class MotionControlPage : UserControl
                 ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
             var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
             profile.Validate();
-            var velocity = velocityOverride ?? axis.JogSpeed;
+            var velocity = velocityOverrides?.GetValueOrDefault(hardwareAxisNo)
+                ?? velocityOverride
+                ?? axis.JogSpeed;
             if (!double.IsFinite(velocity) || velocity <= 0)
             {
                 throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
@@ -1152,7 +1194,8 @@ public partial class MotionControlPage : UserControl
         CancellationToken cancellationToken,
         double? lowVelocityOverride = null,
         double? highVelocityOverride = null,
-        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        IReadOnlyDictionary<int, MotionHomeProfile>? profileOverrides = null)
     {
         ArgumentNullException.ThrowIfNull(hardwareAxisNos);
         var axisNumbers = hardwareAxisNos
@@ -1179,6 +1222,21 @@ public partial class MotionControlPage : UserControl
             (!double.IsFinite(highVelocity) || highVelocity <= 0))
         {
             throw new ArgumentOutOfRangeException(nameof(highVelocityOverride), "回原高速必须是大于 0 的有效数值。");
+        }
+
+        if (profileOverrides is not null)
+        {
+            foreach (var (axisNo, profile) in profileOverrides)
+            {
+                if (axisNo < 0)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(profileOverrides),
+                        "逐轴回原参数包含无效轴号。");
+                }
+
+                profile.Validate(requireEnabled: true);
+            }
         }
 
         if (_closed)
@@ -1231,7 +1289,8 @@ public partial class MotionControlPage : UserControl
                 throw new MotionCardException($"{axis.Name} 未使能，不能启动轴组回原。");
             }
 
-            if ((!lowVelocityOverride.HasValue || !highVelocityOverride.HasValue) &&
+            if (profileOverrides is null &&
+                (!lowVelocityOverride.HasValue || !highVelocityOverride.HasValue) &&
                 (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0))
             {
                 throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
@@ -1247,32 +1306,40 @@ public partial class MotionControlPage : UserControl
             foreach (var axis in axes)
             {
                 linkedCancellation.Token.ThrowIfCancellationRequested();
-                var profile = new MotionHomeProfile
-                {
-                    Enabled = true,
-                    Mode = homeMode,
-                    LowVelocity = lowVelocityOverride ?? axis.JogSpeed * TestHomeLowSpeedRatio,
-                    HighVelocity = highVelocityOverride ?? axis.JogSpeed,
-                    AccelerationSeconds = 0.1,
-                    DecelerationSeconds = 0.1,
-                    OffsetPosition = offsetPosition
-                };
+                var profile = profileOverrides?.GetValueOrDefault(axis.HardwareAxisNo)
+                    ?? new MotionHomeProfile
+                    {
+                        Enabled = true,
+                        Mode = homeMode,
+                        LowVelocity = lowVelocityOverride ?? axis.JogSpeed * TestHomeLowSpeedRatio,
+                        HighVelocity = highVelocityOverride ?? axis.JogSpeed,
+                        AccelerationSeconds = 0.1,
+                        DecelerationSeconds = 0.1,
+                        OffsetPosition = offsetPosition
+                    };
                 profile.Validate(requireEnabled: true);
                 _motionCard.Home(axis.HardwareAxisNo, profile);
                 axis.Homed = false;
                 axis.IsMoving = true;
-                axis.State = $"轴组回原：模式 {homeMode} 回零中";
+                axis.State = $"轴组回原：模式 {profile.Mode} 回零中";
                 StartHomeTracking(axis.HardwareAxisNo, deadline);
             }
 
-            SetCommandStage(CommandStage.Running, $"轴组模式 {homeMode} 回原中");
+            var modeSummary = profileOverrides is null
+                ? $"模式 {homeMode}"
+                : "逐轴模式";
+            SetCommandStage(CommandStage.Running, $"轴组{modeSummary}回原中");
             await Task.WhenAll(axes.Select(axis => WaitForHomeAsync(axis, deadline, linkedCancellation.Token)));
             foreach (var axis in axes)
             {
-                axis.State = $"轴组回原：模式 {homeMode} 回零完成";
+                var completedMode = profileOverrides?
+                                        .GetValueOrDefault(axis.HardwareAxisNo)?
+                                        .Mode
+                                    ?? homeMode;
+                axis.State = $"轴组回原：模式 {completedMode} 回零完成";
             }
 
-            SetCommandStage(CommandStage.Stopped, $"轴组模式 {homeMode} 回原完成");
+            SetCommandStage(CommandStage.Stopped, $"轴组{modeSummary}回原完成");
         }
         catch (Exception exception)
         {
@@ -1561,7 +1628,8 @@ public partial class MotionControlPage : UserControl
         double velocity,
         double positionTolerance,
         int moveTimeoutMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double? yVelocityOverride = null)
     {
         var beforeX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
         var beforeY = _motionCard.ReadAxis(yAxis.HardwareAxisNo);
@@ -1575,7 +1643,10 @@ public partial class MotionControlPage : UserControl
 
         if (Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance)
         {
-            _motionCard.MoveAbsolute(yAxis.HardwareAxisNo, targetY, velocity);
+            _motionCard.MoveAbsolute(
+                yAxis.HardwareAxisNo,
+                targetY,
+                yVelocityOverride ?? velocity);
         }
 
         xAxis.Target = targetX;

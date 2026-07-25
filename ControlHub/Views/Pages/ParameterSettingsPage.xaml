@@ -67,7 +67,7 @@
                             BorderThickness="1"
                             CornerRadius="14"
                             Padding="12,5">
-                        <TextBlock Text="单位：pulse / pulse·s⁻¹"
+                        <TextBlock Text="单位：pulse / pulse·s⁻¹ / ms"
                                    Foreground="#77BEFF"
                                    FontSize="12"
                                    FontWeight="Bold" />

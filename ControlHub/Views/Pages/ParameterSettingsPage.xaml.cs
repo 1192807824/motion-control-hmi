@@ -36,13 +36,15 @@ public partial class ParameterSettingsPage : UserControl
             return;
         }
 
-        var cardGrid = new UniformGrid
+        var cardGrid = new Grid
         {
-            Columns = 2,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Top
         };
+        cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        cardGrid.ColumnDefinitions.Add(new ColumnDefinition());
 
+        var cardIndex = 0;
         while (sourcePanel.Children.Count > 0)
         {
             var child = sourcePanel.Children[0];
@@ -55,7 +57,17 @@ public partial class ParameterSettingsPage : UserControl
                 card.MinHeight = 202;
             }
 
+            var rowIndex = cardIndex / 2;
+            if (cardIndex % 2 == 0)
+            {
+                cardGrid.RowDefinitions.Add(
+                    new RowDefinition { Height = GridLength.Auto });
+            }
+
+            Grid.SetRow(child, rowIndex);
+            Grid.SetColumn(child, cardIndex % 2);
             cardGrid.Children.Add(child);
+            cardIndex++;
         }
 
         scrollViewer.Content = cardGrid;

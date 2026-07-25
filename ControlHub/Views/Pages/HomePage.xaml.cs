@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
@@ -79,6 +80,22 @@ public partial class HomePage : UserControl
         [0, .. FirstSetAxisNos, .. FirstSetZAxisNos, .. MoveOutAxisNos];
     private static readonly int[] ProductionHandlingAxisNos =
         [.. FirstSetAxisNos, .. SecondSetAxisNos, .. FirstSetZAxisNos, .. SecondSetZAxisNos];
+    private static readonly ProductionAxisDefinition[] ProductionAxisDefinitions =
+    [
+        new(0, "DD转盘", "DD马达", Axis0Velocity),
+        new(VisionCalibrationService.FirstSetXHardwareAxisNo, "第一套XY", "上料X", FirstSetXyVelocity),
+        new(VisionCalibrationService.FirstSetYHardwareAxisNo, "第一套XY", "上料Y", FirstSetXyVelocity),
+        new(VisionCalibrationService.SecondSetXHardwareAxisNo, "第二套XY", "下料X", SecondSetXyVelocity),
+        new(VisionCalibrationService.SecondSetYHardwareAxisNo, "第二套XY", "下料Y", SecondSetXyVelocity),
+        new(FirstSetNozzle1ZHardwareAxisNo, "第一套Z轴", "上料Z1", DefaultNozzleZVelocity),
+        new(FirstSetNozzle2ZHardwareAxisNo, "第一套Z轴", "上料Z2", DefaultNozzleZVelocity),
+        new(SecondSetNozzle1ZHardwareAxisNo, "第二套Z轴", "下料Z1", DefaultNozzleZVelocity),
+        new(SecondSetNozzle2ZHardwareAxisNo, "第二套Z轴", "下料Z2", DefaultNozzleZVelocity),
+        new(13, "测试站", "5号测试站", TestStationPressVelocity),
+        new(14, "测试站", "6号测试站", TestStationPressVelocity),
+        new(15, "测试站", "7号测试站", TestStationPressVelocity)
+    ];
+    private static readonly int[] TestStationHomeAxisNos = [13, 14, 15];
     private static readonly Point[] CarouselStationCardSlots =
     [
         new(241, 16),
@@ -122,6 +139,10 @@ public partial class HomePage : UserControl
     private ProductionZPositions? _productionZPositions;
     private SecondSetXyPositions? _secondSetXyPositions;
     private BinDropPositions? _binDropPositions;
+    private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
+    private IReadOnlyDictionary<int, ProductionAxisHomeSettings>? _productionAxisHomeSettings;
+    private readonly Dictionary<int, ProductionAxisMotionEditors> _productionAxisMotionEditors = [];
+    private readonly Dictionary<int, ProductionAxisHomeEditors> _productionAxisHomeEditors = [];
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
@@ -132,8 +153,159 @@ public partial class HomePage : UserControl
     public HomePage()
     {
         InitializeComponent();
+        InitializeProductionMotionParameterEditors();
         LoadPresetPositions();
         UpdateCarouselStationDisplay(CreateCarouselStationStates());
+    }
+
+    private void InitializeProductionMotionParameterEditors()
+    {
+        foreach (var group in ProductionAxisDefinitions.GroupBy(item => item.GroupName))
+        {
+            ProductionMotionParametersPanel.Children.Add(CreateParameterGroupTitle(group.Key));
+            var groupGrid = new UniformGrid
+            {
+                Columns = group.Count() == 1 ? 1 : 2
+            };
+            foreach (var definition in group)
+            {
+                var editors = CreateProductionAxisMotionEditors(definition);
+                _productionAxisMotionEditors[definition.AxisNo] = editors;
+                groupGrid.Children.Add(editors.Container);
+            }
+
+            ProductionMotionParametersPanel.Children.Add(groupGrid);
+        }
+
+        foreach (var axisNo in TestStationHomeAxisNos)
+        {
+            var definition = ProductionAxisDefinitions.Single(item => item.AxisNo == axisNo);
+            var editors = CreateProductionAxisHomeEditors(definition);
+            _productionAxisHomeEditors[axisNo] = editors;
+            TestStationHomeParametersPanel.Children.Add(editors.Container);
+        }
+    }
+
+    private static TextBlock CreateParameterGroupTitle(string title)
+    {
+        return new TextBlock
+        {
+            Text = title,
+            Margin = new Thickness(2, 8, 2, 4),
+            Foreground = new SolidColorBrush(Color.FromRgb(119, 190, 255)),
+            FontSize = 12,
+            FontWeight = FontWeights.Bold
+        };
+    }
+
+    private ProductionAxisMotionEditors CreateProductionAxisMotionEditors(
+        ProductionAxisDefinition definition)
+    {
+        var fields = new UniformGrid { Columns = 4 };
+        var runVelocity = AddProductionParameterField(fields, "运行速度", "pulse/s");
+        var startVelocity = AddProductionParameterField(fields, "初始速度", "pulse/s");
+        var stopVelocity = AddProductionParameterField(fields, "停止速度", "pulse/s");
+        var acceleration = AddProductionParameterField(fields, "加速时间", "ms");
+        var deceleration = AddProductionParameterField(fields, "减速时间", "ms");
+        var sTime = AddProductionParameterField(fields, "S曲线时间", "ms，范围0–1000");
+        var decelerationStop = AddProductionParameterField(fields, "减速停止时间", "ms");
+
+        return new ProductionAxisMotionEditors(
+            CreateAxisParameterCard(
+                $"轴{definition.AxisNo} · {definition.DisplayName}",
+                fields),
+            runVelocity,
+            startVelocity,
+            stopVelocity,
+            acceleration,
+            deceleration,
+            sTime,
+            decelerationStop);
+    }
+
+    private ProductionAxisHomeEditors CreateProductionAxisHomeEditors(
+        ProductionAxisDefinition definition)
+    {
+        var fields = new UniformGrid { Columns = 3 };
+        var mode = AddProductionParameterField(fields, "回原模式", "整数模式号");
+        var lowVelocity = AddProductionParameterField(fields, "回原低速", "pulse/s");
+        var highVelocity = AddProductionParameterField(fields, "回原高速", "pulse/s");
+        var acceleration = AddProductionParameterField(fields, "加速时间", "ms");
+        var deceleration = AddProductionParameterField(fields, "减速时间", "ms");
+        var offset = AddProductionParameterField(fields, "回原偏移", "pulse");
+
+        return new ProductionAxisHomeEditors(
+            CreateAxisParameterCard(
+                $"轴{definition.AxisNo} · {definition.DisplayName}",
+                fields),
+            mode,
+            lowVelocity,
+            highVelocity,
+            acceleration,
+            deceleration,
+            offset);
+    }
+
+    private static Border CreateAxisParameterCard(string title, UIElement fields)
+    {
+        return new Border
+        {
+            Margin = new Thickness(0, 0, 0, 6),
+            Padding = new Thickness(8, 6, 8, 7),
+            Background = new SolidColorBrush(Color.FromRgb(18, 48, 69)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(45, 74, 97)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            Child = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = title,
+                        Margin = new Thickness(2, 0, 2, 4),
+                        Foreground = new SolidColorBrush(Color.FromRgb(234, 242, 247)),
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold
+                    },
+                    fields
+                }
+            }
+        };
+    }
+
+    private TextBox AddProductionParameterField(
+        Panel panel,
+        string label,
+        string unitOrHint)
+    {
+        var textBox = new TextBox
+        {
+            Height = 25,
+            Margin = new Thickness(0, 2, 6, 0),
+            TextAlignment = TextAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(234, 242, 247)),
+            Background = new SolidColorBrush(Color.FromRgb(23, 52, 74)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(59, 95, 120)),
+            ToolTip = unitOrHint
+        };
+        textBox.TextChanged += ProductionAxisParameterTextBox_TextChanged;
+        panel.Children.Add(new StackPanel
+        {
+            Margin = new Thickness(0, 1, 0, 3),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = label,
+                    Foreground = new SolidColorBrush(Color.FromRgb(159, 177, 191)),
+                    FontSize = 9
+                },
+                textBox
+            }
+        });
+        return textBox;
     }
 
     public FrameworkElement DetachParameterSettingsPanel()
@@ -497,10 +669,9 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
         var zHardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, nozzleNumber);
-        var zVelocity = ParseProductionVelocity(
-            NozzleZVelocityTextBox.Text,
-            "Z轴速度");
+        var zVelocity = GetProductionAxisMotionSettings(zHardwareAxisNo).RunVelocity;
         SetFirstSetPositionStatus(
             $"Z{nozzleNumber}正在移动到{positionName}{targetPosition:0.###} pulse，速度 {zVelocity:0.###}…",
             true);
@@ -521,16 +692,16 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
         var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
         var positions = GetProductionZPositions();
         var safePosition = axisSet == VisionCalibrationAxisSet.First
             ? positions.FirstSetSafe
             : positions.SecondSetSafe;
-        var zVelocity = ParseProductionVelocity(
-            NozzleZVelocityTextBox.Text,
-            "Z轴速度");
         var z1HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 1);
         var z2HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 2);
+        var zVelocities = GetProductionAxisVelocities(
+            [z1HardwareAxisNo, z2HardwareAxisNo]);
         SetFirstSetPositionStatus(
             $"XY放料前正在确认 Z1/Z2 的 {safePosition:0.###} 安全位…",
             true);
@@ -544,7 +715,7 @@ public partial class HomePage : UserControl
             cancellationToken,
             allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
             minimumCompletionTolerance: HomePageCompletionTolerance,
-            velocityOverride: zVelocity);
+            velocityOverrides: zVelocities);
 
         SetFirstSetPositionStatus(
             $"Z1/Z2均已到 {safePosition:0.###} pulse 安全位，允许 XY 前往位置1/2。",
@@ -868,17 +1039,16 @@ public partial class HomePage : UserControl
             var visualCalibrationController = _visualCalibrationController
                 ?? throw new InvalidOperationException("主页尚未连接视觉标定组件。");
 
-            // 主页生产流程固定使用第一套 XY 轴速度，不受视觉标定页配置影响。
-            var velocity = ParseProductionVelocity(
-                FirstSetXyVelocityTextBox.Text,
-                "轴1/2第一套XY速度");
-
-            // 速度必须是有效正数，否则后续移动超时和下发速度都不可信。
-            if (!double.IsFinite(velocity) || velocity <= 0)
-            {
-                // 用异常中断启动流程，并统一进入下方错误提示。
-                throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
-            }
+            // 启动前锁定全部逐轴参数，并把控制卡曲线参数应用到对应硬件轴。
+            _productionAxisMotionSettings = ReadProductionAxisMotionSettings();
+            _productionAxisHomeSettings = ReadProductionAxisHomeSettings();
+            ApplyProductionAxisMotionSettings(
+                motionController,
+                _productionAxisMotionSettings);
+            var velocity = GetProductionAxisMotionSettings(
+                VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
+            var firstSetYVelocity = GetProductionAxisMotionSettings(
+                VisionCalibrationService.FirstSetYHardwareAxisNo).RunVelocity;
 
             // 生产启动时一次性校验并锁定两套 Z 轴取料、放料和安全高度。
             _productionZPositions = ReadProductionZPositions();
@@ -958,6 +1128,7 @@ public partial class HomePage : UserControl
                 position2X,
                 position2Y,
                 velocity,
+                firstSetYVelocity,
                 _productionCancellation.Token);
             SetStartProductionStatus(
                 $"启动安全定位完成：已按Y后X到达位置2" +
@@ -1009,7 +1180,7 @@ public partial class HomePage : UserControl
                         current.ActualY,
                         center.X,
                         center.Y,
-                        velocity);
+                        Math.Min(velocity, firstSetYVelocity));
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：XY正在回初始中心({center.X:0.###}, {center.Y:0.###})…",
                         Color.FromRgb(242, 181, 68));
@@ -1022,7 +1193,8 @@ public partial class HomePage : UserControl
                         positionTolerance: HomePageCompletionTolerance,
                         moveTimeoutMilliseconds: timeoutMilliseconds,
                         cancellationToken: _productionCancellation.Token,
-                        allowedMovingAxisNos: AllowedProductionPeerAxisNos);
+                        allowedMovingAxisNos: AllowedProductionPeerAxisNos,
+                        yVelocityOverride: firstSetYVelocity);
                 }
 
                 // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
@@ -1176,6 +1348,7 @@ public partial class HomePage : UserControl
                     motionController,
                     center,
                     velocity,
+                    firstSetYVelocity,
                     _productionCancellation.Token);
 
                 // 测试回原与第二套双取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
@@ -1239,6 +1412,8 @@ public partial class HomePage : UserControl
             _productionZPositions = null;
             _secondSetXyPositions = null;
             _binDropPositions = null;
+            _productionAxisMotionSettings = null;
+            _productionAxisHomeSettings = null;
 
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
@@ -1295,7 +1470,8 @@ public partial class HomePage : UserControl
         int yHardwareAxisNo,
         double targetX,
         double targetY,
-        double velocity,
+        double xVelocity,
+        double yVelocity,
         CancellationToken cancellationToken)
     {
         var current = motionController.CaptureCalibrationFeedback(
@@ -1313,13 +1489,13 @@ public partial class HomePage : UserControl
             current.ActualY,
             current.ActualX,
             targetY,
-            velocity);
+            yVelocity);
         await motionController.MoveAxesAbsoluteAsync(
             new Dictionary<int, double> { [yHardwareAxisNo] = targetY },
             cancellationToken,
             minimumTimeoutMilliseconds: yTimeoutMilliseconds,
             minimumCompletionTolerance: HomePageCompletionTolerance,
-            velocityOverride: velocity);
+            velocityOverride: yVelocity);
 
         var afterY = motionController.CaptureCalibrationFeedback(
             xHardwareAxisNo,
@@ -1342,13 +1518,13 @@ public partial class HomePage : UserControl
             afterY.ActualY,
             targetX,
             afterY.ActualY,
-            velocity);
+            xVelocity);
         await motionController.MoveAxesAbsoluteAsync(
             new Dictionary<int, double> { [xHardwareAxisNo] = targetX },
             cancellationToken,
             minimumTimeoutMilliseconds: xTimeoutMilliseconds,
             minimumCompletionTolerance: HomePageCompletionTolerance,
-            velocityOverride: velocity);
+            velocityOverride: xVelocity);
 
         var actual = motionController.CaptureCalibrationFeedback(
             xHardwareAxisNo,
@@ -1370,7 +1546,8 @@ public partial class HomePage : UserControl
     private Task<CalibrationCenterPosition> StartFirstSetReturnToCenterAsync(
         MotionControlPage motionController,
         (double X, double Y) center,
-        double velocity,
+        double xVelocity,
+        double yVelocity,
         CancellationToken cancellationToken)
     {
         var current = motionController.CaptureCalibrationFeedback(
@@ -1382,7 +1559,7 @@ public partial class HomePage : UserControl
             current.ActualY,
             center.X,
             center.Y,
-            velocity);
+            Math.Min(xVelocity, yVelocity));
 
         SetFirstSetPositionStatus(
             $"放料后XY正在回中心：X={center.X:0.###}，Y={center.Y:0.###} pulse。",
@@ -1392,11 +1569,12 @@ public partial class HomePage : UserControl
             VisionCalibration.YHardwareAxisNo,
             center.X,
             center.Y,
-            velocity,
+            xVelocity,
             positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
-            allowedMovingAxisNos: FirstSetProductionPeerAxisNos);
+            allowedMovingAxisNos: FirstSetProductionPeerAxisNos,
+            yVelocityOverride: yVelocity);
     }
 
     private static async Task ObserveTaskNoThrowAsync(Task task)
@@ -1638,13 +1816,11 @@ public partial class HomePage : UserControl
     {
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = ParseProductionVelocity(
-            SecondSetXyVelocityTextBox.Text,
-            "轴3/4第二套XY速度");
-        if (!double.IsFinite(velocity) || velocity <= 0)
-        {
-            throw new InvalidOperationException("第二套XY的移动速度配置无效。");
-        }
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var xVelocity = GetProductionAxisMotionSettings(
+            VisionCalibrationService.SecondSetXHardwareAxisNo).RunVelocity;
+        var yVelocity = GetProductionAxisMotionSettings(
+            VisionCalibrationService.SecondSetYHardwareAxisNo).RunVelocity;
 
         var current = motionController.CaptureCalibrationFeedback(
             VisionCalibrationService.SecondSetXHardwareAxisNo,
@@ -1655,7 +1831,7 @@ public partial class HomePage : UserControl
             current.ActualY,
             targetX,
             targetY,
-            velocity);
+            Math.Min(xVelocity, yVelocity));
         try
         {
             await motionController.MoveCalibrationAxesToAsync(
@@ -1663,11 +1839,12 @@ public partial class HomePage : UserControl
                 VisionCalibrationService.SecondSetYHardwareAxisNo,
                 targetX,
                 targetY,
-                velocity,
+                xVelocity,
                 positionTolerance: HomePageCompletionTolerance,
                 moveTimeoutMilliseconds: timeoutMilliseconds,
                 cancellationToken: cancellationToken,
-                allowedMovingAxisNos: SecondSetProductionPeerAxisNos);
+                allowedMovingAxisNos: SecondSetProductionPeerAxisNos,
+                yVelocityOverride: yVelocity);
         }
         catch (Exception exception)
         {
@@ -1745,12 +1922,6 @@ public partial class HomePage : UserControl
         CarouselStationState[] carouselStations,
         CancellationToken cancellationToken)
     {
-        var pressVelocity = ParseProductionVelocity(
-            TestStationPressVelocityTextBox.Text,
-            "轴13–15下压速度");
-        var homeVelocity = ParseProductionVelocity(
-            TestStationHomeVelocityTextBox.Text,
-            "轴13–15回原速度");
         var axisTargets = TestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
@@ -1771,13 +1942,14 @@ public partial class HomePage : UserControl
             Color.FromRgb(242, 181, 68));
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var pressVelocities = GetProductionAxisVelocities(axisTargets.Keys);
         await motionController.MoveAxesAbsoluteAsync(
             axisTargets,
             cancellationToken,
             TestStationMoveTimeoutMilliseconds,
             ProductionHandlingAxisNos,
             HomePageCompletionTolerance,
-            pressVelocity);
+            velocityOverrides: pressVelocities);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
@@ -1789,19 +1961,19 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 停留完成，测试站正在回原，DD等待回原完成…",
             Color.FromRgb(242, 181, 68));
+        var homeProfiles = GetProductionHomeProfiles(axisTargets.Keys);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 正在下发 21 模式回原点命令，速度 {homeVelocity:0.###} pulse/s…",
+            $"{string.Join("，", stations)} 正在按逐轴参数下发回原点命令…",
             Color.FromRgb(242, 181, 68));
         await motionController.HomeAxesAsync(
             axisTargets.Keys.ToArray(),
             TestStationHomeMode,
             TestStationHomeOffsetPosition,
             cancellationToken,
-            homeVelocity,
-            homeVelocity,
-            ProductionHandlingAxisNos);
+            allowedMovingAxisNos: ProductionHandlingAxisNos,
+            profileOverrides: homeProfiles);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 21 模式回原点完成，DD可继续下一步。",
+            $"{string.Join("，", stations)} 逐轴回原点完成，DD可继续下一步。",
             Color.FromRgb(73, 209, 125));
         foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
         {
@@ -2400,13 +2572,11 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = ParseProductionVelocity(
-            FirstSetXyVelocityTextBox.Text,
-            "轴1/2第一套XY速度");
-        if (!double.IsFinite(velocity) || velocity <= 0)
-        {
-            throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
-        }
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var xVelocity = GetProductionAxisMotionSettings(
+            VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
+        var yVelocity = GetProductionAxisMotionSettings(
+            VisionCalibrationService.FirstSetYHardwareAxisNo).RunVelocity;
 
         var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
         var objectName = step == 1 ? "物体1" : "物体2";
@@ -2425,17 +2595,18 @@ public partial class HomePage : UserControl
             current.ActualY,
             target.Value.X,
             target.Value.Y,
-            velocity);
+            Math.Min(xVelocity, yVelocity));
         var actual = await motionController.MoveCalibrationAxesToAsync(
             VisionCalibration.XHardwareAxisNo,
             VisionCalibration.YHardwareAxisNo,
             target.Value.X,
             target.Value.Y,
-            velocity,
+            xVelocity,
             positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
-            allowedMovingAxisNos: AllowedProductionPeerAxisNos);
+            allowedMovingAxisNos: AllowedProductionPeerAxisNos,
+            yVelocityOverride: yVelocity);
 
         if (step == 1)
         {
@@ -2468,9 +2639,8 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = ParseProductionVelocity(
-            Axis0VelocityTextBox.Text,
-            "轴0 DD马达速度");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var velocity = GetProductionAxisMotionSettings(0).RunVelocity;
         await motionController.MoveAxisRelativeAsync(
             hardwareAxisNo: 0,
             pulseDistance: pulseDistance,
@@ -2616,9 +2786,6 @@ public partial class HomePage : UserControl
         {
             var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
-            _ = ParseProductionVelocity(
-                SecondSetXyVelocityTextBox.Text,
-                "轴3/4第二套XY速度");
 
             _presetPositionMoveRunning = true;
             UpdateHomeCommandState();
@@ -2710,15 +2877,7 @@ public partial class HomePage : UserControl
         {
             var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X 轴绝对脉冲");
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y 轴绝对脉冲");
-            var motionController = _motionController
-                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            var velocity = ParseProductionVelocity(
-                FirstSetXyVelocityTextBox.Text,
-                "轴1/2第一套XY速度");
-            if (!double.IsFinite(velocity) || velocity <= 0)
-            {
-                throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
-            }
+            _ = ReadProductionAxisMotionSettings();
 
             _presetPositionMoveRunning = true;
             UpdateHomeCommandState();
@@ -2754,13 +2913,11 @@ public partial class HomePage : UserControl
 
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-        var velocity = ParseProductionVelocity(
-            FirstSetXyVelocityTextBox.Text,
-            "轴1/2第一套XY速度");
-        if (!double.IsFinite(velocity) || velocity <= 0)
-        {
-            throw new InvalidOperationException("第一套 XY 的移动速度配置无效。");
-        }
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var xVelocity = GetProductionAxisMotionSettings(
+            VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
+        var yVelocity = GetProductionAxisMotionSettings(
+            VisionCalibrationService.FirstSetYHardwareAxisNo).RunVelocity;
 
         SetFirstSetPositionStatus(
             $"正在绝对移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
@@ -2774,17 +2931,18 @@ public partial class HomePage : UserControl
             current.ActualY,
             targetX,
             targetY,
-            velocity);
+            Math.Min(xVelocity, yVelocity));
         var actual = await motionController.MoveCalibrationAxesToAsync(
             VisionCalibration.XHardwareAxisNo,
             VisionCalibration.YHardwareAxisNo,
             targetX,
             targetY,
-            velocity,
+            xVelocity,
             positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
-            allowedMovingAxisNos: AllowedProductionPeerAxisNos);
+            allowedMovingAxisNos: AllowedProductionPeerAxisNos,
+            yVelocityOverride: yVelocity);
         SetFirstSetPositionStatus(
             $"{positionName}已到位：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
             true);
@@ -2796,11 +2954,11 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
-    private void ProductionVelocityTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    private void ProductionAxisParameterTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_loadingPresetPositions)
         {
-            SaveNozzleZVelocityFromInput();
+            SaveProductionAxisParametersFromInputs();
             UpdateHomeCommandState();
         }
     }
@@ -2840,13 +2998,7 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1Y);
         PresetPosition2XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2X);
         PresetPosition2YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2Y);
-        Axis0VelocityTextBox.Text = FormatPresetCoordinate(Axis0Velocity);
-        FirstSetXyVelocityTextBox.Text = FormatPresetCoordinate(FirstSetXyVelocity);
-        SecondSetXyVelocityTextBox.Text = FormatPresetCoordinate(SecondSetXyVelocity);
-        TestStationPressVelocityTextBox.Text = FormatPresetCoordinate(TestStationPressVelocity);
-        TestStationHomeVelocityTextBox.Text = FormatPresetCoordinate(TestStationHomeVelocity);
-        NozzleZVelocityTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.NozzleZVelocity ?? DefaultNozzleZVelocity);
+        LoadProductionAxisParameterEditors();
         FirstSetPickupZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetPickupZPosition ?? DefaultNozzlePickupZPosition);
         FirstSetDropZPositionTextBox.Text = FormatPresetCoordinate(
@@ -2876,6 +3028,65 @@ public partial class HomePage : UserControl
         Bin3PositionXTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin3PositionX);
         Bin3PositionYTextBox.Text = FormatPresetCoordinate(_homeSettings.Bin3PositionY);
         _loadingPresetPositions = false;
+    }
+
+    private void LoadProductionAxisParameterEditors()
+    {
+        _homeSettings.ProductionAxisMotionSettings ??= [];
+        _homeSettings.ProductionAxisHomeSettings ??= [];
+        foreach (var definition in ProductionAxisDefinitions)
+        {
+            var settings = _homeSettings.ProductionAxisMotionSettings.GetValueOrDefault(
+                               definition.AxisNo)
+                           ?? CreateDefaultAxisMotionSettings(definition);
+            var editors = _productionAxisMotionEditors[definition.AxisNo];
+            editors.RunVelocity.Text = FormatPresetCoordinate(settings.RunVelocity);
+            editors.StartVelocity.Text = FormatPresetCoordinate(settings.StartVelocity);
+            editors.StopVelocity.Text = FormatPresetCoordinate(settings.StopVelocity);
+            editors.AccelerationMilliseconds.Text =
+                FormatPresetCoordinate(settings.AccelerationMilliseconds);
+            editors.DecelerationMilliseconds.Text =
+                FormatPresetCoordinate(settings.DecelerationMilliseconds);
+            editors.STimeMilliseconds.Text =
+                FormatPresetCoordinate(settings.STimeMilliseconds);
+            editors.DecelerationStopMilliseconds.Text =
+                FormatPresetCoordinate(settings.DecelerationStopMilliseconds);
+        }
+
+        foreach (var axisNo in TestStationHomeAxisNos)
+        {
+            var settings = _homeSettings.ProductionAxisHomeSettings.GetValueOrDefault(axisNo)
+                           ?? new ProductionAxisHomeSettings();
+            var editors = _productionAxisHomeEditors[axisNo];
+            editors.Mode.Text = settings.Mode.ToString(CultureInfo.CurrentCulture);
+            editors.LowVelocity.Text = FormatPresetCoordinate(settings.LowVelocity);
+            editors.HighVelocity.Text = FormatPresetCoordinate(settings.HighVelocity);
+            editors.AccelerationMilliseconds.Text =
+                FormatPresetCoordinate(settings.AccelerationMilliseconds);
+            editors.DecelerationMilliseconds.Text =
+                FormatPresetCoordinate(settings.DecelerationMilliseconds);
+            editors.OffsetPosition.Text = FormatPresetCoordinate(settings.OffsetPosition);
+        }
+    }
+
+    private ProductionAxisMotionSettings CreateDefaultAxisMotionSettings(
+        ProductionAxisDefinition definition)
+    {
+        var legacyZVelocity =
+            FirstSetZAxisNos.Contains(definition.AxisNo) ||
+            SecondSetZAxisNos.Contains(definition.AxisNo)
+                ? _homeSettings.NozzleZVelocity
+                : null;
+        return new ProductionAxisMotionSettings
+        {
+            RunVelocity = legacyZVelocity ?? definition.DefaultRunVelocity,
+            StartVelocity = 0,
+            StopVelocity = 0,
+            AccelerationMilliseconds = 100,
+            DecelerationMilliseconds = 100,
+            STimeMilliseconds = 0,
+            DecelerationStopMilliseconds = 100
+        };
     }
 
     private ProductionZPositions ReadProductionZPositions()
@@ -2915,6 +3126,243 @@ public partial class HomePage : UserControl
                 ParseFiniteCoordinate(Bin3PositionYTextBox.Text, "BIN3位置Y轴绝对脉冲")));
     }
 
+    private IReadOnlyDictionary<int, ProductionAxisMotionSettings>
+        ReadProductionAxisMotionSettings()
+    {
+        var settingsByAxis = new Dictionary<int, ProductionAxisMotionSettings>();
+        foreach (var definition in ProductionAxisDefinitions)
+        {
+            var editors = _productionAxisMotionEditors[definition.AxisNo];
+            var settings = new ProductionAxisMotionSettings
+            {
+                RunVelocity = ParseProductionVelocity(
+                    editors.RunVelocity.Text,
+                    $"轴{definition.AxisNo}运行速度"),
+                StartVelocity = ParseNonNegativeCoordinate(
+                    editors.StartVelocity.Text,
+                    $"轴{definition.AxisNo}初始速度"),
+                StopVelocity = ParseNonNegativeCoordinate(
+                    editors.StopVelocity.Text,
+                    $"轴{definition.AxisNo}停止速度"),
+                AccelerationMilliseconds = ParseProductionVelocity(
+                    editors.AccelerationMilliseconds.Text,
+                    $"轴{definition.AxisNo}加速时间"),
+                DecelerationMilliseconds = ParseProductionVelocity(
+                    editors.DecelerationMilliseconds.Text,
+                    $"轴{definition.AxisNo}减速时间"),
+                STimeMilliseconds = ParseNonNegativeCoordinate(
+                    editors.STimeMilliseconds.Text,
+                    $"轴{definition.AxisNo}S曲线时间"),
+                DecelerationStopMilliseconds = ParseProductionVelocity(
+                    editors.DecelerationStopMilliseconds.Text,
+                    $"轴{definition.AxisNo}减速停止时间")
+            };
+            ValidateProductionAxisMotionSettings(definition, settings);
+            settingsByAxis[definition.AxisNo] = settings;
+        }
+
+        return settingsByAxis;
+    }
+
+    private IReadOnlyDictionary<int, ProductionAxisHomeSettings>
+        ReadProductionAxisHomeSettings()
+    {
+        var settingsByAxis = new Dictionary<int, ProductionAxisHomeSettings>();
+        foreach (var axisNo in TestStationHomeAxisNos)
+        {
+            var editors = _productionAxisHomeEditors[axisNo];
+            if (!int.TryParse(
+                    editors.Mode.Text,
+                    NumberStyles.Integer,
+                    CultureInfo.CurrentCulture,
+                    out var mode))
+            {
+                throw new ArgumentException($"轴{axisNo}回原模式必须是整数。");
+            }
+
+            var settings = new ProductionAxisHomeSettings
+            {
+                Mode = mode,
+                LowVelocity = ParseProductionVelocity(
+                    editors.LowVelocity.Text,
+                    $"轴{axisNo}回原低速"),
+                HighVelocity = ParseProductionVelocity(
+                    editors.HighVelocity.Text,
+                    $"轴{axisNo}回原高速"),
+                AccelerationMilliseconds = ParseProductionVelocity(
+                    editors.AccelerationMilliseconds.Text,
+                    $"轴{axisNo}回原加速时间"),
+                DecelerationMilliseconds = ParseProductionVelocity(
+                    editors.DecelerationMilliseconds.Text,
+                    $"轴{axisNo}回原减速时间"),
+                OffsetPosition = ParseFiniteCoordinate(
+                    editors.OffsetPosition.Text,
+                    $"轴{axisNo}回原偏移")
+            };
+            ValidateProductionAxisHomeSettings(axisNo, settings);
+            settingsByAxis[axisNo] = settings;
+        }
+
+        return settingsByAxis;
+    }
+
+    private static void ValidateProductionAxisMotionSettings(
+        ProductionAxisDefinition definition,
+        ProductionAxisMotionSettings settings)
+    {
+        if (settings.StartVelocity > settings.RunVelocity)
+        {
+            throw new ArgumentException(
+                $"轴{definition.AxisNo}初始速度不能大于运行速度。");
+        }
+
+        if (settings.StopVelocity > settings.RunVelocity)
+        {
+            throw new ArgumentException(
+                $"轴{definition.AxisNo}停止速度不能大于运行速度。");
+        }
+
+        if (settings.STimeMilliseconds > 1000)
+        {
+            throw new ArgumentException(
+                $"轴{definition.AxisNo}S曲线时间必须在0–1000 ms之间。");
+        }
+    }
+
+    private static void ValidateProductionAxisHomeSettings(
+        int axisNo,
+        ProductionAxisHomeSettings settings)
+    {
+        if (settings.Mode is < short.MinValue or > ushort.MaxValue)
+        {
+            throw new ArgumentException(
+                $"轴{axisNo}回原模式必须在{short.MinValue}–{ushort.MaxValue}之间。");
+        }
+
+        if (settings.HighVelocity < settings.LowVelocity)
+        {
+            throw new ArgumentException(
+                $"轴{axisNo}回原高速不能小于回原低速。");
+        }
+    }
+
+    private bool AllProductionAxisParametersValid()
+    {
+        try
+        {
+            _ = ReadProductionAxisMotionSettings();
+            _ = ReadProductionAxisHomeSettings();
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private void SaveProductionAxisParametersFromInputs()
+    {
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        try
+        {
+            _homeSettings.ProductionAxisMotionSettings =
+                ReadProductionAxisMotionSettings().ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value);
+            _homeSettings.ProductionAxisHomeSettings =
+                ReadProductionAxisHomeSettings().ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value);
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (ArgumentException)
+        {
+            // 输入尚未完成时只保持按钮禁用，等待用户继续编辑。
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"保存生产轴参数失败：{exception.Message}", false);
+        }
+    }
+
+    private void ApplyProductionAxisMotionSettings(
+        MotionControlPage motionController,
+        IReadOnlyDictionary<int, ProductionAxisMotionSettings> settingsByAxis)
+    {
+        foreach (var (axisNo, settings) in settingsByAxis)
+        {
+            motionController.ConfigureAxisMoveParameters(
+                axisNo,
+                settings.StartVelocity,
+                settings.StopVelocity,
+                settings.AccelerationMilliseconds / 1000d,
+                settings.DecelerationMilliseconds / 1000d,
+                settings.STimeMilliseconds / 1000d,
+                settings.DecelerationStopMilliseconds / 1000d);
+        }
+    }
+
+    private void ApplyCurrentProductionAxisMotionSettings(
+        MotionControlPage motionController)
+    {
+        ApplyProductionAxisMotionSettings(
+            motionController,
+            _productionAxisMotionSettings ?? ReadProductionAxisMotionSettings());
+    }
+
+    private ProductionAxisMotionSettings GetProductionAxisMotionSettings(int axisNo)
+    {
+        if (_productionAxisMotionSettings?.GetValueOrDefault(axisNo) is { } locked)
+        {
+            return locked;
+        }
+
+        var current = ReadProductionAxisMotionSettings();
+        return current.GetValueOrDefault(axisNo)
+               ?? throw new InvalidOperationException($"轴{axisNo}生产运动参数不存在。");
+    }
+
+    private IReadOnlyDictionary<int, double> GetProductionAxisVelocities(
+        IEnumerable<int> axisNos)
+    {
+        return axisNos
+            .Distinct()
+            .ToDictionary(
+                axisNo => axisNo,
+                axisNo => GetProductionAxisMotionSettings(axisNo).RunVelocity);
+    }
+
+    private IReadOnlyDictionary<int, MotionHomeProfile> GetProductionHomeProfiles(
+        IEnumerable<int> axisNos)
+    {
+        var settingsByAxis = _productionAxisHomeSettings
+                             ?? ReadProductionAxisHomeSettings();
+        return axisNos
+            .Distinct()
+            .ToDictionary(
+                axisNo => axisNo,
+                axisNo =>
+                {
+                    var settings = settingsByAxis.GetValueOrDefault(axisNo)
+                                   ?? throw new InvalidOperationException(
+                                       $"轴{axisNo}生产回原参数不存在。");
+                    return new MotionHomeProfile
+                    {
+                        Enabled = true,
+                        Mode = settings.Mode,
+                        LowVelocity = settings.LowVelocity,
+                        HighVelocity = settings.HighVelocity,
+                        AccelerationSeconds = settings.AccelerationMilliseconds / 1000d,
+                        DecelerationSeconds = settings.DecelerationMilliseconds / 1000d,
+                        OffsetPosition = settings.OffsetPosition
+                    };
+                });
+    }
+
     private void SaveProductionZPositionsFromInputs()
     {
         if (_loadingPresetPositions ||
@@ -2947,26 +3395,6 @@ public partial class HomePage : UserControl
         catch (Exception exception)
         {
             SetFirstSetPositionStatus($"保存Z轴生产高度失败：{exception.Message}", false);
-        }
-    }
-
-    private void SaveNozzleZVelocityFromInput()
-    {
-        if (_loadingPresetPositions ||
-            NozzleZVelocityTextBox is null ||
-            !TryParseProductionVelocity(NozzleZVelocityTextBox.Text, out var zVelocity))
-        {
-            return;
-        }
-
-        _homeSettings.NozzleZVelocity = zVelocity;
-        try
-        {
-            _homeSettingsStore.Save(_homeSettings);
-        }
-        catch (Exception exception)
-        {
-            SetFirstSetPositionStatus($"保存Z轴生产速度失败：{exception.Message}", false);
         }
     }
 
@@ -3174,12 +3602,6 @@ public partial class HomePage : UserControl
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
-            Axis0VelocityTextBox is null ||
-            FirstSetXyVelocityTextBox is null ||
-            SecondSetXyVelocityTextBox is null ||
-            TestStationPressVelocityTextBox is null ||
-            TestStationHomeVelocityTextBox is null ||
-            NozzleZVelocityTextBox is null ||
             FirstSetPickupZPositionTextBox is null ||
             FirstSetDropZPositionTextBox is null ||
             FirstSetSafeZPositionTextBox is null ||
@@ -3219,12 +3641,7 @@ public partial class HomePage : UserControl
             !_presetPositionMoveRunning &&
             !_startSequenceRunning &&
             !_assignedNozzleMoveRunning;
-        var axis0VelocityValid = TryParseProductionVelocity(Axis0VelocityTextBox.Text, out _);
-        var firstSetVelocityValid = TryParseProductionVelocity(FirstSetXyVelocityTextBox.Text, out _);
-        var secondSetVelocityValid = TryParseProductionVelocity(SecondSetXyVelocityTextBox.Text, out _);
-        var pressVelocityValid = TryParseProductionVelocity(TestStationPressVelocityTextBox.Text, out _);
-        var homeVelocityValid = TryParseProductionVelocity(TestStationHomeVelocityTextBox.Text, out _);
-        var nozzleZVelocityValid = TryParseProductionVelocity(NozzleZVelocityTextBox.Text, out _);
+        var allProductionAxisParametersValid = AllProductionAxisParametersValid();
         var allZPositionsValid =
             TryParseCoordinate(FirstSetPickupZPositionTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetDropZPositionTextBox.Text, out _) &&
@@ -3246,16 +3663,9 @@ public partial class HomePage : UserControl
             TryParseCoordinate(Bin2PositionYTextBox.Text, out _) &&
             TryParseCoordinate(Bin3PositionXTextBox.Text, out _) &&
             TryParseCoordinate(Bin3PositionYTextBox.Text, out _);
-        var allProductionVelocitiesValid =
-            axis0VelocityValid &&
-            firstSetVelocityValid &&
-            secondSetVelocityValid &&
-            pressVelocityValid &&
-            homeVelocityValid &&
-            nozzleZVelocityValid;
         StartProductionButton.IsEnabled =
             visionControllersReady &&
-            allProductionVelocitiesValid &&
+            allProductionAxisParametersValid &&
             allZPositionsValid &&
             allSecondSetXyPositionsValid &&
             allBinDropPositionsValid &&
@@ -3271,19 +3681,22 @@ public partial class HomePage : UserControl
         MoveAssignedNozzleButton.IsEnabled =
             visionControllersReady &&
             commandsIdle &&
-            firstSetVelocityValid &&
+            allProductionAxisParametersValid &&
             ((_nextAssignedNozzleMoveStep == 1 && _blob1Nozzle1Target is not null) ||
              (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
         PresetPosition1XTextBox.IsEnabled = commandsIdle;
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
-        Axis0VelocityTextBox.IsEnabled = commandsIdle;
-        FirstSetXyVelocityTextBox.IsEnabled = commandsIdle;
-        SecondSetXyVelocityTextBox.IsEnabled = commandsIdle;
-        TestStationPressVelocityTextBox.IsEnabled = commandsIdle;
-        TestStationHomeVelocityTextBox.IsEnabled = commandsIdle;
-        NozzleZVelocityTextBox.IsEnabled = commandsIdle;
+        foreach (var editors in _productionAxisMotionEditors.Values)
+        {
+            editors.SetEnabled(commandsIdle);
+        }
+
+        foreach (var editors in _productionAxisHomeEditors.Values)
+        {
+            editors.SetEnabled(commandsIdle);
+        }
         FirstSetPickupZPositionTextBox.IsEnabled = commandsIdle;
         FirstSetDropZPositionTextBox.IsEnabled = commandsIdle;
         FirstSetSafeZPositionTextBox.IsEnabled = commandsIdle;
@@ -3309,25 +3722,25 @@ public partial class HomePage : UserControl
         MovePresetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            firstSetVelocityValid &&
+            allProductionAxisParametersValid &&
             TryParseCoordinate(PresetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition1YTextBox.Text, out _);
         MovePresetPosition2Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            firstSetVelocityValid &&
+            allProductionAxisParametersValid &&
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
         MoveSecondSetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            secondSetVelocityValid &&
+            allProductionAxisParametersValid &&
             TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _);
         MoveSecondSetPosition2Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            secondSetVelocityValid &&
+            allProductionAxisParametersValid &&
             TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
         HomeEmergencyStopButton.IsEnabled = _motionController is not null;
@@ -3644,6 +4057,16 @@ public partial class HomePage : UserControl
         return velocity;
     }
 
+    private static double ParseNonNegativeCoordinate(string? value, string fieldName)
+    {
+        if (!TryParseCoordinate(value, out var parsed) || parsed < 0)
+        {
+            throw new ArgumentException($"{fieldName}必须是大于或等于0的有效数字。");
+        }
+
+        return parsed;
+    }
+
     private static bool TryParseProductionVelocity(string? value, out double velocity)
     {
         return TryParseCoordinate(value, out velocity) && velocity > 0;
@@ -3722,6 +4145,54 @@ public partial class HomePage : UserControl
                 _ => throw new InvalidOperationException(
                     $"{stationNumber}工位的分BIN结果无效：{bin ?? "空"}。")
             };
+        }
+    }
+
+    private readonly record struct ProductionAxisDefinition(
+        int AxisNo,
+        string GroupName,
+        string DisplayName,
+        double DefaultRunVelocity);
+
+    private sealed record ProductionAxisMotionEditors(
+        Border Container,
+        TextBox RunVelocity,
+        TextBox StartVelocity,
+        TextBox StopVelocity,
+        TextBox AccelerationMilliseconds,
+        TextBox DecelerationMilliseconds,
+        TextBox STimeMilliseconds,
+        TextBox DecelerationStopMilliseconds)
+    {
+        public void SetEnabled(bool enabled)
+        {
+            RunVelocity.IsEnabled = enabled;
+            StartVelocity.IsEnabled = enabled;
+            StopVelocity.IsEnabled = enabled;
+            AccelerationMilliseconds.IsEnabled = enabled;
+            DecelerationMilliseconds.IsEnabled = enabled;
+            STimeMilliseconds.IsEnabled = enabled;
+            DecelerationStopMilliseconds.IsEnabled = enabled;
+        }
+    }
+
+    private sealed record ProductionAxisHomeEditors(
+        Border Container,
+        TextBox Mode,
+        TextBox LowVelocity,
+        TextBox HighVelocity,
+        TextBox AccelerationMilliseconds,
+        TextBox DecelerationMilliseconds,
+        TextBox OffsetPosition)
+    {
+        public void SetEnabled(bool enabled)
+        {
+            Mode.IsEnabled = enabled;
+            LowVelocity.IsEnabled = enabled;
+            HighVelocity.IsEnabled = enabled;
+            AccelerationMilliseconds.IsEnabled = enabled;
+            DecelerationMilliseconds.IsEnabled = enabled;
+            OffsetPosition.IsEnabled = enabled;
         }
     }
 }
