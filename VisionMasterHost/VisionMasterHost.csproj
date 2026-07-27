@@ -58,6 +58,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSBlobFindModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSHPFeatureMatchModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSHPFeatureMatchModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

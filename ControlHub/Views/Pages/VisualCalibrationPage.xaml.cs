@@ -51,8 +51,10 @@ public partial class VisualCalibrationPage : UserControl
     private bool _suppressClickMoveModeEvent;
     private MotionControlPage? _motionController;
     private CalibrationCenterPosition? _recordedCenter;
-    private CalibrationCenterPosition? _nozzleTeachCameraPosition;
-    private VisionTargetTool? _nozzleTeachTool;
+    private CalibrationCenterPosition? _nozzleDotPosition;
+    private VisionRectangleBlobResult? _pendingNozzlePointResult;
+    private bool _nozzlePointFinding;
+    private bool _nozzlePointSaving;
     private CancellationTokenSource? _calibrationCancellation;
     private CancellationTokenSource? _clickMoveCancellation;
     private VisualCalibrationSettings _uiSettings = VisionCalibrationService.Shared.Settings;
@@ -102,8 +104,8 @@ public partial class VisualCalibrationPage : UserControl
         _visionCalibration.ActiveAxisSet = VisionCalibrationService.ParseAxisSet(
             (AxisSetComboBox.SelectedItem as ComboBoxItem)?.Tag as string);
         _recordedCenter = null;
-        _nozzleTeachCameraPosition = null;
-        _nozzleTeachTool = null;
+        _nozzleDotPosition = null;
+        _pendingNozzlePointResult = null;
         _nozzle1ClickVerified = false;
         _nozzle2ClickVerified = false;
         LoadCalibrationSettings();
@@ -475,37 +477,29 @@ public partial class VisualCalibrationPage : UserControl
         }
     }
 
-    private async void RecordCameraToolPoint_Click(object sender, RoutedEventArgs e)
+    private void RecordNozzleDotPosition_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
-            _nozzleTeachCameraPosition = motionController.CaptureCalibrationCenter(
+            _nozzleDotPosition = motionController.CaptureCalibrationCenter(
                 ActiveAxisPair.XHardwareAxisNo,
                 ActiveAxisPair.YHardwareAxisNo);
-            _nozzleTeachTool = VisionTargetTool.Nozzle1;
+            _pendingNozzlePointResult = null;
             ResetActiveNozzleCalibration();
             _nozzle1ClickVerified = false;
             _nozzle2ClickVerified = false;
             SaveCalibrationSettingsNoThrow();
-            UpdateCalibrationProfilePathDisplay();
-            UpdateNozzleTeachUi();
             SetNozzleCalibrationStatus(
-                "十字已记录，请手动让吸嘴1对准同一标记。",
-                WorkflowStatus.Running);
-
-            if (EnableClickMoveCheckBox.IsChecked == true)
-            {
-                SetClickMoveCheckedNoEvent(false);
-                _ = await ConfigureClickMoveModeAsync(false);
-            }
+                $"双吸嘴公共下压位置已记录：X={_nozzleDotPosition.ActualX:0.###}、" +
+                $"Y={_nozzleDotPosition.ActualY:0.###} pulse。打点完成后请回拍照位。",
+                WorkflowStatus.Success);
         }
         catch (Exception exception)
         {
-            _nozzleTeachCameraPosition = null;
-            _nozzleTeachTool = null;
-            SetNozzleCalibrationStatus($"记录十字位置失败：{exception.Message}", WorkflowStatus.Error);
+            _nozzleDotPosition = null;
+            SetNozzleCalibrationStatus($"记录双吸嘴下压XY失败：{exception.Message}", WorkflowStatus.Error);
         }
         finally
         {
@@ -513,53 +507,161 @@ public partial class VisualCalibrationPage : UserControl
         }
     }
 
-    private void RecordNozzleToolPoint_Click(object sender, RoutedEventArgs e)
+    private async void FindNozzlePoints_Click(object sender, RoutedEventArgs e)
     {
+        if (_nozzlePointFinding || _nozzlePointSaving)
+        {
+            return;
+        }
+
         try
         {
-            var cameraPosition = _nozzleTeachCameraPosition
-                ?? throw new InvalidOperationException("请先记录十字对准位置。");
-            var nozzleTool = _nozzleTeachTool
-                ?? throw new InvalidOperationException("请选择需要标定的吸嘴。");
+            var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
+            if (!File.Exists(calibrationFilePath))
+            {
+                throw new FileNotFoundException("九点标定文件不存在，请先完成九点标定。", calibrationFilePath);
+            }
+
+            if (!_hostReady)
+            {
+                throw new InvalidOperationException("视觉组件尚未就绪。");
+            }
+
+            var photoPosition = _recordedCenter
+                ?? throw new InvalidOperationException("请先记录拍照位并完成九点标定。");
+            _ = _nozzleDotPosition
+                ?? throw new InvalidOperationException("请先在两个吸嘴同时下压的位置记录一次XY坐标。");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
-            var nozzlePosition = motionController.CaptureCalibrationCenter(
+            var current = motionController.CaptureCalibrationCenter(
                 ActiveAxisPair.XHardwareAxisNo,
                 ActiveAxisPair.YHardwareAxisNo);
-            var offsetX = nozzlePosition.ActualX - cameraPosition.ActualX;
-            var offsetY = nozzlePosition.ActualY - cameraPosition.ActualY;
-            if (!double.IsFinite(offsetX) || !double.IsFinite(offsetY))
+            if (Math.Abs(current.ActualX - photoPosition.ActualX) > DefaultPositionTolerancePulses ||
+                Math.Abs(current.ActualY - photoPosition.ActualY) > DefaultPositionTolerancePulses)
             {
-                throw new InvalidOperationException("计算得到的吸嘴偏移无效。");
+                throw new InvalidOperationException("当前不在拍照位，请先点击“回拍照位”。");
             }
 
-            SetActiveNozzleOffset(nozzleTool, offsetX, offsetY);
-            if (nozzleTool != VisionTargetTool.Nozzle2)
+            if (EnableClickMoveCheckBox.IsChecked == true)
             {
-                _nozzleTeachTool = VisionTargetTool.Nozzle2;
-                SaveCalibrationSettingsNoThrow();
-                UpdateNozzleTeachUi();
-                SetNozzleCalibrationStatus(
-                    "吸嘴1已记录，请直接让吸嘴2对准同一标记，不用再对十字。",
-                    WorkflowStatus.Running);
-                return;
+                SetClickMoveCheckedNoEvent(false);
+                _ = await ConfigureClickMoveModeAsync(false);
             }
 
-            _nozzleTeachCameraPosition = null;
-            _nozzleTeachTool = null;
-            SelectClickTargetTool(VisionTargetTool.Nozzle1);
-            SaveCalibrationSettingsNoThrow();
+            _nozzlePointFinding = true;
+            _pendingNozzlePointResult = null;
+            ResetActiveNozzleCalibration();
+            _nozzle1ClickVerified = false;
+            _nozzle2ClickVerified = false;
             UpdateNozzleTeachUi();
+            UpdateCommandState();
+            SetNozzleCalibrationStatus("正在执行“粗定位示教流程”查找两个点…", WorkflowStatus.Running);
+
+            _pendingNozzlePointResult = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
+            var point1 = _pendingNozzlePointResult.Rectangle1;
+            var point2 = _pendingNozzlePointResult.Rectangle2;
             SetNozzleCalibrationStatus(
-                "双吸嘴完成，请分别点击验证吸嘴1、吸嘴2，确认后保存配置。",
+                $"点1：({point1.X:0.###}, {point1.Y:0.###})　点2：({point2.X:0.###}, {point2.Y:0.###})\n" +
+                "请选择点1对应哪个吸嘴。",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)
         {
-            SetNozzleCalibrationStatus($"记录吸嘴位置失败：{exception.Message}", WorkflowStatus.Error);
+            _pendingNozzlePointResult = null;
+            SetNozzleCalibrationStatus($"粗定位示教失败：{exception.Message}", WorkflowStatus.Error);
         }
         finally
         {
+            _nozzlePointFinding = false;
+            UpdateCommandState();
+        }
+    }
+
+    private async void AssignPoint1ToNozzle1_Click(object sender, RoutedEventArgs e)
+    {
+        await AssignNozzlePointsAsync(firstPointIsNozzle1: true);
+    }
+
+    private async void AssignPoint1ToNozzle2_Click(object sender, RoutedEventArgs e)
+    {
+        await AssignNozzlePointsAsync(firstPointIsNozzle1: false);
+    }
+
+    private async Task AssignNozzlePointsAsync(bool firstPointIsNozzle1)
+    {
+        if (_nozzlePointFinding || _nozzlePointSaving)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = _pendingNozzlePointResult
+                ?? throw new InvalidOperationException("请先手动点击“执行粗定位示教”。");
+            var photoPosition = _recordedCenter
+                ?? throw new InvalidOperationException("拍照位XY尚未记录。");
+            var nozzleDotPosition = _nozzleDotPosition
+                ?? throw new InvalidOperationException("双吸嘴公共下压XY尚未记录。");
+            var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
+            if (!File.Exists(calibrationFilePath))
+            {
+                throw new FileNotFoundException("九点标定文件不存在，请先完成九点标定。", calibrationFilePath);
+            }
+
+            _nozzlePointSaving = true;
+            UpdateCommandState();
+            SetNozzleCalibrationStatus("正在换算两个吸嘴点并保存配置…", WorkflowStatus.Running);
+
+            var first = await VisionHost.TransformPixelAsync(
+                result.Rectangle1.X,
+                result.Rectangle1.Y,
+                calibrationFilePath,
+                CancellationToken.None);
+            var second = await VisionHost.TransformPixelAsync(
+                result.Rectangle2.X,
+                result.Rectangle2.Y,
+                calibrationFilePath,
+                CancellationToken.None);
+
+            (double X, double Y) CalculateOffset(VisionPixelTransformResult point)
+            {
+                // 点在公共下压位置生成。先用标定矩阵得到该像素相对图像中心的机械位移，
+                // 再叠加“公共下压位置 - 拍照位”，即可得到对应吸嘴相对相机的偏移。
+                return (
+                    nozzleDotPosition.ActualX - photoPosition.ActualX +
+                    (point.TransformedX - point.CenterTransformedX) * PulsesPerVisionUnit,
+                    nozzleDotPosition.ActualY - photoPosition.ActualY +
+                    (point.TransformedY - point.CenterTransformedY) * PulsesPerVisionUnit);
+            }
+
+            var firstOffset = CalculateOffset(first);
+            var secondOffset = CalculateOffset(second);
+            var nozzle1Offset = firstPointIsNozzle1 ? firstOffset : secondOffset;
+            var nozzle2Offset = firstPointIsNozzle1 ? secondOffset : firstOffset;
+            if (!double.IsFinite(nozzle1Offset.X) ||
+                !double.IsFinite(nozzle1Offset.Y) ||
+                !double.IsFinite(nozzle2Offset.X) ||
+                !double.IsFinite(nozzle2Offset.Y))
+            {
+                throw new InvalidOperationException("标定转换得到的吸嘴偏移无效。");
+            }
+
+            SetActiveNozzleOffset(VisionTargetTool.Nozzle1, nozzle1Offset.X, nozzle1Offset.Y);
+            SetActiveNozzleOffset(VisionTargetTool.Nozzle2, nozzle2Offset.X, nozzle2Offset.Y);
+            SelectClickTargetTool(VisionTargetTool.Nozzle1);
+            var profilePath = SaveCurrentCalibrationProfile();
+            _pendingNozzlePointResult = null;
+            SetNozzleCalibrationStatus(
+                $"点1已分配给{(firstPointIsNozzle1 ? "吸嘴1" : "吸嘴2")}，双吸嘴配置已自动保存：\n{profilePath}",
+                WorkflowStatus.Success);
+        }
+        catch (Exception exception)
+        {
+            SetNozzleCalibrationStatus($"分配或保存吸嘴点失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _nozzlePointSaving = false;
             UpdateCommandState();
         }
     }
@@ -653,7 +755,7 @@ public partial class VisualCalibrationPage : UserControl
             calibrationCompleted = true;
             CalibrationProgressBar.Value = 9;
             SetWorkflowStatus(
-                completionMessage + "；轴1/2已回到中心，请继续第4步双吸嘴对位。",
+                completionMessage + "；轴1/2已回到拍照位。请移动到双吸嘴下压位置，同时打点并记录一次公共XY。",
                 WorkflowStatus.Success);
         }
         catch (OperationCanceledException)
@@ -679,8 +781,8 @@ public partial class VisualCalibrationPage : UserControl
 
         if (calibrationCompleted)
         {
-            _nozzleTeachCameraPosition = null;
-            _nozzleTeachTool = null;
+            _nozzleDotPosition = null;
+            _pendingNozzlePointResult = null;
             ResetActiveNozzleCalibration();
             _nozzle1ClickVerified = false;
             _nozzle2ClickVerified = false;
@@ -688,13 +790,10 @@ public partial class VisualCalibrationPage : UserControl
             UpdateCalibrationProfilePathDisplay();
             UpdateNozzleTeachUi();
             UpdateNozzleCalibrationDisplay();
-
-            SelectClickTargetTool(VisionTargetTool.Camera);
-            SetClickMoveCheckedNoEvent(true);
-            if (!await ConfigureClickMoveModeAsync(true))
-            {
-                SetClickMoveCheckedNoEvent(false);
-            }
+            SetClickMoveCheckedNoEvent(false);
+            SetNozzleCalibrationStatus(
+                "已回到拍照位。请移动到双吸嘴下压位置，让两个吸嘴同时打点并记录一次公共XY。",
+                WorkflowStatus.Ready);
         }
     }
 
@@ -854,7 +953,7 @@ public partial class VisualCalibrationPage : UserControl
         {
             var profile = _profileStore.Load(dialog.FileName);
             ApplyCalibrationProfile(profile, dialog.FileName);
-            SetWorkflowStatus("双吸嘴配置已加载，可在第5步选择吸嘴点击测试。", WorkflowStatus.Success);
+            SetWorkflowStatus("双吸嘴配置已加载，可在第4步选择吸嘴点击测试。", WorkflowStatus.Success);
         }
         catch (Exception exception)
         {
@@ -943,11 +1042,17 @@ public partial class VisualCalibrationPage : UserControl
             case "StopCalibration":
                 StopCalibration_Click(this, new RoutedEventArgs());
                 break;
-            case "RecordCamera":
-                RecordCameraToolPoint_Click(this, new RoutedEventArgs());
+            case "RecordNozzleDotPosition":
+                RecordNozzleDotPosition_Click(this, new RoutedEventArgs());
                 break;
-            case "RecordNozzle":
-                RecordNozzleToolPoint_Click(this, new RoutedEventArgs());
+            case "FindNozzlePoints":
+                FindNozzlePoints_Click(this, new RoutedEventArgs());
+                break;
+            case "AssignPoint1Nozzle1":
+                AssignPoint1ToNozzle1_Click(this, new RoutedEventArgs());
+                break;
+            case "AssignPoint1Nozzle2":
+                AssignPoint1ToNozzle2_Click(this, new RoutedEventArgs());
                 break;
             case "ReturnCameraCenter":
                 ReturnCameraToCenter_Click(this, new RoutedEventArgs());
@@ -1010,7 +1115,7 @@ public partial class VisualCalibrationPage : UserControl
         if (!_visionCalibration.IsToolCalibrated(targetTool))
         {
             SetClickMoveStatus(
-                $"请先完成第4步{GetToolDisplayName(targetTool)}对位。",
+                $"请先完成第3步粗定位示教，再选择{GetToolDisplayName(targetTool)}。",
                 WorkflowStatus.Error);
         }
 
@@ -1242,19 +1347,12 @@ public partial class VisualCalibrationPage : UserControl
 
             var verificationMessage = targetTool switch
             {
-                VisionTargetTool.Camera => "相机中心已对准目标，请点击“记录十字”。",
+                VisionTargetTool.Camera => "相机中心已对准目标。",
                 _ when finishNozzleVerification =>
                     "双吸嘴验证完成，正在退出点击移动。",
                 _ when _nozzle1ClickVerified => "请继续验证吸嘴2。",
                 _ => "请继续验证吸嘴1。"
             };
-            if (targetTool == VisionTargetTool.Camera)
-            {
-                SetNozzleCalibrationStatus(
-                    "相机中心已对准目标，请记录十字位置，再手动移动吸嘴1对准同一目标。",
-                    WorkflowStatus.Running);
-            }
-
             SetClickMoveStatus(
                 $"{targetName}验证完成：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###}；" +
                 verificationMessage,
@@ -1480,27 +1578,38 @@ public partial class VisualCalibrationPage : UserControl
 
     private void UpdateNozzleTeachUi()
     {
-        if (NozzleTeachStepText is null || RecordNozzleToolPointButton is null)
+        if (NozzleTeachStepText is null)
         {
             return;
         }
 
-        if (_nozzleTeachCameraPosition is null || _nozzleTeachTool is null)
+        if (_nozzlePointFinding)
         {
-            NozzleTeachStepText.Text = "等待记录十字";
-            RecordNozzleToolPointButton.Content = "2 记录吸嘴1";
+            NozzleTeachStepText.Text = "正在查找";
             return;
         }
 
-        if (_nozzleTeachTool == VisionTargetTool.Nozzle1)
+        if (_nozzlePointSaving)
         {
-            NozzleTeachStepText.Text = "当前：吸嘴1";
-            RecordNozzleToolPointButton.Content = "2 记录吸嘴1";
+            NozzleTeachStepText.Text = "正在保存";
             return;
         }
 
-        NozzleTeachStepText.Text = "当前：吸嘴2";
-        RecordNozzleToolPointButton.Content = "3 记录吸嘴2";
+        if (_pendingNozzlePointResult is not null)
+        {
+            NozzleTeachStepText.Text = "等待分配";
+            return;
+        }
+
+        if (ActiveNozzle1Calibrated && ActiveNozzle2Calibrated)
+        {
+            NozzleTeachStepText.Text = "已保存";
+            return;
+        }
+
+        NozzleTeachStepText.Text = _nozzleDotPosition is null
+            ? "等待记录下压XY"
+            : "下压XY已记录";
     }
 
     private static string GetToolDisplayName(VisionTargetTool tool)
@@ -1559,12 +1668,7 @@ public partial class VisualCalibrationPage : UserControl
     {
         if (!ActiveNozzle1Calibrated || !ActiveNozzle2Calibrated)
         {
-            throw new InvalidOperationException("请先按顺序完成吸嘴1和吸嘴2对位。");
-        }
-
-        if (!_nozzle1ClickVerified || !_nozzle2ClickVerified)
-        {
-            throw new InvalidOperationException("请先分别完成吸嘴1和吸嘴2的点击移动验证。");
+            throw new InvalidOperationException("请先查找两个吸嘴点并完成吸嘴分配。");
         }
 
         var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
@@ -1587,6 +1691,9 @@ public partial class VisualCalibrationPage : UserControl
             VelocityPulsesPerSecond = ParsePositiveDouble(VelocityTextBox.Text, "标定速度"),
             SettleMilliseconds = ParseNonNegativeInt(SettleMillisecondsTextBox.Text, "到位稳定等待"),
             MovePriority = (MovePriorityComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Y" ? "Y" : "X",
+            NozzleDotPositionRecorded = _nozzleDotPosition is not null,
+            NozzleDotPositionXPulses = _nozzleDotPosition?.ActualX ?? 0d,
+            NozzleDotPositionYPulses = _nozzleDotPosition?.ActualY ?? 0d,
             Nozzle1Calibrated = true,
             Nozzle1OffsetXPulses = ActiveNozzle1OffsetX,
             Nozzle1OffsetYPulses = ActiveNozzle1OffsetY,
@@ -1646,8 +1753,8 @@ public partial class VisualCalibrationPage : UserControl
             _uiSettings.Nozzle2OffsetYPulses = profile.Nozzle2OffsetYPulses;
             _uiSettings.ClickTargetTool = "Nozzle1";
         }
-        _nozzleTeachCameraPosition = null;
-        _nozzleTeachTool = null;
+        _nozzleDotPosition = null;
+        _pendingNozzlePointResult = null;
         _nozzle1ClickVerified = false;
         _nozzle2ClickVerified = false;
 
@@ -1814,7 +1921,11 @@ public partial class VisualCalibrationPage : UserControl
         if (RecordCenterButton is null ||
             StartLivePreviewButton is null ||
             CalibrationFilePathTextBox is null ||
-            RecordCameraToolPointButton is null ||
+            RecordNozzleDotPositionButton is null ||
+            ReturnToPhotoPositionButton is null ||
+            FindNozzlePointsButton is null ||
+            AssignPoint1ToNozzle1Button is null ||
+            AssignPoint1ToNozzle2Button is null ||
             ImportCalibrationFileButton is null ||
             LoadCalibrationProfileButton is null ||
             SaveCalibrationProfileButton is null ||
@@ -1831,8 +1942,6 @@ public partial class VisualCalibrationPage : UserControl
         var profileReadyToSave =
             ActiveNozzle1Calibrated &&
             ActiveNozzle2Calibrated &&
-            _nozzle1ClickVerified &&
-            _nozzle2ClickVerified &&
             calibrationPathValid &&
             File.Exists(calibrationFilePath);
 
@@ -1910,21 +2019,57 @@ public partial class VisualCalibrationPage : UserControl
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
             EnableClickMoveCheckBox.IsChecked != true &&
-            _nozzleTeachCameraPosition is null;
-        RecordCameraToolPointButton.IsEnabled =
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving;
+        RecordNozzleDotPositionButton.IsEnabled =
             !_calibrationRunning &&
             !_centerSyncRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
-            _motionController is not null;
-        RecordNozzleToolPointButton.IsEnabled =
-            !_calibrationRunning &&
-            !_centerSyncRunning &&
-            !_clickMoveRunning &&
-            !_clickMoveConfigurationRunning &&
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving &&
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null &&
-            _nozzleTeachCameraPosition is not null;
+            _recordedCenter is not null &&
+            calibrationPathValid &&
+            File.Exists(calibrationFilePath);
+        ReturnToPhotoPositionButton.IsEnabled =
+            _recordedCenter is not null &&
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving &&
+            _motionController is not null;
+        FindNozzlePointsButton.IsEnabled =
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving &&
+            EnableClickMoveCheckBox.IsChecked != true &&
+            _motionController is not null &&
+            _recordedCenter is not null &&
+            _nozzleDotPosition is not null &&
+            _hostReady &&
+            calibrationPathValid &&
+            File.Exists(calibrationFilePath);
+        var nozzleAssignmentEnabled =
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving &&
+            EnableClickMoveCheckBox.IsChecked != true &&
+            _hostReady &&
+            _recordedCenter is not null &&
+            _nozzleDotPosition is not null &&
+            _pendingNozzlePointResult is not null;
+        AssignPoint1ToNozzle1Button.IsEnabled = nozzleAssignmentEnabled;
+        AssignPoint1ToNozzle2Button.IsEnabled = nozzleAssignmentEnabled;
         ClickTargetToolComboBox.IsEnabled =
             !_calibrationRunning &&
             !_clickMoveRunning &&
@@ -1934,8 +2079,9 @@ public partial class VisualCalibrationPage : UserControl
             !_calibrationRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving &&
             _motionController is not null &&
-            _nozzleTeachCameraPosition is null &&
             _hostReady &&
             clickTargetReady &&
             calibrationPathValid &&
@@ -2036,7 +2182,7 @@ public partial class VisualCalibrationPage : UserControl
                     VelocityTextBox.Text,
                     SettleMillisecondsTextBox.Text,
                     NozzleTeachStepText.Text,
-                    RecordNozzleToolPointButton.Content?.ToString() ?? "2 记录吸嘴1",
+                    "点1 = 吸嘴1",
                     NozzleCalibrationStatusText.Text,
                     clickTarget,
                     EnableClickMoveCheckBox.IsChecked == true,
@@ -2046,8 +2192,8 @@ public partial class VisualCalibrationPage : UserControl
                     StartCalibrationButton.IsEnabled,
                     _calibrationRunning,
                     StepXPulsesTextBox.IsEnabled,
-                    RecordCameraToolPointButton.IsEnabled,
-                    RecordNozzleToolPointButton.IsEnabled,
+                    FindNozzlePointsButton.IsEnabled,
+                    AssignPoint1ToNozzle1Button.IsEnabled,
                     ClickTargetToolComboBox.IsEnabled,
                     EnableClickMoveCheckBox.IsEnabled,
                     _recordedCenter is not null &&
@@ -2060,7 +2206,8 @@ public partial class VisualCalibrationPage : UserControl
                     GetBrushColor(CenterVmText.Foreground, "#12D879"),
                     GetBrushColor(NozzleCalibrationStatusText.Foreground, "#AFC0CD"),
                     GetBrushColor(ClickMoveStatusText.Foreground, "#AFC0CD"),
-                    WorkflowStatusText.Text);
+                    WorkflowStatusText.Text,
+                    RecordNozzleDotPositionButton.IsEnabled);
                 try
                 {
                     await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);

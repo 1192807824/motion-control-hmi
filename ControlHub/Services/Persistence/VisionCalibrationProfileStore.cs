@@ -56,6 +56,8 @@ public sealed class VisionCalibrationProfileStore
             profile.SettleMilliseconds < 0 ||
             (!string.Equals(profile.MovePriority, "X", StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(profile.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)) ||
+            (profile.NozzleDotPositionRecorded &&
+             !AreFinite(profile.NozzleDotPositionXPulses, profile.NozzleDotPositionYPulses)) ||
             !profile.Nozzle1Calibrated ||
             !profile.Nozzle2Calibrated ||
             !AreFinite(
@@ -124,6 +126,12 @@ public sealed class VisionCalibrationProfile
     public int SettleMilliseconds { get; set; } = 300;
 
     public string MovePriority { get; set; } = "X";
+
+    public bool NozzleDotPositionRecorded { get; set; }
+
+    public double NozzleDotPositionXPulses { get; set; }
+
+    public double NozzleDotPositionYPulses { get; set; }
 
     public bool Nozzle1Calibrated { get; set; }
 

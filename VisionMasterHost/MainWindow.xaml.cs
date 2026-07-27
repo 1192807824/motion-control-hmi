@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
+using IMVSHPFeatureMatchModuCs;
 using IMVSNPointCalibModuCs;
 using VM.Core;
 using VM.PlatformSDKCS;
@@ -22,11 +23,13 @@ public partial class MainWindow : Window
     private const string FixedSolutionFileName = "新纳方案.sol";
     private const string FallbackSolutionFileName = "标定方案.sol";
     private const string InspectionProcedureName = "找芯片流程";
+    private const string NozzlePointProcedureName = "粗定位示教流程";
     private const string CalibrationProcedureName = "标定流程";
     private const string CalibrationImageSourceName = "图像源1";
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
+    private const string NozzlePointMatchModuleName = "高精度匹配1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly bool _embedded;
@@ -36,6 +39,7 @@ public partial class MainWindow : Window
     private readonly object _commandPipeSync = new();
     private VmProcedure? _previewProcedure;
     private VmProcedure? _inspectionProcedure;
+    private VmProcedure? _nozzlePointProcedure;
     private VmProcedure? _calibrationProcedure;
     private IMVSCalibTransformModuTool? _standaloneTransformModule;
     private IMVSBlobFindModuTool? _standaloneBlobModule;
@@ -255,6 +259,7 @@ public partial class MainWindow : Window
             "START_LIVE_PREVIEW" => throw new InvalidOperationException("START_LIVE_PREVIEW must be executed asynchronously."),
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
+            "RUN_NOZZLE_POINTS" => RunNozzlePointInspection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
     }
@@ -348,9 +353,26 @@ public partial class MainWindow : Window
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
+        return RunTwoPointInspection(parts, InspectionProcedureName, ref _inspectionProcedure);
+    }
+
+    /// <summary>
+    /// 单次执行“粗定位示教流程”，读取“高精度匹配1”结果表前两行的匹配框中心点。
+    /// 流程只负责找点，不驱动运动轴或吸嘴动作。
+    /// </summary>
+    private string RunNozzlePointInspection(IReadOnlyList<string> parts)
+    {
+        return RunTwoPointInspection(parts, NozzlePointProcedureName, ref _nozzlePointProcedure);
+    }
+
+    private string RunTwoPointInspection(
+        IReadOnlyList<string> parts,
+        string procedureName,
+        ref VmProcedure? cachedProcedure)
+    {
         if (parts.Count != 1)
         {
-            throw new InvalidDataException("找芯片流程命令参数不正确。");
+            throw new InvalidDataException($"{procedureName}命令参数不正确。");
         }
 
         if (_busy || _calibrationSession is not null)
@@ -358,25 +380,43 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("视觉标定正在执行，暂不允许拍照检测。");
         }
 
-        if (!_solutionLoaded || _inspectionProcedure is null)
+        if (!_solutionLoaded)
         {
             // 进程窗口先于方案加载完成时，主页可能已经发来第一次检测命令。
             // 在 UI 线程内同步确保固定方案已就绪，避免出现启动时序导致的方案切换或误报。
             LoadFixedSolution();
         }
 
-        if (!_solutionLoaded || _inspectionProcedure is null)
+        if (!_solutionLoaded)
         {
             throw new InvalidOperationException(
                 $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
         }
 
-        var procedure = _inspectionProcedure;
-        var blobModule = ResolveNamedBlobFindModule(InspectionProcedureName, InspectionBlobModuleName);
-        // 同一相机不能被两个流程同时占用。找芯片前明确停止方案内的连续执行。
+        cachedProcedure ??= GetRequiredProcedure(procedureName);
+        var procedure = cachedProcedure;
+        var isNozzlePointProcedure = string.Equals(
+            procedureName,
+            NozzlePointProcedureName,
+            StringComparison.Ordinal);
+        var blobModule = isNozzlePointProcedure
+            ? null
+            : ResolveNamedBlobFindModule(InspectionProcedureName, InspectionBlobModuleName);
+        var matchModule = isNozzlePointProcedure
+            ? ResolveNamedHighPrecisionMatchModule(procedureName, NozzlePointMatchModuleName)
+            : null;
+        var resultModule = (VmModule?)matchModule ?? blobModule
+            ?? throw new InvalidOperationException($"固定方案的“{procedureName}”中未找到结果模块。");
+        // 同一相机不能被两个流程同时占用。找点前明确停止方案内的连续执行。
         StopAllContinuousExecutionNoThrow();
 
-        BindInspectionBlobModule(blobModule);
+        if (isNozzlePointProcedure)
+        {
+            ApplyLiveRenderLayout();
+            RefreshRenderLayout();
+        }
+
+        BindInspectionResultModule(resultModule);
 
         InspectionImageFile? inspectionImage = null;
         try
@@ -393,27 +433,52 @@ public partial class MainWindow : Window
                             $"{error.strDisplayName}(0x{unchecked((uint)error.nErrorCode):X8})"));
                 throw new InvalidOperationException(
                     string.IsNullOrWhiteSpace(details)
-                        ? $"固定方案中的{InspectionProcedureName}执行异常。"
-                        : $"固定方案中的{InspectionProcedureName}执行异常：{details}");
+                        ? $"固定方案中的{procedureName}执行异常。"
+                        : $"固定方案中的{procedureName}执行异常：{details}");
             }
 
-            var blobResult = blobModule.ModuResult;
-            if (blobResult.ModuStatus != 1)
+            RectangleBlobCandidate first;
+            RectangleBlobCandidate second;
+            if (matchModule is not null)
             {
-                throw new InvalidOperationException(
-                    $"{InspectionProcedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
-            }
+                var matchResult = matchModule.ModuResult;
+                if (matchResult.ModuStatus != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{NozzlePointMatchModuleName}返回NG，请检查模板和匹配参数。");
+                }
 
-            var resultCount = Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0);
-            if (resultCount < 2)
+                var resultCount = Math.Min(matchResult.MatchNum, matchResult.MatchRect?.Count ?? 0);
+                if (resultCount < 2)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{NozzlePointMatchModuleName}只返回 {resultCount} 个匹配结果，必须找到两个中心点。");
+                }
+
+                // 与“高精度匹配1”的当前结果表一致，直接取第0、1行匹配框的中心点。
+                first = ReadHighPrecisionMatchCenter(matchResult, 0);
+                second = ReadHighPrecisionMatchCenter(matchResult, 1);
+            }
+            else
             {
-                throw new InvalidOperationException(
-                    $"{InspectionProcedureName}.{InspectionBlobModuleName}只返回 {resultCount} 个结果，至少需要两个。");
-            }
+                var blobResult = blobModule!.ModuResult;
+                if (blobResult.ModuStatus != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
+                }
 
-            // 与 VisionMaster 的“当前结果”表严格一致：直接读取第0、1行，不筛选也不重排。
-            var first = ReadBlobResultRow(blobResult, 0);
-            var second = ReadBlobResultRow(blobResult, 1);
+                var resultCount = Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0);
+                if (resultCount < 2)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{InspectionBlobModuleName}只返回 {resultCount} 个结果，至少需要两个。");
+                }
+
+                // 与 VisionMaster 的“当前结果”表严格一致：直接读取第0、1行，不筛选也不重排。
+                first = ReadBlobResultRow(blobResult, 0);
+                second = ReadBlobResultRow(blobResult, 1);
+            }
 
             var imageWarning = "";
             try
@@ -429,7 +494,7 @@ public partial class MainWindow : Window
             }
 
             SetStatus(
-                $"{InspectionProcedureName}执行完成：结果1({first.PixelX:0.###}, {first.PixelY:0.###})，" +
+                $"{procedureName}执行完成：结果1({first.PixelX:0.###}, {first.PixelY:0.###})，" +
                 $"结果2({second.PixelX:0.###}, {second.PixelY:0.###}){imageWarning}",
                 StatusKind.Success);
             return string.Join(
@@ -469,7 +534,7 @@ public partial class MainWindow : Window
         {
             if (!_closed)
             {
-                // 找芯片流程保持单次执行；停止全部连续流程即可释放相机，同时保留Blob结果图。
+                // 找点流程保持单次执行；停止全部连续流程即可释放相机，同时保留结果图。
                 StopAllContinuousExecutionNoThrow();
             }
 
@@ -543,7 +608,7 @@ public partial class MainWindow : Window
     private void ResetCalibrationSaveFeedback()
     {
         SaveCalibrationProfileToolbarButton.Content = "保存配置";
-        SaveCalibrationProfileToolbarButton.ToolTip = "保存当前九点标定和双吸嘴对位配置";
+        SaveCalibrationProfileToolbarButton.ToolTip = "保存当前九点标定和双吸嘴粗定位示教配置";
         SaveCalibrationProfileToolbarButton.Background = new SolidColorBrush(Color.FromRgb(11, 43, 36));
         SaveCalibrationProfileToolbarButton.BorderBrush = new SolidColorBrush(Color.FromRgb(0, 169, 101));
         SaveCalibrationProfileToolbarButton.Foreground = new SolidColorBrush(Color.FromRgb(30, 234, 134));
@@ -551,7 +616,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 30)
+        if (parts.Count != 31)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -634,6 +699,7 @@ public partial class MainWindow : Window
             SidebarSettleTextBox.IsEnabled = parameterInputsEnabled;
             SidebarRecordCameraButton.IsEnabled = parts[20] == "1";
             SidebarRecordNozzleButton.IsEnabled = parts[21] == "1";
+            SidebarAssignPoint1Nozzle2Button.IsEnabled = parts[21] == "1";
             SidebarClickTargetComboBox.IsEnabled = parts[22] == "1";
             SidebarEnableClickMoveCheckBox.IsEnabled = parts[23] == "1";
             SidebarReturnCameraCenterButton.IsEnabled = parts[24] == "1";
@@ -642,6 +708,7 @@ public partial class MainWindow : Window
             SidebarNozzleStatusText.Foreground = ParseBrush(Decode(parts[27]), Brushes.LightSteelBlue);
             SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[28]), Brushes.LightSteelBlue);
             SidebarStartCalibrationButton.ToolTip = Decode(parts[29]);
+            SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
         }
         finally
         {
@@ -652,16 +719,15 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 与参考程序一致，直接把指定执行模块绑定到 VmRenderControl。
-    /// 主页只显示“Blob分析1”的模块结果，不显示方案工具栏或标定模块。
+    /// 与参考程序一致，直接把指定结果模块绑定到 VmRenderControl。
     /// </summary>
-    private void BindInspectionBlobModule(IMVSBlobFindModuTool blobModule)
+    private void BindInspectionResultModule(VmModule resultModule)
     {
         DetachCrosshairModule();
         _displayedModule = null;
         ImagePlaceholder.Visibility = Visibility.Visible;
         CenterCrosshair.Visibility = Visibility.Collapsed;
-        VisionRenderControl.ModuleSource = blobModule;
+        VisionRenderControl.ModuleSource = resultModule;
     }
 
     /// <summary>
@@ -911,6 +977,47 @@ public partial class MainWindow : Window
             blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y),
             Math.Max(1, blobRect?.RectWidth ?? 1),
             Math.Max(1, blobRect?.RectHeight ?? 1));
+    }
+
+    private static RectangleBlobCandidate ReadHighPrecisionMatchCenter(
+        HPFeatureMatchResult result,
+        int index)
+    {
+        var rectangles = result.MatchRect;
+        var resultCount = Math.Min(result.MatchNum, rectangles?.Count ?? 0);
+        if (rectangles is null || index < 0 || index >= resultCount)
+        {
+            throw new InvalidOperationException(
+                $"{NozzlePointMatchModuleName}未返回第 {index + 1} 行匹配结果。");
+        }
+
+        var rectangle = rectangles[index]
+            ?? throw new InvalidOperationException(
+                $"{NozzlePointMatchModuleName}第 {index + 1} 行的匹配框为空。");
+        var center = rectangle.CenterPoint;
+        if (center is null ||
+            float.IsNaN(center.X) || float.IsInfinity(center.X) || center.X < 0 ||
+            float.IsNaN(center.Y) || float.IsInfinity(center.Y) || center.Y < 0)
+        {
+            throw new InvalidOperationException(
+                $"{NozzlePointMatchModuleName}第 {index + 1} 行的中心点 X/Y 无效。");
+        }
+
+        var width = float.IsNaN(rectangle.BoxWidth) || float.IsInfinity(rectangle.BoxWidth) || rectangle.BoxWidth <= 0
+            ? 1f
+            : rectangle.BoxWidth;
+        var height = float.IsNaN(rectangle.BoxHeight) || float.IsInfinity(rectangle.BoxHeight) || rectangle.BoxHeight <= 0
+            ? 1f
+            : rectangle.BoxHeight;
+        return new RectangleBlobCandidate(
+            center.X,
+            center.Y,
+            0f,
+            width * height,
+            (int)Math.Round(center.X - width / 2f),
+            (int)Math.Round(center.Y - height / 2f),
+            Math.Max(1, (int)Math.Round(width)),
+            Math.Max(1, (int)Math.Round(height)));
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -1533,6 +1640,63 @@ public partial class MainWindow : Window
 
         throw new InvalidOperationException(
             $"固定方案的“{procedureName}”中未找到“{blobModuleName}”。");
+    }
+
+    /// <summary>
+    /// 按显示名精确定位粗定位示教流程中的“高精度匹配1”。
+    /// </summary>
+    private static IMVSHPFeatureMatchModuTool ResolveNamedHighPrecisionMatchModule(
+        string procedureName,
+        string matchModuleName)
+    {
+        try
+        {
+            if (VmSolution.Instance[$"{procedureName}.{matchModuleName}"] is IMVSHPFeatureMatchModuTool directModule)
+            {
+                return directModule;
+            }
+        }
+        catch
+        {
+            // 部分方案需要先从模块列表取得实际查询键，下面进行精确显示名回退。
+        }
+
+        var procedure = VmSolution.Instance[procedureName] as VmProcedure
+            ?? throw new InvalidOperationException($"固定方案中未找到“{procedureName}”。");
+        var moduleList = procedure.GetProcedureModuleList();
+        for (var index = 0; index < moduleList.nNum; index++)
+        {
+            var info = moduleList.astModuleInfo[index];
+            var displayName = info.strDisplayName?.Trim() ?? "";
+            if (!string.Equals(displayName, matchModuleName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var moduleName = info.strModuleName?.Trim() ?? "";
+            foreach (var candidate in new[]
+                     {
+                         $"{procedureName}.{displayName}",
+                         $"{procedureName}.{moduleName}",
+                         displayName,
+                         moduleName
+                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
+            {
+                try
+                {
+                    if (VmSolution.Instance[candidate] is IMVSHPFeatureMatchModuTool module)
+                    {
+                        return module;
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"固定方案的“{procedureName}”中未找到“{matchModuleName}”。");
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
@@ -2184,6 +2348,7 @@ public partial class MainWindow : Window
             _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
             _previewProcedure = _calibrationProcedure;
             _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
+            _nozzlePointProcedure = null;
             _calibrationViewActive = false;
 
             // 方案可能保存了“连续运行”状态。主页阶段只保留找芯片流程，标定页打开后再取标定对象。
@@ -2583,6 +2748,7 @@ public partial class MainWindow : Window
 
         _previewProcedure = null;
         _inspectionProcedure = null;
+        _nozzlePointProcedure = null;
         _calibrationProcedure = null;
         _calibrationViewActive = false;
         _loadedSolutionPath = "";
@@ -2609,6 +2775,7 @@ public partial class MainWindow : Window
 
         _previewProcedure = null;
         _inspectionProcedure = null;
+        _nozzlePointProcedure = null;
         _calibrationProcedure = null;
         _calibrationViewActive = false;
         _loadedSolutionPath = "";
@@ -2831,7 +2998,7 @@ public partial class MainWindow : Window
         {
         }
 
-        foreach (var procedure in new[] { _previewProcedure, _inspectionProcedure, _calibrationProcedure })
+        foreach (var procedure in new[] { _previewProcedure, _inspectionProcedure, _nozzlePointProcedure, _calibrationProcedure })
         {
             if (procedure is null)
             {

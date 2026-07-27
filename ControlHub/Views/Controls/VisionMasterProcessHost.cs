@@ -379,7 +379,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.CenterVmColor),
                 Encode(state.NozzleStatusColor),
                 Encode(state.ClickMoveStatusColor),
-                Encode(state.WorkflowStatus)),
+                Encode(state.WorkflowStatus),
+                state.RecordNozzleDotPositionEnabled ? "1" : "0"),
             cancellationToken);
     }
 
@@ -437,11 +438,27 @@ public sealed class VisionMasterProcessHost : HwndHost
     /// 在按需加载的固定视觉方案中，单次执行
     /// “找芯片流程 → Blob分析1”，返回结果表前两行的矩形与像素质心。
     /// </summary>
-    public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+    public Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+        CancellationToken cancellationToken)
+    {
+        return RunTwoPointBlobInspectionAsync("RUN_RECTANGLE_BLOB", cancellationToken);
+    }
+
+    /// <summary>
+    /// 手动触发固定方案中的“粗定位示教流程”，返回流程找到的前两个点。
+    /// </summary>
+    public Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
+        CancellationToken cancellationToken)
+    {
+        return RunTwoPointBlobInspectionAsync("RUN_NOZZLE_POINTS", cancellationToken);
+    }
+
+    private async Task<VisionRectangleBlobResult> RunTwoPointBlobInspectionAsync(
+        string command,
         CancellationToken cancellationToken)
     {
         var response = await SendCalibrationCommandAsync(
-            "RUN_RECTANGLE_BLOB",
+            command,
             cancellationToken);
         var parts = response.Split('\t');
         if (parts.Length != 15 ||
@@ -1338,7 +1355,8 @@ public sealed record CalibrationSidebarState(
     string CenterVmColor,
     string NozzleStatusColor,
     string ClickMoveStatusColor,
-    string WorkflowStatus);
+    string WorkflowStatus,
+    bool RecordNozzleDotPositionEnabled);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

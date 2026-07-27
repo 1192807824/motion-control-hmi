@@ -398,7 +398,7 @@
                             Background="#0B2B24"
                             BorderBrush="#00A965"
                             Foreground="#1EEA86"
-                            ToolTip="保存当前九点标定和双吸嘴对位配置"
+                            ToolTip="保存当前九点标定和双吸嘴粗定位示教配置"
                             Click="CalibrationToolbarAction_Click" />
                 </StackPanel>
 
@@ -586,9 +586,9 @@
                                     <TextBlock Text="3" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="吸嘴对位" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock Grid.Column="1" Text="粗定位示教" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
                                 <TextBlock Grid.Column="2" x:Name="SidebarNozzleTeachStepText"
-                                           Text="等待记录十字" Foreground="#12D879" FontSize="11"
+                                           Text="等待手动打点" Foreground="#12D879" FontSize="11"
                                            VerticalAlignment="Center" />
                             </Grid>
                             <Grid Margin="26,0,0,6">
@@ -597,17 +597,38 @@
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="SidebarRecordCameraButton" Tag="RecordCamera"
-                                        Content="1 记录十字" Style="{StaticResource SidebarButton}"
+                                <Button x:Name="SidebarRecordNozzleDotButton" Tag="RecordNozzleDotPosition"
+                                        Content="记录下压XY" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
-                                <Button Grid.Column="2" x:Name="SidebarRecordNozzleButton" Tag="RecordNozzle"
-                                        Content="2 记录吸嘴1" Style="{StaticResource SidebarButton}"
+                                <Button Grid.Column="2" x:Name="SidebarReturnCameraCenterButton"
+                                        Tag="ReturnCameraCenter" Content="回拍照位"
+                                        Style="{StaticResource SidebarButton}"
+                                        Background="#0B4CA3" BorderBrush="#0D6EE8"
+                                        Click="CalibrationSidebarButton_Click" />
+                            </Grid>
+                            <Button x:Name="SidebarRecordCameraButton" Tag="FindNozzlePoints"
+                                    Margin="26,0,0,6" Content="执行粗定位示教"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#102A3E" BorderBrush="#35546B"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <Grid Margin="26,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="SidebarRecordNozzleButton" Tag="AssignPoint1Nozzle1"
+                                        Content="点1 = 吸嘴1" Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E" BorderBrush="#35546B"
+                                        Click="CalibrationSidebarButton_Click" />
+                                <Button Grid.Column="2" x:Name="SidebarAssignPoint1Nozzle2Button" Tag="AssignPoint1Nozzle2"
+                                        Content="点1 = 吸嘴2" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
                             </Grid>
                             <TextBlock x:Name="SidebarNozzleStatusText"
-                                       Margin="26,0,0,0" Text="吸嘴1：未标定&#x0a;吸嘴2：未标定"
+                                       Margin="26,0,0,0" Text="两个吸嘴同时打点时，先记录一次公共XY"
                                        Foreground="#AFC0CD" FontSize="11" LineHeight="22" />
                         </StackPanel>
                     </Border>
@@ -633,14 +654,6 @@
                                     <ComboBoxItem Content="吸嘴2中心对准" Tag="Nozzle2" />
                                 </ComboBox>
                             </Grid>
-                            <Button x:Name="SidebarReturnCameraCenterButton"
-                                    Tag="ReturnCameraCenter"
-                                    Margin="26,0,0,6"
-                                    Content="相机回到中心点"
-                                    Style="{StaticResource SidebarButton}"
-                                    Background="#0B4CA3"
-                                    BorderBrush="#0D6EE8"
-                                    Click="CalibrationSidebarButton_Click" />
                             <Grid Margin="26,0,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />

@@ -316,12 +316,12 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="3　吸嘴对位"
+                                    <TextBlock Text="3　粗定位示教"
                                                Style="{StaticResource SectionTitle}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1"
                                                x:Name="NozzleTeachStepText"
-                                               Text="等待记录十字"
+                                               Text="等待手动打点"
                                                Foreground="#49D17D"
                                                FontSize="10"
                                                VerticalAlignment="Center" />
@@ -332,27 +332,58 @@
                                         <ColumnDefinition Width="7" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Button x:Name="RecordCameraToolPointButton"
-                                            Content="1 记录十字"
+                                    <Button x:Name="RecordNozzleDotPositionButton"
+                                            Content="记录下压XY"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             FontSize="11"
-                                            Click="RecordCameraToolPoint_Click" />
+                                            Click="RecordNozzleDotPosition_Click" />
                                     <Button Grid.Column="2"
-                                            x:Name="RecordNozzleToolPointButton"
-                                            Content="2 记录吸嘴1"
+                                            x:Name="ReturnToPhotoPositionButton"
+                                            Content="回拍照位"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#0B4CA3"
+                                            BorderBrush="#0D6EE8"
+                                            FontSize="11"
+                                            Click="ReturnCameraToCenter_Click" />
+                                </Grid>
+                                <Button x:Name="FindNozzlePointsButton"
+                                        Margin="0,5,0,0"
+                                        Content="执行粗定位示教"
+                                        Style="{StaticResource PanelButton}"
+                                        Background="#294A64"
+                                        BorderBrush="#45647A"
+                                        FontSize="11"
+                                        Click="FindNozzlePoints_Click" />
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="7" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="AssignPoint1ToNozzle1Button"
+                                            Content="点1 = 吸嘴1"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             FontSize="11"
                                             IsEnabled="False"
-                                            Click="RecordNozzleToolPoint_Click" />
+                                            Click="AssignPoint1ToNozzle1_Click" />
+                                    <Button Grid.Column="2"
+                                            x:Name="AssignPoint1ToNozzle2Button"
+                                            Content="点1 = 吸嘴2"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            IsEnabled="False"
+                                            Click="AssignPoint1ToNozzle2_Click" />
                                 </Grid>
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
                                            Margin="0,4,0,0"
                                            MaxHeight="30"
-                                           Text="记录一次十字，再依次记录吸嘴1、吸嘴2"
+                                           Text="两个吸嘴同时打点时，先记录一次公共XY"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
                                            TextAlignment="Center"
