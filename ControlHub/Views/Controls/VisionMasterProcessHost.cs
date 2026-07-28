@@ -490,6 +490,50 @@ public sealed class VisionMasterProcessHost : HwndHost
             values[0], values[1], values[2], values[3], values[4], values[5]);
     }
 
+    public async Task<VisionLowerCameraCorrectionResult> RunLowerCameraCorrectionAsync(
+        double lineStartX,
+        double lineStartY,
+        double lineEndX,
+        double lineEndY,
+        double circleCenterX,
+        double circleCenterY,
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        var values = new[]
+        {
+            lineStartX,
+            lineStartY,
+            lineEndX,
+            lineEndY,
+            circleCenterX,
+            circleCenterY
+        };
+        if (values.Any(value => !double.IsFinite(value)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lineStartX), "下相机纠偏输入必须是有效数字。");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var commandParts = new List<string> { "RUN_LOWER_CAMERA_CORRECTION" };
+        commandParts.AddRange(values.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
+        commandParts.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath)));
+        var response = await SendCalibrationCommandAsync(
+            string.Join("\t", commandParts),
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 2 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y))
+        {
+            throw new InvalidDataException("VisionMaster 返回的下相机纠偏转换坐标无效。");
+        }
+
+        return new VisionLowerCameraCorrectionResult(x, y);
+    }
+
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
         double pixelX,
         double pixelY,
@@ -1481,6 +1525,10 @@ public sealed record VisionLowerCameraTeachResult(
     double LineStartY,
     double LineEndX,
     double LineEndY,
+    double TransformedX,
+    double TransformedY);
+
+public sealed record VisionLowerCameraCorrectionResult(
     double TransformedX,
     double TransformedY);
 

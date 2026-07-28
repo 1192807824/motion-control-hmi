@@ -8,14 +8,16 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
-using CalculatorModuleCs;
 using GlobalVariableModuleCs;
+using GeometryCreateCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSCircleFitModuCs;
+using IMVSHPFeatureMatchModuCs;
 using IMVSLineFindModuCs;
 using IMVSNPointCalibModuCs;
 using IMVSRectFindModuCs;
+using ShellModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
 using VMControls.Interface;
@@ -34,9 +36,7 @@ public partial class MainWindow : Window
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
-    private const string NozzlePointDisplayModuleName = "高精度匹配1";
-    private const string NozzlePointCalculatorModuleName = "变量计算";
-    private const uint NozzlePointCalculatorModuleId = 34;
+    private const string NozzlePointMatchModuleName = "高精度匹配1";
     private const string RotationPointProcedureName = "获取三点流程";
     private const string RotationPointRectangleModuleName = "矩形检测1";
     private const string RotationCenterProcedureName = "计算旋转中心";
@@ -44,6 +44,10 @@ public partial class MainWindow : Window
     private const string LowerCameraTeachProcedureName = "下相机示教流程";
     private const string LowerCameraTeachLineModuleName = "直线查找1";
     private const string LowerCameraTeachTransformModuleName = "标定转换1";
+    private const string LowerCameraCorrectionProcedureName = "下相机纠偏";
+    private const string LowerCameraCorrectionGeometryModuleName = "几何创建1";
+    private const string LowerCameraCorrectionScriptModuleName = "脚本1";
+    private const string LowerCameraCorrectionTransformModuleName = "标定转换1";
     private const string GlobalVariableModuleName = "全局变量1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
@@ -280,6 +284,7 @@ public partial class MainWindow : Window
             "RUN_ROTATION_CENTER_CAPTURE" => RunRotationCenterCapture(parts),
             "CALCULATE_ROTATION_CENTER" => CalculateRotationCenter(parts),
             "RUN_LOWER_CAMERA_TEACH" => RunLowerCameraTeach(parts),
+            "RUN_LOWER_CAMERA_CORRECTION" => RunLowerCameraCorrection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
     }
@@ -414,7 +419,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 单次执行“粗定位示教流程”，从34号“变量计算”模块的 X/Y 数组读取前两个点。
+    /// 单次执行“粗定位示教流程”，读取“高精度匹配1”结果表前两行的匹配框中心 X/Y。
     /// 流程只负责找点，不驱动运动轴或吸嘴动作。
     /// </summary>
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
@@ -604,6 +609,126 @@ public partial class MainWindow : Window
             values.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
     }
 
+    private string RunLowerCameraCorrection(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 8)
+        {
+            throw new InvalidDataException(
+                "下相机纠偏命令必须包含直线起终点、旋转圆心和当前吸嘴标定文件。");
+        }
+
+        EnsureRotationCenterCommandReady();
+        var values = new float[6];
+        for (var index = 0; index < values.Length; index++)
+        {
+            var value = ParseFiniteDouble(parts[index + 1], $"下相机纠偏参数{index + 1}");
+            if (value < float.MinValue || value > float.MaxValue)
+            {
+                throw new InvalidDataException($"下相机纠偏参数{index + 1}超出float范围。");
+            }
+
+            values[index] = (float)value;
+        }
+
+        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[7]);
+        var procedure = GetRequiredProcedure(LowerCameraCorrectionProcedureName);
+        var geometryModule = ResolveNamedModule<GeometryCreateTool>(
+            LowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionGeometryModuleName);
+        var scriptModule = ResolveNamedModule<ShellModuleTool>(
+            LowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionScriptModuleName);
+        var transformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
+            LowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionTransformModuleName);
+
+        StopAllContinuousExecutionNoThrow();
+        var globalVariables = ResolveGlobalVariableModule();
+        globalVariables.SetVarFloat("1x", [values[0]]);
+        globalVariables.SetVarFloat("1y", [values[1]]);
+        globalVariables.SetVarFloat("2x", [values[2]]);
+        globalVariables.SetVarFloat("2y", [values[3]]);
+        TrySetFirstExistingGlobalFloat(
+            globalVariables,
+            ["旋转中心X", "旋转X", "RX"],
+            values[4]);
+        TrySetFirstExistingGlobalFloat(
+            globalVariables,
+            ["旋转中心Y", "旋转Y", "RY"],
+            values[5]);
+
+        geometryModule.ModuParams.InputLine =
+        [
+            new VM.PlatformSDKCS.Line
+            {
+                StartPoint = new VM.PlatformSDKCS.PointF { X = values[0], Y = values[1] },
+                EndPoint = new VM.PlatformSDKCS.PointF { X = values[2], Y = values[3] }
+            }
+        ];
+        scriptModule.ModuParams.SetInputFloat("RX", [values[4]]);
+        scriptModule.ModuParams.SetInputFloat("RY", [values[5]]);
+        transformModule.ModuParams.LoadCalibPath = calibrationPath;
+
+        BindInspectionResultModule(transformModule);
+        procedure.Run(true);
+        EnsureProcedureRunSucceeded(procedure, LowerCameraCorrectionProcedureName);
+
+        if (geometryModule.ModuResult is not { ModuStatus: 1 })
+        {
+            throw new InvalidOperationException(
+                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionGeometryModuleName}返回NG，请检查四个直线参数。");
+        }
+
+        if (scriptModule.ModuResult is not { ModuStatus: 1 })
+        {
+            throw new InvalidOperationException(
+                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionScriptModuleName}返回NG，请检查RX/RY圆心参数。");
+        }
+
+        var transformResult = transformModule.ModuResult;
+        if (transformResult is null || transformResult.ModuStatus != 1 ||
+            transformResult.TransPoint is null || transformResult.TransPoint.Count < 1)
+        {
+            throw new InvalidOperationException(
+                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionTransformModuleName}未返回转换坐标。");
+        }
+
+        var transformed = transformResult.TransPoint[0];
+        if (float.IsNaN(transformed.X) || float.IsInfinity(transformed.X) ||
+            float.IsNaN(transformed.Y) || float.IsInfinity(transformed.Y))
+        {
+            throw new InvalidOperationException("下相机纠偏返回的转换坐标X/Y无效。");
+        }
+
+        SetStatus(
+            $"下相机纠偏完成：转换坐标X={transformed.X:0.###}，Y={transformed.Y:0.###}",
+            StatusKind.Success);
+        return string.Join(
+            "\t",
+            transformed.X.ToString("R", CultureInfo.InvariantCulture),
+            transformed.Y.ToString("R", CultureInfo.InvariantCulture));
+    }
+
+    private static bool TrySetFirstExistingGlobalFloat(
+        GlobalVariableModuleTool module,
+        IEnumerable<string> candidateNames,
+        float value)
+    {
+        foreach (var candidateName in candidateNames)
+        {
+            try
+            {
+                module.SetVarFloat(candidateName, [value]);
+                return true;
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
     private static void EnsureProcedureRunSucceeded(VmProcedure procedure, string procedureName)
     {
         if (procedure.GetIsExecuteNormal() == 1)
@@ -740,12 +865,10 @@ public partial class MainWindow : Window
         var blobModule = isNozzlePointProcedure
             ? null
             : ResolveNamedBlobFindModule(InspectionProcedureName, InspectionBlobModuleName);
-        var calculatorModule = isNozzlePointProcedure
-            ? ResolveNozzlePointCalculatorModule(procedureName)
+        var matchModule = isNozzlePointProcedure
+            ? ResolveNamedHighPrecisionMatchModule(procedureName, NozzlePointMatchModuleName)
             : null;
-        var resultModule = calculatorModule is not null
-            ? TryResolveNamedModule(procedureName, NozzlePointDisplayModuleName) ?? calculatorModule
-            : blobModule
+        var resultModule = (VmModule?)matchModule ?? blobModule
             ?? throw new InvalidOperationException($"固定方案的“{procedureName}”中未找到结果模块。");
         // 同一相机不能被两个流程同时占用。找点前明确停止方案内的连续执行。
         StopAllContinuousExecutionNoThrow();
@@ -779,9 +902,25 @@ public partial class MainWindow : Window
 
             RectangleBlobCandidate first;
             RectangleBlobCandidate second;
-            if (calculatorModule is not null)
+            if (matchModule is not null)
             {
-                (first, second) = ReadVariableCalculationPoints(calculatorModule.ModuResult);
+                var matchResult = matchModule.ModuResult;
+                if (matchResult.ModuStatus != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{NozzlePointMatchModuleName}返回NG，请检查模板和匹配参数。");
+                }
+
+                var resultCount = Math.Min(matchResult.MatchNum, matchResult.MatchRect?.Count ?? 0);
+                if (resultCount < 2)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{NozzlePointMatchModuleName}只返回 {resultCount} 个匹配结果，必须找到两个中心点。");
+                }
+
+                // 与截图中的结果表一致：直接取第0、1行“匹配框中心X / 匹配框中心Y”。
+                first = ReadHighPrecisionMatchCenter(matchResult, 0);
+                second = ReadHighPrecisionMatchCenter(matchResult, 1);
             }
             else
             {
@@ -1368,50 +1507,45 @@ public partial class MainWindow : Window
             Math.Max(1, blobRect?.RectHeight ?? 1));
     }
 
-    private static (RectangleBlobCandidate First, RectangleBlobCandidate Second)
-        ReadVariableCalculationPoints(CalculatorResult result)
+    private static RectangleBlobCandidate ReadHighPrecisionMatchCenter(
+        HPFeatureMatchResult result,
+        int index)
     {
-        if (result.ModuStatus != 1)
+        var rectangles = result.MatchRect;
+        var resultCount = Math.Min(result.MatchNum, rectangles?.Count ?? 0);
+        if (rectangles is null || index < 0 || index >= resultCount)
         {
             throw new InvalidOperationException(
-                $"34号{NozzlePointCalculatorModuleName}返回NG，请检查 X/Y 表达式及上游匹配结果。");
+                $"{NozzlePointMatchModuleName}未返回第 {index + 1} 行匹配结果。");
         }
 
-        var xOutput = result.GetOutputFloat("X");
-        var yOutput = result.GetOutputFloat("Y");
-        var xValues = xOutput.pFloatVal;
-        var yValues = yOutput.pFloatVal;
-        var xCount = Math.Min(xOutput.nValueNum, xValues?.Length ?? 0);
-        var yCount = Math.Min(yOutput.nValueNum, yValues?.Length ?? 0);
-        if (xCount < 2 || yCount < 2)
+        var rectangle = rectangles[index]
+            ?? throw new InvalidOperationException(
+                $"{NozzlePointMatchModuleName}第 {index + 1} 行的匹配框为空。");
+        var center = rectangle.CenterPoint;
+        if (center is null ||
+            float.IsNaN(center.X) || float.IsInfinity(center.X) || center.X < 0 ||
+            float.IsNaN(center.Y) || float.IsInfinity(center.Y) || center.Y < 0)
         {
             throw new InvalidOperationException(
-                $"34号{NozzlePointCalculatorModuleName}的 X/Y 数组至少需要两个值，当前 X={xCount}、Y={yCount}。");
+                $"{NozzlePointMatchModuleName}第 {index + 1} 行的匹配框中心 X/Y 无效。");
         }
 
-        return (
-            CreateVariableCalculationPoint(xValues![0], yValues![0], 0),
-            CreateVariableCalculationPoint(xValues[1], yValues[1], 1));
-    }
-
-    private static RectangleBlobCandidate CreateVariableCalculationPoint(float x, float y, int index)
-    {
-        if (float.IsNaN(x) || float.IsInfinity(x) || x < 0 ||
-            float.IsNaN(y) || float.IsInfinity(y) || y < 0)
-        {
-            throw new InvalidOperationException(
-                $"34号{NozzlePointCalculatorModuleName}第 {index + 1} 组 X/Y 无效。");
-        }
-
+        var width = float.IsNaN(rectangle.BoxWidth) || float.IsInfinity(rectangle.BoxWidth) || rectangle.BoxWidth <= 0
+            ? 1f
+            : rectangle.BoxWidth;
+        var height = float.IsNaN(rectangle.BoxHeight) || float.IsInfinity(rectangle.BoxHeight) || rectangle.BoxHeight <= 0
+            ? 1f
+            : rectangle.BoxHeight;
         return new RectangleBlobCandidate(
-            x,
-            y,
+            center.X,
+            center.Y,
             0f,
-            0f,
-            (int)Math.Round(x),
-            (int)Math.Round(y),
-            1,
-            1);
+            width * height,
+            (int)Math.Round(center.X - width / 2f),
+            (int)Math.Round(center.Y - height / 2f),
+            Math.Max(1, (int)Math.Round(width)),
+            Math.Max(1, (int)Math.Round(height)));
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -2054,26 +2188,22 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 优先按方案中的固定模块号34定位“变量计算”，同时兼容显示名查询。
+    /// 按显示名精确定位粗定位示教流程中的“高精度匹配1”。
     /// </summary>
-    private static CalculatorModuleTool ResolveNozzlePointCalculatorModule(string procedureName)
+    private static IMVSHPFeatureMatchModuTool ResolveNamedHighPrecisionMatchModule(
+        string procedureName,
+        string matchModuleName)
     {
-        foreach (var directName in new[]
-                 {
-                     NozzlePointCalculatorModuleName,
-                     $"{NozzlePointCalculatorModuleName}1"
-                 })
+        try
         {
-            try
+            if (VmSolution.Instance[$"{procedureName}.{matchModuleName}"] is IMVSHPFeatureMatchModuTool directModule)
             {
-                if (VmSolution.Instance[$"{procedureName}.{directName}"] is CalculatorModuleTool directModule)
-                {
-                    return directModule;
-                }
+                return directModule;
             }
-            catch
-            {
-            }
+        }
+        catch
+        {
+            // 部分方案需要先从模块列表取得实际查询键，下面进行精确显示名回退。
         }
 
         var procedure = VmSolution.Instance[procedureName] as VmProcedure
@@ -2083,9 +2213,7 @@ public partial class MainWindow : Window
         {
             var info = moduleList.astModuleInfo[index];
             var displayName = info.strDisplayName?.Trim() ?? "";
-            if (info.nModuleID != NozzlePointCalculatorModuleId &&
-                !string.Equals(displayName, NozzlePointCalculatorModuleName, StringComparison.Ordinal) &&
-                !string.Equals(displayName, $"{NozzlePointCalculatorModuleName}1", StringComparison.Ordinal))
+            if (!string.Equals(displayName, matchModuleName, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -2101,7 +2229,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    if (VmSolution.Instance[candidate] is CalculatorModuleTool module)
+                    if (VmSolution.Instance[candidate] is IMVSHPFeatureMatchModuTool module)
                     {
                         return module;
                     }
@@ -2113,64 +2241,7 @@ public partial class MainWindow : Window
         }
 
         throw new InvalidOperationException(
-            $"固定方案的“{procedureName}”中未找到34号“{NozzlePointCalculatorModuleName}”模块。");
-    }
-
-    /// <summary>
-    /// 只用于保持粗定位示教的图像显示；点坐标仍严格取自34号变量计算模块。
-    /// </summary>
-    private static VmModule? TryResolveNamedModule(string procedureName, string displayModuleName)
-    {
-        try
-        {
-            if (VmSolution.Instance[$"{procedureName}.{displayModuleName}"] is VmModule directModule)
-            {
-                return directModule;
-            }
-        }
-        catch
-        {
-        }
-
-        var procedure = VmSolution.Instance[procedureName] as VmProcedure;
-        if (procedure is null)
-        {
-            return null;
-        }
-
-        var moduleList = procedure.GetProcedureModuleList();
-        for (var index = 0; index < moduleList.nNum; index++)
-        {
-            var info = moduleList.astModuleInfo[index];
-            var displayName = info.strDisplayName?.Trim() ?? "";
-            if (!string.Equals(displayName, displayModuleName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var moduleName = info.strModuleName?.Trim() ?? "";
-            foreach (var candidate in new[]
-                     {
-                         $"{procedureName}.{displayName}",
-                         $"{procedureName}.{moduleName}",
-                         displayName,
-                         moduleName
-                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
-            {
-                try
-                {
-                    if (VmSolution.Instance[candidate] is VmModule module)
-                    {
-                        return module;
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
-
-        return null;
+            $"固定方案的“{procedureName}”中未找到“{matchModuleName}”。");
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)

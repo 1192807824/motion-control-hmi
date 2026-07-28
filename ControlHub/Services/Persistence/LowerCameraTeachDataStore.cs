@@ -11,6 +11,19 @@ public sealed class LowerCameraTeachDataStore
         WriteIndented = true
     };
 
+    public static string GetDefaultFilePath(int nozzleNumber)
+    {
+        if (nozzleNumber is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "下相机吸嘴编号只能是1或2。");
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            "标定文件",
+            $"下相机吸嘴{nozzleNumber}示教数据.json");
+    }
+
     public void Save(string filePath, LowerCameraTeachData data)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);

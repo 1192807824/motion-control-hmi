@@ -69,7 +69,8 @@ public partial class HomePage : UserControl
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
     private const string CarouselStatusReturning = "回待机位";
-    private static readonly int[] MoveOutAxisNos = [13, 14, 15];
+    // 14轴故障，自动开始流程中只允许13/15轴参与测试站下压。
+    private static readonly int[] MoveOutAxisNos = [13, 15];
     private static readonly int[] FirstSetAxisNos =
         [VisionCalibrationService.FirstSetXHardwareAxisNo, VisionCalibrationService.FirstSetYHardwareAxisNo];
     private static readonly int[] SecondSetAxisNos =
@@ -129,8 +130,13 @@ public partial class HomePage : UserControl
             [6] = 14,
             [7] = 15
         };
+    private static readonly IReadOnlyDictionary<int, int> EnabledTestStationAxisByStation =
+        TestStationAxisByStation
+            .Where(pair => pair.Value != 14)
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
+    private readonly LowerCameraTeachDataStore _lowerCameraTeachDataStore = new();
     private HomePageSettings _homeSettings = new();
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
@@ -152,6 +158,7 @@ public partial class HomePage : UserControl
     private ProductionZDwellTimes? _productionZDwellTimes;
     private SecondSetXyPositions? _secondSetXyPositions;
     private BinDropPositions? _binDropPositions;
+    private LowerCameraPhotoPositions? _lowerCameraPhotoPositions;
     private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
     private readonly Dictionary<int, ProductionAxisMotionEditors> _productionAxisMotionEditors = [];
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
@@ -768,6 +775,99 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("本轮生产的 BIN0-BIN3 下料位置尚未锁定。");
     }
 
+    private LowerCameraPhotoPositions GetLowerCameraPhotoPositions()
+    {
+        return _lowerCameraPhotoPositions
+            ?? throw new InvalidOperationException("本轮生产的下相机拍照位1/2尚未锁定。");
+    }
+
+    private async Task RunLowerCameraCorrectionsAsync(
+        VisualCalibrationPage visualCalibrationController,
+        LowerCameraCorrectionProfile nozzle1Profile,
+        LowerCameraCorrectionProfile nozzle2Profile,
+        CancellationToken cancellationToken)
+    {
+        if (VisionCalibration.XHardwareAxisNo != VisionCalibrationService.FirstSetXHardwareAxisNo ||
+            VisionCalibration.YHardwareAxisNo != VisionCalibrationService.FirstSetYHardwareAxisNo)
+        {
+            throw new InvalidOperationException("下相机纠偏只允许使用第一套XY（轴1/2）。");
+        }
+
+        var positions = GetLowerCameraPhotoPositions();
+        LowerCameraCorrectionResultText.Text = "下相机纠偏：吸嘴1正在移动到拍照位1…";
+        LowerCameraCorrectionResultText.Foreground =
+            new SolidColorBrush(Color.FromRgb(242, 181, 68));
+        SetStartProductionStatus(
+            $"两个吸嘴已取料，XY正在前往拍照位1({positions.Position1X:0.###}, {positions.Position1Y:0.###})…",
+            Color.FromRgb(242, 181, 68));
+        await MovePresetPositionCoreAsync(
+            "下相机拍照位1",
+            positions.Position1X,
+            positions.Position1Y,
+            cancellationToken);
+        var nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+            nozzle1Profile.TeachData,
+            nozzle1Profile.CalibrationFilePath,
+            cancellationToken);
+
+        LowerCameraCorrectionResultText.Text =
+            $"吸嘴1：X={nozzle1Result.TransformedX:0.###} Y={nozzle1Result.TransformedY:0.###}；吸嘴2正在拍照位2纠偏…";
+        SetStartProductionStatus(
+            $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…",
+            Color.FromRgb(242, 181, 68));
+        await MovePresetPositionCoreAsync(
+            "下相机拍照位2",
+            positions.Position2X,
+            positions.Position2Y,
+            cancellationToken);
+        var nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+            nozzle2Profile.TeachData,
+            nozzle2Profile.CalibrationFilePath,
+            cancellationToken);
+
+        LowerCameraCorrectionResultText.Text =
+            $"下相机纠偏｜吸嘴1 X={nozzle1Result.TransformedX:0.###} Y={nozzle1Result.TransformedY:0.###}｜" +
+            $"吸嘴2 X={nozzle2Result.TransformedX:0.###} Y={nozzle2Result.TransformedY:0.###}";
+        LowerCameraCorrectionResultText.Foreground =
+            new SolidColorBrush(Color.FromRgb(73, 209, 125));
+        SetStartProductionStatus(
+            $"下相机纠偏完成：吸嘴1({nozzle1Result.TransformedX:0.###}, {nozzle1Result.TransformedY:0.###})，" +
+            $"吸嘴2({nozzle2Result.TransformedX:0.###}, {nozzle2Result.TransformedY:0.###})。",
+            Color.FromRgb(73, 209, 125));
+    }
+
+    private LowerCameraCorrectionProfile ReadLowerCameraCorrectionProfile(int nozzleNumber)
+    {
+        var teachDataPath = LowerCameraTeachDataStore.GetDefaultFilePath(nozzleNumber);
+        if (!File.Exists(teachDataPath))
+        {
+            throw new FileNotFoundException(
+                $"下相机吸嘴{nozzleNumber}示教数据不存在，请先完成该吸嘴标定、旋转中心和示教。",
+                teachDataPath);
+        }
+
+        var teachData = _lowerCameraTeachDataStore.Load(teachDataPath);
+        var configuredPath = nozzleNumber == 2
+            ? _visionCalibration.Settings.LowerCameraNozzle2CalibrationFilePath
+            : string.IsNullOrWhiteSpace(_visionCalibration.Settings.LowerCameraNozzle1CalibrationFilePath)
+                ? _visionCalibration.Settings.LowerCameraCalibrationFilePath
+                : _visionCalibration.Settings.LowerCameraNozzle1CalibrationFilePath;
+        var calibrationPath = string.IsNullOrWhiteSpace(configuredPath)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                "标定文件",
+                $"下相机吸嘴{nozzleNumber}标定.xml")
+            : Path.GetFullPath(configuredPath.Trim());
+        if (!File.Exists(calibrationPath))
+        {
+            throw new FileNotFoundException(
+                $"下相机吸嘴{nozzleNumber}标定文件不存在。",
+                calibrationPath);
+        }
+
+        return new LowerCameraCorrectionProfile(nozzleNumber, calibrationPath, teachData);
+    }
+
     private static int GetNozzleZHardwareAxisNo(
         VisionCalibrationAxisSet axisSet,
         int nozzleNumber)
@@ -1095,6 +1195,11 @@ public partial class HomePage : UserControl
             // BIN配置点是两个吸嘴的中间位置，启动时锁定，避免运行中修改导致下料点变化。
             _binDropPositions = ReadBinDropPositions();
 
+            // 两个下相机拍照位、两个吸嘴的示教数据和标定文件在启动时一次性锁定。
+            _lowerCameraPhotoPositions = ReadLowerCameraPhotoPositions();
+            var lowerCameraNozzle1Profile = ReadLowerCameraCorrectionProfile(1);
+            var lowerCameraNozzle2Profile = ReadLowerCameraCorrectionProfile(2);
+
             // 在任何轴开始运动前读取并验证完整自动流程参数，避免流程中途才发现输入缺失。
             var position1X = ParseFiniteCoordinate(PresetPosition1XTextBox.Text, "位置 1 X 轴绝对脉冲");
 
@@ -1323,6 +1428,26 @@ public partial class HomePage : UserControl
                 await EnsureActiveSetNozzlesAtSafeZAsync(_productionCancellation.Token);
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
+                // 两个吸嘴都取料并回安全Z后，依次到拍照位1/2执行各自的下相机纠偏。
+                try
+                {
+                    await RunLowerCameraCorrectionsAsync(
+                        visualCalibrationController,
+                        lowerCameraNozzle1Profile,
+                        lowerCameraNozzle2Profile,
+                        _productionCancellation.Token);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    LowerCameraCorrectionResultText.Text = $"下相机纠偏失败：{exception.Message}";
+                    LowerCameraCorrectionResultText.Foreground =
+                        new SolidColorBrush(Color.FromRgb(242, 122, 128));
+                    throw new InvalidOperationException(
+                        $"下相机纠偏失败：{exception.Message}",
+                        exception);
+                }
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
+
                 // 拍照和双吸嘴取料不等待DD或测试站；真正放料前只等待DD完成固定两次转动。
                 if (activeCarouselAdvanceTask is not null)
                 {
@@ -1470,6 +1595,7 @@ public partial class HomePage : UserControl
             _productionZDwellTimes = null;
             _secondSetXyPositions = null;
             _binDropPositions = null;
+            _lowerCameraPhotoPositions = null;
             _productionAxisMotionSettings = null;
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
@@ -2049,7 +2175,7 @@ public partial class HomePage : UserControl
 
     private int CountLoadedTestStations(IReadOnlyList<CarouselStationState> carouselStations)
     {
-        return TestStationAxisByStation.Keys.Count(station =>
+        return EnabledTestStationAxisByStation.Keys.Count(station =>
             station < carouselStations.Count && carouselStations[station].Occupied);
     }
 
@@ -2058,16 +2184,18 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         await WaitIfProductionPausedAsync(cancellationToken);
-        var axisTargets = TestStationAxisByStation
+        var axisTargets = EnabledTestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
         if (axisTargets.Count == 0)
         {
-            SetStartProductionStatus("5/6/7工位当前无料，跳过测试站下压。", Color.FromRgb(159, 177, 191));
+            SetStartProductionStatus(
+                "5/7号可用测试工位当前无料（14轴已停用），跳过本次下压。",
+                Color.FromRgb(159, 177, 191));
             return 0;
         }
 
-        var stations = TestStationAxisByStation
+        var stations = EnabledTestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
             .Select(pair => $"{pair.Key}号→轴{pair.Value}")
             .ToArray();
@@ -2110,7 +2238,8 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 已返回绝对位置 {TestStationReturnAbsolutePosition:0.###}，DD可继续下一步。",
             Color.FromRgb(73, 209, 125));
-        foreach (var station in TestStationAxisByStation.Keys.Where(station => carouselStations[station].Occupied))
+        foreach (var station in EnabledTestStationAxisByStation.Keys
+                     .Where(station => carouselStations[station].Occupied))
         {
             // 当前联调阶段只模拟 BIN1-BIN3，暂不生成 BIN0。
             carouselStations[station].SetTested($"BIN{Random.Shared.Next(1, 4)}");
@@ -2786,6 +2915,127 @@ public partial class HomePage : UserControl
             velocityOverride: velocity);
     }
 
+    private async void MoveLowerCameraPhotoPosition1_Click(object sender, RoutedEventArgs e)
+    {
+        await MoveLowerCameraPhotoPositionAsync(
+            "下相机拍照位1",
+            LowerCameraPhotoPosition1XTextBox,
+            LowerCameraPhotoPosition1YTextBox,
+            MoveLowerCameraPhotoPosition1Button);
+    }
+
+    private void RecordLowerCameraPhotoPosition1_Click(object sender, RoutedEventArgs e)
+    {
+        RecordLowerCameraPhotoPosition(
+            1,
+            "下相机拍照位1",
+            LowerCameraPhotoPosition1XTextBox,
+            LowerCameraPhotoPosition1YTextBox);
+    }
+
+    private async void MoveLowerCameraPhotoPosition2_Click(object sender, RoutedEventArgs e)
+    {
+        await MoveLowerCameraPhotoPositionAsync(
+            "下相机拍照位2",
+            LowerCameraPhotoPosition2XTextBox,
+            LowerCameraPhotoPosition2YTextBox,
+            MoveLowerCameraPhotoPosition2Button);
+    }
+
+    private void RecordLowerCameraPhotoPosition2_Click(object sender, RoutedEventArgs e)
+    {
+        RecordLowerCameraPhotoPosition(
+            2,
+            "下相机拍照位2",
+            LowerCameraPhotoPosition2XTextBox,
+            LowerCameraPhotoPosition2YTextBox);
+    }
+
+    private void RecordLowerCameraPhotoPosition(
+        int positionNumber,
+        string positionName,
+        TextBox xInput,
+        TextBox yInput)
+    {
+        try
+        {
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
+
+            _loadingPresetPositions = true;
+            xInput.Text = current.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
+            yInput.Text = current.ActualY.ToString("0.###", CultureInfo.CurrentCulture);
+            _loadingPresetPositions = false;
+            if (positionNumber == 1)
+            {
+                _homeSettings.LowerCameraPhotoPosition1X = current.ActualX;
+                _homeSettings.LowerCameraPhotoPosition1Y = current.ActualY;
+            }
+            else
+            {
+                _homeSettings.LowerCameraPhotoPosition2X = current.ActualX;
+                _homeSettings.LowerCameraPhotoPosition2Y = current.ActualY;
+            }
+
+            _homeSettingsStore.Save(_homeSettings);
+            SetLowerCameraPhotoPositionStatus(
+                $"{positionName}已记录：X={current.ActualX:0.###}，Y={current.ActualY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            _loadingPresetPositions = false;
+            SetLowerCameraPhotoPositionStatus($"{positionName}记录失败：{exception.Message}", false);
+        }
+        finally
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
+    private async Task MoveLowerCameraPhotoPositionAsync(
+        string positionName,
+        TextBox xInput,
+        TextBox yInput,
+        Button moveButton)
+    {
+        if (_presetPositionMoveRunning || _oneKeyResetRunning ||
+            _startSequenceRunning || _assignedNozzleMoveRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
+            var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
+            _ = ReadProductionAxisMotionSettings();
+            _presetPositionMoveRunning = true;
+            moveButton.Content = "移动中";
+            UpdateHomeCommandState();
+            SetLowerCameraPhotoPositionStatus(
+                $"正在移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
+                true);
+            await MovePresetPositionCoreAsync(positionName, targetX, targetY, CancellationToken.None);
+            SetLowerCameraPhotoPositionStatus(
+                $"{positionName}已到位：X={targetX:0.###}，Y={targetY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            SetLowerCameraPhotoPositionStatus($"{positionName}移动失败：{exception.Message}", false);
+        }
+        finally
+        {
+            _presetPositionMoveRunning = false;
+            moveButton.Content = "移动";
+            UpdateHomeCommandState();
+        }
+    }
+
     private async void MovePresetPosition1_Click(object sender, RoutedEventArgs e)
     {
         await MovePresetPositionAsync(
@@ -3099,6 +3349,12 @@ public partial class HomePage : UserControl
         }
     }
 
+    private void LowerCameraPhotoPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SaveLowerCameraPhotoPositionsFromInputs();
+        UpdateHomeCommandState();
+    }
+
     private void ProductionZPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SaveProductionZPositionsFromInputs();
@@ -3134,6 +3390,14 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1Y);
         PresetPosition2XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2X);
         PresetPosition2YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2Y);
+        LowerCameraPhotoPosition1XTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraPhotoPosition1X);
+        LowerCameraPhotoPosition1YTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraPhotoPosition1Y);
+        LowerCameraPhotoPosition2XTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraPhotoPosition2X);
+        LowerCameraPhotoPosition2YTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraPhotoPosition2Y);
         LoadProductionAxisParameterEditors();
         FirstSetPickupZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetPickupZPosition ?? DefaultNozzlePickupZPosition);
@@ -3244,6 +3508,23 @@ public partial class HomePage : UserControl
             ParseFiniteCoordinate(SecondSetPosition1YTextBox.Text, "第二套位置1（吸嘴2取13）Y轴绝对脉冲"),
             ParseFiniteCoordinate(SecondSetPosition2XTextBox.Text, "第二套位置2（吸嘴1取14）X轴绝对脉冲"),
             ParseFiniteCoordinate(SecondSetPosition2YTextBox.Text, "第二套位置2（吸嘴1取14）Y轴绝对脉冲"));
+    }
+
+    private LowerCameraPhotoPositions ReadLowerCameraPhotoPositions()
+    {
+        return new LowerCameraPhotoPositions(
+            ParseFiniteCoordinate(
+                LowerCameraPhotoPosition1XTextBox.Text,
+                "下相机拍照位1 X轴绝对脉冲"),
+            ParseFiniteCoordinate(
+                LowerCameraPhotoPosition1YTextBox.Text,
+                "下相机拍照位1 Y轴绝对脉冲"),
+            ParseFiniteCoordinate(
+                LowerCameraPhotoPosition2XTextBox.Text,
+                "下相机拍照位2 X轴绝对脉冲"),
+            ParseFiniteCoordinate(
+                LowerCameraPhotoPosition2YTextBox.Text,
+                "下相机拍照位2 Y轴绝对脉冲"));
     }
 
     private BinDropPositions ReadBinDropPositions()
@@ -3654,6 +3935,14 @@ public partial class HomePage : UserControl
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
+            LowerCameraPhotoPosition1XTextBox is null ||
+            LowerCameraPhotoPosition1YTextBox is null ||
+            LowerCameraPhotoPosition2XTextBox is null ||
+            LowerCameraPhotoPosition2YTextBox is null ||
+            RecordLowerCameraPhotoPosition1Button is null ||
+            RecordLowerCameraPhotoPosition2Button is null ||
+            MoveLowerCameraPhotoPosition1Button is null ||
+            MoveLowerCameraPhotoPosition2Button is null ||
             FirstSetPickupZPositionTextBox is null ||
             FirstSetDropZPositionTextBox is null ||
             FirstSetSafeZPositionTextBox is null ||
@@ -3710,6 +3999,11 @@ public partial class HomePage : UserControl
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
+        var allLowerCameraPhotoPositionsValid =
+            TryParseCoordinate(LowerCameraPhotoPosition1XTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out _);
         var allBinDropPositionsValid =
             TryParseCoordinate(Bin0PositionXTextBox.Text, out _) &&
             TryParseCoordinate(Bin0PositionYTextBox.Text, out _) &&
@@ -3724,6 +4018,7 @@ public partial class HomePage : UserControl
             allProductionAxisParametersValid &&
             allZPositionsValid &&
             allSecondSetXyPositionsValid &&
+            allLowerCameraPhotoPositionsValid &&
             allBinDropPositionsValid &&
             (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
         StartProductionTitleText.Text = _startSequenceRunning
@@ -3753,6 +4048,10 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition2YTextBox.IsEnabled = commandsIdle;
         foreach (var editors in _productionAxisMotionEditors.Values)
         {
             editors.SetEnabled(commandsIdle);
@@ -3780,6 +4079,8 @@ public partial class HomePage : UserControl
         Bin3PositionYTextBox.IsEnabled = commandsIdle;
         RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
+        RecordLowerCameraPhotoPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
+        RecordLowerCameraPhotoPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordSecondSetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordSecondSetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         MovePresetPosition1Button.IsEnabled =
@@ -3794,6 +4095,18 @@ public partial class HomePage : UserControl
             allProductionAxisParametersValid &&
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
+        MoveLowerCameraPhotoPosition1Button.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            allProductionAxisParametersValid &&
+            TryParseCoordinate(LowerCameraPhotoPosition1XTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out _);
+        MoveLowerCameraPhotoPosition2Button.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            allProductionAxisParametersValid &&
+            TryParseCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out _);
         MoveSecondSetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
@@ -3842,6 +4155,37 @@ public partial class HomePage : UserControl
         StartProductionHintText.Text = message;
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
+    }
+
+    private void SaveLowerCameraPhotoPositionsFromInputs()
+    {
+        if (_loadingPresetPositions ||
+            LowerCameraPhotoPosition1XTextBox is null ||
+            LowerCameraPhotoPosition1YTextBox is null ||
+            LowerCameraPhotoPosition2XTextBox is null ||
+            LowerCameraPhotoPosition2YTextBox is null ||
+            !TryParseOptionalCoordinate(LowerCameraPhotoPosition1XTextBox.Text, out var position1X) ||
+            !TryParseOptionalCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out var position1Y) ||
+            !TryParseOptionalCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out var position2X) ||
+            !TryParseOptionalCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out var position2Y))
+        {
+            return;
+        }
+
+        _homeSettings.LowerCameraPhotoPosition1X = position1X;
+        _homeSettings.LowerCameraPhotoPosition1Y = position1Y;
+        _homeSettings.LowerCameraPhotoPosition2X = position2X;
+        _homeSettings.LowerCameraPhotoPosition2Y = position2Y;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception)
+        {
+            SetLowerCameraPhotoPositionStatus(
+                $"保存下相机拍照位失败：{exception.Message}",
+                false);
+        }
     }
 
     private void ResetUphTracking()
@@ -4161,6 +4505,14 @@ public partial class HomePage : UserControl
             : Color.FromRgb(242, 181, 68));
     }
 
+    private void SetLowerCameraPhotoPositionStatus(string message, bool success)
+    {
+        LowerCameraPhotoPositionStatusText.Text = message;
+        LowerCameraPhotoPositionStatusText.Foreground = new SolidColorBrush(success
+            ? Color.FromRgb(73, 209, 125)
+            : Color.FromRgb(242, 181, 68));
+    }
+
     private static double ParseFiniteCoordinate(string? value, string fieldName)
     {
         if (!TryParseCoordinate(value, out var parsed))
@@ -4273,6 +4625,17 @@ public partial class HomePage : UserControl
         double Position1Y,
         double Position2X,
         double Position2Y);
+
+    private readonly record struct LowerCameraPhotoPositions(
+        double Position1X,
+        double Position1Y,
+        double Position2X,
+        double Position2Y);
+
+    private sealed record LowerCameraCorrectionProfile(
+        int NozzleNumber,
+        string CalibrationFilePath,
+        LowerCameraTeachData TeachData);
 
     private readonly record struct BinDropPosition(double X, double Y);
 

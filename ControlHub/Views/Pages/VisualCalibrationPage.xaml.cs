@@ -743,6 +743,31 @@ public partial class VisualCalibrationPage : UserControl
         return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
     }
 
+    public async Task<VisionLowerCameraCorrectionResult> RunLowerCameraCorrectionAsync(
+        LowerCameraTeachData teachData,
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(teachData);
+        teachData.Validate();
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        await EnsureStartedAsync();
+        if (!_hostReady)
+        {
+            throw new InvalidOperationException("视觉组件尚未就绪，无法运行下相机纠偏流程。");
+        }
+
+        return await VisionHost.RunLowerCameraCorrectionAsync(
+            teachData.LineStartX,
+            teachData.LineStartY,
+            teachData.LineEndX,
+            teachData.LineEndY,
+            teachData.CircleCenterX,
+            teachData.CircleCenterY,
+            calibrationFilePath,
+            cancellationToken);
+    }
+
     public void Shutdown()
     {
         if (_shutdown)

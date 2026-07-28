@@ -446,6 +446,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="36" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <Grid>
@@ -530,6 +531,20 @@
                                                HorizontalAlignment="Center" />
                                 </StackPanel>
                             </Grid>
+                        </Border>
+                        <Border Grid.Row="2"
+                                Margin="0,6,0,0"
+                                Padding="9,4"
+                                Background="#10283A"
+                                BorderBrush="#29465C"
+                                BorderThickness="1"
+                                CornerRadius="3">
+                            <TextBlock x:Name="LowerCameraCorrectionResultText"
+                                       Text="下相机纠偏：等待吸嘴1/2取料"
+                                       Foreground="#9FB1BF"
+                                       FontSize="11"
+                                       FontFamily="Consolas"
+                                       TextWrapping="Wrap" />
                         </Border>
                     </Grid>
                 </Border>
@@ -1110,6 +1125,101 @@
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel>
+                    <Border Margin="0,8,0,8"
+                            Padding="9,7"
+                            Background="#12283A"
+                            BorderBrush="#2D4A61"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="24" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <TextBlock Text="下相机拍照位（第一套 XY pulse）" Foreground="#EAF2F7"
+                                           FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                                <TextBlock Text="吸嘴1 / 吸嘴2纠偏" Foreground="#49D17D" FontSize="10"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Grid.Row="1" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="拍照位 1" Foreground="#62B5FF" FontSize="10" FontWeight="Bold"
+                                           VerticalAlignment="Center" TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraPhotoPosition1XTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             TextChanged="LowerCameraPhotoPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraPhotoPosition1YTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             TextChanged="LowerCameraPhotoPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <Grid Grid.Column="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" /><ColumnDefinition Width="4" /><ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="RecordLowerCameraPhotoPosition1Button" Height="25" Content="记录"
+                                            Foreground="White" Background="#166A52" BorderBrush="#49D17D"
+                                            Cursor="Hand" IsEnabled="False" Click="RecordLowerCameraPhotoPosition1_Click" />
+                                    <Button Grid.Column="2" x:Name="MoveLowerCameraPhotoPosition1Button" Height="25" Content="移动"
+                                            Foreground="White" Background="#1674D1" BorderBrush="#62B5FF"
+                                            Cursor="Hand" IsEnabled="False" Click="MoveLowerCameraPhotoPosition1_Click" />
+                                </Grid>
+                            </Grid>
+                            <Grid Grid.Row="2" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="拍照位 2" Foreground="#62B5FF" FontSize="10" FontWeight="Bold"
+                                           VerticalAlignment="Center" TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraPhotoPosition2XTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             TextChanged="LowerCameraPhotoPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraPhotoPosition2YTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             TextChanged="LowerCameraPhotoPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <Grid Grid.Column="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" /><ColumnDefinition Width="4" /><ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="RecordLowerCameraPhotoPosition2Button" Height="25" Content="记录"
+                                            Foreground="White" Background="#166A52" BorderBrush="#49D17D"
+                                            Cursor="Hand" IsEnabled="False" Click="RecordLowerCameraPhotoPosition2_Click" />
+                                    <Button Grid.Column="2" x:Name="MoveLowerCameraPhotoPosition2Button" Height="25" Content="移动"
+                                            Foreground="White" Background="#1674D1" BorderBrush="#62B5FF"
+                                            Cursor="Hand" IsEnabled="False" Click="MoveLowerCameraPhotoPosition2_Click" />
+                                </Grid>
+                            </Grid>
+                            <TextBlock Grid.Row="3" x:Name="LowerCameraPhotoPositionStatusText"
+                                       Text="两个吸嘴取料后依次到拍照位1、拍照位2执行下相机纠偏。"
+                                       Foreground="#9FB1BF" FontSize="10" TextWrapping="Wrap" />
+                        </Grid>
+                    </Border>
+
                     <Border Margin="0,8,0,8"
                             Padding="9,7"
                             Background="#12283A"

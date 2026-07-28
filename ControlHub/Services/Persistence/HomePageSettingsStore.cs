@@ -63,6 +63,14 @@ public sealed class HomePageSettings
 
     public double? PresetPosition2Y { get; set; }
 
+    public double? LowerCameraPhotoPosition1X { get; set; }
+
+    public double? LowerCameraPhotoPosition1Y { get; set; }
+
+    public double? LowerCameraPhotoPosition2X { get; set; }
+
+    public double? LowerCameraPhotoPosition2Y { get; set; }
+
     public double? Axis0RelativePulse { get; set; }
 
     public double? FirstSetPickupZPosition { get; set; }

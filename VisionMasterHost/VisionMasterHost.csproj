@@ -74,8 +74,16 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\GlobalVariableModuleCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
-    <Reference Include="CalculatorModuleCs">
-      <HintPath>$(VisionMasterAssemblyDirectory)\CalculatorModuleCs.dll</HintPath>
+    <Reference Include="GeometryCreateCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\GeometryCreateCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="ShellModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\ShellModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSHPFeatureMatchModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSHPFeatureMatchModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>
