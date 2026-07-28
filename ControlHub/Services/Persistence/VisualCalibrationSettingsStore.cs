@@ -56,6 +56,8 @@ public sealed class VisualCalibrationSettings
 {
     public string ActiveAxisSet { get; set; } = "First";
 
+    public string ActiveCalibrationMode { get; set; } = "";
+
     public double StepXPulses { get; set; } = 100_000;
 
     public double StepYPulses { get; set; } = 100_000;
@@ -111,4 +113,16 @@ public sealed class VisualCalibrationSettings
     public double SecondNozzle2OffsetYPulses { get; set; }
 
     public string SecondClickTargetTool { get; set; } = "Camera";
+
+    public double LowerCameraStepXPulses { get; set; } = 100_000;
+
+    public double LowerCameraStepYPulses { get; set; } = 100_000;
+
+    public double LowerCameraVelocityPulsesPerSecond { get; set; } = 200_000;
+
+    public int LowerCameraSettleMilliseconds { get; set; } = 300;
+
+    public string LowerCameraMovePriority { get; set; } = "X";
+
+    public string LowerCameraCalibrationFilePath { get; set; } = "";
 }

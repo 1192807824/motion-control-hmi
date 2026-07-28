@@ -3860,10 +3860,10 @@ public partial class MotionControlPage : UserControl
                 new([6, 8, 10, 12], 33, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity),
                 new([5, 7, 9, 11], -1, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity)
             ]),
-            new("上料X", [new([1], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
+            new("上料X", [new([1], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
             new("上料Y/下料XY/三个测试站同时", [
-                new([2], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
-                new([3, 4], 33, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new([2], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new([3, 4], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
                 new([13, 14, 15], 21, OneKeyResetTestStationHomeVelocity, OneKeyResetTestStationHomeVelocity)
             ]),
             new("DD马达", [

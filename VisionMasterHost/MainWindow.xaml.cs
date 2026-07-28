@@ -532,7 +532,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationToolbarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 7)
+        if (parts.Count != 8)
         {
             throw new InvalidDataException("标定文件菜单状态参数不正确。");
         }
@@ -556,6 +556,13 @@ public partial class MainWindow : Window
         ImportCalibrationToolbarButton.IsEnabled = parts[4] == "1";
         LoadCalibrationProfileToolbarButton.IsEnabled = parts[5] == "1";
         SaveCalibrationProfileToolbarButton.IsEnabled = parts[6] == "1";
+        var simplifiedMode = parts[7] == "1";
+        LoadCalibrationProfileToolbarButton.Visibility = simplifiedMode
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        SaveCalibrationProfileToolbarButton.Visibility = simplifiedMode
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         if (!SaveCalibrationProfileToolbarButton.IsEnabled)
         {
             ResetCalibrationSaveFeedback();
@@ -604,7 +611,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 31)
+        if (parts.Count != 32)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -697,6 +704,20 @@ public partial class MainWindow : Window
             SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[28]), Brushes.LightSteelBlue);
             SidebarStartCalibrationButton.ToolTip = Decode(parts[29]);
             SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
+            var simplifiedMode = parts[31] == "1";
+            SidebarNozzleTeachSection.Visibility = simplifiedMode
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            SidebarClickTargetComboBox.Visibility = simplifiedMode
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            SidebarClickMoveStepText.Text = simplifiedMode ? "3" : "4";
+            SidebarClickMoveTitleText.Text = simplifiedMode
+                ? "点哪里移动到哪里"
+                : "点击移动";
+            SidebarEnableClickMoveCheckBox.Content = simplifiedMode
+                ? "点哪里移动到哪里"
+                : "点击图像移动";
         }
         finally
         {
@@ -1186,7 +1207,7 @@ public partial class MainWindow : Window
 
     private async Task<string> PrepareNinePointCalibrationAsync(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 7)
+        if (parts.Count != 8)
         {
             throw new InvalidDataException("准备九点标定的参数数量不正确。");
         }
@@ -1208,11 +1229,17 @@ public partial class MainWindow : Window
             "Y" => false,
             _ => throw new InvalidDataException("移动优先参数只能是 X 或 Y。")
         };
+        var lowerCamera = parts[6] switch
+        {
+            "Lower" => true,
+            "Keep" => false,
+            _ => throw new InvalidDataException("相机位置参数只能是 Keep 或 Lower。")
+        };
         string calibrationPath;
         try
         {
             calibrationPath = Path.GetFullPath(
-                Encoding.UTF8.GetString(Convert.FromBase64String(parts[6])));
+                Encoding.UTF8.GetString(Convert.FromBase64String(parts[7])));
         }
         catch (FormatException exception)
         {
@@ -1236,6 +1263,10 @@ public partial class MainWindow : Window
         {
             var parameters = nPointModule.ModuParams;
             parameters.CalibPointGet = NPointCalibParam.CalibPointGetEnum.TriggerAcquisition;
+            if (lowerCamera)
+            {
+                parameters.CameraMode = NPointCalibParam.CameraModeEnum.CameraStaticDown;
+            }
             parameters.CalibPointTotalNum = 9;
             parameters.RotPointTotalNum = 0;
             parameters.TeachEnable = false;
@@ -1260,7 +1291,8 @@ public partial class MainWindow : Window
             SetBusy(true);
             SetStatus(
                 $"九点标定已准备：基准({centerX:0.####}, {centerY:0.####})，" +
-                $"偏移({offsetX:0.####}, {offsetY:0.####})，{(xFirst ? "X" : "Y")}优先",
+                $"偏移({offsetX:0.####}, {offsetY:0.####})，{(xFirst ? "X" : "Y")}优先，" +
+                $"{(lowerCamera ? "下相机" : "原方案相机")}模式",
                 StatusKind.Busy);
             return $"已准备九点标定：{calibrationPath}";
         }

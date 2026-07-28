@@ -195,9 +195,10 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="150" />
                     <ColumnDefinition Width="190" />
-                    <ColumnDefinition Width="220" />
-                    <ColumnDefinition Width="200" />
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="160" />
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -217,6 +218,23 @@
                     <TextBlock Text="LOT-20260715-A" Foreground="{StaticResource TextPrimary}" FontFamily="Consolas" FontSize="14" FontWeight="Bold" Margin="0,3,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                    <TextBlock Text="UPH" Style="{StaticResource MutedLabel}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                        <TextBlock x:Name="UphValueText"
+                                   Text="0"
+                                   Foreground="{StaticResource PrimaryBlueLight}"
+                                   FontFamily="Consolas"
+                                   FontSize="16"
+                                   FontWeight="Bold"
+                                   ToolTip="从首次取料开始统计" />
+                        <TextBlock Text=" 件/小时"
+                                   Foreground="{StaticResource TextSecondary}"
+                                   FontSize="11"
+                                   VerticalAlignment="Bottom"
+                                   Margin="3,0,0,1" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="4" VerticalAlignment="Center">
                     <TextBlock Text="整机状态" Style="{StaticResource MutedLabel}" />
                     <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
                         <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessGreen}" Margin="0,0,7,0" VerticalAlignment="Center" />

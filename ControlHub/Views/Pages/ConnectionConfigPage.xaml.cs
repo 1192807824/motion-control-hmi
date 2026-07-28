@@ -31,14 +31,14 @@ public partial class ConnectionConfigPage : UserControl
     private const int OneKeyGatherCycleCount = 1;
     private const int LeftRightGatherPulseDurationMs = 1500;
     private const int UpDownGatherPulseDurationMs = 1500;
-    private const string LeftRightGatherParameterCommand = "&02,044,050,1,044,050,1,044,050,1,044,050,1,05$";
+    private const string LeftRightGatherParameterCommand = "&02,044,040,1,044,040,1,044,040,1,044,040,1,05$";
     private const string LeftRightGatherStartCommand = "&03,05$";
-    private const string UpDownGatherParameterCommand = "&02,044,077,1,044,077,1,044,077,1,044,077,1,06$";
+    private const string UpDownGatherParameterCommand = "&02,044,060,1,044,060,1,044,060,1,044,060,1,06$";
     private const string UpDownGatherStartCommand = "&03,06$";
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly TcpConnectionSettingsStore _tcpSettingsStore = new();
-    private readonly VibrationFeederTcpClient _generalTcpClient = new();
+    private readonly E4981ATcpClient _generalTcpClient = new();
     private readonly SerialConnectionSettingsStore _serialSettingsStore = new();
     private readonly SerialConnectionClient _serialClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
@@ -47,6 +47,7 @@ public partial class ConnectionConfigPage : UserControl
     private bool _closed;
     private bool _connecting;
     private bool _tcpConnecting;
+    private bool _meterOperationRunning;
     private bool _loaded;
     private bool _vibrationSequenceRunning;
     private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
@@ -61,7 +62,6 @@ public partial class ConnectionConfigPage : UserControl
         InitializeComponent();
         _tcpClient.DataReceived += TcpClient_DataReceived;
         _tcpClient.ConnectionClosed += TcpClient_ConnectionClosed;
-        _generalTcpClient.DataReceived += GeneralTcpClient_DataReceived;
         _generalTcpClient.ConnectionClosed += GeneralTcpClient_ConnectionClosed;
         _serialClient.DataReceived += SerialClient_DataReceived;
         _serialClient.ConnectionClosed += SerialClient_ConnectionClosed;
@@ -91,7 +91,6 @@ public partial class ConnectionConfigPage : UserControl
         _lifetimeCancellation.Cancel();
         _tcpClient.DataReceived -= TcpClient_DataReceived;
         _tcpClient.ConnectionClosed -= TcpClient_ConnectionClosed;
-        _generalTcpClient.DataReceived -= GeneralTcpClient_DataReceived;
         _generalTcpClient.ConnectionClosed -= GeneralTcpClient_ConnectionClosed;
         _serialClient.DataReceived -= SerialClient_DataReceived;
         _serialClient.ConnectionClosed -= SerialClient_ConnectionClosed;
@@ -110,7 +109,7 @@ public partial class ConnectionConfigPage : UserControl
 
         _loaded = true;
         AddLog("\u8fde\u63a5\u914d\u7f6e\u9875\u5df2\u52a0\u8f7d");
-        AddTcpLog("TCP 连接配置已加载");
+        AddTcpLog("E4981A连接配置已加载");
         AddSerialLog("串口连接配置已加载");
         RefreshSerialOptionLists();
         RefreshSerialPorts();
@@ -250,7 +249,7 @@ public partial class ConnectionConfigPage : UserControl
 
         if (_tcpConnecting)
         {
-            AddTcpLog("TCP 正在连接，请稍候");
+            AddTcpLog("E4981A正在连接，请稍候");
             return;
         }
 
@@ -264,10 +263,17 @@ public partial class ConnectionConfigPage : UserControl
         try
         {
             await _generalTcpClient.ConnectAsync(settings, _lifetimeCancellation.Token);
+            var identity = await QueryMeterAsync("*IDN?");
+            if (!identity.Contains("E4981A", StringComparison.OrdinalIgnoreCase))
+            {
+                _generalTcpClient.Close();
+                throw new InvalidDataException($"已连接的设备不是E4981A：{identity}");
+            }
+            UpdateMeterIdentity(identity);
             settings.LastSuccessfulConnectionSignature = CreateTcpConnectionSignature(settings.Host, settings.Port);
             _tcpSettingsStore.Save(settings);
-            SetTcpStatus($"已连接：{settings.Host}:{settings.Port}");
-            AddTcpLog($"TCP 已连接 {settings.Host}:{settings.Port}");
+            SetTcpStatus($"E4981A已连接：{settings.Host}:{settings.Port}");
+            AddTcpLog($"E4981A身份确认成功：{identity}");
         }
         catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ArgumentException)
         {
@@ -280,7 +286,7 @@ public partial class ConnectionConfigPage : UserControl
         catch (OperationCanceledException)
         {
             SetTcpStatus("未连接");
-            AddTcpLog("TCP 连接已取消");
+            AddTcpLog("E4981A连接已取消");
         }
         finally
         {
@@ -292,7 +298,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         _generalTcpClient.Close();
         SetTcpStatus("未连接");
-        AddTcpLog("已断开 TCP 连接");
+        AddTcpLog("已断开E4981A连接");
     }
 
     private async void SendTcpMessage_Click(object sender, RoutedEventArgs e)
@@ -314,17 +320,80 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        try
+        await RunMeterOperationAsync("手动发送", async () =>
         {
-            var payload = BuildPayload(settings.ManualSendText, settings.AppendNewLine, settings.NewLine);
-            await _generalTcpClient.WriteAsync(payload);
-            AddTcpLog($"TX [ASCII]  {FormatPayload(payload)}");
-        }
-        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+            var command = settings.ManualSendText.Trim();
+            if (E4981AProtocol.ExpectsResponse(command))
+            {
+                var response = await QueryMeterAsync(command);
+                if (string.Equals(command, "*IDN?", StringComparison.OrdinalIgnoreCase))
+                {
+                    UpdateMeterIdentity(response);
+                }
+                else if (string.Equals(command, "*TRG", StringComparison.OrdinalIgnoreCase))
+                {
+                    UpdateMeterResult(E4981AProtocol.ParseMeasurement(response));
+                }
+            }
+            else
+            {
+                await SendMeterCommandAsync(command);
+            }
+        });
+    }
+
+    private async void IdentifyMeter_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMeterOperationAsync("读取仪表型号", async () =>
         {
-            SetTcpStatus("通讯异常");
-            AddTcpLog($"发送失败：{ex.Message}");
+            var identity = await QueryMeterAsync("*IDN?");
+            UpdateMeterIdentity(identity);
+        });
+    }
+
+    private async void ApplyMeterSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (TcpSettings is not { } settings)
+        {
+            return;
         }
+
+        CommitInputBindings(this);
+        SaveTcpSettings(writeLog: false);
+        await RunMeterOperationAsync("下发测试参数", async () =>
+        {
+            var commands = E4981AProtocol.BuildSetupCommands(settings);
+            foreach (var command in commands)
+            {
+                await SendMeterCommandAsync(command);
+            }
+
+            var instrumentError = await QueryMeterAsync("SYST:ERR?");
+            if (!instrumentError.StartsWith("0", StringComparison.OrdinalIgnoreCase) &&
+                !instrumentError.StartsWith("+0", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"仪表参数错误：{instrumentError}");
+            }
+            AddTcpLog($"E4981A测试参数下发完成，共{commands.Count}条命令");
+        });
+    }
+
+    private async void TriggerMeterTest_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMeterOperationAsync("单次测试", async () =>
+        {
+            var response = await QueryMeterAsync("*TRG");
+            UpdateMeterResult(E4981AProtocol.ParseMeasurement(response));
+        });
+    }
+
+    private async void ReadMeterError_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMeterOperationAsync("读取仪表错误", async () =>
+        {
+            var response = await QueryMeterAsync("SYST:ERR?");
+            MeterErrorText.Text = response;
+        });
     }
 
     private void ClearTcpLog_Click(object sender, RoutedEventArgs e)
@@ -499,12 +568,12 @@ public partial class ConnectionConfigPage : UserControl
                 tcpSettings.Host,
                 tcpSettings.Port))
         {
-            AddTcpLog("程序启动，正在自动连接 TCP");
+            AddTcpLog("程序启动，正在自动连接E4981A");
             connectionTasks.Add(ConnectTcpAsync(tcpSettings));
         }
         else
         {
-            AddTcpLog("未自动连接：当前 TCP 配置尚未成功连接过");
+            AddTcpLog("未自动连接：当前E4981A配置尚未成功连接过");
         }
 
         await Task.WhenAll(connectionTasks);
@@ -785,7 +854,7 @@ public partial class ConnectionConfigPage : UserControl
         _tcpSettingsStore.Save(settings);
         if (writeLog)
         {
-            AddTcpLog("TCP 连接配置已保存");
+            AddTcpLog("E4981A连接与测试参数已保存");
         }
     }
 
@@ -928,6 +997,79 @@ public partial class ConnectionConfigPage : UserControl
         await Task.Delay(120, _lifetimeCancellation.Token);
     }
 
+    private async Task RunMeterOperationAsync(string actionName, Func<Task> operation)
+    {
+        if (_meterOperationRunning)
+        {
+            AddTcpLog($"{actionName}未执行：仪表正在处理上一条命令");
+            return;
+        }
+        if (!_generalTcpClient.IsConnected)
+        {
+            AddTcpLog($"{actionName}失败：请先连接E4981A");
+            return;
+        }
+
+        _meterOperationRunning = true;
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or
+                                   InvalidOperationException or FormatException or ObjectDisposedException)
+        {
+            if (!_generalTcpClient.IsConnected)
+            {
+                SetTcpStatus("通讯异常");
+            }
+            AddTcpLog($"{actionName}失败：{ex.Message}");
+        }
+        finally
+        {
+            _meterOperationRunning = false;
+        }
+    }
+
+    private async Task SendMeterCommandAsync(string command)
+    {
+        var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
+        AddTcpLog($"TX [SCPI]  {command}");
+        await _generalTcpClient.SendCommandAsync(command, timeout, _lifetimeCancellation.Token);
+    }
+
+    private async Task<string> QueryMeterAsync(string command)
+    {
+        var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
+        AddTcpLog($"TX [SCPI]  {command}");
+        var response = await _generalTcpClient.QueryAsync(command, timeout, _lifetimeCancellation.Token);
+        AddTcpLog($"RX [SCPI]  {response}");
+        return response;
+    }
+
+    private void UpdateMeterIdentity(string identity)
+    {
+        MeterIdentityText.Text = identity;
+        MeterIdentityText.ToolTip = identity;
+    }
+
+    private void UpdateMeterResult(E4981AMeasurementResult result)
+    {
+        MeterResultStatusText.Text = result.StatusDescription;
+        MeterResultStatusText.Foreground = new SolidColorBrush(
+            result.IsSuccessful ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
+        MeterCapacitanceText.Text = $"{result.CapacitancePf:0.######} pF";
+        MeterDissipationText.Text = result.DissipationFactor.ToString("G9");
+        MeterBinText.Text = result.BinDescription;
+        MeterRawResultText.Text = result.RawResponse;
+        MeterRawResultText.ToolTip = result.RawResponse;
+        AddTcpLog(
+            $"测试结果：{result.StatusDescription}，C={result.CapacitancePf:0.######} pF，" +
+            $"D={result.DissipationFactor:G9}，{result.BinDescription}");
+    }
+
     private void TcpClient_DataReceived(byte[] payload)
     {
         Dispatcher.BeginInvoke(new Action(() =>
@@ -953,20 +1095,14 @@ public partial class ConnectionConfigPage : UserControl
         }));
     }
 
-    private void GeneralTcpClient_DataReceived(byte[] payload)
-    {
-        Dispatcher.BeginInvoke(new Action(() =>
-            AddTcpLog($"RX [ASCII]  {FormatPayload(payload)}")));
-    }
-
     private void GeneralTcpClient_ConnectionClosed(Exception? exception)
     {
         Dispatcher.BeginInvoke(new Action(() =>
         {
             SetTcpStatus("未连接");
             AddTcpLog(exception is null
-                ? "TCP 连接已由对端关闭"
-                : $"TCP 连接中断：{exception.Message}");
+                ? "E4981A连接已由仪表关闭"
+                : $"E4981A连接中断：{exception.Message}");
         }));
     }
 

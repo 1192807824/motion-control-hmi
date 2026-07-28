@@ -476,7 +476,7 @@
                                                VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="TCP 连接"
+                                    <TextBlock Text="E4981A 仪表"
                                                FontSize="15"
                                                FontWeight="Bold"
                                                Foreground="#F4F8FB" />
@@ -485,7 +485,7 @@
                                                FontWeight="SemiBold"
                                                Foreground="#62B5FF">
                                         <TextBlock.Text>
-                                            <MultiBinding StringFormat="TCP  {0}:{1}">
+                                            <MultiBinding StringFormat="SCPI  {0}:{1}">
                                                 <Binding Path="TcpConnectionSettings.Host" />
                                                 <Binding Path="TcpConnectionSettings.Port" />
                                             </MultiBinding>
@@ -869,36 +869,36 @@
                 <Border Grid.Row="0" Style="{StaticResource Panel}" Padding="14,8">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="1.35*" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="0.75*" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="330" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="连接对象" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Text="TCP 连接" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                            <TextBlock Text="E4981A 电容测试仪" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock Text="设备地址" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="仪表 IP" Style="{StaticResource MetricLabel}" />
                             <TextBlock Text="{Binding TcpConnectionSettings.Host}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                            <TextBlock Text="TCP 端口" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="端口" Style="{StaticResource MetricLabel}" />
                             <TextBlock Text="{Binding TcpConnectionSettings.Port}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="3" VerticalAlignment="Center">
                             <TextBlock Text="协议" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Text="TCP Client" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                            <TextBlock Text="SCPI / TCP" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="4"
                                     Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center">
-                            <Button Content="保存"
+                            <Button Content="保存参数"
                                     Style="{StaticResource SecondaryButton}"
                                     Click="SaveTcpSettings_Click" />
-                            <Button Content="连接"
+                            <Button Content="连接仪表"
                                     Style="{StaticResource PrimaryButton}"
                                     Background="{StaticResource AccentGreen}"
                                     BorderBrush="#16723F"
@@ -915,111 +915,275 @@
 
                 <Grid Grid.Row="2">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="560" />
+                        <ColumnDefinition Width="760" />
                         <ColumnDefinition Width="10" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="220" />
-                            <RowDefinition Height="10" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                        <Border Grid.Row="0" Style="{StaticResource Panel}">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="44" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <Border Background="{StaticResource PanelHeader}"
-                                        BorderBrush="{StaticResource PanelBorder}"
-                                        BorderThickness="0,0,0,1"
-                                        CornerRadius="6,6,0,0"
-                                        Padding="14,0">
-                                    <TextBlock Text="TCP 客户端参数" Style="{StaticResource PanelTitle}" />
-                                </Border>
-                                <Grid Grid.Row="1" Margin="14,12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="88" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="22" />
-                                        <ColumnDefinition Width="88" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
+                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
+                                <Grid>
                                     <Grid.RowDefinitions>
-                                        <RowDefinition Height="42" />
-                                        <RowDefinition Height="42" />
-                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="44" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <TextBlock Text="设备地址" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Column="1"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding TcpConnectionSettings.Host, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Grid.Column="3" Text="TCP 端口" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Column="4"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding TcpConnectionSettings.Port, UpdateSourceTrigger=LostFocus}" />
-                                    <TextBlock Grid.Row="1" Text="结束符" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Grid.Row="1"
-                                             Grid.Column="1"
-                                             Grid.ColumnSpan="4"
-                                             Style="{StaticResource ConfigInput}"
-                                             Text="{Binding TcpConnectionSettings.NewLine, UpdateSourceTrigger=PropertyChanged}" />
-                                </Grid>
-                            </Grid>
-                        </Border>
+                                    <Border Background="{StaticResource PanelHeader}"
+                                            BorderBrush="{StaticResource PanelBorder}"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="6,6,0,0"
+                                            Padding="14,0">
+                                        <TextBlock Text="E4981A 连接与测量参数" Style="{StaticResource PanelTitle}" />
+                                    </Border>
+                                    <Grid Grid.Row="1" Margin="14,10,14,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                        </Grid.RowDefinitions>
 
-                        <Border Grid.Row="2" Style="{StaticResource Panel}">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="44" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="42" />
-                                    <RowDefinition Height="54" />
-                                </Grid.RowDefinitions>
-                                <Border Background="{StaticResource PanelHeader}"
-                                        BorderBrush="{StaticResource PanelBorder}"
-                                        BorderThickness="0,0,0,1"
-                                        CornerRadius="6,6,0,0"
-                                        Padding="14,0">
-                                    <TextBlock Text="数据收发" Style="{StaticResource PanelTitle}" />
-                                </Border>
-                                <TextBox Grid.Row="1"
-                                         Margin="14,12,14,0"
-                                         Padding="10,8"
-                                         AcceptsReturn="True"
-                                         TextWrapping="Wrap"
-                                         VerticalScrollBarVisibility="Auto"
-                                         BorderBrush="#45647A"
-                                         Background="#132B40"
-                                         Foreground="#F4F8FB"
-                                         FontFamily="Consolas"
-                                         FontSize="14"
-                                         Text="{Binding TcpConnectionSettings.ManualSendText, UpdateSourceTrigger=PropertyChanged}" />
-                                <CheckBox Grid.Row="2"
-                                          Margin="14,10,14,0"
-                                          Style="{StaticResource ConfigCheckBox}"
-                                          Content="发送时追加结束符"
-                                          IsChecked="{Binding TcpConnectionSettings.AppendNewLine, UpdateSourceTrigger=PropertyChanged}" />
-                                <StackPanel Grid.Row="3"
-                                            Orientation="Horizontal"
-                                            HorizontalAlignment="Right"
-                                            VerticalAlignment="Center"
-                                            Margin="14,6,6,10">
-                                    <Button Content="发送"
-                                            Style="{StaticResource PrimaryButton}"
-                                            Background="{StaticResource AccentGreen}"
-                                            BorderBrush="#16723F"
-                                            Click="SendTcpMessage_Click" />
-                                    <Button Content="清空日志"
-                                            Style="{StaticResource SecondaryButton}"
-                                            Click="ClearTcpLog_Click" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </Grid>
+                                        <TextBlock Text="仪表 IP" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Column="1" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Host, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Grid.Column="3" Text="TCP端口" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Port, UpdateSourceTrigger=LostFocus}" />
+
+                                        <TextBlock Grid.Row="1" Text="命令超时(ms)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Row="1" Grid.Column="1" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.CommandTimeoutMilliseconds, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="3" Text="结束符" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="4" Text="LF（仪表固定）" Style="{StaticResource MetricValue}" />
+
+                                        <TextBlock Grid.Row="2" Text="测试频率" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox Grid.Row="2" Grid.Column="1" Style="{StaticResource ConfigComboBox}"
+                                                  SelectedValuePath="Content"
+                                                  SelectedValue="{Binding TcpConnectionSettings.Frequency, Mode=TwoWay}">
+                                            <ComboBoxItem Content="120HZ" />
+                                            <ComboBoxItem Content="1KHZ" />
+                                            <ComboBoxItem Content="1MHZ" />
+                                        </ComboBox>
+                                        <TextBlock Grid.Row="2" Grid.Column="3" Text="测试电压(V)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Row="2" Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.SignalLevelVolts, UpdateSourceTrigger=LostFocus}" />
+
+                                        <TextBlock Grid.Row="3" Text="测量量程" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox Grid.Row="3" Grid.Column="1" Style="{StaticResource ConfigComboBox}"
+                                                  SelectedValuePath="Content"
+                                                  SelectedValue="{Binding TcpConnectionSettings.MeasurementRange, Mode=TwoWay}">
+                                            <ComboBoxItem Content="AUTO" />
+                                            <ComboBoxItem Content="1p" /><ComboBoxItem Content="2.2p" /><ComboBoxItem Content="4.7p" />
+                                            <ComboBoxItem Content="10p" /><ComboBoxItem Content="22p" /><ComboBoxItem Content="47p" />
+                                            <ComboBoxItem Content="100p" /><ComboBoxItem Content="220p" /><ComboBoxItem Content="470p" />
+                                            <ComboBoxItem Content="1n" /><ComboBoxItem Content="2.2n" /><ComboBoxItem Content="4.7n" />
+                                            <ComboBoxItem Content="10n" /><ComboBoxItem Content="22n" /><ComboBoxItem Content="47n" />
+                                            <ComboBoxItem Content="100n" /><ComboBoxItem Content="220n" /><ComboBoxItem Content="470n" />
+                                            <ComboBoxItem Content="1u" /><ComboBoxItem Content="2.2u" /><ComboBoxItem Content="4.7u" />
+                                            <ComboBoxItem Content="10u" /><ComboBoxItem Content="22u" /><ComboBoxItem Content="47u" />
+                                            <ComboBoxItem Content="100u" /><ComboBoxItem Content="220u" /><ComboBoxItem Content="470u" />
+                                            <ComboBoxItem Content="1m" />
+                                        </ComboBox>
+                                        <TextBlock Grid.Row="3" Grid.Column="3" Text="测量时间" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox Grid.Row="3" Grid.Column="4" Style="{StaticResource ConfigComboBox}"
+                                                  SelectedValuePath="Content"
+                                                  SelectedValue="{Binding TcpConnectionSettings.ApertureTime, Mode=TwoWay}">
+                                            <ComboBoxItem Content="1" /><ComboBoxItem Content="2" /><ComboBoxItem Content="4" />
+                                            <ComboBoxItem Content="6" /><ComboBoxItem Content="8" />
+                                        </ComboBox>
+
+                                        <TextBlock Grid.Row="4" Text="测试线长度(m)" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox Grid.Row="4" Grid.Column="1" Style="{StaticResource ConfigComboBox}"
+                                                  SelectedValuePath="Content"
+                                                  SelectedValue="{Binding TcpConnectionSettings.CableLengthMeters, Mode=TwoWay}">
+                                            <ComboBoxItem Content="0" /><ComboBoxItem Content="1" /><ComboBoxItem Content="2" />
+                                        </ComboBox>
+                                        <StackPanel Grid.Row="4" Grid.Column="3" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                            <CheckBox Content="启用平均" Style="{StaticResource ConfigCheckBox}"
+                                                      IsChecked="{Binding TcpConnectionSettings.AveragingEnabled}" />
+                                            <TextBlock Text="次数" Style="{StaticResource FieldLabel}" Margin="18,0,8,0" />
+                                            <TextBox Width="90" Style="{StaticResource ConfigInput}"
+                                                     Text="{Binding TcpConnectionSettings.AveragingCount, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBlock Text="测量模式：Cp-D" Style="{StaticResource FieldLabel}" Margin="18,0,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="44" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Background="{StaticResource PanelHeader}"
+                                            BorderBrush="{StaticResource PanelBorder}"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="6,6,0,0"
+                                            Padding="14,0">
+                                        <Grid>
+                                            <TextBlock Text="电容分BIN与损耗限制（电容单位：pF）" Style="{StaticResource PanelTitle}" />
+                                            <CheckBox HorizontalAlignment="Right" Content="启用仪表比较器"
+                                                      Style="{StaticResource ConfigCheckBox}"
+                                                      IsChecked="{Binding TcpConnectionSettings.ComparatorEnabled}" />
+                                        </Grid>
+                                    </Border>
+                                    <Grid Grid.Row="1" Margin="14,10,14,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="34" />
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                            <RowDefinition Height="40" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Column="1" Text="启用" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock Grid.Column="3" Text="下限" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock Grid.Column="6" Text="上限" Style="{StaticResource FieldLabel}" />
+
+                                        <TextBlock Grid.Row="1" Text="BIN1" Style="{StaticResource FieldLabel}" />
+                                        <CheckBox Grid.Row="1" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
+                                                  IsChecked="{Binding TcpConnectionSettings.Bin1Enabled}" />
+                                        <TextBox Grid.Row="1" Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Bin1LowerPf, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBox Grid.Row="1" Grid.Column="7" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Bin1UpperPf, UpdateSourceTrigger=LostFocus}" />
+
+                                        <TextBlock Grid.Row="2" Text="BIN2" Style="{StaticResource FieldLabel}" />
+                                        <CheckBox Grid.Row="2" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
+                                                  IsChecked="{Binding TcpConnectionSettings.Bin2Enabled}" />
+                                        <TextBox Grid.Row="2" Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Bin2LowerPf, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBox Grid.Row="2" Grid.Column="7" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Bin2UpperPf, UpdateSourceTrigger=LostFocus}" />
+
+                                        <TextBlock Grid.Row="3" Text="BIN3" Style="{StaticResource FieldLabel}" />
+                                        <CheckBox Grid.Row="3" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
+                                                  IsChecked="{Binding TcpConnectionSettings.Bin3Enabled}" />
+                                        <TextBox Grid.Row="3" Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Bin3LowerPf, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBox Grid.Row="3" Grid.Column="7" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.Bin3UpperPf, UpdateSourceTrigger=LostFocus}" />
+
+                                        <TextBlock Grid.Row="4" Text="损耗 D" Style="{StaticResource FieldLabel}" />
+                                        <CheckBox Grid.Row="4" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
+                                                  IsChecked="{Binding TcpConnectionSettings.LossLimitEnabled}" />
+                                        <TextBox Grid.Row="4" Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.LossLower, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBox Grid.Row="4" Grid.Column="7" Style="{StaticResource ConfigInput}"
+                                                 Text="{Binding TcpConnectionSettings.LossUpper, UpdateSourceTrigger=LostFocus}" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="44" />
+                                        <RowDefinition Height="54" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Background="{StaticResource PanelHeader}"
+                                            BorderBrush="{StaticResource PanelBorder}"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="6,6,0,0"
+                                            Padding="14,0">
+                                        <TextBlock Text="仪表操作与最近一次测试结果" Style="{StaticResource PanelTitle}" />
+                                    </Border>
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="14,10,6,8">
+                                        <Button Content="读取型号" Style="{StaticResource SecondaryButton}" Click="IdentifyMeter_Click" />
+                                        <Button Content="下发测试参数" Style="{StaticResource PrimaryButton}" Click="ApplyMeterSettings_Click" />
+                                        <Button Content="单次测试" Style="{StaticResource PrimaryButton}"
+                                                Background="{StaticResource AccentGreen}" BorderBrush="#16723F"
+                                                Click="TriggerMeterTest_Click" />
+                                        <Button Content="读取错误" Style="{StaticResource SecondaryButton}" Click="ReadMeterError_Click" />
+                                    </StackPanel>
+                                    <Grid Grid.Row="2" Margin="14,4,14,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="32" />
+                                            <RowDefinition Height="32" />
+                                            <RowDefinition Height="32" />
+                                            <RowDefinition Height="32" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="仪表型号" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterIdentityText" Grid.Column="1" Grid.ColumnSpan="3"
+                                                   Text="尚未读取" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Grid.Row="1" Text="测量状态" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterResultStatusText" Grid.Row="1" Grid.Column="1"
+                                                   Text="尚未测试" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="2" Text="BIN结果" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterBinText" Grid.Row="1" Grid.Column="3"
+                                                   Text="--" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Grid.Row="2" Text="电容值" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterCapacitanceText" Grid.Row="2" Grid.Column="1"
+                                                   Text="-- pF" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="2" Text="损耗 D" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterDissipationText" Grid.Row="2" Grid.Column="3"
+                                                   Text="--" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Grid.Row="3" Text="原始数据" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterRawResultText" Grid.Row="3" Grid.Column="1"
+                                                   Text="--" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="2" Text="仪表错误" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock x:Name="MeterErrorText" Grid.Row="3" Grid.Column="3"
+                                                   Text="--" Style="{StaticResource MetricValue}" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource Panel}" Margin="0,0,0,4">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="44" />
+                                        <RowDefinition Height="82" />
+                                        <RowDefinition Height="50" />
+                                    </Grid.RowDefinitions>
+                                    <Border Background="{StaticResource PanelHeader}"
+                                            BorderBrush="{StaticResource PanelBorder}"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="6,6,0,0"
+                                            Padding="14,0">
+                                        <TextBlock Text="SCPI 手动调试" Style="{StaticResource PanelTitle}" />
+                                    </Border>
+                                    <TextBox Grid.Row="1" Margin="14,10,14,0" Padding="10,8"
+                                             AcceptsReturn="True" TextWrapping="Wrap"
+                                             BorderBrush="#45647A" Background="#132B40" Foreground="#F4F8FB"
+                                             FontFamily="Consolas" FontSize="14"
+                                             Text="{Binding TcpConnectionSettings.ManualSendText, UpdateSourceTrigger=PropertyChanged}" />
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                                                VerticalAlignment="Center" Margin="14,6,6,10">
+                                        <TextBlock Text="查询命令和 *TRG 会自动等待一行响应" Style="{StaticResource FieldLabel}" Margin="0,0,18,0" />
+                                        <Button Content="发送命令" Style="{StaticResource PrimaryButton}"
+                                                Background="{StaticResource AccentGreen}" BorderBrush="#16723F"
+                                                Click="SendTcpMessage_Click" />
+                                        <Button Content="清空日志" Style="{StaticResource SecondaryButton}" Click="ClearTcpLog_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <Border Grid.Column="2" Style="{StaticResource Panel}">
                         <Grid>
@@ -1032,7 +1196,7 @@
                                     BorderThickness="0,0,0,1"
                                     CornerRadius="6,6,0,0"
                                     Padding="14,0">
-                                <TextBlock Text="通讯日志" Style="{StaticResource PanelTitle}" />
+                                <TextBlock Text="E4981A 通讯日志" Style="{StaticResource PanelTitle}" />
                             </Border>
                             <ListBox x:Name="TcpConnectionLogListBox"
                                      Grid.Row="1"
@@ -1045,7 +1209,7 @@
                                     <DataTemplate>
                                         <TextBlock Text="{Binding}"
                                                    Foreground="#D8E4EC"
-                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="Wrap"
                                                    Margin="0,2" />
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>

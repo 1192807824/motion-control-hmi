@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using System.Xml.Linq;
 using ControlHub.Services.Motion;
 using ControlHub.Services.Persistence;
@@ -32,13 +34,18 @@ public partial class HomePage : UserControl
     private const int DefaultVacuumBreakPulseMilliseconds = 150;
     private const int DefaultVacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
+    private const int FirstSetNozzle1RHardwareAxisNo = 6;
     private const int FirstSetNozzle2ZHardwareAxisNo = 7;
+    private const int FirstSetNozzle2RHardwareAxisNo = 8;
     private const int SecondSetNozzle1ZHardwareAxisNo = 9;
+    private const int SecondSetNozzle1RHardwareAxisNo = 10;
     private const int SecondSetNozzle2ZHardwareAxisNo = 11;
+    private const int SecondSetNozzle2RHardwareAxisNo = 12;
     private const double DefaultNozzlePickupZPosition = 30_000d;
     private const double DefaultNozzleDropZPosition = 4_800d;
     private const double DefaultNozzleSafeZPosition = -5_000d;
     private const double DefaultNozzleZVelocity = 20_000d;
+    private const double DefaultNozzleRVelocity = 50_000d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
@@ -85,9 +92,13 @@ public partial class HomePage : UserControl
         new(VisionCalibrationService.SecondSetXHardwareAxisNo, "第二套XY", "下料X", SecondSetXyVelocity),
         new(VisionCalibrationService.SecondSetYHardwareAxisNo, "第二套XY", "下料Y", SecondSetXyVelocity),
         new(FirstSetNozzle1ZHardwareAxisNo, "第一套Z轴", "上料Z1", DefaultNozzleZVelocity),
+        new(FirstSetNozzle1RHardwareAxisNo, "第一套R轴", "上料R1", DefaultNozzleRVelocity),
         new(FirstSetNozzle2ZHardwareAxisNo, "第一套Z轴", "上料Z2", DefaultNozzleZVelocity),
+        new(FirstSetNozzle2RHardwareAxisNo, "第一套R轴", "上料R2", DefaultNozzleRVelocity),
         new(SecondSetNozzle1ZHardwareAxisNo, "第二套Z轴", "下料Z1", DefaultNozzleZVelocity),
+        new(SecondSetNozzle1RHardwareAxisNo, "第二套R轴", "下料R3", DefaultNozzleRVelocity),
         new(SecondSetNozzle2ZHardwareAxisNo, "第二套Z轴", "下料Z2", DefaultNozzleZVelocity),
+        new(SecondSetNozzle2RHardwareAxisNo, "第二套R轴", "下料R4", DefaultNozzleRVelocity),
         new(13, "测试站", "5号测试站", TestStationPressVelocity),
         new(14, "测试站", "6号测试站", TestStationPressVelocity),
         new(15, "测试站", "7号测试站", TestStationPressVelocity)
@@ -130,6 +141,11 @@ public partial class HomePage : UserControl
     private CancellationTokenSource? _productionCancellation;
     private TaskCompletionSource<bool>? _productionCompletion;
     private bool _productionStopRequested;
+    private bool _productionPauseRequested;
+    private TaskCompletionSource<bool>? _productionResumeSignal;
+    private readonly Stopwatch _uphStopwatch = new();
+    private readonly DispatcherTimer _uphRefreshTimer;
+    private long _uphCompletedUnitCount;
     private bool _preserveIoOnEmergencyStop;
     private VisionCalibrationAxisSet? _productionAxisSet;
     private ProductionZPositions? _productionZPositions;
@@ -148,6 +164,11 @@ public partial class HomePage : UserControl
     public HomePage()
     {
         InitializeComponent();
+        _uphRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _uphRefreshTimer.Tick += (_, _) => UpdateUphDisplay();
         InitializeProductionMotionParameterEditors();
         LoadPresetPositions();
         UpdateCarouselStationDisplay(CreateCarouselStationStates());
@@ -1019,13 +1040,19 @@ public partial class HomePage : UserControl
         Task<CarouselAdvanceResult>? activeCarouselAdvanceTask = null;
         Task<int> activeFinalTestTask = Task.FromResult(0);
 
-        // 如果当前已经在连续生产，再次点击按钮表示请求停止。
+        // 如果当前已经在连续生产，再次点击按钮用于在安全节点暂停或继续。
         if (_startSequenceRunning)
         {
-            // 下发停止请求，但不阻塞 UI 线程等待生产循环收尾。
-            _ = RequestProductionStop();
+            if (_productionPauseRequested)
+            {
+                ResumeProduction();
+            }
+            else
+            {
+                RequestProductionPause();
+            }
 
-            // 停止请求已经发出，本次点击不再继续启动新流程。
+            // 本次点击只切换现有流程的暂停状态，不创建新的生产任务。
             return;
         }
 
@@ -1117,12 +1144,15 @@ public partial class HomePage : UserControl
 
             // 清空停止标记，表示新的连续生产流程还没有收到停止请求。
             _productionStopRequested = false;
+            _productionPauseRequested = false;
+            _productionResumeSignal = null;
 
             // 锁定本轮生产所使用的轴组，防止运行中切换视觉页时误写另一套真空 IO。
             _productionAxisSet = _visionCalibration.ActiveAxisSet;
 
             // 标记连续生产已进入运行状态。
             _startSequenceRunning = true;
+            ResetUphTracking();
 
             // 刷新主页按钮状态，把“开始运行”切成“停止循环”，并锁住其它会冲突的操作。
             UpdateHomeCommandState();
@@ -1139,6 +1169,7 @@ public partial class HomePage : UserControl
                 velocity,
                 firstSetYVelocity,
                 _productionCancellation.Token);
+            await WaitIfProductionPausedAsync(_productionCancellation.Token);
             SetStartProductionStatus(
                 $"启动安全定位完成：已按Y后X到达位置2" +
                 $"({startupSafePosition.ActualX:0.###}, {startupSafePosition.ActualY:0.###})，准备进入取料流程…",
@@ -1155,6 +1186,8 @@ public partial class HomePage : UserControl
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
             {
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
+
                 // 每轮开始前先检查是否已经收到停止请求。
                 _productionCancellation.Token.ThrowIfCancellationRequested();
 
@@ -1205,6 +1238,7 @@ public partial class HomePage : UserControl
                         allowedMovingAxisNos: AllowedProductionPeerAxisNos,
                         yVelocityOverride: firstSetYVelocity);
                 }
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 必须等轴1、轴2均确认到位后，才允许单次执行固定方案中的找芯片流程。
                 // 流程名和模块名都采用固定名称，避免误跑标定流程或实时流程。
@@ -1256,6 +1290,7 @@ public partial class HomePage : UserControl
 
                 // 缓存本轮换算出的吸嘴目标，并同步更新吸嘴对位 UI。
                 SetAssignedNozzleTargets(assignedTargets);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 提示第 3 步开始：吸嘴1对位物体1，到位后 Z1 下探取料并安全回缩。
                 SetStartProductionStatus(
@@ -1264,9 +1299,12 @@ public partial class HomePage : UserControl
 
                 // 执行吸嘴1对位动作。
                 await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 吸嘴1到达物体1后，Z1 到取料位、开吸，然后回到安全位。
+                StartUphTracking();
                 await PickWithActiveSetNozzleAsync(1, _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 提示第 4 步开始：吸嘴2对位物体2，到位后 Z2 下探取料并安全回缩。
                 SetStartProductionStatus(
@@ -1275,12 +1313,15 @@ public partial class HomePage : UserControl
 
                 // 执行吸嘴2对位动作。
                 await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 吸嘴2到达物体2后，Z2 到取料位、开吸，然后回到安全位。
                 await PickWithActiveSetNozzleAsync(2, _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 放料 XY 动作的安全门：必须再次确认两根 Z 轴都在本轮配置的安全高度。
                 await EnsureActiveSetNozzlesAtSafeZAsync(_productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 拍照和双吸嘴取料不等待DD或测试站；真正放料前只等待DD完成固定两次转动。
                 if (activeCarouselAdvanceTask is not null)
@@ -1301,6 +1342,7 @@ public partial class HomePage : UserControl
                         $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，立即开始上下料；最后一轮测试可并行继续…",
                         Color.FromRgb(73, 209, 125));
                 }
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
@@ -1313,12 +1355,14 @@ public partial class HomePage : UserControl
                     position1X,
                     position1Y,
                     _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 到达位置1后，Z1 下降到配置放料高度，破真空后回到配置安全高度。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：1工位已到位，Z1正在下降到配置放料位…",
                     Color.FromRgb(242, 181, 68));
                 await PlaceWithActiveSetNozzleAsync(1, _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 提示第 7 步开始：第一套 XY 移动到预设位置2。
                 SetStartProductionStatus(
@@ -1331,6 +1375,7 @@ public partial class HomePage : UserControl
                     position2X,
                     position2Y,
                     _productionCancellation.Token);
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 到达位置2后，Z2 下降到配置放料高度，破真空后回到配置安全高度。
                 SetStartProductionStatus(
@@ -1338,6 +1383,7 @@ public partial class HomePage : UserControl
                     Color.FromRgb(242, 181, 68));
                 await PlaceWithActiveSetNozzleAsync(2, _productionCancellation.Token);
                 CloseAllActiveSetNozzleVacuumOutputs();
+                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 carouselStations[1].SetLoaded();
                 carouselStations[2].SetLoaded();
@@ -1405,6 +1451,7 @@ public partial class HomePage : UserControl
         finally
         {
             _productionCancellation?.Cancel();
+            _productionResumeSignal?.TrySetResult(true);
             await ObserveTaskNoThrowAsync(activeSecondSetUnloadTask);
             await ObserveTaskNoThrowAsync(activeSecondSetPickupTask);
             if (activeFirstSetReturnToCenterTask is not null)
@@ -1414,6 +1461,7 @@ public partial class HomePage : UserControl
 
             await ObserveCarouselAdvanceTaskNoThrowAsync(activeCarouselAdvanceTask);
             await ObserveTaskNoThrowAsync(activeFinalTestTask);
+            StopUphTracking();
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
             // 急停后的 IO 冻结保持到下一次明确启动生产，不能在本轮 finally 收尾时提前解除。
             // 否则尚未退出的取消回调仍可能把低电平有效的真空输出写成相反状态。
@@ -1428,6 +1476,8 @@ public partial class HomePage : UserControl
 
             // 清除停止请求标记，保证下次启动从干净状态开始。
             _productionStopRequested = false;
+            _productionPauseRequested = false;
+            _productionResumeSignal = null;
 
             // 释放取消源，避免持有旧流程资源。
             _productionCancellation?.Dispose();
@@ -1466,10 +1516,72 @@ public partial class HomePage : UserControl
         }
 
         _productionStopRequested = true;
+        _productionPauseRequested = false;
+        _productionResumeSignal?.TrySetResult(true);
+        _productionResumeSignal = null;
         _productionCancellation?.Cancel();
         SetStartProductionStatus("正在停止循环，请等待当前轴确认停止…", Color.FromRgb(242, 181, 68));
         UpdateHomeCommandState();
         return true;
+    }
+
+    private bool RequestProductionPause()
+    {
+        if (!_startSequenceRunning ||
+            _productionStopRequested ||
+            _productionPauseRequested)
+        {
+            return false;
+        }
+
+        _productionPauseRequested = true;
+        _productionResumeSignal = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        SetStartProductionStatus(
+            "暂停请求已接收：当前动作完成并到达安全节点后暂停；再次点击可继续。",
+            Color.FromRgb(242, 181, 68));
+        UpdateHomeCommandState();
+        return true;
+    }
+
+    private bool ResumeProduction()
+    {
+        if (!_startSequenceRunning ||
+            _productionStopRequested ||
+            !_productionPauseRequested)
+        {
+            return false;
+        }
+
+        _productionPauseRequested = false;
+        var resumeSignal = _productionResumeSignal;
+        _productionResumeSignal = null;
+        SetStartProductionStatus(
+            "正在从暂停位置继续运行…",
+            Color.FromRgb(73, 209, 125));
+        UpdateHomeCommandState();
+        resumeSignal?.TrySetResult(true);
+        return true;
+    }
+
+    private async Task WaitIfProductionPausedAsync(CancellationToken cancellationToken)
+    {
+        if (!_productionPauseRequested)
+        {
+            return;
+        }
+
+        var resumeSignal = _productionResumeSignal;
+        if (resumeSignal is null)
+        {
+            return;
+        }
+
+        SetStartProductionStatus(
+            "生产流程已在安全节点暂停；点击“继续运行”将从下一步接着执行。",
+            Color.FromRgb(242, 181, 68));
+        await resumeSignal.Task.WaitAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task<CalibrationCenterPosition> MoveToStartupPosition2SafelyAsync(
@@ -1639,6 +1751,7 @@ public partial class HomePage : UserControl
             requiredFinalTestTask,
             requiredSecondSetPickupTask,
             xyMoveAwayDelayTask);
+        await WaitIfProductionPausedAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var carouselAdvanceResult = await AdvanceCarouselExactlyTwoStationsAsync(
             carouselStations,
@@ -1657,6 +1770,7 @@ public partial class HomePage : UserControl
         }
 
         await requiredPreviousSecondSetUnloadTask;
+        await WaitIfProductionPausedAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
         var secondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
@@ -1730,24 +1844,28 @@ public partial class HomePage : UserControl
                 xyPositions.Position1X,
                 xyPositions.Position1Y,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
             await PickSecondSetNozzleFromStationAsync(
                 2,
                 SecondSetNozzle2UnloadStation,
                 zPositions.SecondSetPickup,
                 zPositions.SecondSetSafe,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
 
             await MoveSecondSetUnloadAxesToAsync(
                 "吸嘴1取14工位",
                 xyPositions.Position2X,
                 xyPositions.Position2Y,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
             await PickSecondSetNozzleFromStationAsync(
                 1,
                 SecondSetNozzle1UnloadStation,
                 zPositions.SecondSetPickup,
                 zPositions.SecondSetSafe,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
 
             // 第二套必须先完成两次取料。任一吸嘴未确认持料时，禁止进入任何放料动作。
             EnsureBothSecondSetNozzlesHolding();
@@ -1763,24 +1881,30 @@ public partial class HomePage : UserControl
                 nozzle1BinCenter.X,
                 nozzle1BinCenter.Y + SecondSetNozzleBinYOffset,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
                 1,
                 zPositions.SecondSetDrop,
                 zPositions.SecondSetSafe,
                 cancellationToken);
+            RecordCompletedUphUnit();
+            await WaitIfProductionPausedAsync(cancellationToken);
 
             await MoveSecondSetUnloadAxesToAsync(
                 $"吸嘴2放料到{nozzle2Bin}",
                 nozzle2BinCenter.X,
                 nozzle2BinCenter.Y - SecondSetNozzleBinYOffset,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
                 2,
                 zPositions.SecondSetDrop,
                 zPositions.SecondSetSafe,
                 cancellationToken);
+            RecordCompletedUphUnit();
+            await WaitIfProductionPausedAsync(cancellationToken);
             CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet.Second);
 
             // 两个BIN放料全部完成后，立即回到下一轮首先使用的取料位等待，
@@ -1790,6 +1914,7 @@ public partial class HomePage : UserControl
                 xyPositions.Position1X,
                 xyPositions.Position1Y,
                 cancellationToken);
+            await WaitIfProductionPausedAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1877,6 +2002,7 @@ public partial class HomePage : UserControl
         const int maximumTurnsBeforeReload = 2;
         for (var turn = 1; turn <= maximumTurnsBeforeReload; turn++)
         {
+            await WaitIfProductionPausedAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var loadedTestStationCount = CountLoadedTestStations(carouselStations);
             SetStartProductionStatus(
@@ -1908,6 +2034,7 @@ public partial class HomePage : UserControl
                     carouselStations,
                     cancellationToken);
             }
+            await WaitIfProductionPausedAsync(cancellationToken);
         }
 
         SetStartProductionStatus(
@@ -1930,6 +2057,7 @@ public partial class HomePage : UserControl
         CarouselStationState[] carouselStations,
         CancellationToken cancellationToken)
     {
+        await WaitIfProductionPausedAsync(cancellationToken);
         var axisTargets = TestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
@@ -1989,6 +2117,7 @@ public partial class HomePage : UserControl
         }
 
         UpdateCarouselStationDisplay(carouselStations);
+        await WaitIfProductionPausedAsync(cancellationToken);
         return axisTargets.Count;
     }
 
@@ -3598,12 +3727,21 @@ public partial class HomePage : UserControl
             allBinDropPositionsValid &&
             (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
         StartProductionTitleText.Text = _startSequenceRunning
-            ? (_productionStopRequested ? "正在停止" : "停止循环")
+            ? (_productionStopRequested
+                ? "正在停止"
+                : _productionPauseRequested
+                    ? "继续运行"
+                    : "暂停循环")
             : "开始运行";
+        var productionButtonPaused = _startSequenceRunning && _productionPauseRequested;
         StartProductionButton.Background = new SolidColorBrush(
-            _startSequenceRunning ? Color.FromRgb(181, 22, 35) : Color.FromRgb(22, 139, 80));
+            productionButtonPaused || !_startSequenceRunning
+                ? Color.FromRgb(22, 139, 80)
+                : Color.FromRgb(181, 22, 35));
         StartProductionButton.BorderBrush = new SolidColorBrush(
-            _startSequenceRunning ? Color.FromRgb(255, 98, 110) : Color.FromRgb(56, 185, 121));
+            productionButtonPaused || !_startSequenceRunning
+                ? Color.FromRgb(56, 185, 121)
+                : Color.FromRgb(255, 98, 110));
         OneKeyResetButton.IsEnabled = _motionController is not null && commandsIdle;
         MoveAssignedNozzleButton.IsEnabled =
             visionControllersReady &&
@@ -3704,6 +3842,67 @@ public partial class HomePage : UserControl
         StartProductionHintText.Text = message;
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
+    }
+
+    private void ResetUphTracking()
+    {
+        _uphRefreshTimer.Stop();
+        _uphStopwatch.Reset();
+        _uphCompletedUnitCount = 0;
+        UpdateUphDisplay();
+    }
+
+    private void StartUphTracking()
+    {
+        if (_uphStopwatch.IsRunning || _uphStopwatch.Elapsed > TimeSpan.Zero)
+        {
+            return;
+        }
+
+        _uphStopwatch.Start();
+        _uphRefreshTimer.Start();
+        UpdateUphDisplay();
+    }
+
+    private void StopUphTracking()
+    {
+        if (_uphStopwatch.IsRunning)
+        {
+            _uphStopwatch.Stop();
+        }
+
+        _uphRefreshTimer.Stop();
+        UpdateUphDisplay();
+    }
+
+    private void RecordCompletedUphUnit()
+    {
+        if (_uphStopwatch.Elapsed == TimeSpan.Zero)
+        {
+            return;
+        }
+
+        _uphCompletedUnitCount++;
+        UpdateUphDisplay();
+    }
+
+    private void UpdateUphDisplay()
+    {
+        if (UphValueText is null)
+        {
+            return;
+        }
+
+        var elapsedHours = _uphStopwatch.Elapsed.TotalHours;
+        var uph = elapsedHours > 0
+            ? _uphCompletedUnitCount / elapsedHours
+            : 0d;
+        UphValueText.Text = Math.Round(uph, MidpointRounding.AwayFromZero)
+            .ToString("0", CultureInfo.InvariantCulture);
+        UphValueText.ToolTip = _uphStopwatch.Elapsed == TimeSpan.Zero
+            ? "从首次取料开始统计"
+            : $"从首次取料开始 · 已完成 {_uphCompletedUnitCount} 件 · " +
+              $"累计 {_uphStopwatch.Elapsed:hh\\:mm\\:ss}";
     }
 
     private void SetOneKeyResetStatus(string message, Color color)

@@ -574,7 +574,7 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource SidebarSection}">
+                    <Border x:Name="SidebarNozzleTeachSection" Style="{StaticResource SidebarSection}">
                         <StackPanel>
                             <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>
@@ -642,10 +642,10 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
-                                    <TextBlock Text="4" Foreground="White" FontWeight="Bold"
+                                    <TextBlock x:Name="SidebarClickMoveStepText" Text="4" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="点击移动" Style="{StaticResource SidebarTitle}" Margin="10,0,10,0" />
+                                <TextBlock Grid.Column="1" x:Name="SidebarClickMoveTitleText" Text="点击移动" Style="{StaticResource SidebarTitle}" Margin="10,0,10,0" />
                                 <ComboBox Grid.Column="2" x:Name="SidebarClickTargetComboBox" Tag="ClickTarget"
                                           Style="{StaticResource SidebarCombo}"
                                           SelectionChanged="CalibrationSidebarSelection_Changed">

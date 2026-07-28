@@ -213,6 +213,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         double offsetX,
         double offsetY,
         bool xFirst,
+        bool lowerCamera,
         string calibrationFilePath,
         CancellationToken cancellationToken)
     {
@@ -227,6 +228,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 offsetX.ToString("R", CultureInfo.InvariantCulture),
                 offsetY.ToString("R", CultureInfo.InvariantCulture),
                 xFirst ? "X" : "Y",
+                lowerCamera ? "Lower" : "Keep",
                 encodedPath),
             cancellationToken);
     }
@@ -309,6 +311,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         bool importEnabled,
         bool loadProfileEnabled,
         bool saveProfileEnabled,
+        bool simplifiedMode,
         CancellationToken cancellationToken)
     {
         var encodedPath = Convert.ToBase64String(
@@ -322,7 +325,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 chooseEnabled ? "1" : "0",
                 importEnabled ? "1" : "0",
                 loadProfileEnabled ? "1" : "0",
-                saveProfileEnabled ? "1" : "0"),
+                saveProfileEnabled ? "1" : "0",
+                simplifiedMode ? "1" : "0"),
             cancellationToken);
     }
 
@@ -380,7 +384,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.NozzleStatusColor),
                 Encode(state.ClickMoveStatusColor),
                 Encode(state.WorkflowStatus),
-                state.RecordNozzleDotPositionEnabled ? "1" : "0"),
+                state.RecordNozzleDotPositionEnabled ? "1" : "0",
+                state.SimplifiedMode ? "1" : "0"),
             cancellationToken);
     }
 
@@ -1356,7 +1361,8 @@ public sealed record CalibrationSidebarState(
     string NozzleStatusColor,
     string ClickMoveStatusColor,
     string WorkflowStatus,
-    bool RecordNozzleDotPositionEnabled);
+    bool RecordNozzleDotPositionEnabled,
+    bool SimplifiedMode);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

@@ -90,18 +90,19 @@
                                Foreground="#D8E4EC"
                                FontSize="14"
                                VerticalAlignment="Center" />
-                    <TextBlock Text="轴组"
+                    <TextBlock Text="标定类型"
                                Foreground="#AFC0CD"
                                FontSize="12"
                                Margin="18,0,8,0"
                                VerticalAlignment="Center" />
                     <ComboBox x:Name="AxisSetComboBox"
-                              Width="138"
+                              Width="168"
                               Height="34"
                               VerticalContentAlignment="Center"
                               SelectionChanged="AxisSet_SelectionChanged">
-                        <ComboBoxItem Content="第一套轴 1/2" Tag="First" />
-                        <ComboBoxItem Content="第二套轴 3/4" Tag="Second" />
+                        <ComboBoxItem Content="第一套 XY 标定" Tag="First" />
+                        <ComboBoxItem Content="第二套 XY 标定" Tag="Second" />
+                        <ComboBoxItem Content="下相机标定" Tag="LowerCamera" />
                     </ComboBox>
                 </StackPanel>
                 <Button Grid.Column="2"
