@@ -13,6 +13,7 @@ using GlobalVariableModuleCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSCircleFitModuCs;
+using IMVSLineFindModuCs;
 using IMVSNPointCalibModuCs;
 using IMVSRectFindModuCs;
 using VM.Core;
@@ -40,6 +41,9 @@ public partial class MainWindow : Window
     private const string RotationPointRectangleModuleName = "矩形检测1";
     private const string RotationCenterProcedureName = "计算旋转中心";
     private const string RotationCenterCircleModuleName = "圆拟合1";
+    private const string LowerCameraTeachProcedureName = "下相机示教流程";
+    private const string LowerCameraTeachLineModuleName = "直线查找1";
+    private const string LowerCameraTeachTransformModuleName = "标定转换1";
     private const string GlobalVariableModuleName = "全局变量1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
@@ -275,6 +279,7 @@ public partial class MainWindow : Window
             "RUN_NOZZLE_POINTS" => RunNozzlePointInspection(parts),
             "RUN_ROTATION_CENTER_CAPTURE" => RunRotationCenterCapture(parts),
             "CALCULATE_ROTATION_CENTER" => CalculateRotationCenter(parts),
+            "RUN_LOWER_CAMERA_TEACH" => RunLowerCameraTeach(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
     }
@@ -538,6 +543,65 @@ public partial class MainWindow : Window
             throw new InvalidOperationException(
                 $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
         }
+    }
+
+    private string RunLowerCameraTeach(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 2)
+        {
+            throw new InvalidDataException("下相机示教命令必须包含当前吸嘴的标定文件路径。");
+        }
+
+        EnsureRotationCenterCommandReady();
+        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[1]);
+        var procedure = GetRequiredProcedure(LowerCameraTeachProcedureName);
+        var lineModule = ResolveNamedModule<IMVSLineFindModuTool>(
+            LowerCameraTeachProcedureName,
+            LowerCameraTeachLineModuleName);
+        var transformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
+            LowerCameraTeachProcedureName,
+            LowerCameraTeachTransformModuleName);
+
+        StopAllContinuousExecutionNoThrow();
+        transformModule.ModuParams.LoadCalibPath = calibrationPath;
+        BindInspectionResultModule(transformModule);
+        procedure.Run(true);
+        EnsureProcedureRunSucceeded(procedure, LowerCameraTeachProcedureName);
+
+        var lineResult = lineModule.ModuResult;
+        var line = lineResult?.OutputLine;
+        if (lineResult is null || lineResult.ModuStatus != 1 || line is null)
+        {
+            throw new InvalidOperationException(
+                $"{LowerCameraTeachProcedureName}.{LowerCameraTeachLineModuleName}返回NG，请检查吸嘴图像和直线查找参数。");
+        }
+
+        var transformResult = transformModule.ModuResult;
+        if (transformResult is null || transformResult.ModuStatus != 1 ||
+            transformResult.TransPoint is null || transformResult.TransPoint.Count < 1)
+        {
+            throw new InvalidOperationException(
+                $"{LowerCameraTeachProcedureName}.{LowerCameraTeachTransformModuleName}未返回转换坐标，请检查标定文件和模块输入连线。");
+        }
+
+        var start = line.StartPoint;
+        var end = line.EndPoint;
+        var transformed = transformResult.TransPoint[0];
+        var values = new[]
+        {
+            start.X, start.Y, end.X, end.Y, transformed.X, transformed.Y
+        };
+        if (values.Any(value => float.IsNaN(value) || float.IsInfinity(value)))
+        {
+            throw new InvalidOperationException("下相机示教流程返回的直线或转换坐标无效。");
+        }
+
+        SetStatus(
+            $"下相机示教完成：起点({start.X:0.###}, {start.Y:0.###})，终点({end.X:0.###}, {end.Y:0.###})，转换({transformed.X:0.###}, {transformed.Y:0.###})",
+            StatusKind.Success);
+        return string.Join(
+            "\t",
+            values.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
     }
 
     private static void EnsureProcedureRunSucceeded(VmProcedure procedure, string procedureName)
@@ -883,7 +947,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 36)
+        if (parts.Count != 39)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -997,16 +1061,31 @@ public partial class MainWindow : Window
                 ? "StopRotationCenter"
                 : "CalculateRotationCenter";
             SidebarRotationCenterButton.Content = rotationCenterRunning
-                ? "停止计算旋转中心"
-                : $"计算旋转中心 · {lowerCameraNozzleName}";
+                ? "停止旋转中心 / 自动示教"
+                : $"计算旋转中心并保存 · {lowerCameraNozzleName}";
             SidebarRotationCenterStatusText.Text = Decode(parts[35]);
             SidebarRotationCenterStatusText.Foreground = rotationCenterRunning
+                ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
+                : new SolidColorBrush(Color.FromRgb(175, 192, 205));
+            var lowerCameraTeachRunning = parts[37] == "1";
+            SidebarLowerCameraTeachSection.Visibility = simplifiedMode
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            SidebarLowerCameraTeachButton.IsEnabled = parts[36] == "1" || lowerCameraTeachRunning;
+            SidebarLowerCameraTeachButton.Tag = lowerCameraTeachRunning
+                ? "StopLowerCameraTeach"
+                : "RunLowerCameraTeach";
+            SidebarLowerCameraTeachButton.Content = lowerCameraTeachRunning
+                ? "停止下相机示教"
+                : $"执行并保存示教 · {lowerCameraNozzleName}";
+            SidebarLowerCameraTeachStatusText.Text = Decode(parts[38]);
+            SidebarLowerCameraTeachStatusText.Foreground = lowerCameraTeachRunning
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
                 : new SolidColorBrush(Color.FromRgb(175, 192, 205));
             SidebarClickTargetComboBox.Visibility = simplifiedMode
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-            SidebarClickMoveStepText.Text = "4";
+            SidebarClickMoveStepText.Text = simplifiedMode ? "5" : "4";
             SidebarClickMoveTitleText.Text = simplifiedMode
                 ? $"点哪里移动到哪里 · {lowerCameraNozzleName}"
                 : "点击移动";

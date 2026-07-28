@@ -126,6 +126,14 @@ public sealed class VisualCalibrationSettings
 
     public int LowerCameraActiveNozzle { get; set; } = 1;
 
+    public double? LowerCameraArrivalPosition1X { get; set; }
+
+    public double? LowerCameraArrivalPosition1Y { get; set; }
+
+    public double? LowerCameraArrivalPosition2X { get; set; }
+
+    public double? LowerCameraArrivalPosition2Y { get; set; }
+
     public string LowerCameraCalibrationFilePath { get; set; } = "";
 
     public string LowerCameraNozzle1CalibrationFilePath { get; set; } = "";

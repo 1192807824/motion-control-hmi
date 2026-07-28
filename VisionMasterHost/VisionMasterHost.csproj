@@ -66,6 +66,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSCircleFitModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSLineFindModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSLineFindModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="GlobalVariableModuleCs">
       <HintPath>$(VisionMasterAssemblyDirectory)\GlobalVariableModuleCs.dll</HintPath>
       <Private>true</Private>

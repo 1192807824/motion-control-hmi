@@ -398,7 +398,10 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.LowerCameraNozzleName),
                 state.RotationCenterEnabled ? "1" : "0",
                 state.RotationCenterRunning ? "1" : "0",
-                Encode(state.RotationCenterStatus)),
+                Encode(state.RotationCenterStatus),
+                state.LowerCameraTeachEnabled ? "1" : "0",
+                state.LowerCameraTeachRunning ? "1" : "0",
+                Encode(state.LowerCameraTeachStatus)),
             cancellationToken);
     }
 
@@ -452,6 +455,39 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
 
         return new VisionRotationCenterResult(centerX, centerY);
+    }
+
+    public async Task<VisionLowerCameraTeachResult> RunLowerCameraTeachAsync(
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath));
+        var response = await SendCalibrationCommandAsync(
+            $"RUN_LOWER_CAMERA_TEACH\t{encodedPath}",
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 6)
+        {
+            throw new InvalidDataException("VisionMaster 返回的下相机示教数据数量不正确。");
+        }
+
+        var values = new double[6];
+        for (var index = 0; index < values.Length; index++)
+        {
+            if (!double.TryParse(
+                    parts[index],
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out values[index]) ||
+                !double.IsFinite(values[index]))
+            {
+                throw new InvalidDataException($"VisionMaster 返回的下相机示教数据{index + 1}无效。");
+            }
+        }
+
+        return new VisionLowerCameraTeachResult(
+            values[0], values[1], values[2], values[3], values[4], values[5]);
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -1431,11 +1467,22 @@ public sealed record CalibrationSidebarState(
     string LowerCameraNozzleName,
     bool RotationCenterEnabled,
     bool RotationCenterRunning,
-    string RotationCenterStatus);
+    string RotationCenterStatus,
+    bool LowerCameraTeachEnabled,
+    bool LowerCameraTeachRunning,
+    string LowerCameraTeachStatus);
 
 public sealed record VisionRotationPoint(double X, double Y);
 
 public sealed record VisionRotationCenterResult(double CenterX, double CenterY);
+
+public sealed record VisionLowerCameraTeachResult(
+    double LineStartX,
+    double LineStartY,
+    double LineEndX,
+    double LineEndY,
+    double TransformedX,
+    double TransformedY);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

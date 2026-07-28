@@ -584,12 +584,12 @@
                                     <TextBlock Text="3" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="旋转中心" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock Text="旋转中心 + 自动示教" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
                             </StackPanel>
                             <Button x:Name="SidebarRotationCenterButton"
                                     Tag="CalculateRotationCenter"
                                     Margin="26,0,0,6"
-                                    Content="计算旋转中心"
+                                    Content="计算旋转中心并保存示教数据"
                                     Style="{StaticResource SidebarButton}"
                                     Background="#6B3FD6"
                                     BorderBrush="#8A63E8"
@@ -661,6 +661,36 @@
                             <TextBlock x:Name="SidebarNozzleStatusText"
                                        Margin="26,0,0,0" Text="两个吸嘴同时打点时，先记录一次公共XY"
                                        Foreground="#AFC0CD" FontSize="11" LineHeight="22" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="SidebarLowerCameraTeachSection"
+                            Style="{StaticResource SidebarSection}"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="4" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="示教数据（可单独重做）" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                            </StackPanel>
+                            <Button x:Name="SidebarLowerCameraTeachButton"
+                                    Tag="RunLowerCameraTeach"
+                                    Margin="26,0,0,6"
+                                    Content="执行并保存示教"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#0B6A88"
+                                    BorderBrush="#1496B8"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <TextBlock x:Name="SidebarLowerCameraTeachStatusText"
+                                       Margin="26,0,0,0"
+                                       Text="旋转中心完成后可执行"
+                                       Foreground="#AFC0CD"
+                                       FontSize="11"
+                                       LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
                         </StackPanel>
                     </Border>
 
