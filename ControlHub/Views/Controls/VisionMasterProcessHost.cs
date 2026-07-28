@@ -395,8 +395,63 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.WorkflowStatus),
                 state.RecordNozzleDotPositionEnabled ? "1" : "0",
                 state.SimplifiedMode ? "1" : "0",
-                Encode(state.LowerCameraNozzleName)),
+                Encode(state.LowerCameraNozzleName),
+                state.RotationCenterEnabled ? "1" : "0",
+                state.RotationCenterRunning ? "1" : "0",
+                Encode(state.RotationCenterStatus)),
             cancellationToken);
+    }
+
+    public async Task<VisionRotationPoint> CaptureRotationCenterPointAsync(
+        CancellationToken cancellationToken)
+    {
+        var response = await SendCalibrationCommandAsync(
+            "RUN_ROTATION_CENTER_CAPTURE",
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 2 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y))
+        {
+            throw new InvalidDataException("VisionMaster 返回的矩形中心点无效。");
+        }
+
+        return new VisionRotationPoint(x, y);
+    }
+
+    public async Task<VisionRotationCenterResult> CalculateRotationCenterAsync(
+        IReadOnlyList<VisionRotationPoint> points,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(points);
+        if (points.Count != 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+        {
+            throw new ArgumentException("计算旋转中心必须提供三个有效中心点。", nameof(points));
+        }
+
+        var commandParts = new List<string> { "CALCULATE_ROTATION_CENTER" };
+        foreach (var point in points)
+        {
+            commandParts.Add(point.X.ToString("R", CultureInfo.InvariantCulture));
+            commandParts.Add(point.Y.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        var response = await SendCalibrationCommandAsync(
+            string.Join("\t", commandParts),
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 2 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerX) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerY) ||
+            !double.IsFinite(centerX) ||
+            !double.IsFinite(centerY))
+        {
+            throw new InvalidDataException("VisionMaster 返回的旋转中心无效。");
+        }
+
+        return new VisionRotationCenterResult(centerX, centerY);
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -1373,7 +1428,14 @@ public sealed record CalibrationSidebarState(
     string WorkflowStatus,
     bool RecordNozzleDotPositionEnabled,
     bool SimplifiedMode,
-    string LowerCameraNozzleName);
+    string LowerCameraNozzleName,
+    bool RotationCenterEnabled,
+    bool RotationCenterRunning,
+    string RotationCenterStatus);
+
+public sealed record VisionRotationPoint(double X, double Y);
+
+public sealed record VisionRotationCenterResult(double CenterX, double CenterY);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

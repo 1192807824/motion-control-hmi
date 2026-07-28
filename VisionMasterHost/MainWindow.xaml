@@ -575,6 +575,36 @@
                         </StackPanel>
                     </Border>
 
+                    <Border x:Name="SidebarRotationCenterSection"
+                            Style="{StaticResource SidebarSection}"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="3" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="旋转中心" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                            </StackPanel>
+                            <Button x:Name="SidebarRotationCenterButton"
+                                    Tag="CalculateRotationCenter"
+                                    Margin="26,0,0,6"
+                                    Content="计算旋转中心"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#6B3FD6"
+                                    BorderBrush="#8A63E8"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <TextBlock x:Name="SidebarRotationCenterStatusText"
+                                       Margin="26,0,0,0"
+                                       Text="九点标定完成后可计算"
+                                       Foreground="#AFC0CD"
+                                       FontSize="11"
+                                       LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
                     <Border x:Name="SidebarNozzleTeachSection" Style="{StaticResource SidebarSection}">
                         <StackPanel>
                             <Grid Margin="0,0,0,6">

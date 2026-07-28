@@ -9,9 +9,12 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using CalculatorModuleCs;
+using GlobalVariableModuleCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
+using IMVSCircleFitModuCs;
 using IMVSNPointCalibModuCs;
+using IMVSRectFindModuCs;
 using VM.Core;
 using VM.PlatformSDKCS;
 using VMControls.Interface;
@@ -33,6 +36,11 @@ public partial class MainWindow : Window
     private const string NozzlePointDisplayModuleName = "高精度匹配1";
     private const string NozzlePointCalculatorModuleName = "变量计算";
     private const uint NozzlePointCalculatorModuleId = 34;
+    private const string RotationPointProcedureName = "获取三点流程";
+    private const string RotationPointRectangleModuleName = "矩形检测1";
+    private const string RotationCenterProcedureName = "计算旋转中心";
+    private const string RotationCenterCircleModuleName = "圆拟合1";
+    private const string GlobalVariableModuleName = "全局变量1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
     private readonly bool _embedded;
@@ -265,6 +273,8 @@ public partial class MainWindow : Window
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             "RUN_NOZZLE_POINTS" => RunNozzlePointInspection(parts),
+            "RUN_ROTATION_CENTER_CAPTURE" => RunRotationCenterCapture(parts),
+            "CALCULATE_ROTATION_CENTER" => CalculateRotationCenter(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
     }
@@ -405,6 +415,228 @@ public partial class MainWindow : Window
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
     {
         return RunTwoPointInspection(parts, NozzlePointProcedureName, ref _nozzlePointProcedure);
+    }
+
+    private string RunRotationCenterCapture(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 1)
+        {
+            throw new InvalidDataException("获取旋转中心采集点命令参数不正确。");
+        }
+
+        EnsureRotationCenterCommandReady();
+        var procedure = GetRequiredProcedure(RotationPointProcedureName);
+        var rectangleModule = ResolveNamedModule<IMVSRectFindModuTool>(
+            RotationPointProcedureName,
+            RotationPointRectangleModuleName);
+        StopAllContinuousExecutionNoThrow();
+        BindInspectionResultModule(rectangleModule);
+        procedure.Run(true);
+        EnsureProcedureRunSucceeded(procedure, RotationPointProcedureName);
+
+        var result = rectangleModule.ModuResult;
+        if (result is null || result.ModuStatus != 1 || result.DetectStatus != 1)
+        {
+            throw new InvalidOperationException(
+                $"{RotationPointProcedureName}.{RotationPointRectangleModuleName}返回NG，请检查吸嘴图像和矩形检测参数。");
+        }
+
+        var center = result.RectBox?.CenterPoint
+            ?? throw new InvalidOperationException(
+                $"{RotationPointProcedureName}.{RotationPointRectangleModuleName}未返回矩形中心点。");
+        if (float.IsNaN(center.X) || float.IsInfinity(center.X) ||
+            float.IsNaN(center.Y) || float.IsInfinity(center.Y))
+        {
+            throw new InvalidOperationException("矩形检测返回的中心点X/Y无效。");
+        }
+
+        SetStatus(
+            $"获取旋转中心采集点完成：X={center.X:0.###}，Y={center.Y:0.###}",
+            StatusKind.Success);
+        return string.Join(
+            "\t",
+            center.X.ToString("R", CultureInfo.InvariantCulture),
+            center.Y.ToString("R", CultureInfo.InvariantCulture));
+    }
+
+    private string CalculateRotationCenter(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 7)
+        {
+            throw new InvalidDataException("计算旋转中心命令必须包含三个点的六个坐标。");
+        }
+
+        EnsureRotationCenterCommandReady();
+        var values = new float[6];
+        for (var index = 0; index < values.Length; index++)
+        {
+            var value = ParseFiniteDouble(parts[index + 1], $"旋转中心参数{index + 1}");
+            if (value < float.MinValue || value > float.MaxValue)
+            {
+                throw new InvalidDataException($"旋转中心参数{index + 1}超出float范围。");
+            }
+
+            values[index] = (float)value;
+        }
+
+        StopAllContinuousExecutionNoThrow();
+        var globalVariables = ResolveGlobalVariableModule();
+        globalVariables.SetVarFloat("X1", [values[0]]);
+        globalVariables.SetVarFloat("Y1", [values[1]]);
+        globalVariables.SetVarFloat("X2", [values[2]]);
+        globalVariables.SetVarFloat("Y2", [values[3]]);
+        globalVariables.SetVarFloat("X3", [values[4]]);
+        globalVariables.SetVarFloat("Y3", [values[5]]);
+
+        var procedure = GetRequiredProcedure(RotationCenterProcedureName);
+        var circleModule = ResolveNamedModule<IMVSCircleFitModuTool>(
+            RotationCenterProcedureName,
+            RotationCenterCircleModuleName);
+        BindInspectionResultModule(circleModule);
+        procedure.Run(true);
+        EnsureProcedureRunSucceeded(procedure, RotationCenterProcedureName);
+
+        var result = circleModule.ModuResult;
+        if (result is null || result.ModuStatus != 1 || result.FitStatus != 1)
+        {
+            throw new InvalidOperationException(
+                $"{RotationCenterProcedureName}.{RotationCenterCircleModuleName}返回NG，请检查三个采集点。");
+        }
+
+        var center = result.OutputCircle?.CenterPoint
+            ?? throw new InvalidOperationException(
+                $"{RotationCenterProcedureName}.{RotationCenterCircleModuleName}未返回圆心。");
+        if (float.IsNaN(center.X) || float.IsInfinity(center.X) ||
+            float.IsNaN(center.Y) || float.IsInfinity(center.Y))
+        {
+            throw new InvalidOperationException("圆拟合返回的圆心X/Y无效。");
+        }
+
+        SetStatus(
+            $"旋转中心计算完成：X={center.X:0.###}，Y={center.Y:0.###}",
+            StatusKind.Success);
+        return string.Join(
+            "\t",
+            center.X.ToString("R", CultureInfo.InvariantCulture),
+            center.Y.ToString("R", CultureInfo.InvariantCulture));
+    }
+
+    private void EnsureRotationCenterCommandReady()
+    {
+        if (_busy || _calibrationSession is not null)
+        {
+            throw new InvalidOperationException("九点标定正在执行，不能计算旋转中心。");
+        }
+
+        if (!_solutionLoaded)
+        {
+            LoadFixedSolution();
+        }
+
+        if (!_solutionLoaded)
+        {
+            throw new InvalidOperationException(
+                $"固定方案尚未加载完成，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
+        }
+    }
+
+    private static void EnsureProcedureRunSucceeded(VmProcedure procedure, string procedureName)
+    {
+        if (procedure.GetIsExecuteNormal() == 1)
+        {
+            return;
+        }
+
+        var errors = procedure.GetModuErrorInfoList();
+        var details = errors is null
+            ? ""
+            : string.Join(
+                "；",
+                errors.Select(error =>
+                    $"{error.strDisplayName}(0x{unchecked((uint)error.nErrorCode):X8})"));
+        throw new InvalidOperationException(
+            string.IsNullOrWhiteSpace(details)
+                ? $"固定方案中的{procedureName}执行异常。"
+                : $"固定方案中的{procedureName}执行异常：{details}");
+    }
+
+    private static GlobalVariableModuleTool ResolveGlobalVariableModule()
+    {
+        try
+        {
+            if (VmSolution.Instance[GlobalVariableModuleName] is GlobalVariableModuleTool module)
+            {
+                return module;
+            }
+        }
+        catch
+        {
+        }
+
+        foreach (var candidate in VmSolution.Instance.Modules)
+        {
+            if (candidate is GlobalVariableModuleTool module &&
+                (string.Equals(module.Name, GlobalVariableModuleName, StringComparison.Ordinal) ||
+                 string.Equals(module.StrModuleName, GlobalVariableModuleName, StringComparison.Ordinal) ||
+                 string.Equals(module.FullName, GlobalVariableModuleName, StringComparison.Ordinal)))
+            {
+                return module;
+            }
+        }
+
+        throw new InvalidOperationException($"固定方案中未找到“{GlobalVariableModuleName}”。");
+    }
+
+    private static TModule ResolveNamedModule<TModule>(string procedureName, string displayModuleName)
+        where TModule : VmModule
+    {
+        try
+        {
+            if (VmSolution.Instance[$"{procedureName}.{displayModuleName}"] is TModule directModule)
+            {
+                return directModule;
+            }
+        }
+        catch
+        {
+        }
+
+        var procedure = VmSolution.Instance[procedureName] as VmProcedure
+            ?? throw new InvalidOperationException($"固定方案中未找到“{procedureName}”。");
+        var moduleList = procedure.GetProcedureModuleList();
+        for (var index = 0; index < moduleList.nNum; index++)
+        {
+            var info = moduleList.astModuleInfo[index];
+            var displayName = info.strDisplayName?.Trim() ?? "";
+            if (!string.Equals(displayName, displayModuleName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var moduleName = info.strModuleName?.Trim() ?? "";
+            foreach (var candidate in new[]
+                     {
+                         $"{procedureName}.{displayName}",
+                         $"{procedureName}.{moduleName}",
+                         displayName,
+                         moduleName
+                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
+            {
+                try
+                {
+                    if (VmSolution.Instance[candidate] is TModule module)
+                    {
+                        return module;
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"固定方案的“{procedureName}”中未找到“{displayModuleName}”。");
     }
 
     private string RunTwoPointInspection(
@@ -651,7 +883,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 33)
+        if (parts.Count != 36)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -753,13 +985,28 @@ public partial class MainWindow : Window
             SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
             var simplifiedMode = parts[31] == "1";
             var lowerCameraNozzleName = Decode(parts[32]);
+            var rotationCenterRunning = parts[34] == "1";
             SidebarNozzleTeachSection.Visibility = simplifiedMode
                 ? Visibility.Collapsed
                 : Visibility.Visible;
+            SidebarRotationCenterSection.Visibility = simplifiedMode
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            SidebarRotationCenterButton.IsEnabled = parts[33] == "1" || rotationCenterRunning;
+            SidebarRotationCenterButton.Tag = rotationCenterRunning
+                ? "StopRotationCenter"
+                : "CalculateRotationCenter";
+            SidebarRotationCenterButton.Content = rotationCenterRunning
+                ? "停止计算旋转中心"
+                : $"计算旋转中心 · {lowerCameraNozzleName}";
+            SidebarRotationCenterStatusText.Text = Decode(parts[35]);
+            SidebarRotationCenterStatusText.Foreground = rotationCenterRunning
+                ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
+                : new SolidColorBrush(Color.FromRgb(175, 192, 205));
             SidebarClickTargetComboBox.Visibility = simplifiedMode
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-            SidebarClickMoveStepText.Text = simplifiedMode ? "3" : "4";
+            SidebarClickMoveStepText.Text = "4";
             SidebarClickMoveTitleText.Text = simplifiedMode
                 ? $"点哪里移动到哪里 · {lowerCameraNozzleName}"
                 : "点击移动";

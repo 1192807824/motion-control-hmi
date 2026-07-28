@@ -131,4 +131,16 @@ public sealed class VisualCalibrationSettings
     public string LowerCameraNozzle1CalibrationFilePath { get; set; } = "";
 
     public string LowerCameraNozzle2CalibrationFilePath { get; set; } = "";
+
+    public bool LowerCameraNozzle1RotationCenterCalibrated { get; set; }
+
+    public double LowerCameraNozzle1RotationCenterX { get; set; }
+
+    public double LowerCameraNozzle1RotationCenterY { get; set; }
+
+    public bool LowerCameraNozzle2RotationCenterCalibrated { get; set; }
+
+    public double LowerCameraNozzle2RotationCenterX { get; set; }
+
+    public double LowerCameraNozzle2RotationCenterY { get; set; }
 }

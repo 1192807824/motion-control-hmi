@@ -58,6 +58,18 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSBlobFindModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSRectFindModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSRectFindModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSCircleFitModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSCircleFitModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="GlobalVariableModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\GlobalVariableModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="CalculatorModuleCs">
       <HintPath>$(VisionMasterAssemblyDirectory)\CalculatorModuleCs.dll</HintPath>
       <Private>true</Private>
