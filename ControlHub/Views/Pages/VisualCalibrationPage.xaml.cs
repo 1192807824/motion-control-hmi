@@ -2325,7 +2325,7 @@ public partial class VisualCalibrationPage : UserControl
             _lowerCameraCorrectionTestCancellation = new CancellationTokenSource();
             _lowerCameraCorrectionTestRunning = true;
             SetLowerCameraCorrectionTestStatus(
-                $"正在写入{ActiveLowerCameraNozzleName}的直线、圆心和标定文件，并运行“下相机纠偏”…");
+                $"正在使用标定文件“{Path.GetFileName(calibrationPath)}”，写入{ActiveLowerCameraNozzleName}的直线和圆心，并运行“下相机纠偏”…");
             SetWorkflowStatus(
                 $"{ActiveLowerCameraNozzleName}下相机纠偏测试运行中…",
                 WorkflowStatus.Running);
@@ -2337,7 +2337,8 @@ public partial class VisualCalibrationPage : UserControl
                 _lowerCameraCorrectionTestCancellation.Token);
             var message =
                 $"{ActiveLowerCameraNozzleName}纠偏测试：转换坐标X={result.TransformedX:0.###}，" +
-                $"转换坐标Y={result.TransformedY:0.###}，转换角度={result.TransformedAngle:0.###}°";
+                $"转换坐标Y={result.TransformedY:0.###}，转换角度={result.TransformedAngle:0.###}°；" +
+                $"标定文件={Path.GetFileName(calibrationPath)}";
             SetLowerCameraCorrectionTestStatus(message);
             SetWorkflowStatus(message, WorkflowStatus.Success);
         }

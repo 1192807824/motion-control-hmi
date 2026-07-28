@@ -472,7 +472,11 @@
                     BorderBrush="#29475D"
                     BorderThickness="1"
                     CornerRadius="4">
-                <StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalFirst"
+                              CanContentScroll="False">
+                    <StackPanel>
                     <Border Style="{StaticResource SidebarSection}">
                         <Button x:Name="SidebarStartLivePreviewButton" Tag="StartLivePreview"
                                 Margin="0" Content="获取实时画面"
@@ -758,7 +762,8 @@
                                        Text="未启用" Foreground="#AFC0CD" FontSize="11" TextAlignment="Center" />
                         </StackPanel>
                     </Border>
-                </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
 
             <Grid x:Name="RenderGrid" Grid.Column="2">
