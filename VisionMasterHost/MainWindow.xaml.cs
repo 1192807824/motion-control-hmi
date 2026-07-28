@@ -670,6 +670,13 @@ public partial class MainWindow : Window
 
         static void SetText(TextBox textBox, string value)
         {
+            // 侧栏输入会通过进程间消息同步到主程序，主程序随后回写整套状态。
+            // 用户正在编辑时不能用回写值覆盖文本，否则每次按键后光标和内容都会被重置。
+            if (textBox.IsKeyboardFocusWithin)
+            {
+                return;
+            }
+
             if (!string.Equals(textBox.Text, value, StringComparison.Ordinal))
             {
                 textBox.Text = value;
