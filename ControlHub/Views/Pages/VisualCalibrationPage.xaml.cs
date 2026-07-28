@@ -32,9 +32,12 @@ public partial class VisualCalibrationPage : UserControl
     private static readonly string DefaultSecondCalibrationFilePath = Path.Combine(
         DefaultCalibrationDirectory,
         "第二套XY标定.xml");
-    private static readonly string DefaultLowerCameraCalibrationFilePath = Path.Combine(
+    private static readonly string DefaultLowerCameraNozzle1CalibrationFilePath = Path.Combine(
         DefaultCalibrationDirectory,
-        "下相机标定.xml");
+        "下相机吸嘴1标定.xml");
+    private static readonly string DefaultLowerCameraNozzle2CalibrationFilePath = Path.Combine(
+        DefaultCalibrationDirectory,
+        "下相机吸嘴2标定.xml");
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly VisionCalibrationProfileStore _profileStore = new();
     private readonly DispatcherTimer _settingsSaveTimer = new()
@@ -56,9 +59,11 @@ public partial class VisualCalibrationPage : UserControl
     private bool _calibrationToolbarSyncPending;
     private bool _calibrationSidebarSyncRunning;
     private bool _calibrationSidebarSyncPending;
+    private bool _calibrationProcedureSwitchRunning;
     private bool _nozzle1ClickVerified;
     private bool _nozzle2ClickVerified;
     private bool _suppressClickMoveModeEvent;
+    private bool _suppressLowerCameraNozzleEvent;
     private MotionControlPage? _motionController;
     private CalibrationCenterPosition? _recordedCenter;
     private CalibrationCenterPosition? _nozzleDotPosition;
@@ -88,6 +93,14 @@ public partial class VisualCalibrationPage : UserControl
 
     private bool IsLowerCameraMode => ActiveCalibrationMode == VisualCalibrationMode.LowerCamera;
 
+    private int ActiveLowerCameraNozzle
+    {
+        get => _uiSettings.LowerCameraActiveNozzle == 2 ? 2 : 1;
+        set => _uiSettings.LowerCameraActiveNozzle = value == 2 ? 2 : 1;
+    }
+
+    private string ActiveLowerCameraNozzleName => $"吸嘴{ActiveLowerCameraNozzle}";
+
     public VisualCalibrationPage()
     {
         InitializeComponent();
@@ -107,14 +120,14 @@ public partial class VisualCalibrationPage : UserControl
         UpdateCommandState();
     }
 
-    private void AxisSet_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void AxisSet_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_settingsLoaded)
         {
             return;
         }
 
-        if (_calibrationRunning || _clickMoveRunning || _centerSyncRunning)
+        if (_calibrationRunning || _clickMoveRunning || _centerSyncRunning || _calibrationProcedureSwitchRunning)
         {
             AxisSetComboBox.SelectedItem = AxisSetComboBox.Items
                 .OfType<ComboBoxItem>()
@@ -137,12 +150,94 @@ public partial class VisualCalibrationPage : UserControl
         LoadCalibrationSettings();
         if (IsLowerCameraMode)
         {
-            SetWorkflowStatus("下相机模式：记录中心后执行九点标定，再开启点哪里移动到哪里。", WorkflowStatus.Ready);
-            SetClickMoveStatus("请先完成下相机九点标定。", WorkflowStatus.Ready);
+            SetWorkflowStatus(
+                $"下相机模式 · {ActiveLowerCameraNozzleName}：本次只标一个吸嘴，完成后再切换另一个吸嘴。",
+                WorkflowStatus.Ready);
+            SetClickMoveStatus($"请先完成{ActiveLowerCameraNozzleName}的下相机九点标定。", WorkflowStatus.Ready);
         }
         _visionCalibration.Save();
         UpdateVisionOffsetPreview();
         UpdateCommandState();
+        await SwitchCalibrationProcedureAsync();
+    }
+
+    private async void LowerCameraNozzle_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_settingsLoaded || _suppressLowerCameraNozzleEvent || !IsLowerCameraMode)
+        {
+            return;
+        }
+
+        if (_calibrationRunning || _clickMoveRunning || _centerSyncRunning || _calibrationProcedureSwitchRunning)
+        {
+            SelectLowerCameraNozzleComboBox();
+            return;
+        }
+
+        SaveCalibrationSettingsNoThrow();
+        ActiveLowerCameraNozzle =
+            (LowerCameraNozzleComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "2" ? 2 : 1;
+        _recordedCenter = null;
+        CalibrationProgressBar.Value = 0;
+        LoadCalibrationSettings();
+        _visionCalibration.Save();
+        SetWorkflowStatus(
+            $"已切换到下相机{ActiveLowerCameraNozzleName}标定；本次九点只保存这个吸嘴。",
+            WorkflowStatus.Ready);
+        SetClickMoveStatus($"请先完成{ActiveLowerCameraNozzleName}九点标定。", WorkflowStatus.Ready);
+        UpdateCommandState();
+        await SwitchCalibrationProcedureAsync();
+    }
+
+    private void SelectLowerCameraNozzleComboBox()
+    {
+        if (LowerCameraNozzleComboBox is null || LowerCameraNozzleLabel is null)
+        {
+            return;
+        }
+
+        var visibility = IsLowerCameraMode ? Visibility.Visible : Visibility.Collapsed;
+        LowerCameraNozzleLabel.Visibility = visibility;
+        LowerCameraNozzleComboBox.Visibility = visibility;
+        _suppressLowerCameraNozzleEvent = true;
+        try
+        {
+            var value = ActiveLowerCameraNozzle.ToString(CultureInfo.InvariantCulture);
+            LowerCameraNozzleComboBox.SelectedItem = LowerCameraNozzleComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, value, StringComparison.Ordinal));
+        }
+        finally
+        {
+            _suppressLowerCameraNozzleEvent = false;
+        }
+    }
+
+    private async Task SwitchCalibrationProcedureAsync()
+    {
+        if (!_hostReady || !_calibrationViewRequested || _shutdown || _calibrationProcedureSwitchRunning)
+        {
+            return;
+        }
+
+        _calibrationProcedureSwitchRunning = true;
+        UpdateCommandState();
+        try
+        {
+            var message = await VisionHost.SetCalibrationProcedureAsync(
+                IsLowerCameraMode,
+                CancellationToken.None);
+            SetHostStatus(message, HostStatus.Ready);
+        }
+        catch (Exception exception)
+        {
+            SetWorkflowStatus($"切换视觉标定流程失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _calibrationProcedureSwitchRunning = false;
+            UpdateCommandState();
+        }
     }
 
     private void SelectAxisSetComboBox()
@@ -163,12 +258,31 @@ public partial class VisualCalibrationPage : UserControl
     {
         if (IsLowerCameraMode)
         {
-            return DefaultLowerCameraCalibrationFilePath;
+            return GetLowerCameraCalibrationFilePath(ActiveLowerCameraNozzle);
         }
 
         return ActiveAxisSet == VisionCalibrationAxisSet.Second
             ? DefaultSecondCalibrationFilePath
             : DefaultCalibrationFilePath;
+    }
+
+    private string GetLowerCameraCalibrationFilePath(int nozzleNumber)
+    {
+        if (nozzleNumber == 2)
+        {
+            return TryGetCalibrationFilePath(
+                _uiSettings.LowerCameraNozzle2CalibrationFilePath,
+                out var nozzle2Path)
+                    ? nozzle2Path
+                    : DefaultLowerCameraNozzle2CalibrationFilePath;
+        }
+
+        var configuredPath = string.IsNullOrWhiteSpace(_uiSettings.LowerCameraNozzle1CalibrationFilePath)
+            ? _uiSettings.LowerCameraCalibrationFilePath
+            : _uiSettings.LowerCameraNozzle1CalibrationFilePath;
+        return TryGetCalibrationFilePath(configuredPath, out var nozzle1Path)
+            ? nozzle1Path
+            : DefaultLowerCameraNozzle1CalibrationFilePath;
     }
 
     private static VisualCalibrationMode ParseCalibrationMode(
@@ -310,7 +424,11 @@ public partial class VisualCalibrationPage : UserControl
     private string ActiveCalibrationFilePath
     {
         get => IsLowerCameraMode
-            ? _uiSettings.LowerCameraCalibrationFilePath
+            ? ActiveLowerCameraNozzle == 2
+                ? _uiSettings.LowerCameraNozzle2CalibrationFilePath
+                : string.IsNullOrWhiteSpace(_uiSettings.LowerCameraNozzle1CalibrationFilePath)
+                    ? _uiSettings.LowerCameraCalibrationFilePath
+                    : _uiSettings.LowerCameraNozzle1CalibrationFilePath
             : ActiveAxisSet == VisionCalibrationAxisSet.Second
             ? _uiSettings.SecondCalibrationFilePath
             : _uiSettings.CalibrationFilePath;
@@ -318,7 +436,15 @@ public partial class VisualCalibrationPage : UserControl
         {
             if (IsLowerCameraMode)
             {
-                _uiSettings.LowerCameraCalibrationFilePath = value;
+                if (ActiveLowerCameraNozzle == 2)
+                {
+                    _uiSettings.LowerCameraNozzle2CalibrationFilePath = value;
+                }
+                else
+                {
+                    _uiSettings.LowerCameraNozzle1CalibrationFilePath = value;
+                    _uiSettings.LowerCameraCalibrationFilePath = value;
+                }
             }
             else if (ActiveAxisSet == VisionCalibrationAxisSet.Second)
             {
@@ -413,6 +539,7 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         await VisionHost.ActivateCalibrationViewAsync(CancellationToken.None);
+        await SwitchCalibrationProcedureAsync();
         if (EnableClickMoveCheckBox.IsChecked == true)
         {
             await ConfigureClickMoveModeAsync(true);
@@ -772,6 +899,12 @@ public partial class VisualCalibrationPage : UserControl
                 ?? throw new InvalidOperationException("请先记录标定中心坐标。");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            if (IsLowerCameraMode &&
+                (ActiveAxisPair.XHardwareAxisNo != VisionCalibrationService.FirstSetXHardwareAxisNo ||
+                 ActiveAxisPair.YHardwareAxisNo != VisionCalibrationService.FirstSetYHardwareAxisNo))
+            {
+                throw new InvalidOperationException("下相机标定只允许使用第一套 XY（轴1/2）。");
+            }
             if (!_hostReady)
             {
                 throw new InvalidOperationException("VisionMaster 视觉组件尚未就绪。");
@@ -848,7 +981,7 @@ public partial class VisualCalibrationPage : UserControl
             CalibrationProgressBar.Value = 9;
             SetWorkflowStatus(
                 IsLowerCameraMode
-                    ? completionMessage + "；下相机九点标定完成。现在可开启“点哪里移动到哪里”。"
+                    ? completionMessage + $"；下相机{ActiveLowerCameraNozzleName}九点标定完成。"
                     : completionMessage + "；XY已回到拍照位。请移动到双吸嘴下压位置，同时打点并记录一次公共XY。",
                 WorkflowStatus.Success);
         }
@@ -879,7 +1012,13 @@ public partial class VisualCalibrationPage : UserControl
             {
                 _visionCalibration.Save();
                 SetClickMoveCheckedNoEvent(false);
-                SetClickMoveStatus("九点标定已完成，勾选“点哪里移动到哪里”即可使用。", WorkflowStatus.Ready);
+                var otherNozzle = ActiveLowerCameraNozzle == 1 ? 2 : 1;
+                var otherCalibrationDone = File.Exists(GetLowerCameraCalibrationFilePath(otherNozzle));
+                SetClickMoveStatus(
+                    otherCalibrationDone
+                        ? $"{ActiveLowerCameraNozzleName}标定完成；两个吸嘴的下相机标定文件都已具备。"
+                        : $"{ActiveLowerCameraNozzleName}标定完成。请切换到吸嘴{otherNozzle}，再执行一次九点标定。",
+                    WorkflowStatus.Success);
                 UpdateCommandState();
                 return;
             }
@@ -1251,7 +1390,7 @@ public partial class VisualCalibrationPage : UserControl
             if (enabled)
             {
                 var targetTool = GetSelectedTargetTool();
-                if (!_visionCalibration.IsToolCalibrated(targetTool))
+                if (!IsLowerCameraMode && !_visionCalibration.IsToolCalibrated(targetTool))
                 {
                     throw new InvalidOperationException(
                         $"请先完成{GetToolDisplayName(targetTool)}对位标定。");
@@ -1394,6 +1533,12 @@ public partial class VisualCalibrationPage : UserControl
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            if (IsLowerCameraMode &&
+                (ActiveAxisPair.XHardwareAxisNo != VisionCalibrationService.FirstSetXHardwareAxisNo ||
+                 ActiveAxisPair.YHardwareAxisNo != VisionCalibrationService.FirstSetYHardwareAxisNo))
+            {
+                throw new InvalidOperationException("下相机点选移动只允许驱动第一套 XY（轴1/2）。");
+            }
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "点击移动速度");
             var current = motionController.CaptureCalibrationCenter(
                 ActiveAxisPair.XHardwareAxisNo,
@@ -1401,13 +1546,17 @@ public partial class VisualCalibrationPage : UserControl
             var deltaX = (e.CenterTransformedX - e.TransformedX) * PulsesPerVisionUnit;
             var deltaY = (e.CenterTransformedY - e.TransformedY) * PulsesPerVisionUnit;
             var targetTool = GetSelectedTargetTool();
-            var target = _visionCalibration.CalculateTarget(
-                current.ActualX + deltaX,
-                current.ActualY + deltaY,
-                targetTool);
-            var targetX = target.X;
-            var targetY = target.Y;
-            var targetName = IsLowerCameraMode ? "下相机 XY" : GetToolDisplayName(targetTool);
+            var targetX = current.ActualX + deltaX;
+            var targetY = current.ActualY + deltaY;
+            if (!IsLowerCameraMode)
+            {
+                var target = _visionCalibration.CalculateTarget(targetX, targetY, targetTool);
+                targetX = target.X;
+                targetY = target.Y;
+            }
+            var targetName = IsLowerCameraMode
+                ? $"下相机{ActiveLowerCameraNozzleName}（第一套XY）"
+                : GetToolDisplayName(targetTool);
 
             if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
             {
@@ -1620,6 +1769,7 @@ public partial class VisualCalibrationPage : UserControl
     {
         _uiSettings = _visionCalibration.Settings;
         SelectAxisSetComboBox();
+        SelectLowerCameraNozzleComboBox();
         var stepX = IsLowerCameraMode
             ? _uiSettings.LowerCameraStepXPulses
             : ActiveAxisSet == VisionCalibrationAxisSet.Second
@@ -2067,6 +2217,7 @@ public partial class VisualCalibrationPage : UserControl
             LoadCalibrationProfileButton is null ||
             SaveCalibrationProfileButton is null ||
             AxisSetComboBox is null ||
+            LowerCameraNozzleComboBox is null ||
             ClickTargetToolComboBox is null)
         {
             return;
@@ -2075,7 +2226,8 @@ public partial class VisualCalibrationPage : UserControl
         var calibrationPathValid = TryGetCalibrationFilePath(
             CalibrationFilePathTextBox.Text,
             out var calibrationFilePath);
-        var clickTargetReady = _visionCalibration.IsToolCalibrated(GetSelectedTargetTool());
+        var clickTargetReady =
+            IsLowerCameraMode || _visionCalibration.IsToolCalibrated(GetSelectedTargetTool());
         var profileReadyToSave =
             !IsLowerCameraMode &&
             ActiveNozzle1Calibrated &&
@@ -2084,6 +2236,7 @@ public partial class VisualCalibrationPage : UserControl
             File.Exists(calibrationFilePath);
 
         RecordCenterButton.IsEnabled =
+            !_calibrationProcedureSwitchRunning &&
             !_calibrationRunning &&
             !_livePreviewStarting &&
             !_centerSyncRunning &&
@@ -2091,6 +2244,7 @@ public partial class VisualCalibrationPage : UserControl
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null;
         StartLivePreviewButton.IsEnabled =
+            !_calibrationProcedureSwitchRunning &&
             !_calibrationRunning &&
             !_livePreviewStarting &&
             !_centerSyncRunning &&
@@ -2099,6 +2253,7 @@ public partial class VisualCalibrationPage : UserControl
             EnableClickMoveCheckBox.IsChecked != true &&
             _hostReady;
         StartCalibrationButton.IsEnabled =
+            !_calibrationProcedureSwitchRunning &&
             !_calibrationRunning &&
             !_livePreviewStarting &&
             !_calibrationFileImporting &&
@@ -2110,11 +2265,21 @@ public partial class VisualCalibrationPage : UserControl
             calibrationPathValid;
         StopCalibrationButton.IsEnabled = _calibrationRunning;
         AxisSetComboBox.IsEnabled =
+            !_calibrationProcedureSwitchRunning &&
             !_calibrationRunning &&
             !_centerSyncRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
             !_calibrationFileImporting;
+        LowerCameraNozzleComboBox.IsEnabled =
+            IsLowerCameraMode &&
+            !_calibrationProcedureSwitchRunning &&
+            !_calibrationRunning &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_calibrationFileImporting &&
+            EnableClickMoveCheckBox.IsChecked != true;
         RestartHostButton.IsEnabled =
             !_calibrationRunning &&
             !_clickMoveRunning &&
@@ -2219,6 +2384,7 @@ public partial class VisualCalibrationPage : UserControl
             !_clickMoveConfigurationRunning &&
             EnableClickMoveCheckBox.IsChecked != true;
         EnableClickMoveCheckBox.IsEnabled =
+            !_calibrationProcedureSwitchRunning &&
             !_calibrationRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
@@ -2352,7 +2518,8 @@ public partial class VisualCalibrationPage : UserControl
                     GetBrushColor(ClickMoveStatusText.Foreground, "#AFC0CD"),
                     WorkflowStatusText.Text,
                     RecordNozzleDotPositionButton.IsEnabled,
-                    IsLowerCameraMode);
+                    IsLowerCameraMode,
+                    IsLowerCameraMode ? ActiveLowerCameraNozzleName : "");
                 try
                 {
                     await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);

@@ -322,6 +322,7 @@
 
                 <TextBlock Grid.Column="7" Text="标定流程" Style="{StaticResource FieldLabel}" />
                 <TextBlock Grid.Column="8"
+                           x:Name="CalibrationProcedureNameText"
                            Text="标定流程"
                            VerticalAlignment="Center"
                            Foreground="#EDF4F9"

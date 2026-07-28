@@ -252,6 +252,15 @@ public sealed class VisionMasterProcessHost : HwndHost
         return SendCalibrationCommandAsync("ACTIVATE_CALIBRATION_VIEW", cancellationToken);
     }
 
+    public Task<string> SetCalibrationProcedureAsync(
+        bool lowerCamera,
+        CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync(
+            $"SET_CALIBRATION_PROCEDURE\t{(lowerCamera ? "Lower" : "Standard")}",
+            cancellationToken);
+    }
+
     public Task<string> ActivateInspectionViewAsync(CancellationToken cancellationToken)
     {
         return SendCalibrationCommandAsync("ACTIVATE_INSPECTION_VIEW", cancellationToken);
@@ -385,7 +394,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.ClickMoveStatusColor),
                 Encode(state.WorkflowStatus),
                 state.RecordNozzleDotPositionEnabled ? "1" : "0",
-                state.SimplifiedMode ? "1" : "0"),
+                state.SimplifiedMode ? "1" : "0",
+                Encode(state.LowerCameraNozzleName)),
             cancellationToken);
     }
 
@@ -1362,7 +1372,8 @@ public sealed record CalibrationSidebarState(
     string ClickMoveStatusColor,
     string WorkflowStatus,
     bool RecordNozzleDotPositionEnabled,
-    bool SimplifiedMode);
+    bool SimplifiedMode,
+    string LowerCameraNozzleName);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

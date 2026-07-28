@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private const string InspectionProcedureName = "找芯片流程";
     private const string NozzlePointProcedureName = "粗定位示教流程";
     private const string CalibrationProcedureName = "标定流程";
+    private const string LowerCameraCalibrationProcedureName = "下相机标定流程";
     private const string CalibrationImageSourceName = "图像源1";
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
     private bool _showingCalibrationRender;
+    private string _activeCalibrationProcedureName = CalibrationProcedureName;
 
     public MainWindow(
         bool embedded,
@@ -227,6 +229,7 @@ public partial class MainWindow : Window
             var result = commandName switch
             {
                 "ACTIVATE_CALIBRATION_VIEW" => await ActivateCalibrationViewAsync(),
+                "SET_CALIBRATION_PROCEDURE" => await SetCalibrationProcedureAsync(command.Split('\t')),
                 "ACTIVATE_INSPECTION_VIEW" => await ActivateInspectionViewAsync(),
                 "DEACTIVATE_CALIBRATION_VIEW" => await DeactivateCalibrationViewAsync(),
                 "START_LIVE_PREVIEW" => await StartLivePreviewFromCommandAsync(),
@@ -280,20 +283,57 @@ public partial class MainWindow : Window
                 $"固定方案尚未加载完成。请等待程序启动加载完成，或确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
         }
 
-        _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
-        _calibrationViewActive = true;
+        await ActivateCalibrationProcedureAsync(_activeCalibrationProcedureName);
+        return $"标定界面已开启：{_activeCalibrationProcedureName}。";
+    }
 
-        CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
+    private async Task<string> SetCalibrationProcedureAsync(IReadOnlyList<string> parts)
+    {
+        if (parts.Count != 2)
+        {
+            throw new InvalidDataException("切换标定流程的参数不正确。");
+        }
+
+        var procedureName = parts[1] switch
+        {
+            "Lower" => LowerCameraCalibrationProcedureName,
+            "Standard" => CalibrationProcedureName,
+            _ => throw new InvalidDataException("标定流程只能选择 Standard 或 Lower。")
+        };
+        await ActivateCalibrationProcedureAsync(procedureName);
+        return $"已切换到 VisionMaster“{procedureName}”";
+    }
+
+    private async Task ActivateCalibrationProcedureAsync(string procedureName)
+    {
+        if (_calibrationSession is not null || _busy)
+        {
+            throw new InvalidOperationException("九点标定正在执行，不能切换视觉流程。");
+        }
+
+        if (!_solutionLoaded)
+        {
+            throw new InvalidOperationException("固定视觉方案尚未加载完成。");
+        }
+
+        var procedure = GetRequiredProcedure(procedureName);
         StopAllContinuousExecutionNoThrow();
+        _activeCalibrationProcedureName = procedureName;
+        _calibrationProcedure = procedure;
+        _previewProcedure = procedure;
+        _calibrationViewActive = true;
+        CalibrationProcedureNameText.Text = procedureName;
+        CalibrationProcedureComboBox.SelectedItem = procedureName;
+        PreviewProcedureComboBox.SelectedItem = procedureName;
+        PopulateImageSteps(procedureName, procedure);
+        ApplyCalibrationShellLayout();
         ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
-        BindCalibrationModule(ResolveNPointCalibrationModule(CalibrationProcedureName));
+        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
         await RefreshRenderLayoutAsync();
-
         UpdateCommandState();
-        SetStatus("标定界面已开启：方案已加载，点击一键九点标定后开始取像。", StatusKind.Success);
-        return "标定界面已开启。";
+        SetStatus($"已启用{procedureName}，点击一键九点标定后开始取像。", StatusKind.Success);
     }
 
     private async Task<string> DeactivateCalibrationViewAsync()
@@ -611,7 +651,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 32)
+        if (parts.Count != 33)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -705,6 +745,7 @@ public partial class MainWindow : Window
             SidebarStartCalibrationButton.ToolTip = Decode(parts[29]);
             SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
             var simplifiedMode = parts[31] == "1";
+            var lowerCameraNozzleName = Decode(parts[32]);
             SidebarNozzleTeachSection.Visibility = simplifiedMode
                 ? Visibility.Collapsed
                 : Visibility.Visible;
@@ -713,11 +754,17 @@ public partial class MainWindow : Window
                 : Visibility.Visible;
             SidebarClickMoveStepText.Text = simplifiedMode ? "3" : "4";
             SidebarClickMoveTitleText.Text = simplifiedMode
-                ? "点哪里移动到哪里"
+                ? $"点哪里移动到哪里 · {lowerCameraNozzleName}"
                 : "点击移动";
             SidebarEnableClickMoveCheckBox.Content = simplifiedMode
                 ? "点哪里移动到哪里"
                 : "点击图像移动";
+            if (simplifiedMode)
+            {
+                SidebarStartCalibrationButton.Content = calibrationRunning
+                    ? $"停止{lowerCameraNozzleName}标定"
+                    : $"一键九点标定 · {lowerCameraNozzleName}";
+            }
         }
         finally
         {
@@ -1168,7 +1215,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("固定视觉方案尚未加载完成，无法写入标定流程。");
         }
 
-        const string procedureName = CalibrationProcedureName;
+        var procedureName = _activeCalibrationProcedureName;
 
         StopAllContinuousExecutionNoThrow();
         ApplyCalibrationRenderLayout();
@@ -1212,12 +1259,10 @@ public partial class MainWindow : Window
             throw new InvalidDataException("准备九点标定的参数数量不正确。");
         }
 
-        if (!_solutionLoaded || _calibrationProcedure is null)
+        if (!_solutionLoaded)
         {
             throw new InvalidOperationException("固定视觉方案尚未加载完成，无法开始九点标定。");
         }
-
-        const string procedureName = CalibrationProcedureName;
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
         var centerY = ParseFiniteDouble(parts[2], "基准点Y");
@@ -1235,6 +1280,14 @@ public partial class MainWindow : Window
             "Keep" => false,
             _ => throw new InvalidDataException("相机位置参数只能是 Keep 或 Lower。")
         };
+        var expectedProcedureName = lowerCamera
+            ? LowerCameraCalibrationProcedureName
+            : CalibrationProcedureName;
+        if (!string.Equals(_activeCalibrationProcedureName, expectedProcedureName, StringComparison.Ordinal))
+        {
+            await ActivateCalibrationProcedureAsync(expectedProcedureName);
+        }
+        var procedureName = _activeCalibrationProcedureName;
         string calibrationPath;
         try
         {
@@ -1551,7 +1604,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                return ResolveCalibrationTransformModule(CalibrationProcedureName);
+                return ResolveCalibrationTransformModule(_activeCalibrationProcedureName);
             }
             catch (InvalidOperationException)
             {
@@ -2943,7 +2996,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var options = GetImageStepOptions(CalibrationProcedureName, _previewProcedure);
+            var options = GetImageStepOptions(_activeCalibrationProcedureName, _previewProcedure);
             ImageStepComboBox.ItemsSource = options;
             var imageOption = options.FirstOrDefault(option =>
                 string.Equals(option.DisplayName, CalibrationImageSourceName, StringComparison.Ordinal));

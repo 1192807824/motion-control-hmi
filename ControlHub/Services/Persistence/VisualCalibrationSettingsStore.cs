@@ -124,5 +124,11 @@ public sealed class VisualCalibrationSettings
 
     public string LowerCameraMovePriority { get; set; } = "X";
 
+    public int LowerCameraActiveNozzle { get; set; } = 1;
+
     public string LowerCameraCalibrationFilePath { get; set; } = "";
+
+    public string LowerCameraNozzle1CalibrationFilePath { get; set; } = "";
+
+    public string LowerCameraNozzle2CalibrationFilePath { get; set; } = "";
 }

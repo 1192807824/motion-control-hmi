@@ -104,6 +104,23 @@
                         <ComboBoxItem Content="第二套 XY 标定" Tag="Second" />
                         <ComboBoxItem Content="下相机标定" Tag="LowerCamera" />
                     </ComboBox>
+                    <TextBlock x:Name="LowerCameraNozzleLabel"
+                               Text="吸嘴"
+                               Foreground="#AFC0CD"
+                               FontSize="12"
+                               Margin="14,0,8,0"
+                               VerticalAlignment="Center"
+                               Visibility="Collapsed" />
+                    <ComboBox x:Name="LowerCameraNozzleComboBox"
+                              Width="108"
+                              Height="34"
+                              VerticalContentAlignment="Center"
+                              ToolTip="下相机的吸嘴1、吸嘴2都使用第一套 XY（轴1/2），每次只标一个吸嘴"
+                              Visibility="Collapsed"
+                              SelectionChanged="LowerCameraNozzle_SelectionChanged">
+                        <ComboBoxItem Content="吸嘴 1" Tag="1" />
+                        <ComboBoxItem Content="吸嘴 2" Tag="2" />
+                    </ComboBox>
                 </StackPanel>
                 <Button Grid.Column="2"
                         x:Name="RestartHostButton"
