@@ -401,7 +401,11 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.RotationCenterStatus),
                 state.LowerCameraTeachEnabled ? "1" : "0",
                 state.LowerCameraTeachRunning ? "1" : "0",
-                Encode(state.LowerCameraTeachStatus)),
+                Encode(state.LowerCameraTeachStatus),
+                state.LowerCameraCorrectionTestEnabled ? "1" : "0",
+                state.LowerCameraCorrectionTestRunning ? "1" : "0",
+                Encode(state.LowerCameraCorrectionTestStatus),
+                state.LowerCameraTeachDataImportEnabled ? "1" : "0"),
             cancellationToken);
     }
 
@@ -522,16 +526,18 @@ public sealed class VisionMasterProcessHost : HwndHost
             string.Join("\t", commandParts),
             cancellationToken);
         var parts = response.Split('\t');
-        if (parts.Length != 2 ||
+        if (parts.Length != 3 ||
             !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
             !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var angle) ||
             !double.IsFinite(x) ||
-            !double.IsFinite(y))
+            !double.IsFinite(y) ||
+            !double.IsFinite(angle))
         {
-            throw new InvalidDataException("VisionMaster 返回的下相机纠偏转换坐标无效。");
+            throw new InvalidDataException("VisionMaster 返回的下相机纠偏转换坐标或角度无效。");
         }
 
-        return new VisionLowerCameraCorrectionResult(x, y);
+        return new VisionLowerCameraCorrectionResult(x, y, angle);
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -1514,7 +1520,11 @@ public sealed record CalibrationSidebarState(
     string RotationCenterStatus,
     bool LowerCameraTeachEnabled,
     bool LowerCameraTeachRunning,
-    string LowerCameraTeachStatus);
+    string LowerCameraTeachStatus,
+    bool LowerCameraCorrectionTestEnabled,
+    bool LowerCameraCorrectionTestRunning,
+    string LowerCameraCorrectionTestStatus,
+    bool LowerCameraTeachDataImportEnabled);
 
 public sealed record VisionRotationPoint(double X, double Y);
 
@@ -1530,7 +1540,8 @@ public sealed record VisionLowerCameraTeachResult(
 
 public sealed record VisionLowerCameraCorrectionResult(
     double TransformedX,
-    double TransformedY);
+    double TransformedY,
+    double TransformedAngle);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

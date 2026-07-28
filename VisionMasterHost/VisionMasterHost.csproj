@@ -70,6 +70,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSLineFindModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSL2LMeasureModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSL2LMeasureModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="GlobalVariableModuleCs">
       <HintPath>$(VisionMasterAssemblyDirectory)\GlobalVariableModuleCs.dll</HintPath>
       <Private>true</Private>

@@ -15,6 +15,7 @@ using IMVSCalibTransformModuCs;
 using IMVSCircleFitModuCs;
 using IMVSHPFeatureMatchModuCs;
 using IMVSLineFindModuCs;
+using IMVSL2LMeasureModuCs;
 using IMVSNPointCalibModuCs;
 using IMVSRectFindModuCs;
 using ShellModuleCs;
@@ -46,6 +47,7 @@ public partial class MainWindow : Window
     private const string LowerCameraTeachTransformModuleName = "标定转换1";
     private const string LowerCameraCorrectionProcedureName = "下相机纠偏";
     private const string LowerCameraCorrectionGeometryModuleName = "几何创建1";
+    private const string LowerCameraCorrectionLineLineModuleName = "线线测量1";
     private const string LowerCameraCorrectionScriptModuleName = "脚本1";
     private const string LowerCameraCorrectionTransformModuleName = "标定转换1";
     private const string GlobalVariableModuleName = "全局变量1";
@@ -635,6 +637,9 @@ public partial class MainWindow : Window
         var geometryModule = ResolveNamedModule<GeometryCreateTool>(
             LowerCameraCorrectionProcedureName,
             LowerCameraCorrectionGeometryModuleName);
+        var lineLineModule = ResolveNamedModule<IMVSL2LMeasureModuTool>(
+            LowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionLineLineModuleName);
         var scriptModule = ResolveNamedModule<ShellModuleTool>(
             LowerCameraCorrectionProcedureName,
             LowerCameraCorrectionScriptModuleName);
@@ -685,6 +690,14 @@ public partial class MainWindow : Window
                 $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionScriptModuleName}返回NG，请检查RX/RY圆心参数。");
         }
 
+        var lineLineResult = lineLineModule.ModuResult;
+        if (lineLineResult is null || lineLineResult.ModuStatus != 1 ||
+            float.IsNaN(lineLineResult.L2LAngle) || float.IsInfinity(lineLineResult.L2LAngle))
+        {
+            throw new InvalidOperationException(
+                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionLineLineModuleName}未返回有效夹角。");
+        }
+
         var transformResult = transformModule.ModuResult;
         if (transformResult is null || transformResult.ModuStatus != 1 ||
             transformResult.TransPoint is null || transformResult.TransPoint.Count < 1)
@@ -701,12 +714,13 @@ public partial class MainWindow : Window
         }
 
         SetStatus(
-            $"下相机纠偏完成：转换坐标X={transformed.X:0.###}，Y={transformed.Y:0.###}",
+            $"下相机纠偏完成：转换坐标X={transformed.X:0.###}，Y={transformed.Y:0.###}，转换角度={lineLineResult.L2LAngle:0.###}°",
             StatusKind.Success);
         return string.Join(
             "\t",
             transformed.X.ToString("R", CultureInfo.InvariantCulture),
-            transformed.Y.ToString("R", CultureInfo.InvariantCulture));
+            transformed.Y.ToString("R", CultureInfo.InvariantCulture),
+            lineLineResult.L2LAngle.ToString("R", CultureInfo.InvariantCulture));
     }
 
     private static bool TrySetFirstExistingGlobalFloat(
@@ -1086,7 +1100,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 39)
+        if (parts.Count != 43)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -1221,6 +1235,20 @@ public partial class MainWindow : Window
             SidebarLowerCameraTeachStatusText.Foreground = lowerCameraTeachRunning
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
                 : new SolidColorBrush(Color.FromRgb(175, 192, 205));
+            var lowerCameraCorrectionTestRunning = parts[40] == "1";
+            SidebarLowerCameraCorrectionTestButton.IsEnabled =
+                parts[39] == "1" || lowerCameraCorrectionTestRunning;
+            SidebarLowerCameraCorrectionTestButton.Tag = lowerCameraCorrectionTestRunning
+                ? "StopLowerCameraCorrectionTest"
+                : "RunLowerCameraCorrectionTest";
+            SidebarLowerCameraCorrectionTestButton.Content = lowerCameraCorrectionTestRunning
+                ? "停止纠偏测试"
+                : $"纠偏测试 · {lowerCameraNozzleName}";
+            SidebarLowerCameraCorrectionTestStatusText.Text = Decode(parts[41]);
+            SidebarLowerCameraCorrectionTestStatusText.Foreground = lowerCameraCorrectionTestRunning
+                ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
+                : new SolidColorBrush(Color.FromRgb(175, 192, 205));
+            SidebarImportLowerCameraTeachDataButton.IsEnabled = parts[42] == "1";
             SidebarClickTargetComboBox.Visibility = simplifiedMode
                 ? Visibility.Collapsed
                 : Visibility.Visible;

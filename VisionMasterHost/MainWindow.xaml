@@ -691,6 +691,30 @@
                                        LineHeight="19"
                                        TextWrapping="Wrap"
                                        TextAlignment="Center" />
+                            <Button x:Name="SidebarImportLowerCameraTeachDataButton"
+                                    Tag="ImportLowerCameraTeachData"
+                                    Margin="26,10,0,6"
+                                    Content="导入8项示教数据"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#102A3E"
+                                    BorderBrush="#35546B"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <Button x:Name="SidebarLowerCameraCorrectionTestButton"
+                                    Tag="RunLowerCameraCorrectionTest"
+                                    Margin="26,0,0,6"
+                                    Content="纠偏测试"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#5B3A8C"
+                                    BorderBrush="#9067C6"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <TextBlock x:Name="SidebarLowerCameraCorrectionTestStatusText"
+                                       Margin="26,0,0,0"
+                                       Text="示教数据保存后可测试"
+                                       Foreground="#AFC0CD"
+                                       FontSize="11"
+                                       LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
                         </StackPanel>
                     </Border>
 

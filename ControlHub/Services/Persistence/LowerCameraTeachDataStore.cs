@@ -52,27 +52,35 @@ public sealed class LowerCameraTeachDataStore
 
 public sealed class LowerCameraTeachData
 {
+    [JsonRequired]
     [JsonPropertyName("数据圆心X")]
     public double CircleCenterX { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("数据圆心Y")]
     public double CircleCenterY { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("直线起点X")]
     public double LineStartX { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("直线起点Y")]
     public double LineStartY { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("直线终点X")]
     public double LineEndX { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("直线终点Y")]
     public double LineEndY { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("转换坐标X")]
     public double TransformedX { get; set; }
 
+    [JsonRequired]
     [JsonPropertyName("转换坐标Y")]
     public double TransformedY { get; set; }
 
