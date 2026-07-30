@@ -84,6 +84,11 @@ public sealed class VisionCalibrationService
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    public string? BackupSettingsBeforeOverwrite()
+    {
+        return _store.BackupBeforeOverwrite();
+    }
+
     public VisionCalibrationSnapshot GetSnapshot()
     {
         var axisSet = ActiveAxisSet;

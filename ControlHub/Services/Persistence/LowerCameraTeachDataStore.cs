@@ -24,7 +24,7 @@ public sealed class LowerCameraTeachDataStore
             $"下相机吸嘴{nozzleNumber}示教数据.json");
     }
 
-    public void Save(string filePath, LowerCameraTeachData data)
+    public string? Save(string filePath, LowerCameraTeachData data)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(data);
@@ -37,7 +37,9 @@ public sealed class LowerCameraTeachDataStore
             Directory.CreateDirectory(directory);
         }
 
+        var backupPath = CalibrationBackupService.BackupBeforeOverwrite(fullPath);
         File.WriteAllText(fullPath, JsonSerializer.Serialize(data, JsonOptions));
+        return backupPath;
     }
 
     public LowerCameraTeachData Load(string filePath)

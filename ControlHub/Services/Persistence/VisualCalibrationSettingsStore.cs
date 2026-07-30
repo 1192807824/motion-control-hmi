@@ -50,6 +50,11 @@ public sealed class VisualCalibrationSettingsStore
             WriteIndented = true
         }));
     }
+
+    public string? BackupBeforeOverwrite()
+    {
+        return CalibrationBackupService.BackupBeforeOverwrite(_filePath);
+    }
 }
 
 public sealed class VisualCalibrationSettings

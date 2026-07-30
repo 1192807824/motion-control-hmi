@@ -613,14 +613,14 @@ public partial class MainWindow : Window
 
     private string RunLowerCameraCorrection(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 8)
+        if (parts.Count != 10)
         {
             throw new InvalidDataException(
-                "下相机纠偏命令必须包含直线起终点、旋转圆心和当前吸嘴标定文件。");
+                "下相机纠偏命令必须包含直线起终点、旋转圆心、示教转换坐标和当前吸嘴标定文件。");
         }
 
         EnsureRotationCenterCommandReady();
-        var values = new float[6];
+        var values = new float[8];
         for (var index = 0; index < values.Length; index++)
         {
             var value = ParseFiniteDouble(parts[index + 1], $"下相机纠偏参数{index + 1}");
@@ -632,7 +632,7 @@ public partial class MainWindow : Window
             values[index] = (float)value;
         }
 
-        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[7]);
+        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[9]);
         var procedure = GetRequiredProcedure(LowerCameraCorrectionProcedureName);
         var geometryModule = ResolveNamedModule<GeometryCreateTool>(
             LowerCameraCorrectionProcedureName,
@@ -713,13 +713,21 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("下相机纠偏返回的转换坐标X/Y无效。");
         }
 
+        var correctionX = transformed.X - values[6];
+        var correctionY = transformed.Y - values[7];
+        if (float.IsNaN(correctionX) || float.IsInfinity(correctionX) ||
+            float.IsNaN(correctionY) || float.IsInfinity(correctionY))
+        {
+            throw new InvalidOperationException("下相机纠偏计算得到的X/Y偏差无效。");
+        }
+
         SetStatus(
-            $"下相机纠偏完成：转换坐标X={transformed.X:0.###}，Y={transformed.Y:0.###}，转换角度={lineLineResult.L2LAngle:0.###}°",
+            $"下相机纠偏完成：X偏差={correctionX:0.###}，Y偏差={correctionY:0.###}，夹角={lineLineResult.L2LAngle:0.###}°",
             StatusKind.Success);
         return string.Join(
             "\t",
-            transformed.X.ToString("R", CultureInfo.InvariantCulture),
-            transformed.Y.ToString("R", CultureInfo.InvariantCulture),
+            correctionX.ToString("R", CultureInfo.InvariantCulture),
+            correctionY.ToString("R", CultureInfo.InvariantCulture),
             lineLineResult.L2LAngle.ToString("R", CultureInfo.InvariantCulture));
     }
 
@@ -1036,10 +1044,12 @@ public partial class MainWindow : Window
             throw new InvalidDataException("标定文件菜单路径格式不正确。", exception);
         }
 
-        CalibrationToolbarPathTextBox.Text = path;
+        CalibrationToolbarPathTextBox.Text = string.IsNullOrWhiteSpace(path)
+            ? "未设置"
+            : Path.GetFileName(path.Trim());
         CalibrationToolbarPathTextBox.ToolTip = string.IsNullOrWhiteSpace(path)
-            ? "当前九点标定文件"
-            : path;
+            ? "当前应用的九点标定文件尚未设置"
+            : $"当前应用文件：{path}";
         CalibrationToolbarPathTextBox.IsEnabled = parts[2] == "1";
         ChooseCalibrationToolbarButton.IsEnabled = parts[3] == "1";
         ImportCalibrationToolbarButton.IsEnabled = parts[4] == "1";
@@ -1224,6 +1234,9 @@ public partial class MainWindow : Window
             SidebarLowerCameraTeachSection.Visibility = simplifiedMode
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            SidebarClickMoveSection.Visibility = simplifiedMode
+                ? Visibility.Collapsed
+                : Visibility.Visible;
             SidebarLowerCameraTeachButton.IsEnabled = parts[36] == "1" || lowerCameraTeachRunning;
             SidebarLowerCameraTeachButton.Tag = lowerCameraTeachRunning
                 ? "StopLowerCameraTeach"
@@ -1249,16 +1262,10 @@ public partial class MainWindow : Window
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
                 : new SolidColorBrush(Color.FromRgb(175, 192, 205));
             SidebarImportLowerCameraTeachDataButton.IsEnabled = parts[42] == "1";
-            SidebarClickTargetComboBox.Visibility = simplifiedMode
-                ? Visibility.Collapsed
-                : Visibility.Visible;
-            SidebarClickMoveStepText.Text = simplifiedMode ? "5" : "4";
-            SidebarClickMoveTitleText.Text = simplifiedMode
-                ? $"点哪里移动到哪里 · {lowerCameraNozzleName}"
-                : "点击移动";
-            SidebarEnableClickMoveCheckBox.Content = simplifiedMode
-                ? "点哪里移动到哪里"
-                : "点击图像移动";
+            SidebarClickTargetComboBox.Visibility = Visibility.Visible;
+            SidebarClickMoveStepText.Text = "4";
+            SidebarClickMoveTitleText.Text = "点击移动";
+            SidebarEnableClickMoveCheckBox.Content = "点击图像移动";
             if (simplifiedMode)
             {
                 SidebarStartCalibrationButton.Content = calibrationRunning
@@ -1829,11 +1836,12 @@ public partial class MainWindow : Window
             parameters.UseRelativeCoordinates = false;
 
             Directory.CreateDirectory(calibrationDirectory);
+            var backupPath = CalibrationBackupService.BackupBeforeOverwrite(calibrationPath);
             parameters.CalibPathName = calibrationPath;
             parameters.RefreshFileEnable = true;
             parameters.DoClearPoint();
 
-            _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath);
+            _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath, backupPath);
             ClearCalibrationRenderer();
             BindCalibrationModule(nPointModule);
             SetBusy(true);
@@ -1923,7 +1931,10 @@ public partial class MainWindow : Window
         RefreshRenderLayout();
         var message =
             $"九点标定成功，像素精度 {result.PixelPrecision:0.######}，" +
-            $"标定文件：{session.CalibrationPath}";
+            $"标定文件：{session.CalibrationPath}" +
+            (string.IsNullOrWhiteSpace(session.BackupPath)
+                ? ""
+                : $"；旧文件已备份：{session.BackupPath}");
         SetBusy(false);
         SetStatus(message, StatusKind.Success);
         return Task.FromResult(message);
@@ -3735,15 +3746,19 @@ public partial class MainWindow : Window
     {
         public VisionCalibrationSession(
             IMVSNPointCalibModuTool module,
-            string calibrationPath)
+            string calibrationPath,
+            string? backupPath)
         {
             Module = module;
             CalibrationPath = calibrationPath;
+            BackupPath = backupPath;
         }
 
         public IMVSNPointCalibModuTool Module { get; }
 
         public string CalibrationPath { get; }
+
+        public string? BackupPath { get; }
 
         public int NextPointNumber { get; set; } = 1;
     }

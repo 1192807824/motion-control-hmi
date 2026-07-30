@@ -344,7 +344,7 @@
                 <StackPanel Grid.Column="10"
                             x:Name="CalibrationToolbarPanel"
                             Orientation="Horizontal">
-                    <TextBlock Text="标定文件" Style="{StaticResource FieldLabel}" Margin="0,0,8,0" />
+                    <TextBlock Text="应用文件" Style="{StaticResource FieldLabel}" Margin="0,0,8,0" />
                 </StackPanel>
                 <TextBox Grid.Column="11"
                          x:Name="CalibrationToolbarPathTextBox"
@@ -356,7 +356,7 @@
                          Foreground="#EDF4F9"
                          BorderBrush="#35546B"
                          BorderThickness="1"
-                         ToolTip="当前九点标定文件" />
+                         ToolTip="当前应用的九点标定文件" />
                 <StackPanel Grid.Column="12" Orientation="Horizontal">
                     <Button x:Name="ChooseCalibrationToolbarButton"
                             Content="保存位置"
@@ -722,7 +722,9 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource SidebarSection}" BorderThickness="0">
+                    <Border x:Name="SidebarClickMoveSection"
+                            Style="{StaticResource SidebarSection}"
+                            BorderThickness="0">
                         <StackPanel>
                             <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>

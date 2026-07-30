@@ -501,6 +501,8 @@ public sealed class VisionMasterProcessHost : HwndHost
         double lineEndY,
         double circleCenterX,
         double circleCenterY,
+        double taughtTransformedX,
+        double taughtTransformedY,
         string calibrationFilePath,
         CancellationToken cancellationToken)
     {
@@ -511,7 +513,9 @@ public sealed class VisionMasterProcessHost : HwndHost
             lineEndX,
             lineEndY,
             circleCenterX,
-            circleCenterY
+            circleCenterY,
+            taughtTransformedX,
+            taughtTransformedY
         };
         if (values.Any(value => !double.IsFinite(value)))
         {
@@ -534,7 +538,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             !double.IsFinite(y) ||
             !double.IsFinite(angle))
         {
-            throw new InvalidDataException("VisionMaster 返回的下相机纠偏转换坐标或角度无效。");
+            throw new InvalidDataException("VisionMaster 返回的下相机纠偏偏差或夹角无效。");
         }
 
         return new VisionLowerCameraCorrectionResult(x, y, angle);
@@ -1539,9 +1543,9 @@ public sealed record VisionLowerCameraTeachResult(
     double TransformedY);
 
 public sealed record VisionLowerCameraCorrectionResult(
-    double TransformedX,
-    double TransformedY,
-    double TransformedAngle);
+    double CorrectionX,
+    double CorrectionY,
+    double MeasuredAngle);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,

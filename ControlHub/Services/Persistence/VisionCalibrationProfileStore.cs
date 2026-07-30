@@ -10,7 +10,7 @@ public sealed class VisionCalibrationProfileStore
         WriteIndented = true
     };
 
-    public void Save(string filePath, VisionCalibrationProfile profile)
+    public string? Save(string filePath, VisionCalibrationProfile profile)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(profile);
@@ -21,7 +21,9 @@ public sealed class VisionCalibrationProfileStore
             Directory.CreateDirectory(directory);
         }
 
+        var backupPath = CalibrationBackupService.BackupBeforeOverwrite(fullPath);
         File.WriteAllText(fullPath, JsonSerializer.Serialize(profile, JsonOptions));
+        return backupPath;
     }
 
     public VisionCalibrationProfile Load(string filePath)

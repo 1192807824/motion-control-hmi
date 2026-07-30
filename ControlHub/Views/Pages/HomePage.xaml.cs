@@ -811,7 +811,8 @@ public partial class HomePage : UserControl
             cancellationToken);
 
         LowerCameraCorrectionResultText.Text =
-            $"吸嘴1：X={nozzle1Result.TransformedX:0.###} Y={nozzle1Result.TransformedY:0.###}；吸嘴2正在拍照位2纠偏…";
+            $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.###} Y偏差={nozzle1Result.CorrectionY:0.###} " +
+            $"夹角={nozzle1Result.MeasuredAngle:0.###}°；吸嘴2正在拍照位2纠偏…";
         SetStartProductionStatus(
             $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…",
             Color.FromRgb(242, 181, 68));
@@ -826,13 +827,17 @@ public partial class HomePage : UserControl
             cancellationToken);
 
         LowerCameraCorrectionResultText.Text =
-            $"下相机纠偏｜吸嘴1 X={nozzle1Result.TransformedX:0.###} Y={nozzle1Result.TransformedY:0.###}｜" +
-            $"吸嘴2 X={nozzle2Result.TransformedX:0.###} Y={nozzle2Result.TransformedY:0.###}";
+            $"下相机纠偏｜吸嘴1 X偏差={nozzle1Result.CorrectionX:0.###} Y偏差={nozzle1Result.CorrectionY:0.###} " +
+            $"夹角={nozzle1Result.MeasuredAngle:0.###}°｜" +
+            $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.###} Y偏差={nozzle2Result.CorrectionY:0.###} " +
+            $"夹角={nozzle2Result.MeasuredAngle:0.###}°";
         LowerCameraCorrectionResultText.Foreground =
             new SolidColorBrush(Color.FromRgb(73, 209, 125));
         SetStartProductionStatus(
-            $"下相机纠偏完成：吸嘴1({nozzle1Result.TransformedX:0.###}, {nozzle1Result.TransformedY:0.###})，" +
-            $"吸嘴2({nozzle2Result.TransformedX:0.###}, {nozzle2Result.TransformedY:0.###})。",
+            $"下相机纠偏完成：吸嘴1偏差({nozzle1Result.CorrectionX:0.###}, {nozzle1Result.CorrectionY:0.###})，" +
+            $"夹角{nozzle1Result.MeasuredAngle:0.###}°；" +
+            $"吸嘴2偏差({nozzle2Result.CorrectionX:0.###}, {nozzle2Result.CorrectionY:0.###})，" +
+            $"夹角{nozzle2Result.MeasuredAngle:0.###}°。",
             Color.FromRgb(73, 209, 125));
     }
 
