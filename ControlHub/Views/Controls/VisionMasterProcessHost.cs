@@ -405,7 +405,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 state.LowerCameraCorrectionTestEnabled ? "1" : "0",
                 state.LowerCameraCorrectionTestRunning ? "1" : "0",
                 Encode(state.LowerCameraCorrectionTestStatus),
-                state.LowerCameraTeachDataImportEnabled ? "1" : "0"),
+                state.LowerCameraTeachDataImportEnabled ? "1" : "0",
+                Encode(state.LowerCameraTeachDataFilePath)),
             cancellationToken);
     }
 
@@ -1528,7 +1529,8 @@ public sealed record CalibrationSidebarState(
     bool LowerCameraCorrectionTestEnabled,
     bool LowerCameraCorrectionTestRunning,
     string LowerCameraCorrectionTestStatus,
-    bool LowerCameraTeachDataImportEnabled);
+    bool LowerCameraTeachDataImportEnabled,
+    string LowerCameraTeachDataFilePath);
 
 public sealed record VisionRotationPoint(double X, double Y);
 

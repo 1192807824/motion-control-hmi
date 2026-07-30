@@ -1110,7 +1110,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 43)
+        if (parts.Count != 44)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -1262,6 +1262,13 @@ public partial class MainWindow : Window
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
                 : new SolidColorBrush(Color.FromRgb(175, 192, 205));
             SidebarImportLowerCameraTeachDataButton.IsEnabled = parts[42] == "1";
+            var lowerCameraTeachDataFilePath = Decode(parts[43]);
+            SidebarLowerCameraTeachDataFileText.Text = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
+                ? "示教应用文件：未设置"
+                : $"示教应用文件：{Path.GetFileName(lowerCameraTeachDataFilePath)}";
+            SidebarLowerCameraTeachDataFileText.ToolTip = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
+                ? "当前吸嘴纠偏所应用的示教数据文件尚未设置"
+                : $"当前吸嘴纠偏应用：{lowerCameraTeachDataFilePath}";
             SidebarClickTargetComboBox.Visibility = Visibility.Visible;
             SidebarClickMoveStepText.Text = "4";
             SidebarClickMoveTitleText.Text = "点击移动";

@@ -843,7 +843,12 @@ public partial class HomePage : UserControl
 
     private LowerCameraCorrectionProfile ReadLowerCameraCorrectionProfile(int nozzleNumber)
     {
-        var teachDataPath = LowerCameraTeachDataStore.GetDefaultFilePath(nozzleNumber);
+        var configuredTeachDataPath = nozzleNumber == 2
+            ? _visionCalibration.Settings.LowerCameraNozzle2TeachDataFilePath
+            : _visionCalibration.Settings.LowerCameraNozzle1TeachDataFilePath;
+        var teachDataPath = string.IsNullOrWhiteSpace(configuredTeachDataPath)
+            ? LowerCameraTeachDataStore.GetDefaultFilePath(nozzleNumber)
+            : Path.GetFullPath(configuredTeachDataPath.Trim());
         if (!File.Exists(teachDataPath))
         {
             throw new FileNotFoundException(

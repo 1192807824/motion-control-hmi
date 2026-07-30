@@ -344,7 +344,7 @@
                 <StackPanel Grid.Column="10"
                             x:Name="CalibrationToolbarPanel"
                             Orientation="Horizontal">
-                    <TextBlock Text="应用文件" Style="{StaticResource FieldLabel}" Margin="0,0,8,0" />
+                    <TextBlock Text="标定文件" Style="{StaticResource FieldLabel}" Margin="0,0,8,0" />
                 </StackPanel>
                 <TextBox Grid.Column="11"
                          x:Name="CalibrationToolbarPathTextBox"
@@ -679,6 +679,13 @@
                                 </Border>
                                 <TextBlock Text="示教数据（可单独重做）" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
                             </StackPanel>
+                            <TextBlock x:Name="SidebarLowerCameraTeachDataFileText"
+                                       Margin="26,0,0,6"
+                                       Text="示教应用文件：未设置"
+                                       Foreground="#49D17D"
+                                       FontSize="11"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip="当前吸嘴纠偏所应用的示教数据文件" />
                             <Button x:Name="SidebarLowerCameraTeachButton"
                                     Tag="RunLowerCameraTeach"
                                     Margin="26,0,0,6"

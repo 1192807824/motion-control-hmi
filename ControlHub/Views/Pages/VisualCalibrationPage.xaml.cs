@@ -2253,7 +2253,7 @@ public partial class VisualCalibrationPage : UserControl
         var dialog = new OpenFileDialog
         {
             Title = $"导入{ActiveLowerCameraNozzleName}的8项下相机示教数据",
-            Filter = "下相机示教数据 (*.json)|*.json|所有文件 (*.*)|*.*",
+            Filter = "下相机示教数据 (*.txt;*.json)|*.txt;*.json|所有文件 (*.*)|*.*",
             CheckFileExists = true,
             InitialDirectory = Directory.Exists(Path.GetDirectoryName(currentFilePath))
                 ? Path.GetDirectoryName(currentFilePath)
@@ -2272,12 +2272,14 @@ public partial class VisualCalibrationPage : UserControl
         try
         {
             var data = _lowerCameraTeachDataStore.Load(dialog.FileName);
-            var backupFilePath = _lowerCameraTeachDataStore.Save(currentFilePath, data);
+            var selectedFilePath = Path.GetFullPath(dialog.FileName);
+            SetLowerCameraTeachDataFilePath(ActiveLowerCameraNozzle, selectedFilePath);
+            _visionCalibration.Save();
             var message =
-                $"已导入{ActiveLowerCameraNozzleName}8项示教数据：圆心({data.CircleCenterX:0.###}, {data.CircleCenterY:0.###})；" +
+                $"已应用{ActiveLowerCameraNozzleName}示教文件“{Path.GetFileName(selectedFilePath)}”：" +
+                $"圆心({data.CircleCenterX:0.###}, {data.CircleCenterY:0.###})；" +
                 $"直线({data.LineStartX:0.###}, {data.LineStartY:0.###})→({data.LineEndX:0.###}, {data.LineEndY:0.###})；" +
-                $"转换({data.TransformedX:0.###}, {data.TransformedY:0.###})。现在可直接纠偏测试。" +
-                FormatBackupNotice(backupFilePath, "旧示教数据");
+                $"转换({data.TransformedX:0.###}, {data.TransformedY:0.###})。现在可直接纠偏测试。";
             SetLowerCameraTeachStatus(message, WorkflowStatus.Success);
             RefreshLowerCameraCorrectionTestStatus();
             SetWorkflowStatus(message, WorkflowStatus.Success);
@@ -2443,9 +2445,37 @@ public partial class VisualCalibrationPage : UserControl
 
     private string GetLowerCameraTeachDataFilePath(int nozzleNumber)
     {
+        var configuredPath = nozzleNumber == 2
+            ? _uiSettings.LowerCameraNozzle2TeachDataFilePath
+            : _uiSettings.LowerCameraNozzle1TeachDataFilePath;
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            try
+            {
+                return Path.GetFullPath(configuredPath.Trim());
+            }
+            catch
+            {
+                // Invalid legacy settings fall back to the per-nozzle default file.
+            }
+        }
+
         return nozzleNumber == 2
             ? DefaultLowerCameraNozzle2TeachDataFilePath
             : DefaultLowerCameraNozzle1TeachDataFilePath;
+    }
+
+    private void SetLowerCameraTeachDataFilePath(int nozzleNumber, string filePath)
+    {
+        var fullPath = Path.GetFullPath(filePath);
+        if (nozzleNumber == 2)
+        {
+            _uiSettings.LowerCameraNozzle2TeachDataFilePath = fullPath;
+        }
+        else
+        {
+            _uiSettings.LowerCameraNozzle1TeachDataFilePath = fullPath;
+        }
     }
 
     private void RefreshLowerCameraTeachStatus()
@@ -3522,7 +3552,10 @@ public partial class VisualCalibrationPage : UserControl
                     CanRunLowerCameraCorrectionTest(),
                     _lowerCameraCorrectionTestRunning,
                     _lowerCameraCorrectionTestStatus,
-                    CanImportLowerCameraTeachData());
+                    CanImportLowerCameraTeachData(),
+                    IsLowerCameraMode
+                        ? GetLowerCameraTeachDataFilePath(ActiveLowerCameraNozzle)
+                        : "");
                 try
                 {
                     await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);
