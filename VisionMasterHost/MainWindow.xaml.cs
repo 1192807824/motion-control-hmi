@@ -1029,7 +1029,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationToolbarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 8)
+        if (parts.Count != 9)
         {
             throw new InvalidDataException("标定文件菜单状态参数不正确。");
         }
@@ -1056,6 +1056,17 @@ public partial class MainWindow : Window
         LoadCalibrationProfileToolbarButton.IsEnabled = parts[5] == "1";
         SaveCalibrationProfileToolbarButton.IsEnabled = parts[6] == "1";
         var simplifiedMode = parts[7] == "1";
+        var lowerCameraTeachDataFilePath = Encoding.UTF8.GetString(
+            Convert.FromBase64String(parts[8]));
+        CalibrationTeachDataFilePanel.Visibility = simplifiedMode
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        CalibrationTeachDataFileTextBox.Text = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
+            ? "未设置"
+            : Path.GetFileName(lowerCameraTeachDataFilePath.Trim());
+        CalibrationTeachDataFileTextBox.ToolTip = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
+            ? "当前吸嘴纠偏所应用的示教数据文件尚未设置"
+            : $"当前吸嘴纠偏应用：{lowerCameraTeachDataFilePath}";
         LoadCalibrationProfileToolbarButton.Visibility = simplifiedMode
             ? Visibility.Collapsed
             : Visibility.Visible;

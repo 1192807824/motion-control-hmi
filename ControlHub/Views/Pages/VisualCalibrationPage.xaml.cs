@@ -3452,6 +3452,9 @@ public partial class VisualCalibrationPage : UserControl
                 {
                     await VisionHost.SetCalibrationToolbarStateAsync(
                         CalibrationFilePathTextBox.Text,
+                        IsLowerCameraMode
+                            ? GetLowerCameraTeachDataFilePath(ActiveLowerCameraNozzle)
+                            : "",
                         CalibrationFilePathTextBox.IsEnabled,
                         ChooseCalibrationFileButton.IsEnabled,
                         ImportCalibrationFileButton.IsEnabled,

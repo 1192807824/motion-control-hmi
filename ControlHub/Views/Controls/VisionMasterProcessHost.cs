@@ -315,6 +315,7 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     public Task<string> SetCalibrationToolbarStateAsync(
         string calibrationFilePath,
+        string lowerCameraTeachDataFilePath,
         bool pathEnabled,
         bool chooseEnabled,
         bool importEnabled,
@@ -325,6 +326,8 @@ public sealed class VisionMasterProcessHost : HwndHost
     {
         var encodedPath = Convert.ToBase64String(
             Encoding.UTF8.GetBytes(calibrationFilePath?.Trim() ?? string.Empty));
+        var encodedTeachDataPath = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(lowerCameraTeachDataFilePath?.Trim() ?? string.Empty));
         return SendCalibrationCommandAsync(
             string.Join(
                 "\t",
@@ -335,7 +338,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 importEnabled ? "1" : "0",
                 loadProfileEnabled ? "1" : "0",
                 saveProfileEnabled ? "1" : "0",
-                simplifiedMode ? "1" : "0"),
+                simplifiedMode ? "1" : "0",
+                encodedTeachDataPath),
             cancellationToken);
     }
 

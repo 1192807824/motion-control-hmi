@@ -405,6 +405,32 @@
 
                 <Border Grid.Column="13" Width="1" Height="34" Background="#345269" />
 
+                <Grid Grid.Column="14"
+                      x:Name="CalibrationTeachDataFilePanel"
+                      Margin="12,0,0,0"
+                      HorizontalAlignment="Left"
+                      Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="200" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="示教文件"
+                               Style="{StaticResource FieldLabel}"
+                               Margin="0,0,8,0" />
+                    <TextBox Grid.Column="1"
+                             x:Name="CalibrationTeachDataFileTextBox"
+                             Height="40"
+                             Padding="8,0"
+                             VerticalContentAlignment="Center"
+                             IsReadOnly="True"
+                             Background="#0B2235"
+                             Foreground="#49D17D"
+                             BorderBrush="#35546B"
+                             BorderThickness="1"
+                             Text="未设置"
+                             ToolTip="当前吸嘴纠偏所应用的示教数据文件" />
+                </Grid>
+
                 <StackPanel Grid.Column="14"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right">
