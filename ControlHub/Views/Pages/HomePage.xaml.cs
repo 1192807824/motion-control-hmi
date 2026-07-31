@@ -47,6 +47,9 @@ public partial class HomePage : UserControl
     private const double DefaultNozzleSafeZPosition = -5_000d;
     private const double DefaultNozzleZVelocity = 20_000d;
     private const double DefaultNozzleRVelocity = 50_000d;
+    private const double LowerCameraLinearPulsePerMillimeter = 10_000d;
+    private const double NozzleRPulsesPerRevolution = 131_072d;
+    private const double DegreesPerRevolution = 360d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
@@ -80,14 +83,25 @@ public partial class HomePage : UserControl
         [VisionCalibrationService.SecondSetXHardwareAxisNo, VisionCalibrationService.SecondSetYHardwareAxisNo];
     private static readonly int[] FirstSetZAxisNos =
         [FirstSetNozzle1ZHardwareAxisNo, FirstSetNozzle2ZHardwareAxisNo];
+    private static readonly int[] FirstSetRAxisNos =
+        [FirstSetNozzle1RHardwareAxisNo, FirstSetNozzle2RHardwareAxisNo];
     private static readonly int[] SecondSetZAxisNos =
         [SecondSetNozzle1ZHardwareAxisNo, SecondSetNozzle2ZHardwareAxisNo];
+    private static readonly int[] SecondSetRAxisNos =
+        [SecondSetNozzle1RHardwareAxisNo, SecondSetNozzle2RHardwareAxisNo];
     private static readonly int[] FirstSetProductionPeerAxisNos =
-        [0, .. SecondSetAxisNos, .. SecondSetZAxisNos, .. MoveOutAxisNos];
+        [0, .. SecondSetAxisNos, .. SecondSetZAxisNos, .. SecondSetRAxisNos, .. MoveOutAxisNos];
     private static readonly int[] SecondSetProductionPeerAxisNos =
-        [0, .. FirstSetAxisNos, .. FirstSetZAxisNos, .. MoveOutAxisNos];
+        [0, .. FirstSetAxisNos, .. FirstSetZAxisNos, .. FirstSetRAxisNos, .. MoveOutAxisNos];
     private static readonly int[] ProductionHandlingAxisNos =
-        [.. FirstSetAxisNos, .. SecondSetAxisNos, .. FirstSetZAxisNos, .. SecondSetZAxisNos];
+        [
+            .. FirstSetAxisNos,
+            .. SecondSetAxisNos,
+            .. FirstSetZAxisNos,
+            .. SecondSetZAxisNos,
+            .. FirstSetRAxisNos,
+            .. SecondSetRAxisNos
+        ];
     private static readonly ProductionAxisDefinition[] ProductionAxisDefinitions =
     [
         new(0, "DD转盘", "DD马达", Axis0Velocity),
@@ -711,6 +725,41 @@ public partial class HomePage : UserControl
             true);
     }
 
+    private async Task MoveNozzleRToAsync(
+        VisionCalibrationAxisSet axisSet,
+        int nozzleNumber,
+        double targetPosition,
+        string positionName,
+        CancellationToken cancellationToken)
+    {
+        if (!double.IsFinite(targetPosition))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(targetPosition),
+                $"R{nozzleNumber}的{positionName}目标必须是有效数字。");
+        }
+
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var rHardwareAxisNo = GetNozzleRHardwareAxisNo(axisSet, nozzleNumber);
+        var rVelocity = GetProductionAxisMotionSettings(rHardwareAxisNo).RunVelocity;
+        SetFirstSetPositionStatus(
+            $"R{nozzleNumber}正在移动到{positionName}{targetPosition:0.###} pulse，速度 {rVelocity:0.###}…",
+            true);
+
+        var result = await motionController.MoveAxesAbsoluteAsync(
+            new Dictionary<int, double> { [rHardwareAxisNo] = targetPosition },
+            cancellationToken,
+            allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverride: rVelocity);
+        var actual = result.Single();
+        SetFirstSetPositionStatus(
+            $"R{nozzleNumber}已到{positionName}：{actual.FeedbackPosition:0.###} pulse。",
+            true);
+    }
+
     private async Task EnsureActiveSetNozzlesAtSafeZAsync(CancellationToken cancellationToken)
     {
         var motionController = _motionController
@@ -798,7 +847,7 @@ public partial class HomePage : UserControl
         }
     }
 
-    private async Task RunLowerCameraCorrectionsAsync(
+    private async Task<LowerCameraCorrectionResults> RunLowerCameraCorrectionsAsync(
         VisualCalibrationPage visualCalibrationController,
         LowerCameraCorrectionProfile nozzle1Profile,
         LowerCameraCorrectionProfile nozzle2Profile,
@@ -867,6 +916,7 @@ public partial class HomePage : UserControl
                 $"吸嘴2偏差({nozzle2Result.CorrectionX:0.00000}, {nozzle2Result.CorrectionY:0.00000})，" +
                 $"夹角{nozzle2Result.MeasuredAngle:0.00000}°。",
                 Color.FromRgb(73, 209, 125));
+            return new LowerCameraCorrectionResults(nozzle1Result, nozzle2Result);
         }
         finally
         {
@@ -914,6 +964,33 @@ public partial class HomePage : UserControl
         return new LowerCameraCorrectionProfile(nozzleNumber, calibrationPath, teachData);
     }
 
+    private static LowerCameraPlacementTarget CalculateLowerCameraPlacementTarget(
+        double configuredX,
+        double configuredY,
+        double originalR,
+        VisionLowerCameraCorrectionResult correction)
+    {
+        var correctedX = configuredX -
+                         correction.CorrectionX * LowerCameraLinearPulsePerMillimeter;
+        var correctedY = configuredY -
+                         correction.CorrectionY * LowerCameraLinearPulsePerMillimeter;
+        var rCorrectionPulses =
+            correction.MeasuredAngle / DegreesPerRevolution * NozzleRPulsesPerRevolution;
+        var correctedR = originalR - rCorrectionPulses;
+        if (!double.IsFinite(correctedX) ||
+            !double.IsFinite(correctedY) ||
+            !double.IsFinite(correctedR))
+        {
+            throw new InvalidOperationException("纠偏换算出的X/Y/R目标无效。");
+        }
+
+        return new LowerCameraPlacementTarget(
+            correctedX,
+            correctedY,
+            correctedR,
+            rCorrectionPulses);
+    }
+
     private static int GetNozzleZHardwareAxisNo(
         VisionCalibrationAxisSet axisSet,
         int nozzleNumber)
@@ -924,6 +1001,20 @@ public partial class HomePage : UserControl
             (VisionCalibrationAxisSet.First, 2) => FirstSetNozzle2ZHardwareAxisNo,
             (VisionCalibrationAxisSet.Second, 1) => SecondSetNozzle1ZHardwareAxisNo,
             (VisionCalibrationAxisSet.Second, 2) => SecondSetNozzle2ZHardwareAxisNo,
+            _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
+        };
+    }
+
+    private static int GetNozzleRHardwareAxisNo(
+        VisionCalibrationAxisSet axisSet,
+        int nozzleNumber)
+    {
+        return (axisSet, nozzleNumber) switch
+        {
+            (VisionCalibrationAxisSet.First, 1) => FirstSetNozzle1RHardwareAxisNo,
+            (VisionCalibrationAxisSet.First, 2) => FirstSetNozzle2RHardwareAxisNo,
+            (VisionCalibrationAxisSet.Second, 1) => SecondSetNozzle1RHardwareAxisNo,
+            (VisionCalibrationAxisSet.Second, 2) => SecondSetNozzle2RHardwareAxisNo,
             _ => throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "吸嘴编号只能是 1 或 2。")
         };
     }
@@ -1333,6 +1424,7 @@ public partial class HomePage : UserControl
             var carouselStations = CreateCarouselStationStates();
             _carouselVisualStepOffset = 0;
             UpdateCarouselStationDisplay(carouselStations);
+            var preserveCorrectionFailureDisplay = false;
 
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
@@ -1345,8 +1437,15 @@ public partial class HomePage : UserControl
                 // 记录当前正在执行第几轮，便于状态栏提示和现场排查。
                 cycleNumber++;
 
-                // 清空上一轮的 Blob 识别显示，避免操作员误看旧结果。
-                ClearBlobInspectionResult();
+                // 纠偏失败时保留现场画面，直到下一次视觉流程自然覆盖；正常轮次仍清空旧结果。
+                if (preserveCorrectionFailureDisplay)
+                {
+                    preserveCorrectionFailureDisplay = false;
+                }
+                else
+                {
+                    ClearBlobInspectionResult();
+                }
 
                 // 清空上一轮缓存的吸嘴目标，避免异常重试时使用过期坐标。
                 ClearAssignedNozzleTargets();
@@ -1475,9 +1574,10 @@ public partial class HomePage : UserControl
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 两个吸嘴都取料并回安全Z后，依次到拍照位1/2执行各自的下相机纠偏。
+                LowerCameraCorrectionResults? correctionResults = null;
                 try
                 {
-                    await RunLowerCameraCorrectionsAsync(
+                    correctionResults = await RunLowerCameraCorrectionsAsync(
                         visualCalibrationController,
                         lowerCameraNozzle1Profile,
                         lowerCameraNozzle2Profile,
@@ -1488,11 +1588,41 @@ public partial class HomePage : UserControl
                     LowerCameraCorrectionResultText.Text = $"下相机纠偏失败：{exception.Message}";
                     LowerCameraCorrectionResultText.Foreground =
                         new SolidColorBrush(Color.FromRgb(242, 122, 128));
-                    throw new InvalidOperationException(
-                        $"下相机纠偏失败：{exception.Message}",
-                        exception);
+                    BlobInspectionImageStatusText.Text = "纠偏失败";
+                    BlobInspectionImageStatusText.Foreground =
+                        new SolidColorBrush(Color.FromRgb(242, 122, 128));
+                    preserveCorrectionFailureDisplay = true;
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：纠偏失败，已跳过纠偏并继续后续工序。{exception.Message}",
+                        Color.FromRgb(242, 122, 128));
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
+
+                var position1Target = new LowerCameraPlacementTarget(position1X, position1Y, 0d, 0d);
+                var position2Target = new LowerCameraPlacementTarget(position2X, position2Y, 0d, 0d);
+                var placementTargetDescription = "原设定目标";
+                double? nozzle1OriginalR = null;
+                double? nozzle2OriginalR = null;
+                if (correctionResults is { } corrections)
+                {
+                    placementTargetDescription = "纠偏目标";
+                    var originalRPositions = motionController.CaptureCalibrationFeedback(
+                        FirstSetNozzle1RHardwareAxisNo,
+                        FirstSetNozzle2RHardwareAxisNo,
+                        FirstSetProductionPeerAxisNos);
+                    nozzle1OriginalR = originalRPositions.ActualX;
+                    nozzle2OriginalR = originalRPositions.ActualY;
+                    position1Target = CalculateLowerCameraPlacementTarget(
+                        position1X,
+                        position1Y,
+                        nozzle1OriginalR.Value,
+                        corrections.Nozzle1);
+                    position2Target = CalculateLowerCameraPlacementTarget(
+                        position2X,
+                        position2Y,
+                        nozzle2OriginalR.Value,
+                        corrections.Nozzle2);
+                }
 
                 // 拍照和双吸嘴取料不等待DD；真正放料前只等待DD完成固定两次转动。
                 if (activeCarouselAdvanceTask is not null)
@@ -1517,14 +1647,26 @@ public partial class HomePage : UserControl
 
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，XY正在放料到1工位({position1X:0.###}, {position1Y:0.###})…",
+                    $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，" +
+                    $"正在按{placementTargetDescription}放料到1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
+                    $"{(nozzle1OriginalR.HasValue ? $", R={position1Target.R:0.###}" : string.Empty)})…",
                     Color.FromRgb(242, 181, 68));
+
+                if (nozzle1OriginalR.HasValue)
+                {
+                    await MoveNozzleRToAsync(
+                        VisionCalibrationAxisSet.First,
+                        1,
+                        position1Target.R,
+                        $"纠偏位（角度换算 {position1Target.RCorrectionPulses:0.###} pulse）",
+                        _productionCancellation.Token);
+                }
 
                 // 执行位置1的绝对移动。
                 await MovePresetPositionCoreAsync(
                     "位置 1",
-                    position1X,
-                    position1Y,
+                    position1Target.X,
+                    position1Target.Y,
                     _productionCancellation.Token);
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
@@ -1533,18 +1675,40 @@ public partial class HomePage : UserControl
                     $"第{cycleNumber}轮：1工位已到位，Z1正在下降到配置放料位…",
                     Color.FromRgb(242, 181, 68));
                 await PlaceWithActiveSetNozzleAsync(1, _productionCancellation.Token);
+                if (nozzle1OriginalR.HasValue)
+                {
+                    await MoveNozzleRToAsync(
+                        VisionCalibrationAxisSet.First,
+                        1,
+                        nozzle1OriginalR.Value,
+                        "纠偏前原位",
+                        _productionCancellation.Token);
+                }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 提示第 7 步开始：第一套 XY 移动到预设位置2。
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Z1已放料并回到配置安全位，XY正在放料到2工位({position2X:0.###}, {position2Y:0.###})…",
+                    $"第{cycleNumber}轮：Z1已放料" +
+                    $"{(nozzle1OriginalR.HasValue ? "、R1已回原位" : "（纠偏已跳过）")}，" +
+                    $"正在按{placementTargetDescription}放料到2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
+                    $"{(nozzle2OriginalR.HasValue ? $", R={position2Target.R:0.###}" : string.Empty)})…",
                     Color.FromRgb(242, 181, 68));
+
+                if (nozzle2OriginalR.HasValue)
+                {
+                    await MoveNozzleRToAsync(
+                        VisionCalibrationAxisSet.First,
+                        2,
+                        position2Target.R,
+                        $"纠偏位（角度换算 {position2Target.RCorrectionPulses:0.###} pulse）",
+                        _productionCancellation.Token);
+                }
 
                 // 执行位置2的绝对移动。
                 await MovePresetPositionCoreAsync(
                     "位置 2",
-                    position2X,
-                    position2Y,
+                    position2Target.X,
+                    position2Target.Y,
                     _productionCancellation.Token);
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
@@ -1553,6 +1717,15 @@ public partial class HomePage : UserControl
                     $"第{cycleNumber}轮：2工位已到位，Z2正在下降到配置放料位…",
                     Color.FromRgb(242, 181, 68));
                 await PlaceWithActiveSetNozzleAsync(2, _productionCancellation.Token);
+                if (nozzle2OriginalR.HasValue)
+                {
+                    await MoveNozzleRToAsync(
+                        VisionCalibrationAxisSet.First,
+                        2,
+                        nozzle2OriginalR.Value,
+                        "纠偏前原位",
+                        _productionCancellation.Token);
+                }
                 CloseAllActiveSetNozzleVacuumOutputs();
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
@@ -4823,6 +4996,16 @@ public partial class HomePage : UserControl
         int NozzleNumber,
         string CalibrationFilePath,
         LowerCameraTeachData TeachData);
+
+    private sealed record LowerCameraCorrectionResults(
+        VisionLowerCameraCorrectionResult Nozzle1,
+        VisionLowerCameraCorrectionResult Nozzle2);
+
+    private readonly record struct LowerCameraPlacementTarget(
+        double X,
+        double Y,
+        double R,
+        double RCorrectionPulses);
 
     private readonly record struct BinDropPosition(double X, double Y);
 
