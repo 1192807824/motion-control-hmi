@@ -21,7 +21,6 @@ public partial class MotionControlPage : UserControl
     private const double TestHomeLowSpeedRatio = 0.25;
     private const double OneKeyResetRzHomeVelocity = 50_000;
     private const double OneKeyResetXyHomeVelocity = 100_000;
-    private const double OneKeyResetTestStationHomeVelocity = 100_000;
     private const double OneKeyResetDdHomeVelocity = 50_000;
     private const double OneKeyResetHomePositionTolerance = 100;
     private readonly IMotionCard _motionCard;
@@ -3659,12 +3658,13 @@ public partial class MotionControlPage : UserControl
             throw new MotionCardException($"EtherCAT 总线错误 0x{busError:X4}。");
         }
 
-        foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
+        foreach (var hardwareAxisNo in requestedAxisNumbers)
         {
-            var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+            var axis = axisByHardwareNo[hardwareAxisNo];
+            var snapshot = _motionCard.ReadAxis(hardwareAxisNo);
             ApplySnapshot(axis, snapshot);
             ProcessSnapshotAlarms(axis, snapshot);
-            snapshotsByHardwareNo[axis.HardwareAxisNo] = snapshot;
+            snapshotsByHardwareNo[hardwareAxisNo] = snapshot;
             if (snapshot.IsMoving || snapshot.Alarm || snapshot.EmergencyInput)
             {
                 throw new MotionCardException($"{axis.Name} 正在运动或存在报警/急停输入，不能启动一键复位测试。");
@@ -3679,7 +3679,7 @@ public partial class MotionControlPage : UserControl
 
         if (requestedAxes.Values.Any(axis => !axis.ServoOn))
         {
-            throw new MotionCardException("一键复位测试前必须先使能硬件轴 0～15。");
+            throw new MotionCardException("一键复位测试前必须先使能本次复位涉及的硬件轴。");
         }
 
         foreach (var stage in resetStages)
@@ -3861,10 +3861,9 @@ public partial class MotionControlPage : UserControl
                 new([5, 7, 9, 11], -1, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity)
             ]),
             new("上料X", [new([1], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
-            new("上料Y/下料XY/三个测试站同时", [
+            new("上料Y/下料XY同时", [
                 new([2], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
-                new([3, 4], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
-                new([13, 14, 15], 21, OneKeyResetTestStationHomeVelocity, OneKeyResetTestStationHomeVelocity)
+                new([3, 4], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)
             ]),
             new("DD马达", [
                 new(

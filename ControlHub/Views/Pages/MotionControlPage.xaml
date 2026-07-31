@@ -590,7 +590,7 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <Button x:Name="HomeCurrentButton" Content="当前轴回原点" Style="{StaticResource FlatButton}" Height="62" Background="#E97906" ToolTip="{Binding SelectedAxis.HomeConfigurationSummary}" Click="Home_Click" />
                                 <Button x:Name="HomeAllButton" Content="按次序回原点" Style="{StaticResource FlatButton}" Height="52" Margin="0,12,0,0" Click="HomeAll_Click" />
-                                <Button x:Name="TestOneKeyResetButton" Content="一键复位测试" Style="{StaticResource FlatButton}" Height="52" Margin="0,12,0,0" Background="#B45309" IsEnabled="False" AutomationProperties.Name="按固定测试参数执行一键复位" ToolTip="R/Z速度50000同时 → 上料X速度100000 → 上料Y、下料XY速度100000与测试站13/14/15速度100000同时 → DD马达速度50000（偏移600）" Click="TestOneKeyReset_Click" />
+                                <Button x:Name="TestOneKeyResetButton" Content="一键复位测试" Style="{StaticResource FlatButton}" Height="52" Margin="0,12,0,0" Background="#B45309" IsEnabled="False" AutomationProperties.Name="按固定测试参数执行一键复位" ToolTip="R/Z速度50000同时 → 上料X速度100000 → 上料Y、下料XY速度100000同时 → DD马达速度50000（偏移600）；测试站轴13/14/15不参与" Click="TestOneKeyReset_Click" />
                                 <Grid Margin="0,12,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                     <Button Grid.Column="0" Content="单轴减速停" Style="{StaticResource FlatButton}" Height="52" Background="#52697B" AutomationProperties.Name="当前运动轴减速停止" Click="LocalStop_Click" />
