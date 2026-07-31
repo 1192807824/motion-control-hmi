@@ -1021,7 +1021,7 @@ public partial class HomePage : UserControl
                          correction.CorrectionY * LowerCameraLinearPulsePerMillimeter;
         var rCorrectionPulses =
             correction.MeasuredAngle / DegreesPerRevolution * NozzleRPulsesPerRevolution;
-        var correctedR = originalR - rCorrectionPulses;
+        var correctedR = originalR + rCorrectionPulses;
         if (!double.IsFinite(correctedX) ||
             !double.IsFinite(correctedY) ||
             !double.IsFinite(correctedR))
