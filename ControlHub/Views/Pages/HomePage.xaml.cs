@@ -31,6 +31,7 @@ public partial class HomePage : UserControl
     private const int SecondSetZ2VacuumOutputBit = 21;
     private const int Station13BreakVacuumOutputBit = 22;
     private const int Station14BreakVacuumOutputBit = 23;
+    private const int LowerCameraLightOutputBit = 10;
     private const int DefaultVacuumBreakPulseMilliseconds = 150;
     private const int DefaultVacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
@@ -772,6 +773,31 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("本轮生产的下相机拍照位1/2尚未锁定。");
     }
 
+    private void SetLowerCameraLight(bool enabled)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        if (!motionController.SetDigitalOutputHardwareBit(LowerCameraLightOutputBit, enabled))
+        {
+            throw new InvalidOperationException(
+                $"下相机光源Y{LowerCameraLightOutputBit:00}{(enabled ? "开启" : "关闭")}失败。");
+        }
+    }
+
+    private void TurnOffLowerCameraLightNoThrow()
+    {
+        try
+        {
+            _motionController?.SetDigitalOutputHardwareBit(
+                LowerCameraLightOutputBit,
+                enabled: false);
+        }
+        catch
+        {
+            // 光源关闭兜底不能掩盖原始的视觉、运动、取消或停机原因。
+        }
+    }
+
     private async Task RunLowerCameraCorrectionsAsync(
         VisualCalibrationPage visualCalibrationController,
         LowerCameraCorrectionProfile nozzle1Profile,
@@ -796,42 +822,59 @@ public partial class HomePage : UserControl
             positions.Position1X,
             positions.Position1Y,
             cancellationToken);
-        ShowLowerCameraCorrectionVisionStatus(1);
-        var nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-            nozzle1Profile.TeachData,
-            nozzle1Profile.CalibrationFilePath,
-            cancellationToken);
+        var lightMayBeOn = true;
+        try
+        {
+            // 只有拍照位1确认到位后才开光，并保持到拍照位2的视觉流程完成。
+            SetLowerCameraLight(enabled: true);
+            ShowLowerCameraCorrectionVisionStatus(1);
+            var nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+                nozzle1Profile.TeachData,
+                nozzle1Profile.CalibrationFilePath,
+                cancellationToken);
 
-        LowerCameraCorrectionResultText.Text =
-            $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
-            $"夹角={nozzle1Result.MeasuredAngle:0.00000}°；吸嘴2正在拍照位2纠偏…";
-        SetStartProductionStatus(
-            $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…",
-            Color.FromRgb(242, 181, 68));
-        await MovePresetPositionCoreAsync(
-            "下相机拍照位2",
-            positions.Position2X,
-            positions.Position2Y,
-            cancellationToken);
-        ShowLowerCameraCorrectionVisionStatus(2);
-        var nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-            nozzle2Profile.TeachData,
-            nozzle2Profile.CalibrationFilePath,
-            cancellationToken);
+            LowerCameraCorrectionResultText.Text =
+                $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+                $"夹角={nozzle1Result.MeasuredAngle:0.00000}°；吸嘴2正在拍照位2纠偏…";
+            SetStartProductionStatus(
+                $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…",
+                Color.FromRgb(242, 181, 68));
+            await MovePresetPositionCoreAsync(
+                "下相机拍照位2",
+                positions.Position2X,
+                positions.Position2Y,
+                cancellationToken);
+            ShowLowerCameraCorrectionVisionStatus(2);
+            var nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+                nozzle2Profile.TeachData,
+                nozzle2Profile.CalibrationFilePath,
+                cancellationToken);
 
-        LowerCameraCorrectionResultText.Text =
-            $"下相机纠偏｜吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
-            $"夹角={nozzle1Result.MeasuredAngle:0.00000}°｜" +
-            $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.00000} Y偏差={nozzle2Result.CorrectionY:0.00000} " +
-            $"夹角={nozzle2Result.MeasuredAngle:0.00000}°";
-        LowerCameraCorrectionResultText.Foreground =
-            new SolidColorBrush(Color.FromRgb(73, 209, 125));
-        SetStartProductionStatus(
-            $"下相机纠偏完成：吸嘴1偏差({nozzle1Result.CorrectionX:0.00000}, {nozzle1Result.CorrectionY:0.00000})，" +
-            $"夹角{nozzle1Result.MeasuredAngle:0.00000}°；" +
-            $"吸嘴2偏差({nozzle2Result.CorrectionX:0.00000}, {nozzle2Result.CorrectionY:0.00000})，" +
-            $"夹角{nozzle2Result.MeasuredAngle:0.00000}°。",
-            Color.FromRgb(73, 209, 125));
+            // 两个位置都完成拍照/纠偏后立即关闭光源，再更新完成状态。
+            SetLowerCameraLight(enabled: false);
+            lightMayBeOn = false;
+
+            LowerCameraCorrectionResultText.Text =
+                $"下相机纠偏｜吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+                $"夹角={nozzle1Result.MeasuredAngle:0.00000}°｜" +
+                $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.00000} Y偏差={nozzle2Result.CorrectionY:0.00000} " +
+                $"夹角={nozzle2Result.MeasuredAngle:0.00000}°";
+            LowerCameraCorrectionResultText.Foreground =
+                new SolidColorBrush(Color.FromRgb(73, 209, 125));
+            SetStartProductionStatus(
+                $"下相机纠偏完成：吸嘴1偏差({nozzle1Result.CorrectionX:0.00000}, {nozzle1Result.CorrectionY:0.00000})，" +
+                $"夹角{nozzle1Result.MeasuredAngle:0.00000}°；" +
+                $"吸嘴2偏差({nozzle2Result.CorrectionX:0.00000}, {nozzle2Result.CorrectionY:0.00000})，" +
+                $"夹角{nozzle2Result.MeasuredAngle:0.00000}°。",
+                Color.FromRgb(73, 209, 125));
+        }
+        finally
+        {
+            if (lightMayBeOn)
+            {
+                TurnOffLowerCameraLightNoThrow();
+            }
+        }
     }
 
     private LowerCameraCorrectionProfile ReadLowerCameraCorrectionProfile(int nozzleNumber)
@@ -4379,7 +4422,7 @@ public partial class HomePage : UserControl
         BlobInspectionImageViewbox.Visibility = Visibility.Collapsed;
         BlobInspectionImagePlaceholder.Visibility = Visibility.Collapsed;
         BlobInspectionVisionDisplayHost.Visibility = Visibility.Visible;
-        BlobInspectionImageStatusText.Text = "正在运行 Blob分析1";
+        BlobInspectionImageStatusText.Text = "找芯片流程 · 图像源1";
         BlobInspectionImageStatusText.Foreground = new SolidColorBrush(Color.FromRgb(98, 181, 255));
 
         await Dispatcher.InvokeAsync(
@@ -4444,7 +4487,7 @@ public partial class HomePage : UserControl
             }
 
             BlobInspectionImageStatusText.Text =
-                $"VM组件 · Blob分析1 · {result.ImageWidth}×{result.ImageHeight}";
+                $"找芯片流程 · 图像源1 · {result.ImageWidth}×{result.ImageHeight}";
             BlobInspectionImageStatusText.Foreground =
                 new SolidColorBrush(Color.FromRgb(73, 209, 125));
             return;

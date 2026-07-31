@@ -390,8 +390,8 @@ public partial class MainWindow : Window
         _clickCenterPixelReady = false;
         ApplyInspectionShellLayout();
         await RefreshRenderLayoutAsync();
-        SetStatus("主页检测待命：仅显示找芯片流程 / Blob分析1", StatusKind.Ready);
-        return "主页 Blob 检测显示已开启。";
+        SetStatus("主页视觉待命：显示当前流程的图像源1", StatusKind.Ready);
+        return "主页视觉图像显示已开启。";
     }
 
     /// <summary>
@@ -683,6 +683,7 @@ public partial class MainWindow : Window
         BindInspectionResultModule(imageSourceModule);
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, LowerCameraCorrectionProcedureName);
+        RefreshInspectionDisplayNoThrow();
 
         if (geometryModule.ModuResult is not { ModuStatus: 1 })
         {
@@ -898,6 +899,9 @@ public partial class MainWindow : Window
             : null;
         var resultModule = (VmModule?)matchModule ?? blobModule
             ?? throw new InvalidOperationException($"固定方案的“{procedureName}”中未找到结果模块。");
+        var displayModule = isNozzlePointProcedure
+            ? resultModule
+            : ResolveNamedModule<VmModule>(procedureName, CalibrationImageSourceName);
         // 同一相机不能被两个流程同时占用。找点前明确停止方案内的连续执行。
         StopAllContinuousExecutionNoThrow();
 
@@ -907,7 +911,7 @@ public partial class MainWindow : Window
             RefreshRenderLayout();
         }
 
-        BindInspectionResultModule(resultModule);
+        BindInspectionResultModule(displayModule);
 
         InspectionImageFile? inspectionImage = null;
         try
@@ -927,6 +931,7 @@ public partial class MainWindow : Window
                         ? $"固定方案中的{procedureName}执行异常。"
                         : $"固定方案中的{procedureName}执行异常：{details}");
             }
+            RefreshInspectionDisplayNoThrow();
 
             RectangleBlobCandidate first;
             RectangleBlobCandidate second;
@@ -1315,6 +1320,19 @@ public partial class MainWindow : Window
         ImagePlaceholder.Visibility = Visibility.Visible;
         CenterCrosshair.Visibility = Visibility.Collapsed;
         VisionRenderControl.ModuleSource = resultModule;
+    }
+
+    private void RefreshInspectionDisplayNoThrow()
+    {
+        try
+        {
+            VisionRenderControl.UpdateVMResultShow();
+            ImagePlaceholder.Visibility = Visibility.Collapsed;
+        }
+        catch
+        {
+            // 图像显示不参与生产判定；视觉流程结果仍按各结果模块正常读取。
+        }
     }
 
     /// <summary>
@@ -2792,7 +2810,7 @@ public partial class MainWindow : Window
         CalibrationSidebar.Visibility = Visibility.Collapsed;
         LiveRenderHeaderRow.Height = new GridLength(0);
         LiveRenderHeader.Visibility = Visibility.Collapsed;
-        ImagePlaceholderText.Text = "等待 Blob分析1";
+        ImagePlaceholderText.Text = "等待相机图像";
         LiveRenderPanel.Visibility = Visibility.Visible;
         CalibrationRenderPanel.Visibility = Visibility.Collapsed;
         Grid.SetColumn(LiveRenderPanel, 0);
