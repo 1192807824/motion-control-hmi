@@ -877,46 +877,91 @@ public partial class HomePage : UserControl
             // 只有拍照位1确认到位后才开光，并保持到拍照位2的视觉流程完成。
             SetLowerCameraLight(enabled: true);
             ShowLowerCameraCorrectionVisionStatus(1);
-            var nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-                nozzle1Profile.TeachData,
-                nozzle1Profile.CalibrationFilePath,
-                cancellationToken);
+            VisionLowerCameraCorrectionResult? nozzle1Result = null;
+            string? nozzle1Error = null;
+            try
+            {
+                nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+                    nozzle1Profile.TeachData,
+                    nozzle1Profile.CalibrationFilePath,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                nozzle1Error = exception.Message;
+            }
 
-            LowerCameraCorrectionResultText.Text =
-                $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
-                $"夹角={nozzle1Result.MeasuredAngle:0.00000}°；吸嘴2正在拍照位2纠偏…";
+            LowerCameraCorrectionResultText.Text = nozzle1Result is not null
+                ? $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+                  $"夹角={nozzle1Result.MeasuredAngle:0.00000}°；吸嘴2正在拍照位2纠偏…"
+                : $"吸嘴1纠偏失败，位置1将使用原设定坐标；继续执行吸嘴2纠偏。{nozzle1Error}";
+            LowerCameraCorrectionResultText.Foreground = new SolidColorBrush(
+                nozzle1Result is not null
+                    ? Color.FromRgb(242, 181, 68)
+                    : Color.FromRgb(242, 122, 128));
             SetStartProductionStatus(
-                $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…",
-                Color.FromRgb(242, 181, 68));
+                nozzle1Result is not null
+                    ? $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…"
+                    : $"吸嘴1纠偏失败，已跳过吸嘴1纠偏；XY仍前往拍照位2执行吸嘴2纠偏…",
+                nozzle1Result is not null
+                    ? Color.FromRgb(242, 181, 68)
+                    : Color.FromRgb(242, 122, 128));
             await MovePresetPositionCoreAsync(
                 "下相机拍照位2",
                 positions.Position2X,
                 positions.Position2Y,
                 cancellationToken);
             ShowLowerCameraCorrectionVisionStatus(2);
-            var nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-                nozzle2Profile.TeachData,
-                nozzle2Profile.CalibrationFilePath,
-                cancellationToken);
+            VisionLowerCameraCorrectionResult? nozzle2Result = null;
+            string? nozzle2Error = null;
+            try
+            {
+                nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+                    nozzle2Profile.TeachData,
+                    nozzle2Profile.CalibrationFilePath,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                nozzle2Error = exception.Message;
+            }
 
             // 两个位置都完成拍照/纠偏后立即关闭光源，再更新完成状态。
             SetLowerCameraLight(enabled: false);
             lightMayBeOn = false;
 
+            var nozzle1Summary = nozzle1Result is not null
+                ? $"吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+                  $"夹角={nozzle1Result.MeasuredAngle:0.00000}°"
+                : $"吸嘴1纠偏失败，位置1使用原设定坐标（{nozzle1Error}）";
+            var nozzle2Summary = nozzle2Result is not null
+                ? $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.00000} Y偏差={nozzle2Result.CorrectionY:0.00000} " +
+                  $"夹角={nozzle2Result.MeasuredAngle:0.00000}°"
+                : $"吸嘴2纠偏失败，位置2使用原设定坐标（{nozzle2Error}）";
+            var hasFailure = nozzle1Result is null || nozzle2Result is null;
             LowerCameraCorrectionResultText.Text =
-                $"下相机纠偏｜吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
-                $"夹角={nozzle1Result.MeasuredAngle:0.00000}°｜" +
-                $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.00000} Y偏差={nozzle2Result.CorrectionY:0.00000} " +
-                $"夹角={nozzle2Result.MeasuredAngle:0.00000}°";
-            LowerCameraCorrectionResultText.Foreground =
-                new SolidColorBrush(Color.FromRgb(73, 209, 125));
+                $"下相机纠偏｜{nozzle1Summary}｜{nozzle2Summary}";
+            LowerCameraCorrectionResultText.Foreground = new SolidColorBrush(
+                hasFailure
+                    ? Color.FromRgb(242, 122, 128)
+                    : Color.FromRgb(73, 209, 125));
+            BlobInspectionImageStatusText.Text = hasFailure ? "纠偏失败" : "纠偏完成";
+            BlobInspectionImageStatusText.Foreground = new SolidColorBrush(
+                hasFailure
+                    ? Color.FromRgb(242, 122, 128)
+                    : Color.FromRgb(73, 209, 125));
             SetStartProductionStatus(
-                $"下相机纠偏完成：吸嘴1偏差({nozzle1Result.CorrectionX:0.00000}, {nozzle1Result.CorrectionY:0.00000})，" +
-                $"夹角{nozzle1Result.MeasuredAngle:0.00000}°；" +
-                $"吸嘴2偏差({nozzle2Result.CorrectionX:0.00000}, {nozzle2Result.CorrectionY:0.00000})，" +
-                $"夹角{nozzle2Result.MeasuredAngle:0.00000}°。",
-                Color.FromRgb(73, 209, 125));
-            return new LowerCameraCorrectionResults(nozzle1Result, nozzle2Result);
+                hasFailure
+                    ? $"下相机纠偏部分或全部失败：失败吸嘴使用原设定位置，成功吸嘴仍应用各自纠偏。"
+                    : $"下相机纠偏完成：{nozzle1Summary}；{nozzle2Summary}。",
+                hasFailure
+                    ? Color.FromRgb(242, 122, 128)
+                    : Color.FromRgb(73, 209, 125));
+            return new LowerCameraCorrectionResults(
+                nozzle1Result,
+                nozzle1Error,
+                nozzle2Result,
+                nozzle2Error);
         }
         finally
         {
@@ -1582,6 +1627,10 @@ public partial class HomePage : UserControl
                         lowerCameraNozzle1Profile,
                         lowerCameraNozzle2Profile,
                         _productionCancellation.Token);
+                    if (correctionResults.HasFailure)
+                    {
+                        preserveCorrectionFailureDisplay = true;
+                    }
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -1600,28 +1649,37 @@ public partial class HomePage : UserControl
 
                 var position1Target = new LowerCameraPlacementTarget(position1X, position1Y, 0d, 0d);
                 var position2Target = new LowerCameraPlacementTarget(position2X, position2Y, 0d, 0d);
-                var placementTargetDescription = "原设定目标";
+                var position1TargetDescription = "原设定目标";
+                var position2TargetDescription = "原设定目标";
                 double? nozzle1OriginalR = null;
                 double? nozzle2OriginalR = null;
-                if (correctionResults is { } corrections)
+                if (correctionResults is { HasAnySuccess: true } corrections)
                 {
-                    placementTargetDescription = "纠偏目标";
                     var originalRPositions = motionController.CaptureCalibrationFeedback(
                         FirstSetNozzle1RHardwareAxisNo,
                         FirstSetNozzle2RHardwareAxisNo,
                         FirstSetProductionPeerAxisNos);
-                    nozzle1OriginalR = originalRPositions.ActualX;
-                    nozzle2OriginalR = originalRPositions.ActualY;
-                    position1Target = CalculateLowerCameraPlacementTarget(
-                        position1X,
-                        position1Y,
-                        nozzle1OriginalR.Value,
-                        corrections.Nozzle1);
-                    position2Target = CalculateLowerCameraPlacementTarget(
-                        position2X,
-                        position2Y,
-                        nozzle2OriginalR.Value,
-                        corrections.Nozzle2);
+                    if (corrections.Nozzle1 is { } nozzle1Correction)
+                    {
+                        position1TargetDescription = "吸嘴1纠偏目标";
+                        nozzle1OriginalR = originalRPositions.ActualX;
+                        position1Target = CalculateLowerCameraPlacementTarget(
+                            position1X,
+                            position1Y,
+                            nozzle1OriginalR.Value,
+                            nozzle1Correction);
+                    }
+
+                    if (corrections.Nozzle2 is { } nozzle2Correction)
+                    {
+                        position2TargetDescription = "吸嘴2纠偏目标";
+                        nozzle2OriginalR = originalRPositions.ActualY;
+                        position2Target = CalculateLowerCameraPlacementTarget(
+                            position2X,
+                            position2Y,
+                            nozzle2OriginalR.Value,
+                            nozzle2Correction);
+                    }
                 }
 
                 // 拍照和双吸嘴取料不等待DD；真正放料前只等待DD完成固定两次转动。
@@ -1648,7 +1706,7 @@ public partial class HomePage : UserControl
                 // 提示第 5 步开始：第一套 XY 移动到预设位置1。
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，" +
-                    $"正在按{placementTargetDescription}放料到1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
+                    $"正在按{position1TargetDescription}放料到1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
                     $"{(nozzle1OriginalR.HasValue ? $", R={position1Target.R:0.###}" : string.Empty)})…",
                     Color.FromRgb(242, 181, 68));
 
@@ -1690,7 +1748,7 @@ public partial class HomePage : UserControl
                 SetStartProductionStatus(
                     $"第{cycleNumber}轮：Z1已放料" +
                     $"{(nozzle1OriginalR.HasValue ? "、R1已回原位" : "（纠偏已跳过）")}，" +
-                    $"正在按{placementTargetDescription}放料到2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
+                    $"正在按{position2TargetDescription}放料到2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
                     $"{(nozzle2OriginalR.HasValue ? $", R={position2Target.R:0.###}" : string.Empty)})…",
                     Color.FromRgb(242, 181, 68));
 
@@ -4998,8 +5056,15 @@ public partial class HomePage : UserControl
         LowerCameraTeachData TeachData);
 
     private sealed record LowerCameraCorrectionResults(
-        VisionLowerCameraCorrectionResult Nozzle1,
-        VisionLowerCameraCorrectionResult Nozzle2);
+        VisionLowerCameraCorrectionResult? Nozzle1,
+        string? Nozzle1Error,
+        VisionLowerCameraCorrectionResult? Nozzle2,
+        string? Nozzle2Error)
+    {
+        public bool HasFailure => Nozzle1 is null || Nozzle2 is null;
+
+        public bool HasAnySuccess => Nozzle1 is not null || Nozzle2 is not null;
+    }
 
     private readonly record struct LowerCameraPlacementTarget(
         double X,
