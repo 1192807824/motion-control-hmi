@@ -2346,8 +2346,8 @@ public partial class VisualCalibrationPage : UserControl
                 calibrationPath,
                 _lowerCameraCorrectionTestCancellation.Token);
             var message =
-                $"{ActiveLowerCameraNozzleName}纠偏测试：X偏差={result.CorrectionX:0.###}，" +
-                $"Y偏差={result.CorrectionY:0.###}，夹角={result.MeasuredAngle:0.###}°；" +
+                $"{ActiveLowerCameraNozzleName}纠偏测试：X偏差={result.CorrectionX:0.00000}，" +
+                $"Y偏差={result.CorrectionY:0.00000}，夹角={result.MeasuredAngle:0.00000}°；" +
                 $"标定文件={Path.GetFileName(calibrationPath)}";
             SetLowerCameraCorrectionTestStatus(message);
             SetWorkflowStatus(message, WorkflowStatus.Success);

@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private const string LowerCameraTeachLineModuleName = "直线查找1";
     private const string LowerCameraTeachTransformModuleName = "标定转换1";
     private const string LowerCameraCorrectionProcedureName = "下相机纠偏";
+    private const string LowerCameraCorrectionImageSourceName = "图像源1";
     private const string LowerCameraCorrectionGeometryModuleName = "几何创建1";
     private const string LowerCameraCorrectionLineLineModuleName = "线线测量1";
     private const string LowerCameraCorrectionScriptModuleName = "脚本1";
@@ -634,6 +635,9 @@ public partial class MainWindow : Window
 
         var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[9]);
         var procedure = GetRequiredProcedure(LowerCameraCorrectionProcedureName);
+        var imageSourceModule = ResolveNamedModule<VmModule>(
+            LowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionImageSourceName);
         var geometryModule = ResolveNamedModule<GeometryCreateTool>(
             LowerCameraCorrectionProcedureName,
             LowerCameraCorrectionGeometryModuleName);
@@ -674,7 +678,9 @@ public partial class MainWindow : Window
         scriptModule.ModuParams.SetInputFloat("RY", [values[5]]);
         transformModule.ModuParams.LoadCalibPath = calibrationPath;
 
-        BindInspectionResultModule(transformModule);
+        // 主页复用原 Blob 承载区域显示纠偏画面；绑定图像源可直接看到
+        // 拍照位1/2各自触发的本次原始相机图，而不是下游转换模块的叠加结果。
+        BindInspectionResultModule(imageSourceModule);
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, LowerCameraCorrectionProcedureName);
 
@@ -722,7 +728,7 @@ public partial class MainWindow : Window
         }
 
         SetStatus(
-            $"下相机纠偏完成：X偏差={correctionX:0.###}，Y偏差={correctionY:0.###}，夹角={lineLineResult.L2LAngle:0.###}°",
+            $"下相机纠偏完成：X偏差={correctionX:0.00000}，Y偏差={correctionY:0.00000}，夹角={lineLineResult.L2LAngle:0.00000}°",
             StatusKind.Success);
         return string.Join(
             "\t",

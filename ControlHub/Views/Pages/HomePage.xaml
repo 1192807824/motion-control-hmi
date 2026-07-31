@@ -1777,10 +1777,10 @@
                                                FontSize="12"
                                                FontWeight="Bold"
                                                VerticalAlignment="Center" />
-                                    <UniformGrid Grid.Row="1" Rows="2" Columns="4">
+                                    <UniformGrid Grid.Row="1" Rows="4" Columns="4">
                                 <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="上料 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="FirstSetPickupZPositionTextBox"
+                                    <TextBlock Text="上料 · 吸嘴1 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetNozzle1PickupZPositionTextBox"
                                              Height="25"
                                              Text="30000"
                                              TextAlignment="Center"
@@ -1790,8 +1790,8 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="上料 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="FirstSetDropZPositionTextBox"
+                                    <TextBlock Text="上料 · 吸嘴1 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetNozzle1DropZPositionTextBox"
                                              Height="25"
                                              Text="4800"
                                              TextAlignment="Center"
@@ -1801,8 +1801,8 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="上料 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="FirstSetSafeZPositionTextBox"
+                                    <TextBlock Text="上料 · 吸嘴1 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetNozzle1SafeZPositionTextBox"
                                              Height="25"
                                              Text="-5000"
                                              TextAlignment="Center"
@@ -1824,8 +1824,8 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="下料 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="SecondSetPickupZPositionTextBox"
+                                    <TextBlock Text="上料 · 吸嘴2 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetNozzle2PickupZPositionTextBox"
                                              Height="25"
                                              Text="30000"
                                              TextAlignment="Center"
@@ -1835,8 +1835,8 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
-                                    <TextBlock Text="下料 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="SecondSetDropZPositionTextBox"
+                                    <TextBlock Text="上料 · 吸嘴2 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetNozzle2DropZPositionTextBox"
                                              Height="25"
                                              Text="4800"
                                              TextAlignment="Center"
@@ -1846,8 +1846,8 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="下料 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="SecondSetSafeZPositionTextBox"
+                                    <TextBlock Text="上料 · 吸嘴2 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="FirstSetNozzle2SafeZPositionTextBox"
                                              Height="25"
                                              Text="-5000"
                                              TextAlignment="Center"
@@ -1868,6 +1868,74 @@
                                              ToolTip="Z轴到放料位并开启破真空后的保持时间"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 吸嘴1 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetNozzle1PickupZPositionTextBox"
+                                             Height="25"
+                                             Text="30000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 吸嘴1 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetNozzle1DropZPositionTextBox"
+                                             Height="25"
+                                             Text="4800"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 吸嘴1 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetNozzle1SafeZPositionTextBox"
+                                             Height="25"
+                                             Text="-5000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel />
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 吸嘴2 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetNozzle2PickupZPositionTextBox"
+                                             Height="25"
+                                             Text="30000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 吸嘴2 · 放料Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetNozzle2DropZPositionTextBox"
+                                             Height="25"
+                                             Text="4800"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="下料 · 吸嘴2 · 安全Z" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="SecondSetNozzle2SafeZPositionTextBox"
+                                             Height="25"
+                                             Text="-5000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel />
                                     </UniformGrid>
                                 </Grid>
                             </Border>

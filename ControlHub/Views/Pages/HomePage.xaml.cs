@@ -65,12 +65,14 @@ public partial class HomePage : UserControl
     private const int CarouselStationCount = 16;
     private const int TestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
+    private static readonly bool AutomaticTestStationActionsEnabled = false;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
     private const string CarouselStatusReturning = "回待机位";
-    // 14轴故障，自动开始流程中只允许13/15轴参与测试站下压。
-    private static readonly int[] MoveOutAxisNos = [13, 15];
+    // 自动生产暂时停用全部测试站动作；恢复时仍需避开故障中的14轴。
+    private static readonly int[] MoveOutAxisNos =
+        AutomaticTestStationActionsEnabled ? [13, 15] : [];
     private static readonly int[] FirstSetAxisNos =
         [VisionCalibrationService.FirstSetXHardwareAxisNo, VisionCalibrationService.FirstSetYHardwareAxisNo];
     private static readonly int[] SecondSetAxisNos =
@@ -131,9 +133,11 @@ public partial class HomePage : UserControl
             [7] = 15
         };
     private static readonly IReadOnlyDictionary<int, int> EnabledTestStationAxisByStation =
-        TestStationAxisByStation
-            .Where(pair => pair.Value != 14)
-            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        AutomaticTestStationActionsEnabled
+            ? TestStationAxisByStation
+                .Where(pair => pair.Value != 14)
+                .ToDictionary(pair => pair.Key, pair => pair.Value)
+            : new Dictionary<int, int>();
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
     private readonly LowerCameraTeachDataStore _lowerCameraTeachDataStore = new();
@@ -601,18 +605,12 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
-        var positions = GetProductionZPositions();
-        var pickupPosition = axisSet == VisionCalibrationAxisSet.First
-            ? positions.FirstSetPickup
-            : positions.SecondSetPickup;
-        var safePosition = axisSet == VisionCalibrationAxisSet.First
-            ? positions.FirstSetSafe
-            : positions.SecondSetSafe;
+        var positions = GetProductionZPositions().Resolve(axisSet, nozzleNumber);
         await PickWithNozzleAsync(
             axisSet,
             nozzleNumber,
-            pickupPosition,
-            safePosition,
+            positions.Pickup,
+            positions.Safe,
             cancellationToken);
     }
 
@@ -651,18 +649,12 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
-        var positions = GetProductionZPositions();
-        var dropPosition = axisSet == VisionCalibrationAxisSet.First
-            ? positions.FirstSetDrop
-            : positions.SecondSetDrop;
-        var safePosition = axisSet == VisionCalibrationAxisSet.First
-            ? positions.FirstSetSafe
-            : positions.SecondSetSafe;
+        var positions = GetProductionZPositions().Resolve(axisSet, nozzleNumber);
         await PlaceWithNozzleAsync(
             axisSet,
             nozzleNumber,
-            dropPosition,
-            safePosition,
+            positions.Drop,
+            positions.Safe,
             cancellationToken);
     }
 
@@ -725,22 +717,21 @@ public partial class HomePage : UserControl
         ApplyCurrentProductionAxisMotionSettings(motionController);
         var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
         var positions = GetProductionZPositions();
-        var safePosition = axisSet == VisionCalibrationAxisSet.First
-            ? positions.FirstSetSafe
-            : positions.SecondSetSafe;
+        var nozzle1SafePosition = positions.Resolve(axisSet, 1).Safe;
+        var nozzle2SafePosition = positions.Resolve(axisSet, 2).Safe;
         var z1HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 1);
         var z2HardwareAxisNo = GetNozzleZHardwareAxisNo(axisSet, 2);
         var zVelocities = GetProductionAxisVelocities(
             [z1HardwareAxisNo, z2HardwareAxisNo]);
         SetFirstSetPositionStatus(
-            $"XY放料前正在确认 Z1/Z2 的 {safePosition:0.###} 安全位…",
+            $"XY放料前正在确认 Z1={nozzle1SafePosition:0.###}、Z2={nozzle2SafePosition:0.###} 的安全位…",
             true);
 
         await motionController.MoveAxesAbsoluteAsync(
             new Dictionary<int, double>
             {
-                [z1HardwareAxisNo] = safePosition,
-                [z2HardwareAxisNo] = safePosition
+                [z1HardwareAxisNo] = nozzle1SafePosition,
+                [z2HardwareAxisNo] = nozzle2SafePosition
             },
             cancellationToken,
             allowedMovingAxisNos: GetProductionPeerAxisNos(axisSet),
@@ -748,7 +739,7 @@ public partial class HomePage : UserControl
             velocityOverrides: zVelocities);
 
         SetFirstSetPositionStatus(
-            $"Z1/Z2均已到 {safePosition:0.###} pulse 安全位，允许 XY 前往位置1/2。",
+            $"Z1已到 {nozzle1SafePosition:0.###}、Z2已到 {nozzle2SafePosition:0.###} pulse 安全位，允许 XY 前往位置1/2。",
             true);
     }
 
@@ -805,14 +796,15 @@ public partial class HomePage : UserControl
             positions.Position1X,
             positions.Position1Y,
             cancellationToken);
+        ShowLowerCameraCorrectionVisionStatus(1);
         var nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
             nozzle1Profile.TeachData,
             nozzle1Profile.CalibrationFilePath,
             cancellationToken);
 
         LowerCameraCorrectionResultText.Text =
-            $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.###} Y偏差={nozzle1Result.CorrectionY:0.###} " +
-            $"夹角={nozzle1Result.MeasuredAngle:0.###}°；吸嘴2正在拍照位2纠偏…";
+            $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+            $"夹角={nozzle1Result.MeasuredAngle:0.00000}°；吸嘴2正在拍照位2纠偏…";
         SetStartProductionStatus(
             $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…",
             Color.FromRgb(242, 181, 68));
@@ -821,23 +813,24 @@ public partial class HomePage : UserControl
             positions.Position2X,
             positions.Position2Y,
             cancellationToken);
+        ShowLowerCameraCorrectionVisionStatus(2);
         var nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
             nozzle2Profile.TeachData,
             nozzle2Profile.CalibrationFilePath,
             cancellationToken);
 
         LowerCameraCorrectionResultText.Text =
-            $"下相机纠偏｜吸嘴1 X偏差={nozzle1Result.CorrectionX:0.###} Y偏差={nozzle1Result.CorrectionY:0.###} " +
-            $"夹角={nozzle1Result.MeasuredAngle:0.###}°｜" +
-            $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.###} Y偏差={nozzle2Result.CorrectionY:0.###} " +
-            $"夹角={nozzle2Result.MeasuredAngle:0.###}°";
+            $"下相机纠偏｜吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+            $"夹角={nozzle1Result.MeasuredAngle:0.00000}°｜" +
+            $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.00000} Y偏差={nozzle2Result.CorrectionY:0.00000} " +
+            $"夹角={nozzle2Result.MeasuredAngle:0.00000}°";
         LowerCameraCorrectionResultText.Foreground =
             new SolidColorBrush(Color.FromRgb(73, 209, 125));
         SetStartProductionStatus(
-            $"下相机纠偏完成：吸嘴1偏差({nozzle1Result.CorrectionX:0.###}, {nozzle1Result.CorrectionY:0.###})，" +
-            $"夹角{nozzle1Result.MeasuredAngle:0.###}°；" +
-            $"吸嘴2偏差({nozzle2Result.CorrectionX:0.###}, {nozzle2Result.CorrectionY:0.###})，" +
-            $"夹角{nozzle2Result.MeasuredAngle:0.###}°。",
+            $"下相机纠偏完成：吸嘴1偏差({nozzle1Result.CorrectionX:0.00000}, {nozzle1Result.CorrectionY:0.00000})，" +
+            $"夹角{nozzle1Result.MeasuredAngle:0.00000}°；" +
+            $"吸嘴2偏差({nozzle2Result.CorrectionX:0.00000}, {nozzle2Result.CorrectionY:0.00000})，" +
+            $"夹角{nozzle2Result.MeasuredAngle:0.00000}°。",
             Color.FromRgb(73, 209, 125));
     }
 
@@ -1318,11 +1311,11 @@ public partial class HomePage : UserControl
                 CalibrationCenterPosition actual;
                 if (activeFirstSetReturnToCenterTask is not null)
                 {
-                    // 上一轮放料后已经启动回中心；只等XY到拍照位，不等待DD或测试站完成。
+                    // 上一轮放料后已经启动回中心；只等XY到拍照位，不等待DD完成。
                     actual = await activeFirstSetReturnToCenterTask;
                     activeFirstSetReturnToCenterTask = null;
                     SetFirstSetPositionStatus(
-                        $"XY已回到中心：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse；DD/测试站可继续并行。",
+                        $"XY已回到中心：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse；DD可继续并行。",
                         true);
                 }
                 else
@@ -1458,13 +1451,13 @@ public partial class HomePage : UserControl
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
-                // 拍照和双吸嘴取料不等待DD或测试站；真正放料前只等待DD完成固定两次转动。
+                // 拍照和双吸嘴取料不等待DD；真正放料前只等待DD完成固定两次转动。
                 if (activeCarouselAdvanceTask is not null)
                 {
                     if (!activeCarouselAdvanceTask.IsCompleted)
                     {
                         SetStartProductionStatus(
-                            $"第{cycleNumber}轮：两个料已吸取，正在等待DD完成两次转动；测试站完成状态不阻塞放料…",
+                            $"第{cycleNumber}轮：两个料已吸取，正在等待DD完成两次转动；测试站动作已停用…",
                             Color.FromRgb(242, 181, 68));
                     }
 
@@ -1474,7 +1467,7 @@ public partial class HomePage : UserControl
                     activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
                     activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，立即开始上下料；最后一轮测试可并行继续…",
+                        $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，测试站动作已停用，立即开始上下料…",
                         Color.FromRgb(73, 209, 125));
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
@@ -1541,7 +1534,7 @@ public partial class HomePage : UserControl
                     firstSetYVelocity,
                     _productionCancellation.Token);
 
-                // 测试站返回待机位与第二套双取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
+                // 第二套双取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
                 var requiredFinalTestTask = activeFinalTestTask;
                 activeFinalTestTask = Task.FromResult(0);
                 var requiredSecondSetPickupTask = activeSecondSetPickupTask;
@@ -1562,7 +1555,7 @@ public partial class HomePage : UserControl
                     _productionCancellation.Token);
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD在测试站返回200000且第二套双取料完成后固定转动两次；XY立即准备第{cycleNumber + 1}轮拍照吸料…",
+                    $"第{cycleNumber}轮放料完成，DD在第二套双取料完成后固定转动两次；测试站动作已停用，XY立即准备第{cycleNumber + 1}轮拍照吸料…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -1877,11 +1870,11 @@ public partial class HomePage : UserControl
         if (!requiredFinalTestTask.IsCompleted || !requiredSecondSetPickupTask.IsCompleted)
         {
             SetStartProductionStatus(
-                "XY正在回中心准备下一轮拍照；下一次DD只等待测试轴回原及第二套完成双取料。",
+                "XY正在回中心准备下一轮拍照；测试站动作已停用，下一次DD只等待第二套完成双取料。",
                 Color.FromRgb(242, 181, 68));
         }
 
-        // DD必须同时满足：上一轮测试轴已回原、第二套已从13/14取走两个料、XY已离开放料点0.5秒。
+        // 测试站动作停用时其任务会立即完成；DD只需等待第二套取料和XY离开放料点0.5秒。
         // 第二套后续移动到两个收料位置并放料，不再阻塞DD。
         await Task.WhenAll(
             requiredFinalTestTask,
@@ -1964,6 +1957,8 @@ public partial class HomePage : UserControl
         try
         {
             var zPositions = GetProductionZPositions();
+            var nozzle1ZPositions = zPositions.Resolve(VisionCalibrationAxisSet.Second, 1);
+            var nozzle2ZPositions = zPositions.Resolve(VisionCalibrationAxisSet.Second, 2);
             var xyPositions = GetSecondSetXyPositions();
             var binDropPositions = GetBinDropPositions();
             var nozzle2Bin = carouselStations[SecondSetNozzle2UnloadStation].Bin;
@@ -1984,8 +1979,8 @@ public partial class HomePage : UserControl
             await PickSecondSetNozzleFromStationAsync(
                 2,
                 SecondSetNozzle2UnloadStation,
-                zPositions.SecondSetPickup,
-                zPositions.SecondSetSafe,
+                nozzle2ZPositions.Pickup,
+                nozzle2ZPositions.Safe,
                 cancellationToken);
             await WaitIfProductionPausedAsync(cancellationToken);
 
@@ -1998,8 +1993,8 @@ public partial class HomePage : UserControl
             await PickSecondSetNozzleFromStationAsync(
                 1,
                 SecondSetNozzle1UnloadStation,
-                zPositions.SecondSetPickup,
-                zPositions.SecondSetSafe,
+                nozzle1ZPositions.Pickup,
+                nozzle1ZPositions.Safe,
                 cancellationToken);
             await WaitIfProductionPausedAsync(cancellationToken);
 
@@ -2021,8 +2016,8 @@ public partial class HomePage : UserControl
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
                 1,
-                zPositions.SecondSetDrop,
-                zPositions.SecondSetSafe,
+                nozzle1ZPositions.Drop,
+                nozzle1ZPositions.Safe,
                 cancellationToken);
             RecordCompletedUphUnit();
             await WaitIfProductionPausedAsync(cancellationToken);
@@ -2036,8 +2031,8 @@ public partial class HomePage : UserControl
             await PlaceWithNozzleAsync(
                 VisionCalibrationAxisSet.Second,
                 2,
-                zPositions.SecondSetDrop,
-                zPositions.SecondSetSafe,
+                nozzle2ZPositions.Drop,
+                nozzle2ZPositions.Safe,
                 cancellationToken);
             RecordCompletedUphUnit();
             await WaitIfProductionPausedAsync(cancellationToken);
@@ -2142,7 +2137,9 @@ public partial class HomePage : UserControl
             cancellationToken.ThrowIfCancellationRequested();
             var loadedTestStationCount = CountLoadedTestStations(carouselStations);
             SetStartProductionStatus(
-                loadedTestStationCount > 0
+                !AutomaticTestStationActionsEnabled
+                    ? $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse；测试站动作已全部停用…"
+                    : loadedTestStationCount > 0
                     ? $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse，测试站已有料，转后执行测试…"
                     : $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse，有料工位未进测试站则继续补转…",
                 Color.FromRgb(242, 181, 68));
@@ -2154,18 +2151,20 @@ public partial class HomePage : UserControl
             AdvanceCarouselOccupancy(carouselStations);
             UpdateCarouselStationDisplay(carouselStations);
             SetStartProductionStatus(
-                $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成，正在检查 5/6/7 测试站…",
+                AutomaticTestStationActionsEnabled
+                    ? $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成，正在检查 5/6/7 测试站…"
+                    : $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成；测试站动作已停用，正在更新工位状态…",
                 Color.FromRgb(242, 181, 68));
             if (turn < maximumTurnsBeforeReload)
             {
-                // 第一次转动后的测试必须完成并回原，才允许DD执行第二次转动。
+                // 测试动作启用时必须完成并回原；停用时仅生成后续下料所需的模拟分BIN结果。
                 _ = await RunOccupiedTestStationsAsync(
                     carouselStations,
                     cancellationToken);
             }
             else
             {
-                // 第二次转动后DD已经停稳；测试站继续并行，不阻塞XY放料。
+                // 第二次转动后DD已经停稳；停用时此任务会立即完成且不会向测试轴下发指令。
                 finalTestTask = RunOccupiedTestStationsAsync(
                     carouselStations,
                     cancellationToken);
@@ -2174,7 +2173,9 @@ public partial class HomePage : UserControl
         }
 
         SetStartProductionStatus(
-            $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；最后一轮测试并行执行，XY可直接上下料。",
+            AutomaticTestStationActionsEnabled
+                ? $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；最后一轮测试并行执行，XY可直接上下料。"
+                : $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；测试站动作已全部停用，XY可直接上下料。",
             Color.FromRgb(73, 209, 125));
         return new CarouselAdvanceResult(
             maximumTurnsBeforeReload,
@@ -2194,6 +2195,29 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         await WaitIfProductionPausedAsync(cancellationToken);
+        if (!AutomaticTestStationActionsEnabled)
+        {
+            var bypassedStations = TestStationAxisByStation.Keys
+                .Where(station =>
+                    carouselStations[station].Occupied &&
+                    !carouselStations[station].Tested)
+                .ToArray();
+            foreach (var station in bypassedStations)
+            {
+                // 测试轴不动作时继续沿用联调阶段的模拟分BIN，
+                // 保证物料到达13/14工位后第二套仍能正常执行下料。
+                carouselStations[station].SetTested($"BIN{Random.Shared.Next(1, 4)}");
+            }
+
+            UpdateCarouselStationDisplay(carouselStations);
+            SetStartProductionStatus(
+                bypassedStations.Length > 0
+                    ? $"测试站动作已全部停用；{string.Join("、", bypassedStations)}号工位跳过下压，仅生成模拟分BIN结果。"
+                    : "测试站动作已全部停用，本轮转盘不执行测试轴动作。",
+                Color.FromRgb(159, 177, 191));
+            return 0;
+        }
+
         var axisTargets = EnabledTestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
@@ -3409,18 +3433,54 @@ public partial class HomePage : UserControl
         LowerCameraPhotoPosition2YTextBox.Text = FormatPresetCoordinate(
             _homeSettings.LowerCameraPhotoPosition2Y);
         LoadProductionAxisParameterEditors();
-        FirstSetPickupZPositionTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.FirstSetPickupZPosition ?? DefaultNozzlePickupZPosition);
-        FirstSetDropZPositionTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.FirstSetDropZPosition ?? DefaultNozzleDropZPosition);
-        FirstSetSafeZPositionTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.FirstSetSafeZPosition ?? DefaultNozzleSafeZPosition);
-        SecondSetPickupZPositionTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetPickupZPosition ?? DefaultNozzlePickupZPosition);
-        SecondSetDropZPositionTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetDropZPosition ?? DefaultNozzleDropZPosition);
-        SecondSetSafeZPositionTextBox.Text = FormatPresetCoordinate(
-            _homeSettings.SecondSetSafeZPosition ?? DefaultNozzleSafeZPosition);
+        FirstSetNozzle1PickupZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetNozzle1PickupZPosition
+            ?? _homeSettings.FirstSetPickupZPosition
+            ?? DefaultNozzlePickupZPosition);
+        FirstSetNozzle1DropZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetNozzle1DropZPosition
+            ?? _homeSettings.FirstSetDropZPosition
+            ?? DefaultNozzleDropZPosition);
+        FirstSetNozzle1SafeZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetNozzle1SafeZPosition
+            ?? _homeSettings.FirstSetSafeZPosition
+            ?? DefaultNozzleSafeZPosition);
+        FirstSetNozzle2PickupZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetNozzle2PickupZPosition
+            ?? _homeSettings.FirstSetPickupZPosition
+            ?? DefaultNozzlePickupZPosition);
+        FirstSetNozzle2DropZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetNozzle2DropZPosition
+            ?? _homeSettings.FirstSetDropZPosition
+            ?? DefaultNozzleDropZPosition);
+        FirstSetNozzle2SafeZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetNozzle2SafeZPosition
+            ?? _homeSettings.FirstSetSafeZPosition
+            ?? DefaultNozzleSafeZPosition);
+        SecondSetNozzle1PickupZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetNozzle1PickupZPosition
+            ?? _homeSettings.SecondSetPickupZPosition
+            ?? DefaultNozzlePickupZPosition);
+        SecondSetNozzle1DropZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetNozzle1DropZPosition
+            ?? _homeSettings.SecondSetDropZPosition
+            ?? DefaultNozzleDropZPosition);
+        SecondSetNozzle1SafeZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetNozzle1SafeZPosition
+            ?? _homeSettings.SecondSetSafeZPosition
+            ?? DefaultNozzleSafeZPosition);
+        SecondSetNozzle2PickupZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetNozzle2PickupZPosition
+            ?? _homeSettings.SecondSetPickupZPosition
+            ?? DefaultNozzlePickupZPosition);
+        SecondSetNozzle2DropZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetNozzle2DropZPosition
+            ?? _homeSettings.SecondSetDropZPosition
+            ?? DefaultNozzleDropZPosition);
+        SecondSetNozzle2SafeZPositionTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.SecondSetNozzle2SafeZPosition
+            ?? _homeSettings.SecondSetSafeZPosition
+            ?? DefaultNozzleSafeZPosition);
         VacuumPickupDwellTextBox.Text = (
             _homeSettings.VacuumPickupDwellMilliseconds
             ?? DefaultVacuumPickupDwellMilliseconds).ToString(CultureInfo.CurrentCulture);
@@ -3492,12 +3552,22 @@ public partial class HomePage : UserControl
     private ProductionZPositions ReadProductionZPositions()
     {
         return new ProductionZPositions(
-            ParseFiniteCoordinate(FirstSetPickupZPositionTextBox.Text, "第一套取料Z高度"),
-            ParseFiniteCoordinate(FirstSetDropZPositionTextBox.Text, "第一套放料Z高度"),
-            ParseFiniteCoordinate(FirstSetSafeZPositionTextBox.Text, "第一套安全Z高度"),
-            ParseFiniteCoordinate(SecondSetPickupZPositionTextBox.Text, "第二套取料Z高度"),
-            ParseFiniteCoordinate(SecondSetDropZPositionTextBox.Text, "第二套放料Z高度"),
-            ParseFiniteCoordinate(SecondSetSafeZPositionTextBox.Text, "第二套安全Z高度"));
+            new NozzleZPositions(
+                ParseFiniteCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, "第一套吸嘴1取料Z高度"),
+                ParseFiniteCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, "第一套吸嘴1放料Z高度"),
+                ParseFiniteCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, "第一套吸嘴1安全Z高度")),
+            new NozzleZPositions(
+                ParseFiniteCoordinate(FirstSetNozzle2PickupZPositionTextBox.Text, "第一套吸嘴2取料Z高度"),
+                ParseFiniteCoordinate(FirstSetNozzle2DropZPositionTextBox.Text, "第一套吸嘴2放料Z高度"),
+                ParseFiniteCoordinate(FirstSetNozzle2SafeZPositionTextBox.Text, "第一套吸嘴2安全Z高度")),
+            new NozzleZPositions(
+                ParseFiniteCoordinate(SecondSetNozzle1PickupZPositionTextBox.Text, "第二套吸嘴1取料Z高度"),
+                ParseFiniteCoordinate(SecondSetNozzle1DropZPositionTextBox.Text, "第二套吸嘴1放料Z高度"),
+                ParseFiniteCoordinate(SecondSetNozzle1SafeZPositionTextBox.Text, "第二套吸嘴1安全Z高度")),
+            new NozzleZPositions(
+                ParseFiniteCoordinate(SecondSetNozzle2PickupZPositionTextBox.Text, "第二套吸嘴2取料Z高度"),
+                ParseFiniteCoordinate(SecondSetNozzle2DropZPositionTextBox.Text, "第二套吸嘴2放料Z高度"),
+                ParseFiniteCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, "第二套吸嘴2安全Z高度")));
     }
 
     private ProductionZDwellTimes ReadProductionZDwellTimes()
@@ -3703,32 +3773,50 @@ public partial class HomePage : UserControl
     private void SaveProductionZPositionsFromInputs()
     {
         if (_loadingPresetPositions ||
-            FirstSetPickupZPositionTextBox is null ||
-            FirstSetDropZPositionTextBox is null ||
-            FirstSetSafeZPositionTextBox is null ||
-            SecondSetPickupZPositionTextBox is null ||
-            SecondSetDropZPositionTextBox is null ||
-            SecondSetSafeZPositionTextBox is null ||
+            FirstSetNozzle1PickupZPositionTextBox is null ||
+            FirstSetNozzle1DropZPositionTextBox is null ||
+            FirstSetNozzle1SafeZPositionTextBox is null ||
+            FirstSetNozzle2PickupZPositionTextBox is null ||
+            FirstSetNozzle2DropZPositionTextBox is null ||
+            FirstSetNozzle2SafeZPositionTextBox is null ||
+            SecondSetNozzle1PickupZPositionTextBox is null ||
+            SecondSetNozzle1DropZPositionTextBox is null ||
+            SecondSetNozzle1SafeZPositionTextBox is null ||
+            SecondSetNozzle2PickupZPositionTextBox is null ||
+            SecondSetNozzle2DropZPositionTextBox is null ||
+            SecondSetNozzle2SafeZPositionTextBox is null ||
             VacuumPickupDwellTextBox is null ||
             VacuumBreakPulseTextBox is null ||
-            !TryParseCoordinate(FirstSetPickupZPositionTextBox.Text, out var firstSetPickup) ||
-            !TryParseCoordinate(FirstSetDropZPositionTextBox.Text, out var firstSetDrop) ||
-            !TryParseCoordinate(FirstSetSafeZPositionTextBox.Text, out var firstSetSafe) ||
-            !TryParseCoordinate(SecondSetPickupZPositionTextBox.Text, out var secondSetPickup) ||
-            !TryParseCoordinate(SecondSetDropZPositionTextBox.Text, out var secondSetDrop) ||
-            !TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out var secondSetSafe) ||
+            !TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out var firstSetNozzle1Pickup) ||
+            !TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out var firstSetNozzle1Drop) ||
+            !TryParseCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, out var firstSetNozzle1Safe) ||
+            !TryParseCoordinate(FirstSetNozzle2PickupZPositionTextBox.Text, out var firstSetNozzle2Pickup) ||
+            !TryParseCoordinate(FirstSetNozzle2DropZPositionTextBox.Text, out var firstSetNozzle2Drop) ||
+            !TryParseCoordinate(FirstSetNozzle2SafeZPositionTextBox.Text, out var firstSetNozzle2Safe) ||
+            !TryParseCoordinate(SecondSetNozzle1PickupZPositionTextBox.Text, out var secondSetNozzle1Pickup) ||
+            !TryParseCoordinate(SecondSetNozzle1DropZPositionTextBox.Text, out var secondSetNozzle1Drop) ||
+            !TryParseCoordinate(SecondSetNozzle1SafeZPositionTextBox.Text, out var secondSetNozzle1Safe) ||
+            !TryParseCoordinate(SecondSetNozzle2PickupZPositionTextBox.Text, out var secondSetNozzle2Pickup) ||
+            !TryParseCoordinate(SecondSetNozzle2DropZPositionTextBox.Text, out var secondSetNozzle2Drop) ||
+            !TryParseCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, out var secondSetNozzle2Safe) ||
             !TryParseMilliseconds(VacuumPickupDwellTextBox.Text, out var pickupDwell) ||
             !TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out var breakPulse))
         {
             return;
         }
 
-        _homeSettings.FirstSetPickupZPosition = firstSetPickup;
-        _homeSettings.FirstSetDropZPosition = firstSetDrop;
-        _homeSettings.FirstSetSafeZPosition = firstSetSafe;
-        _homeSettings.SecondSetPickupZPosition = secondSetPickup;
-        _homeSettings.SecondSetDropZPosition = secondSetDrop;
-        _homeSettings.SecondSetSafeZPosition = secondSetSafe;
+        _homeSettings.FirstSetNozzle1PickupZPosition = firstSetNozzle1Pickup;
+        _homeSettings.FirstSetNozzle1DropZPosition = firstSetNozzle1Drop;
+        _homeSettings.FirstSetNozzle1SafeZPosition = firstSetNozzle1Safe;
+        _homeSettings.FirstSetNozzle2PickupZPosition = firstSetNozzle2Pickup;
+        _homeSettings.FirstSetNozzle2DropZPosition = firstSetNozzle2Drop;
+        _homeSettings.FirstSetNozzle2SafeZPosition = firstSetNozzle2Safe;
+        _homeSettings.SecondSetNozzle1PickupZPosition = secondSetNozzle1Pickup;
+        _homeSettings.SecondSetNozzle1DropZPosition = secondSetNozzle1Drop;
+        _homeSettings.SecondSetNozzle1SafeZPosition = secondSetNozzle1Safe;
+        _homeSettings.SecondSetNozzle2PickupZPosition = secondSetNozzle2Pickup;
+        _homeSettings.SecondSetNozzle2DropZPosition = secondSetNozzle2Drop;
+        _homeSettings.SecondSetNozzle2SafeZPosition = secondSetNozzle2Safe;
         _homeSettings.VacuumPickupDwellMilliseconds = pickupDwell;
         _homeSettings.VacuumBreakPulseMilliseconds = breakPulse;
         try
@@ -3953,12 +4041,18 @@ public partial class HomePage : UserControl
             RecordLowerCameraPhotoPosition2Button is null ||
             MoveLowerCameraPhotoPosition1Button is null ||
             MoveLowerCameraPhotoPosition2Button is null ||
-            FirstSetPickupZPositionTextBox is null ||
-            FirstSetDropZPositionTextBox is null ||
-            FirstSetSafeZPositionTextBox is null ||
-             SecondSetPickupZPositionTextBox is null ||
-             SecondSetDropZPositionTextBox is null ||
-             SecondSetSafeZPositionTextBox is null ||
+            FirstSetNozzle1PickupZPositionTextBox is null ||
+            FirstSetNozzle1DropZPositionTextBox is null ||
+            FirstSetNozzle1SafeZPositionTextBox is null ||
+            FirstSetNozzle2PickupZPositionTextBox is null ||
+            FirstSetNozzle2DropZPositionTextBox is null ||
+            FirstSetNozzle2SafeZPositionTextBox is null ||
+            SecondSetNozzle1PickupZPositionTextBox is null ||
+            SecondSetNozzle1DropZPositionTextBox is null ||
+            SecondSetNozzle1SafeZPositionTextBox is null ||
+            SecondSetNozzle2PickupZPositionTextBox is null ||
+            SecondSetNozzle2DropZPositionTextBox is null ||
+            SecondSetNozzle2SafeZPositionTextBox is null ||
              VacuumPickupDwellTextBox is null ||
              VacuumBreakPulseTextBox is null ||
              SecondSetPosition1XTextBox is null ||
@@ -3996,12 +4090,18 @@ public partial class HomePage : UserControl
             !_assignedNozzleMoveRunning;
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
         var allZPositionsValid =
-            TryParseCoordinate(FirstSetPickupZPositionTextBox.Text, out _) &&
-            TryParseCoordinate(FirstSetDropZPositionTextBox.Text, out _) &&
-            TryParseCoordinate(FirstSetSafeZPositionTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetPickupZPositionTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetDropZPositionTextBox.Text, out _) &&
-            TryParseCoordinate(SecondSetSafeZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle2PickupZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle2DropZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle2SafeZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetNozzle1PickupZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetNozzle1DropZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetNozzle1SafeZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetNozzle2PickupZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetNozzle2DropZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, out _) &&
             TryParseMilliseconds(VacuumPickupDwellTextBox.Text, out _) &&
             TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out _);
         var allSecondSetXyPositionsValid =
@@ -4067,12 +4167,18 @@ public partial class HomePage : UserControl
             editors.SetEnabled(commandsIdle);
         }
 
-        FirstSetPickupZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetDropZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetSafeZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetPickupZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetDropZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetSafeZPositionTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle1PickupZPositionTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle1DropZPositionTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle1SafeZPositionTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle2PickupZPositionTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle2DropZPositionTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle2SafeZPositionTextBox.IsEnabled = commandsIdle;
+        SecondSetNozzle1PickupZPositionTextBox.IsEnabled = commandsIdle;
+        SecondSetNozzle1DropZPositionTextBox.IsEnabled = commandsIdle;
+        SecondSetNozzle1SafeZPositionTextBox.IsEnabled = commandsIdle;
+        SecondSetNozzle2PickupZPositionTextBox.IsEnabled = commandsIdle;
+        SecondSetNozzle2DropZPositionTextBox.IsEnabled = commandsIdle;
+        SecondSetNozzle2SafeZPositionTextBox.IsEnabled = commandsIdle;
         VacuumPickupDwellTextBox.IsEnabled = commandsIdle;
         VacuumBreakPulseTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1XTextBox.IsEnabled = commandsIdle;
@@ -4286,6 +4392,14 @@ public partial class HomePage : UserControl
         }
 
         await visualCalibrationController.ActivateInspectionViewAsync(displayHostWindow);
+    }
+
+    private void ShowLowerCameraCorrectionVisionStatus(int nozzleNumber)
+    {
+        BlobInspectionImageStatusText.Text =
+            $"下相机纠偏 · 吸嘴{nozzleNumber} · 图像源1";
+        BlobInspectionImageStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(242, 181, 68));
     }
 
     private void BlobInspectionVisionDisplayHost_HostSizeChanged(object? sender, EventArgs e)
@@ -4619,12 +4733,32 @@ public partial class HomePage : UserControl
     }
 
     private readonly record struct ProductionZPositions(
-        double FirstSetPickup,
-        double FirstSetDrop,
-        double FirstSetSafe,
-        double SecondSetPickup,
-        double SecondSetDrop,
-        double SecondSetSafe);
+        NozzleZPositions FirstSetNozzle1,
+        NozzleZPositions FirstSetNozzle2,
+        NozzleZPositions SecondSetNozzle1,
+        NozzleZPositions SecondSetNozzle2)
+    {
+        public NozzleZPositions Resolve(
+            VisionCalibrationAxisSet axisSet,
+            int nozzleNumber)
+        {
+            return (axisSet, nozzleNumber) switch
+            {
+                (VisionCalibrationAxisSet.First, 1) => FirstSetNozzle1,
+                (VisionCalibrationAxisSet.First, 2) => FirstSetNozzle2,
+                (VisionCalibrationAxisSet.Second, 1) => SecondSetNozzle1,
+                (VisionCalibrationAxisSet.Second, 2) => SecondSetNozzle2,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(nozzleNumber),
+                    "吸嘴编号只能是1或2。")
+            };
+        }
+    }
+
+    private readonly record struct NozzleZPositions(
+        double Pickup,
+        double Drop,
+        double Safe);
 
     private readonly record struct ProductionZDwellTimes(
         int PickupMilliseconds,

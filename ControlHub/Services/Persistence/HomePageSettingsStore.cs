@@ -85,6 +85,30 @@ public sealed class HomePageSettings
 
     public double? SecondSetSafeZPosition { get; set; }
 
+    public double? FirstSetNozzle1PickupZPosition { get; set; }
+
+    public double? FirstSetNozzle1DropZPosition { get; set; }
+
+    public double? FirstSetNozzle1SafeZPosition { get; set; }
+
+    public double? FirstSetNozzle2PickupZPosition { get; set; }
+
+    public double? FirstSetNozzle2DropZPosition { get; set; }
+
+    public double? FirstSetNozzle2SafeZPosition { get; set; }
+
+    public double? SecondSetNozzle1PickupZPosition { get; set; }
+
+    public double? SecondSetNozzle1DropZPosition { get; set; }
+
+    public double? SecondSetNozzle1SafeZPosition { get; set; }
+
+    public double? SecondSetNozzle2PickupZPosition { get; set; }
+
+    public double? SecondSetNozzle2DropZPosition { get; set; }
+
+    public double? SecondSetNozzle2SafeZPosition { get; set; }
+
     public double? NozzleZVelocity { get; set; }
 
     public int? VacuumPickupDwellMilliseconds { get; set; }
