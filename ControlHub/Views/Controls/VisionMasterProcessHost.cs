@@ -27,6 +27,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     private const int WsThickFrame = 0x00040000;
     private const int WsPopup = unchecked((int)0x80000000);
     private const int WsExControlParent = 0x00010000;
+    private const int MaximumInspectionBlobResultCount = 10;
 
     private readonly object _syncRoot = new();
     private readonly object _eventPipeSync = new();
@@ -601,7 +602,7 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     /// <summary>
     /// 在按需加载的固定视觉方案中，单次执行
-    /// “找芯片流程 → Blob分析1”，返回结果表前两行的矩形与像素质心。
+    /// “找芯片流程 → Blob分析1”，返回结果表全部矩形与像素质心。
     /// </summary>
     public Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
         CancellationToken cancellationToken)
@@ -626,45 +627,67 @@ public sealed class VisionMasterProcessHost : HwndHost
             command,
             cancellationToken);
         var parts = response.Split('\t');
-        if (parts.Length != 15 ||
-            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstX) ||
-            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstY) ||
-            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstLeft) ||
-            !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstTop) ||
-            !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstWidth) ||
-            !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstHeight) ||
-            !double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondX) ||
-            !double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondY) ||
-            !double.TryParse(parts[8], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondLeft) ||
-            !double.TryParse(parts[9], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondTop) ||
-            !double.TryParse(parts[10], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondWidth) ||
-            !double.TryParse(parts[11], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondHeight) ||
-            !int.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out var imageWidth) ||
-            !int.TryParse(parts[13], NumberStyles.Integer, CultureInfo.InvariantCulture, out var imageHeight) ||
-            !double.IsFinite(firstX) ||
-            !double.IsFinite(firstY) ||
-            !double.IsFinite(firstLeft) ||
-            !double.IsFinite(firstTop) ||
-            !double.IsFinite(firstWidth) ||
-            !double.IsFinite(firstHeight) ||
-            !double.IsFinite(secondX) ||
-            !double.IsFinite(secondY) ||
-            !double.IsFinite(secondLeft) ||
-            !double.IsFinite(secondTop) ||
-            !double.IsFinite(secondWidth) ||
-            !double.IsFinite(secondHeight) ||
-            firstX < 0 || firstY < 0 || secondX < 0 || secondY < 0 ||
-            firstWidth <= 0 || firstHeight <= 0 || secondWidth <= 0 || secondHeight <= 0 ||
-            !((imageWidth > 0 && imageHeight > 0 && !string.IsNullOrWhiteSpace(parts[14])) ||
-              (imageWidth == 0 && imageHeight == 0 && string.IsNullOrWhiteSpace(parts[14]))))
+        if (parts.Length < 4 ||
+            !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var resultCount) ||
+            resultCount < 0 ||
+            resultCount > MaximumInspectionBlobResultCount ||
+            parts.Length != 1 + resultCount * 6 + 3)
         {
             throw new InvalidDataException("VisionMaster 返回的Blob检测图或矩形结果无效。");
         }
 
+        var rectangles = new List<VisionBlobRectangle>(resultCount);
+        for (var resultIndex = 0; resultIndex < resultCount; resultIndex++)
+        {
+            var offset = 1 + resultIndex * 6;
+            if (!double.TryParse(parts[offset], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                !double.TryParse(parts[offset + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+                !double.TryParse(parts[offset + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out var left) ||
+                !double.TryParse(parts[offset + 3], NumberStyles.Float, CultureInfo.InvariantCulture, out var top) ||
+                !double.TryParse(parts[offset + 4], NumberStyles.Float, CultureInfo.InvariantCulture, out var width) ||
+                !double.TryParse(parts[offset + 5], NumberStyles.Float, CultureInfo.InvariantCulture, out var height) ||
+                !double.IsFinite(x) ||
+                !double.IsFinite(y) ||
+                !double.IsFinite(left) ||
+                !double.IsFinite(top) ||
+                !double.IsFinite(width) ||
+                !double.IsFinite(height) ||
+                x < 0 ||
+                y < 0 ||
+                width <= 0 ||
+                height <= 0)
+            {
+                throw new InvalidDataException(
+                    $"VisionMaster 返回的第{resultIndex + 1}个Blob矩形结果无效。");
+            }
+
+            rectangles.Add(new VisionBlobRectangle(x, y, left, top, width, height));
+        }
+
+        var imageOffset = 1 + resultCount * 6;
+        if (!int.TryParse(
+                parts[imageOffset],
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var imageWidth) ||
+            !int.TryParse(
+                parts[imageOffset + 1],
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var imageHeight) ||
+            !((imageWidth > 0 &&
+               imageHeight > 0 &&
+               !string.IsNullOrWhiteSpace(parts[imageOffset + 2])) ||
+              (imageWidth == 0 &&
+               imageHeight == 0 &&
+               string.IsNullOrWhiteSpace(parts[imageOffset + 2]))))
+        {
+            throw new InvalidDataException("VisionMaster 返回的Blob检测图信息无效。");
+        }
+
         return new VisionRectangleBlobResult(
-            new VisionBlobRectangle(firstX, firstY, firstLeft, firstTop, firstWidth, firstHeight),
-            new VisionBlobRectangle(secondX, secondY, secondLeft, secondTop, secondWidth, secondHeight),
-            parts[14],
+            rectangles,
+            parts[imageOffset + 2],
             imageWidth,
             imageHeight);
     }
@@ -1572,8 +1595,18 @@ public sealed record VisionBlobRectangle(
     double Height);
 
 public sealed record VisionRectangleBlobResult(
-    VisionBlobRectangle Rectangle1,
-    VisionBlobRectangle Rectangle2,
+    IReadOnlyList<VisionBlobRectangle> Rectangles,
     string ImagePath,
     int ImageWidth,
-    int ImageHeight);
+    int ImageHeight)
+{
+    public VisionBlobRectangle Rectangle1 =>
+        Rectangles.Count >= 1
+            ? Rectangles[0]
+            : throw new InvalidOperationException("Blob结果中没有第1个矩形。");
+
+    public VisionBlobRectangle Rectangle2 =>
+        Rectangles.Count >= 2
+            ? Rectangles[1]
+            : throw new InvalidOperationException("Blob结果中没有第2个矩形。");
+}

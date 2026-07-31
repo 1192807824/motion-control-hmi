@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
+    private const int MaximumInspectionBlobResultCount = 10;
     private const string NozzlePointMatchModuleName = "高精度匹配1";
     private const string RotationPointProcedureName = "获取三点流程";
     private const string RotationPointRectangleModuleName = "矩形检测1";
@@ -414,7 +415,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 在已加载的固定方案内，单次执行“找芯片流程”，再按 VisionMaster 结果表原顺序
-    /// 读取“Blob分析1”的前两行。所有相机流程均互斥、单次执行。
+    /// 读取“Blob分析1”的全部结果。所有相机流程均互斥、单次执行。
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
@@ -933,8 +934,7 @@ public partial class MainWindow : Window
             }
             RefreshInspectionDisplayNoThrow();
 
-            RectangleBlobCandidate first;
-            RectangleBlobCandidate second;
+            List<RectangleBlobCandidate> candidates;
             if (matchModule is not null)
             {
                 var matchResult = matchModule.ModuResult;
@@ -952,8 +952,11 @@ public partial class MainWindow : Window
                 }
 
                 // 与截图中的结果表一致：直接取第0、1行“匹配框中心X / 匹配框中心Y”。
-                first = ReadHighPrecisionMatchCenter(matchResult, 0);
-                second = ReadHighPrecisionMatchCenter(matchResult, 1);
+                candidates =
+                [
+                    ReadHighPrecisionMatchCenter(matchResult, 0),
+                    ReadHighPrecisionMatchCenter(matchResult, 1)
+                ];
             }
             else
             {
@@ -964,16 +967,13 @@ public partial class MainWindow : Window
                         $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
                 }
 
-                var resultCount = Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0);
-                if (resultCount < 2)
-                {
-                    throw new InvalidOperationException(
-                        $"{procedureName}.{InspectionBlobModuleName}只返回 {resultCount} 个结果，至少需要两个。");
-                }
-
-                // 与 VisionMaster 的“当前结果”表严格一致：直接读取第0、1行，不筛选也不重排。
-                first = ReadBlobResultRow(blobResult, 0);
-                second = ReadBlobResultRow(blobResult, 1);
+                var resultCount = Math.Min(
+                    MaximumInspectionBlobResultCount,
+                    Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0));
+                // 与 VisionMaster 的“当前结果”表严格一致：按原顺序返回全部结果，不筛选也不重排。
+                candidates = Enumerable.Range(0, resultCount)
+                    .Select(index => ReadBlobResultRow(blobResult, index))
+                    .ToList();
             }
 
             var imageWarning = "";
@@ -990,26 +990,26 @@ public partial class MainWindow : Window
             }
 
             SetStatus(
-                $"{procedureName}执行完成：结果1({first.PixelX:0.###}, {first.PixelY:0.###})，" +
-                $"结果2({second.PixelX:0.###}, {second.PixelY:0.###}){imageWarning}",
+                $"{procedureName}执行完成：共返回 {candidates.Count} 个结果{imageWarning}",
                 StatusKind.Success);
-            return string.Join(
-                "\t",
-                first.PixelX.ToString("R", CultureInfo.InvariantCulture),
-                first.PixelY.ToString("R", CultureInfo.InvariantCulture),
-                first.Left.ToString(CultureInfo.InvariantCulture),
-                first.Top.ToString(CultureInfo.InvariantCulture),
-                first.Width.ToString(CultureInfo.InvariantCulture),
-                first.Height.ToString(CultureInfo.InvariantCulture),
-                second.PixelX.ToString("R", CultureInfo.InvariantCulture),
-                second.PixelY.ToString("R", CultureInfo.InvariantCulture),
-                second.Left.ToString(CultureInfo.InvariantCulture),
-                second.Top.ToString(CultureInfo.InvariantCulture),
-                second.Width.ToString(CultureInfo.InvariantCulture),
-                second.Height.ToString(CultureInfo.InvariantCulture),
-                (inspectionImage?.PixelWidth ?? 0).ToString(CultureInfo.InvariantCulture),
-                (inspectionImage?.PixelHeight ?? 0).ToString(CultureInfo.InvariantCulture),
-                inspectionImage?.FilePath ?? "");
+            var responseParts = new List<string>
+            {
+                candidates.Count.ToString(CultureInfo.InvariantCulture)
+            };
+            foreach (var candidate in candidates)
+            {
+                responseParts.Add(candidate.PixelX.ToString("R", CultureInfo.InvariantCulture));
+                responseParts.Add(candidate.PixelY.ToString("R", CultureInfo.InvariantCulture));
+                responseParts.Add(candidate.Left.ToString(CultureInfo.InvariantCulture));
+                responseParts.Add(candidate.Top.ToString(CultureInfo.InvariantCulture));
+                responseParts.Add(candidate.Width.ToString(CultureInfo.InvariantCulture));
+                responseParts.Add(candidate.Height.ToString(CultureInfo.InvariantCulture));
+            }
+
+            responseParts.Add((inspectionImage?.PixelWidth ?? 0).ToString(CultureInfo.InvariantCulture));
+            responseParts.Add((inspectionImage?.PixelHeight ?? 0).ToString(CultureInfo.InvariantCulture));
+            responseParts.Add(inspectionImage?.FilePath ?? "");
+            return string.Join("\t", responseParts);
         }
         catch
         {

@@ -746,7 +746,7 @@ public partial class VisualCalibrationPage : UserControl
 
     /// <summary>
     /// 在启动时已加载的固定方案中执行“找芯片流程 → Blob分析1”，
-    /// 返回前两个结果的像素质心。
+    /// 手动标定页面仅使用返回结果中的前两个像素质心。
     /// </summary>
     public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
         CancellationToken cancellationToken)

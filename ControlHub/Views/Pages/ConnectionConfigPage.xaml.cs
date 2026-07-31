@@ -679,45 +679,63 @@ public partial class ConnectionConfigPage : UserControl
 
     private async void OneKeyVibration_Click(object sender, RoutedEventArgs e)
     {
+        await RunOneKeyVibrationAsync(_lifetimeCancellation.Token);
+    }
+
+    public async Task<bool> RunOneKeyVibrationAsync(CancellationToken cancellationToken)
+    {
         if (!_tcpClient.IsConnected)
         {
             AddLog("\u4e00\u952e\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
-            return;
+            return false;
         }
 
         if (_vibrationSequenceRunning)
         {
             AddLog("\u4e00\u952e\u9707\u52a8\u6b63\u5728\u6267\u884c\uff0c\u8bf7\u7a0d\u5019");
-            return;
+            return false;
         }
 
         _vibrationSequenceRunning = true;
         try
         {
             AddLog($"\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u5de6\u53f3\u805a\u62e2 -> \u4e0a\u4e0b\u805a\u62e2\uff0c\u5faa\u73af {OneKeyGatherCycleCount} \u6b21");
-            await SendAsciiProtocolCommandAsync("&05,00$", "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f");
+            if (!await SendAsciiProtocolCommandAsync(
+                    "&05,00$",
+                    "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f"))
+            {
+                return false;
+            }
 
             for (var cycleIndex = 1; cycleIndex <= OneKeyGatherCycleCount; cycleIndex++)
             {
                 AddLog($"\u4e00\u952e\u805a\u62e2\u7b2c {cycleIndex}/{OneKeyGatherCycleCount} \u8f6e");
 
-                await RunVibrationPulseAsync(
-                    LeftRightGatherParameterCommand,
-                    LeftRightGatherStartCommand,
-                    LeftRightGatherPulseDurationMs,
-                    $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2");
-
-                await RunVibrationPulseAsync(
-                    UpDownGatherParameterCommand,
-                    UpDownGatherStartCommand,
-                    UpDownGatherPulseDurationMs,
-                    $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2");
+                if (!await RunVibrationPulseAsync(
+                        LeftRightGatherParameterCommand,
+                        LeftRightGatherStartCommand,
+                        LeftRightGatherPulseDurationMs,
+                        $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2",
+                        cancellationToken) ||
+                    !await RunVibrationPulseAsync(
+                        UpDownGatherParameterCommand,
+                        UpDownGatherStartCommand,
+                        UpDownGatherPulseDurationMs,
+                        $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2",
+                        cancellationToken))
+                {
+                    return false;
+                }
             }
 
             AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
+            return true;
         }
-        catch (OperationCanceledException) when (_closed)
+        catch (OperationCanceledException) when (
+            _closed ||
+            cancellationToken.IsCancellationRequested)
         {
+            return false;
         }
         finally
         {
@@ -958,7 +976,7 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private async Task SendAsciiProtocolCommandAsync(string command, string actionName)
+    private async Task<bool> SendAsciiProtocolCommandAsync(string command, string actionName)
     {
         await _protocolWriteLock.WaitAsync();
         try
@@ -966,7 +984,7 @@ public partial class ConnectionConfigPage : UserControl
             if (!_tcpClient.IsConnected)
             {
                 AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
-                return;
+                return false;
             }
 
             try
@@ -974,12 +992,14 @@ public partial class ConnectionConfigPage : UserControl
                 var payload = Encoding.ASCII.GetBytes(command);
                 await _tcpClient.WriteAsync(payload);
                 AddLog($"TX [ASCII]  {command}  {ProtocolCommandName}-{actionName}");
+                return true;
             }
             catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
             {
                 SetFeederStatus("\u901a\u8baf\u5f02\u5e38");
 
                 AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
+                return false;
             }
         }
         finally
@@ -988,13 +1008,38 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private async Task RunVibrationPulseAsync(string parameterCommand, string startCommand, int durationMs, string actionName)
+    private async Task<bool> RunVibrationPulseAsync(
+        string parameterCommand,
+        string startCommand,
+        int durationMs,
+        string actionName,
+        CancellationToken cancellationToken)
     {
-        await SendAsciiProtocolCommandAsync(parameterCommand, $"{actionName}-\u4e0b\u53d1\u53c2\u6570");
-        await SendAsciiProtocolCommandAsync(startCommand, $"{actionName}-\u542f\u52a8");
-        await Task.Delay(durationMs, _lifetimeCancellation.Token);
-        await SendAsciiProtocolCommandAsync(StopVibrationCommand, $"{actionName}-\u505c\u6b62");
-        await Task.Delay(120, _lifetimeCancellation.Token);
+        if (!await SendAsciiProtocolCommandAsync(
+                parameterCommand,
+                $"{actionName}-\u4e0b\u53d1\u53c2\u6570") ||
+            !await SendAsciiProtocolCommandAsync(
+                startCommand,
+                $"{actionName}-\u542f\u52a8"))
+        {
+            return false;
+        }
+
+        var stopped = false;
+        try
+        {
+            await Task.Delay(durationMs, cancellationToken);
+        }
+        finally
+        {
+            // 停止生产或关闭页面时也先下发停止，避免振动脉冲停留在启动状态。
+            stopped = await SendAsciiProtocolCommandAsync(
+                StopVibrationCommand,
+                $"{actionName}-\u505c\u6b62");
+        }
+
+        await Task.Delay(120, cancellationToken);
+        return stopped;
     }
 
     private async Task RunMeterOperationAsync(string actionName, Func<Task> operation)
