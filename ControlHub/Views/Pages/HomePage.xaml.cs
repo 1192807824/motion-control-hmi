@@ -3309,7 +3309,20 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
-    private async Task MoveAxis0RelativeCoreAsync(
+    public Task<MotionAxisSnapshot> RotateDdOnceAsync(CancellationToken cancellationToken)
+    {
+        if (_startSequenceRunning ||
+            _presetPositionMoveRunning ||
+            _oneKeyResetRunning ||
+            _assignedNozzleMoveRunning)
+        {
+            throw new InvalidOperationException("当前存在生产、复位或示教运动，不能单独转动 DD 马达。");
+        }
+
+        return MoveAxis0RelativeCoreAsync(DdMotorPulsePerTurn, cancellationToken);
+    }
+
+    private async Task<MotionAxisSnapshot> MoveAxis0RelativeCoreAsync(
         double pulseDistance,
         CancellationToken cancellationToken,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null)
@@ -3323,7 +3336,7 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
         var velocity = GetProductionAxisMotionSettings(0).RunVelocity;
-        await motionController.MoveAxisRelativeAsync(
+        return await motionController.MoveAxisRelativeAsync(
             hardwareAxisNo: 0,
             pulseDistance: pulseDistance,
             cancellationToken: cancellationToken,

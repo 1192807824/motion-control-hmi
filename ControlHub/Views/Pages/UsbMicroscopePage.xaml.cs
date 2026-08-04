@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -14,16 +15,31 @@ public partial class UsbMicroscopePage : UserControl
 {
     private readonly CaptureDevices _captureDevices = new();
     private CaptureDevice? _captureDevice;
+    private HomePage? _homeController;
     private BitmapSource? _latestFrame;
     private bool _refreshing;
     private bool _connecting;
     private bool _shutdown;
     private bool _loadedOnce;
+    private bool _circleDrawingEnabled;
+    private bool _circleDragActive;
+    private bool _hasCircle;
+    private bool _ddRotationRunning;
+    private Point _circleDragCenter;
+    private double _circleCenterPixelX;
+    private double _circleCenterPixelY;
+    private double _circleRadiusPixels;
     private long _receivedFrames;
 
     public UsbMicroscopePage()
     {
         InitializeComponent();
+    }
+
+    public void AttachHomeController(HomePage homeController)
+    {
+        _homeController = homeController ?? throw new ArgumentNullException(nameof(homeController));
+        UpdateControls();
     }
 
     public async Task ActivateAsync()
@@ -183,6 +199,7 @@ public partial class UsbMicroscopePage : UserControl
         _connecting = true;
         _latestFrame = null;
         _receivedFrames = 0;
+        ClearCircle();
         PreviewImage.Source = null;
         PreviewPlaceholder.Visibility = Visibility.Visible;
         FrameStatusText.Text = "正在等待显微镜画面…";
@@ -263,6 +280,7 @@ public partial class UsbMicroscopePage : UserControl
         }
 
         _latestFrame = null;
+        ClearCircle();
         PreviewImage.Source = null;
         PreviewPlaceholder.Visibility = Visibility.Visible;
         FrameStatusText.Text = "尚未接收画面";
@@ -317,7 +335,8 @@ public partial class UsbMicroscopePage : UserControl
             _latestFrame = frame;
             PreviewImage.Source = frame;
             PreviewPlaceholder.Visibility = Visibility.Collapsed;
-            CaptureButton.IsEnabled = true;
+            UpdateCircleOverlayFromPixels();
+            UpdateControls();
 
             if (receivedFrames == 1 || receivedFrames % 10 == 0)
             {
@@ -389,7 +408,7 @@ public partial class UsbMicroscopePage : UserControl
                 ".bmp" => new BmpBitmapEncoder(),
                 _ => new JpegBitmapEncoder { QualityLevel = 95 }
             };
-            encoder.Frames.Add(BitmapFrame.Create(frame));
+            encoder.Frames.Add(BitmapFrame.Create(CreateAnnotatedFrame(frame)));
             using var output = File.Create(dialog.FileName);
             encoder.Save(output);
             SetStatus($"照片已保存：{Path.GetFileName(dialog.FileName)}", MicroscopeStatus.Connected);
@@ -400,13 +419,270 @@ public partial class UsbMicroscopePage : UserControl
         }
     }
 
-    private void ShowCrosshair_Changed(object sender, RoutedEventArgs e)
+    private void DrawCircle_Click(object sender, RoutedEventArgs e)
     {
-        if (CrosshairOverlay is not null)
+        if (_latestFrame is null)
         {
-            CrosshairOverlay.Visibility = ShowCrosshairCheckBox.IsChecked == true
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            SetStatus("请先连接显微镜并等待实时画面", MicroscopeStatus.Error);
+            return;
+        }
+
+        SetCircleDrawingMode(true);
+        SetStatus("请在画面上按下鼠标确定圆心，拖动确定半径", MicroscopeStatus.Connected);
+    }
+
+    private void ClearCircle_Click(object sender, RoutedEventArgs e)
+    {
+        ClearCircle();
+        SetStatus("圆形标记已清除", _captureDevice is null
+            ? MicroscopeStatus.Ready
+            : MicroscopeStatus.Connected);
+    }
+
+    private void AnnotationCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_circleDrawingEnabled || _latestFrame is null)
+        {
+            return;
+        }
+
+        var imageRect = GetDisplayedImageRect();
+        var point = e.GetPosition(AnnotationCanvas);
+        if (imageRect.IsEmpty || !imageRect.Contains(point))
+        {
+            SetStatus("请在显微镜图像范围内开始画圆", MicroscopeStatus.Error);
+            return;
+        }
+
+        _circleDragCenter = point;
+        _circleDragActive = true;
+        _hasCircle = false;
+        CircleAnnotationEllipse.Visibility = Visibility.Visible;
+        UpdateCirclePreview(point, 0);
+        AnnotationCanvas.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void AnnotationCanvas_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_circleDragActive || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var radius = CalculateCircleRadius(e.GetPosition(AnnotationCanvas));
+        UpdateCirclePreview(_circleDragCenter, radius);
+    }
+
+    private void AnnotationCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_circleDragActive || _latestFrame is null)
+        {
+            return;
+        }
+
+        var radius = CalculateCircleRadius(e.GetPosition(AnnotationCanvas));
+        _circleDragActive = false;
+        AnnotationCanvas.ReleaseMouseCapture();
+
+        var imageRect = GetDisplayedImageRect();
+        var scale = imageRect.IsEmpty || _latestFrame.PixelWidth <= 0
+            ? 0
+            : imageRect.Width / _latestFrame.PixelWidth;
+        if (radius < 3 || scale <= 0)
+        {
+            ClearCircle();
+            SetStatus("圆太小，请重新画圆", MicroscopeStatus.Error);
+            return;
+        }
+
+        _circleCenterPixelX = (_circleDragCenter.X - imageRect.X) / scale;
+        _circleCenterPixelY = (_circleDragCenter.Y - imageRect.Y) / scale;
+        _circleRadiusPixels = radius / scale;
+        _hasCircle = true;
+        UpdateCircleOverlayFromPixels();
+        SetCircleDrawingMode(false);
+        SetStatus(
+            $"圆形标记完成：圆心({_circleCenterPixelX:0}, {_circleCenterPixelY:0})，半径{_circleRadiusPixels:0}像素",
+            MicroscopeStatus.Connected);
+        UpdateControls();
+        e.Handled = true;
+    }
+
+    private void AnnotationCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateCircleOverlayFromPixels();
+    }
+
+    private double CalculateCircleRadius(Point currentPoint)
+    {
+        var imageRect = GetDisplayedImageRect();
+        if (imageRect.IsEmpty)
+        {
+            return 0;
+        }
+
+        var deltaX = currentPoint.X - _circleDragCenter.X;
+        var deltaY = currentPoint.Y - _circleDragCenter.Y;
+        var requestedRadius = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
+        var maximumRadius = Math.Min(
+            Math.Min(_circleDragCenter.X - imageRect.Left, imageRect.Right - _circleDragCenter.X),
+            Math.Min(_circleDragCenter.Y - imageRect.Top, imageRect.Bottom - _circleDragCenter.Y));
+        return Math.Clamp(requestedRadius, 0, Math.Max(0, maximumRadius));
+    }
+
+    private void UpdateCirclePreview(Point center, double radius)
+    {
+        var diameter = radius * 2;
+        CircleAnnotationEllipse.Width = diameter;
+        CircleAnnotationEllipse.Height = diameter;
+        Canvas.SetLeft(CircleAnnotationEllipse, center.X - radius);
+        Canvas.SetTop(CircleAnnotationEllipse, center.Y - radius);
+    }
+
+    private void UpdateCircleOverlayFromPixels()
+    {
+        if (!_hasCircle || _latestFrame is null || AnnotationCanvas is null)
+        {
+            return;
+        }
+
+        var imageRect = GetDisplayedImageRect();
+        if (imageRect.IsEmpty || _latestFrame.PixelWidth <= 0)
+        {
+            CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        var center = new Point(
+            imageRect.X + _circleCenterPixelX * scale,
+            imageRect.Y + _circleCenterPixelY * scale);
+        UpdateCirclePreview(center, _circleRadiusPixels * scale);
+        CircleAnnotationEllipse.Visibility = Visibility.Visible;
+    }
+
+    private Rect GetDisplayedImageRect()
+    {
+        if (_latestFrame is null ||
+            _latestFrame.PixelWidth <= 0 ||
+            _latestFrame.PixelHeight <= 0 ||
+            AnnotationCanvas.ActualWidth <= 0 ||
+            AnnotationCanvas.ActualHeight <= 0)
+        {
+            return Rect.Empty;
+        }
+
+        var scale = Math.Min(
+            AnnotationCanvas.ActualWidth / _latestFrame.PixelWidth,
+            AnnotationCanvas.ActualHeight / _latestFrame.PixelHeight);
+        var width = _latestFrame.PixelWidth * scale;
+        var height = _latestFrame.PixelHeight * scale;
+        return new Rect(
+            (AnnotationCanvas.ActualWidth - width) / 2,
+            (AnnotationCanvas.ActualHeight - height) / 2,
+            width,
+            height);
+    }
+
+    private void SetCircleDrawingMode(bool enabled)
+    {
+        _circleDrawingEnabled = enabled;
+        AnnotationCanvas.IsHitTestVisible = enabled;
+        DrawCircleButton.Content = enabled ? "拖动画圆…" : _hasCircle ? "重画圆" : "画圆";
+        UpdateControls();
+    }
+
+    private void ClearCircle()
+    {
+        _circleDragActive = false;
+        _hasCircle = false;
+        _circleRadiusPixels = 0;
+        if (AnnotationCanvas is not null)
+        {
+            AnnotationCanvas.ReleaseMouseCapture();
+            AnnotationCanvas.IsHitTestVisible = false;
+        }
+
+        if (CircleAnnotationEllipse is not null)
+        {
+            CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
+        }
+
+        _circleDrawingEnabled = false;
+        if (DrawCircleButton is not null)
+        {
+            DrawCircleButton.Content = "画圆";
+        }
+
+        UpdateControls();
+    }
+
+    private BitmapSource CreateAnnotatedFrame(BitmapSource frame)
+    {
+        if (!_hasCircle || _circleRadiusPixels <= 0)
+        {
+            return frame;
+        }
+
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+        {
+            drawing.DrawImage(frame, new Rect(0, 0, frame.PixelWidth, frame.PixelHeight));
+            var displayedRect = GetDisplayedImageRect();
+            var displayScale = displayedRect.IsEmpty || frame.PixelWidth <= 0
+                ? 1d
+                : displayedRect.Width / frame.PixelWidth;
+            var pen = new Pen(
+                new SolidColorBrush(Color.FromRgb(255, 59, 66)),
+                Math.Max(2d, 3d / displayScale));
+            pen.Freeze();
+            drawing.DrawEllipse(
+                null,
+                pen,
+                new Point(_circleCenterPixelX, _circleCenterPixelY),
+                _circleRadiusPixels,
+                _circleRadiusPixels);
+        }
+
+        var dpiX = frame.DpiX > 0 ? frame.DpiX : 96;
+        var dpiY = frame.DpiY > 0 ? frame.DpiY : 96;
+        var rendered = new RenderTargetBitmap(
+            frame.PixelWidth,
+            frame.PixelHeight,
+            dpiX,
+            dpiY,
+            System.Windows.Media.PixelFormats.Pbgra32);
+        rendered.Render(visual);
+        rendered.Freeze();
+        return rendered;
+    }
+
+    private async void RotateDdOnce_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ddRotationRunning || _homeController is null || _captureDevice is null)
+        {
+            return;
+        }
+
+        _ddRotationRunning = true;
+        SetStatus("DD 马达正在转动 22500 脉冲…", MicroscopeStatus.Working);
+        UpdateControls();
+        try
+        {
+            var result = await _homeController.RotateDdOnceAsync(CancellationToken.None);
+            SetStatus(
+                $"DD 马达转动完成，当前位置 {result.FeedbackPosition:0.###} pulse",
+                MicroscopeStatus.Connected);
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"DD 马达转动失败：{exception.Message}", MicroscopeStatus.Error);
+        }
+        finally
+        {
+            _ddRotationRunning = false;
+            UpdateControls();
         }
     }
 
@@ -423,6 +699,12 @@ public partial class UsbMicroscopePage : UserControl
         DisconnectButton.IsEnabled = connected && !busy;
         DevicePropertiesButton.IsEnabled = connected && _captureDevice?.HasPropertyPage == true;
         CaptureButton.IsEnabled = connected && _latestFrame is not null;
+        DrawCircleButton.IsEnabled = connected && _latestFrame is not null && !_circleDrawingEnabled;
+        ClearCircleButton.IsEnabled = _hasCircle || _circleDrawingEnabled;
+        RotateDdButton.IsEnabled = connected &&
+                                   _latestFrame is not null &&
+                                   _homeController is not null &&
+                                   !_ddRotationRunning;
     }
 
     private void SetStatus(string message, MicroscopeStatus status)

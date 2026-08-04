@@ -70,15 +70,11 @@
                                FontSize="13"
                                VerticalAlignment="Center" />
                 </StackPanel>
-                <CheckBox x:Name="ShowCrosshairCheckBox"
-                          Grid.Column="2"
-                          Content="显示中心十字线"
-                          Foreground="#D8E4EC"
-                          FontSize="12"
-                          IsChecked="True"
-                          VerticalAlignment="Center"
-                          Checked="ShowCrosshair_Changed"
-                          Unchecked="ShowCrosshair_Changed" />
+                <TextBlock Grid.Column="2"
+                           Text="画圆模式：在画面上按住鼠标并拖动"
+                           Foreground="#8FB2C9"
+                           FontSize="12"
+                           VerticalAlignment="Center" />
             </Grid>
         </Border>
 
@@ -138,6 +134,28 @@
                             BorderBrush="#45647A"
                             IsEnabled="False"
                             Click="DeviceProperties_Click" />
+                    <Button x:Name="DrawCircleButton"
+                            Content="画圆"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#7A4DB3"
+                            BorderBrush="#A273D7"
+                            IsEnabled="False"
+                            Click="DrawCircle_Click" />
+                    <Button x:Name="ClearCircleButton"
+                            Content="清除圆"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            IsEnabled="False"
+                            Click="ClearCircle_Click" />
+                    <Button x:Name="RotateDdButton"
+                            Content="转动一次"
+                            ToolTip="DD 马达轴正向移动 22500 脉冲"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#C66A12"
+                            BorderBrush="#E58B33"
+                            IsEnabled="False"
+                            Click="RotateDdOnce_Click" />
                     <Button x:Name="CaptureButton"
                             Content="拍照保存"
                             Style="{StaticResource MicroscopeButton}"
@@ -155,22 +173,26 @@
                 BorderThickness="1"
                 CornerRadius="4"
                 ClipToBounds="True">
-            <Grid>
+            <Grid x:Name="PreviewSurface">
                 <Image x:Name="PreviewImage"
                        Stretch="Uniform"
                        RenderOptions.BitmapScalingMode="HighQuality" />
 
-                <Grid x:Name="CrosshairOverlay" IsHitTestVisible="False">
-                    <Rectangle Width="1" Fill="#E83B42" Opacity="0.9" />
-                    <Rectangle Height="1" Fill="#E83B42" Opacity="0.9" />
-                    <Ellipse Width="26"
-                             Height="26"
-                             Stroke="#E83B42"
-                             StrokeThickness="1"
-                             Opacity="0.9"
-                             HorizontalAlignment="Center"
-                             VerticalAlignment="Center" />
-                </Grid>
+                <Canvas x:Name="AnnotationCanvas"
+                        Background="Transparent"
+                        IsHitTestVisible="False"
+                        Cursor="Cross"
+                        SizeChanged="AnnotationCanvas_SizeChanged"
+                        MouseLeftButtonDown="AnnotationCanvas_MouseLeftButtonDown"
+                        MouseMove="AnnotationCanvas_MouseMove"
+                        MouseLeftButtonUp="AnnotationCanvas_MouseLeftButtonUp">
+                    <Ellipse x:Name="CircleAnnotationEllipse"
+                             Visibility="Collapsed"
+                             Stroke="#FF3B42"
+                             StrokeThickness="3"
+                             Fill="#18FF3B42"
+                             IsHitTestVisible="False" />
+                </Canvas>
 
                 <StackPanel x:Name="PreviewPlaceholder"
                             HorizontalAlignment="Center"
