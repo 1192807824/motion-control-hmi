@@ -1,0 +1,205 @@
+<UserControl x:Class="ControlHub.Views.Pages.UsbMicroscopePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="1500"
+             d:DesignHeight="820"
+             Loaded="UsbMicroscopePage_Loaded">
+    <UserControl.Resources>
+        <Style x:Key="MicroscopeLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#AFC0CD" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="MicroscopeComboBox" TargetType="ComboBox">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="Foreground" Value="#10263A" />
+            <Setter Property="Background" Value="#F7FAFC" />
+            <Setter Property="BorderBrush" Value="#668198" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="MicroscopeButton" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="84" />
+            <Setter Property="Padding" Value="13,0" />
+            <Setter Property="Margin" Value="8,0,0,0" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#0D6EE8" />
+            <Setter Property="BorderBrush" Value="#2587F4" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="8" Background="#071D2F">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="56" />
+            <RowDefinition Height="68" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Padding="14,0"
+                Background="#071D2F"
+                BorderBrush="#345269"
+                BorderThickness="1"
+                CornerRadius="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="USB 显微镜"
+                               Foreground="#F4F8FB"
+                               FontSize="21"
+                               FontWeight="Bold" />
+                    <Ellipse x:Name="ConnectionStatusIndicator"
+                             Width="11"
+                             Height="11"
+                             Margin="18,0,0,0"
+                             Fill="#6F8190" />
+                    <TextBlock x:Name="ConnectionStatusText"
+                               Margin="8,0,0,0"
+                               Text="等待检测显微镜"
+                               Foreground="#D8E4EC"
+                               FontSize="13"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <CheckBox x:Name="ShowCrosshairCheckBox"
+                          Grid.Column="2"
+                          Content="显示中心十字线"
+                          Foreground="#D8E4EC"
+                          FontSize="12"
+                          IsChecked="True"
+                          VerticalAlignment="Center"
+                          Checked="ShowCrosshair_Changed"
+                          Unchecked="ShowCrosshair_Changed" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Margin="0,7,0,7"
+                Padding="12,0"
+                Background="#10283C"
+                BorderBrush="#345269"
+                BorderThickness="1"
+                CornerRadius="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="290" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="230" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="显微镜设备" Style="{StaticResource MicroscopeLabel}" />
+                <ComboBox x:Name="DeviceComboBox"
+                          Grid.Column="1"
+                          Margin="8,0,16,0"
+                          Style="{StaticResource MicroscopeComboBox}"
+                          DisplayMemberPath="Name"
+                          SelectionChanged="Device_SelectionChanged" />
+                <TextBlock Grid.Column="2" Text="分辨率" Style="{StaticResource MicroscopeLabel}" />
+                <ComboBox x:Name="ModeComboBox"
+                          Grid.Column="3"
+                          Margin="8,0,0,0"
+                          Style="{StaticResource MicroscopeComboBox}"
+                          DisplayMemberPath="Description" />
+
+                <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="RefreshDevicesButton"
+                            Content="刷新设备"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            Click="RefreshDevices_Click" />
+                    <Button x:Name="ConnectButton"
+                            Content="连接显微镜"
+                            Style="{StaticResource MicroscopeButton}"
+                            Click="Connect_Click" />
+                    <Button x:Name="DisconnectButton"
+                            Content="断开"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#C9363E"
+                            BorderBrush="#E45A61"
+                            IsEnabled="False"
+                            Click="Disconnect_Click" />
+                    <Button x:Name="DevicePropertiesButton"
+                            Content="显微镜参数"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            IsEnabled="False"
+                            Click="DeviceProperties_Click" />
+                    <Button x:Name="CaptureButton"
+                            Content="拍照保存"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#0A8A57"
+                            BorderBrush="#19B978"
+                            IsEnabled="False"
+                            Click="Capture_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2"
+                Background="#11171C"
+                BorderBrush="#345269"
+                BorderThickness="1"
+                CornerRadius="4"
+                ClipToBounds="True">
+            <Grid>
+                <Image x:Name="PreviewImage"
+                       Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+
+                <Grid x:Name="CrosshairOverlay" IsHitTestVisible="False">
+                    <Rectangle Width="1" Fill="#E83B42" Opacity="0.9" />
+                    <Rectangle Height="1" Fill="#E83B42" Opacity="0.9" />
+                    <Ellipse Width="26"
+                             Height="26"
+                             Stroke="#E83B42"
+                             StrokeThickness="1"
+                             Opacity="0.9"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Grid>
+
+                <StackPanel x:Name="PreviewPlaceholder"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsHitTestVisible="False">
+                    <TextBlock Text="USB"
+                               Foreground="#5C7487"
+                               FontSize="38"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="请选择显微镜设备并点击“连接显微镜”"
+                               Margin="0,10,0,0"
+                               Foreground="#91A6B7"
+                               FontSize="14"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <Border HorizontalAlignment="Left"
+                        VerticalAlignment="Bottom"
+                        Margin="12"
+                        Padding="10,5"
+                        Background="#B8071D2F"
+                        CornerRadius="3">
+                    <TextBlock x:Name="FrameStatusText"
+                               Text="尚未接收画面"
+                               Foreground="#D8E4EC"
+                               FontSize="12" />
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

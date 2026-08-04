@@ -173,6 +173,16 @@
                             <TextBlock Text="视觉标定" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    <Button x:Name="UsbMicroscopeMenuButton" Style="{StaticResource MenuButton}" Click="UsbMicroscopeMenu_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <Image Width="20"
+                                   Height="20"
+                                   Margin="0,0,8,0"
+                                   Source="/Assets/Icons/TopMenu/ccd.png"
+                                   Stretch="Uniform" />
+                            <TextBlock Text="USB显微镜" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="ConnectionMenuButton" Style="{StaticResource MenuButton}" Click="ConnectionMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
@@ -228,6 +238,10 @@
             <pages:VisualCalibrationPage x:Name="VisualCalibrationContent"
                                           Grid.Row="2"
                                           Visibility="Hidden" />
+
+            <pages:UsbMicroscopePage x:Name="UsbMicroscopeContent"
+                                     Grid.Row="2"
+                                     Visibility="Collapsed" />
 
             <pages:ConnectionConfigPage x:Name="ConnectionConfigContent"
                                         Grid.Row="2"

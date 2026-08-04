@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
+        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
 
     private async void HomeMenu_Click(object sender, RoutedEventArgs e)
     {
+        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -82,6 +84,7 @@ public partial class MainWindow : Window
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
+        await UsbMicroscopeContent.DeactivateAsync();
         ShowVisualCalibrationPage();
         try
         {
@@ -98,9 +101,22 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void UsbMicroscopeMenu_Click(object sender, RoutedEventArgs e)
+    {
+        await HomeContent.DeactivateProductionAsync();
+        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        {
+            return;
+        }
+
+        ShowUsbMicroscopePage();
+        await UsbMicroscopeContent.ActivateAsync();
+    }
+
     private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
+        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -111,6 +127,7 @@ public partial class MainWindow : Window
     private async void ParameterSettingsMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
+        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -171,6 +188,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         VisualCalibrationContent.Shutdown();
+        UsbMicroscopeContent.Shutdown();
         ConnectionConfigContent.Shutdown();
         _clockTimer.Stop();
         base.OnClosed(e);
@@ -181,11 +199,13 @@ public partial class MainWindow : Window
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
+        UsbMicroscopeMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
         ParameterSettingsMenuButton.Style = (Style)Resources["MenuButton"];
         HomeContent.Visibility = Visibility.Collapsed;
         MotionPage.Visibility = Visibility.Visible;
         VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        UsbMicroscopeContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
         ParameterSettingsContent.Visibility = Visibility.Collapsed;
     }
@@ -195,11 +215,13 @@ public partial class MainWindow : Window
         HomeMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
+        UsbMicroscopeMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
         ParameterSettingsMenuButton.Style = (Style)Resources["MenuButton"];
         HomeContent.Visibility = Visibility.Visible;
         MotionPage.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        UsbMicroscopeContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
         ParameterSettingsContent.Visibility = Visibility.Collapsed;
         HomeContent.RefreshVisionInspectionDisplay(VisualCalibrationContent);
@@ -211,14 +233,32 @@ public partial class MainWindow : Window
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["ActiveMenuButton"];
+        UsbMicroscopeMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
         ParameterSettingsMenuButton.Style = (Style)Resources["MenuButton"];
         HomeContent.Visibility = Visibility.Collapsed;
         MotionPage.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.Visibility = Visibility.Visible;
+        UsbMicroscopeContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
         ParameterSettingsContent.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.RefreshVisionDisplay();
+    }
+
+    private void ShowUsbMicroscopePage()
+    {
+        HomeMenuButton.Style = (Style)Resources["MenuButton"];
+        MotionMenuButton.Style = (Style)Resources["MenuButton"];
+        VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
+        UsbMicroscopeMenuButton.Style = (Style)Resources["ActiveMenuButton"];
+        ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
+        ParameterSettingsMenuButton.Style = (Style)Resources["MenuButton"];
+        HomeContent.Visibility = Visibility.Collapsed;
+        MotionPage.Visibility = Visibility.Collapsed;
+        VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        UsbMicroscopeContent.Visibility = Visibility.Visible;
+        ConnectionConfigContent.Visibility = Visibility.Collapsed;
+        ParameterSettingsContent.Visibility = Visibility.Collapsed;
     }
 
     private void ShowConnectionConfigPage()
@@ -226,11 +266,13 @@ public partial class MainWindow : Window
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
+        UsbMicroscopeMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         ParameterSettingsMenuButton.Style = (Style)Resources["MenuButton"];
         HomeContent.Visibility = Visibility.Collapsed;
         MotionPage.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        UsbMicroscopeContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Visible;
         ParameterSettingsContent.Visibility = Visibility.Collapsed;
     }
@@ -240,11 +282,13 @@ public partial class MainWindow : Window
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
+        UsbMicroscopeMenuButton.Style = (Style)Resources["MenuButton"];
         ConnectionMenuButton.Style = (Style)Resources["MenuButton"];
         ParameterSettingsMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         HomeContent.Visibility = Visibility.Collapsed;
         MotionPage.Visibility = Visibility.Collapsed;
         VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        UsbMicroscopeContent.Visibility = Visibility.Collapsed;
         ConnectionConfigContent.Visibility = Visibility.Collapsed;
         ParameterSettingsContent.Visibility = Visibility.Visible;
     }
