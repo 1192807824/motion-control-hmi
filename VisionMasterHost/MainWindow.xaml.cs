@@ -13,7 +13,6 @@ using GeometryCreateCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSCircleFitModuCs;
-using IMVSHPFeatureMatchModuCs;
 using IMVSLineFindModuCs;
 using IMVSL2LMeasureModuCs;
 using IMVSNPointCalibModuCs;
@@ -38,7 +37,6 @@ public partial class MainWindow : Window
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
     private const int MaximumInspectionBlobResultCount = 10;
-    private const string NozzlePointMatchModuleName = "高精度匹配1";
     private const string RotationPointProcedureName = "获取三点流程";
     private const string RotationPointRectangleModuleName = "矩形检测1";
     private const string RotationCenterProcedureName = "计算旋转中心";
@@ -414,7 +412,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 单次执行“粗定位示教流程”，读取“高精度匹配1”结果表前两行的匹配框中心 X/Y。
+    /// 单次执行“粗定位示教流程”，读取“Blob分析1”结果表前两行的质心 X/Y。
     /// 流程只负责找点，不驱动运动轴或吸嘴动作。
     /// </summary>
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
@@ -837,14 +835,8 @@ public partial class MainWindow : Window
             procedureName,
             NozzlePointProcedureName,
             StringComparison.Ordinal);
-        var blobModule = isNozzlePointProcedure
-            ? null
-            : ResolveNamedBlobFindModule(InspectionProcedureName, InspectionBlobModuleName);
-        var matchModule = isNozzlePointProcedure
-            ? ResolveNamedHighPrecisionMatchModule(procedureName, NozzlePointMatchModuleName)
-            : null;
-        var resultModule = (VmModule?)matchModule ?? blobModule
-            ?? throw new InvalidOperationException($"固定方案的“{procedureName}”中未找到结果模块。");
+        var blobModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
+        var resultModule = (VmModule)blobModule;
         var displayModule = isNozzlePointProcedure
             ? resultModule
             : ResolveNamedModule<VmModule>(procedureName, CalibrationImageSourceName);
@@ -879,42 +871,34 @@ public partial class MainWindow : Window
             }
             RefreshInspectionDisplayNoThrow();
 
-            List<RectangleBlobCandidate> candidates;
-            if (matchModule is not null)
+            var blobResult = blobModule.ModuResult;
+            if (blobResult.ModuStatus != 1)
             {
-                var matchResult = matchModule.ModuResult;
-                if (matchResult.ModuStatus != 1)
-                {
-                    throw new InvalidOperationException(
-                        $"{procedureName}.{NozzlePointMatchModuleName}返回NG，请检查模板和匹配参数。");
-                }
+                throw new InvalidOperationException(
+                    $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
+            }
 
-                var resultCount = Math.Min(matchResult.MatchNum, matchResult.MatchRect?.Count ?? 0);
+            var resultCount = Math.Min(
+                MaximumInspectionBlobResultCount,
+                Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0));
+            List<RectangleBlobCandidate> candidates;
+            if (isNozzlePointProcedure)
+            {
                 if (resultCount < 2)
                 {
                     throw new InvalidOperationException(
-                        $"{procedureName}.{NozzlePointMatchModuleName}只返回 {resultCount} 个匹配结果，必须找到两个中心点。");
+                        $"{procedureName}.{InspectionBlobModuleName}只返回 {resultCount} 个结果，必须找到两个质心点。");
                 }
 
-                // 与截图中的结果表一致：直接取第0、1行“匹配框中心X / 匹配框中心Y”。
+                // 与截图中的结果表一致：直接取第0、1行“质心X / 质心Y”。
                 candidates =
                 [
-                    ReadHighPrecisionMatchCenter(matchResult, 0),
-                    ReadHighPrecisionMatchCenter(matchResult, 1)
+                    ReadBlobResultRow(blobResult, 0),
+                    ReadBlobResultRow(blobResult, 1)
                 ];
             }
             else
             {
-                var blobResult = blobModule!.ModuResult;
-                if (blobResult.ModuStatus != 1)
-                {
-                    throw new InvalidOperationException(
-                        $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
-                }
-
-                var resultCount = Math.Min(
-                    MaximumInspectionBlobResultCount,
-                    Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0));
                 // 与 VisionMaster 的“当前结果”表严格一致：按原顺序返回全部结果，不筛选也不重排。
                 candidates = Enumerable.Range(0, resultCount)
                     .Select(index => ReadBlobResultRow(blobResult, index))
@@ -1496,47 +1480,6 @@ public partial class MainWindow : Window
             blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y),
             Math.Max(1, blobRect?.RectWidth ?? 1),
             Math.Max(1, blobRect?.RectHeight ?? 1));
-    }
-
-    private static RectangleBlobCandidate ReadHighPrecisionMatchCenter(
-        HPFeatureMatchResult result,
-        int index)
-    {
-        var rectangles = result.MatchRect;
-        var resultCount = Math.Min(result.MatchNum, rectangles?.Count ?? 0);
-        if (rectangles is null || index < 0 || index >= resultCount)
-        {
-            throw new InvalidOperationException(
-                $"{NozzlePointMatchModuleName}未返回第 {index + 1} 行匹配结果。");
-        }
-
-        var rectangle = rectangles[index]
-            ?? throw new InvalidOperationException(
-                $"{NozzlePointMatchModuleName}第 {index + 1} 行的匹配框为空。");
-        var center = rectangle.CenterPoint;
-        if (center is null ||
-            float.IsNaN(center.X) || float.IsInfinity(center.X) || center.X < 0 ||
-            float.IsNaN(center.Y) || float.IsInfinity(center.Y) || center.Y < 0)
-        {
-            throw new InvalidOperationException(
-                $"{NozzlePointMatchModuleName}第 {index + 1} 行的匹配框中心 X/Y 无效。");
-        }
-
-        var width = float.IsNaN(rectangle.BoxWidth) || float.IsInfinity(rectangle.BoxWidth) || rectangle.BoxWidth <= 0
-            ? 1f
-            : rectangle.BoxWidth;
-        var height = float.IsNaN(rectangle.BoxHeight) || float.IsInfinity(rectangle.BoxHeight) || rectangle.BoxHeight <= 0
-            ? 1f
-            : rectangle.BoxHeight;
-        return new RectangleBlobCandidate(
-            center.X,
-            center.Y,
-            0f,
-            width * height,
-            (int)Math.Round(center.X - width / 2f),
-            (int)Math.Round(center.Y - height / 2f),
-            Math.Max(1, (int)Math.Round(width)),
-            Math.Max(1, (int)Math.Round(height)));
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -2180,63 +2123,6 @@ public partial class MainWindow : Window
 
         throw new InvalidOperationException(
             $"固定方案的“{procedureName}”中未找到“{blobModuleName}”。");
-    }
-
-    /// <summary>
-    /// 按显示名精确定位粗定位示教流程中的“高精度匹配1”。
-    /// </summary>
-    private static IMVSHPFeatureMatchModuTool ResolveNamedHighPrecisionMatchModule(
-        string procedureName,
-        string matchModuleName)
-    {
-        try
-        {
-            if (VmSolution.Instance[$"{procedureName}.{matchModuleName}"] is IMVSHPFeatureMatchModuTool directModule)
-            {
-                return directModule;
-            }
-        }
-        catch
-        {
-            // 部分方案需要先从模块列表取得实际查询键，下面进行精确显示名回退。
-        }
-
-        var procedure = VmSolution.Instance[procedureName] as VmProcedure
-            ?? throw new InvalidOperationException($"固定方案中未找到“{procedureName}”。");
-        var moduleList = procedure.GetProcedureModuleList();
-        for (var index = 0; index < moduleList.nNum; index++)
-        {
-            var info = moduleList.astModuleInfo[index];
-            var displayName = info.strDisplayName?.Trim() ?? "";
-            if (!string.Equals(displayName, matchModuleName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var moduleName = info.strModuleName?.Trim() ?? "";
-            foreach (var candidate in new[]
-                     {
-                         $"{procedureName}.{displayName}",
-                         $"{procedureName}.{moduleName}",
-                         displayName,
-                         moduleName
-                     }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
-            {
-                try
-                {
-                    if (VmSolution.Instance[candidate] is IMVSHPFeatureMatchModuTool module)
-                    {
-                        return module;
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
-
-        throw new InvalidOperationException(
-            $"固定方案的“{procedureName}”中未找到“{matchModuleName}”。");
     }
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)

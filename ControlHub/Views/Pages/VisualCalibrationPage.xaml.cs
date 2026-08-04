@@ -945,7 +945,9 @@ public partial class VisualCalibrationPage : UserControl
             _nozzle2ClickVerified = false;
             UpdateNozzleTeachUi();
             UpdateCommandState();
-            SetNozzleCalibrationStatus("正在执行“粗定位示教流程”查找两个点…", WorkflowStatus.Running);
+            SetNozzleCalibrationStatus(
+                "正在执行“粗定位示教流程”，读取 Blob分析1 的两个质心点…",
+                WorkflowStatus.Running);
 
             _pendingNozzlePointResult = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
             var point1 = _pendingNozzlePointResult.Rectangle1;

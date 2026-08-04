@@ -554,7 +554,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
-    /// 手动触发固定方案中的“粗定位示教流程”，返回流程找到的前两个点。
+    /// 手动触发固定方案中的“粗定位示教流程”，返回“Blob分析1”结果表前两行的质心 X/Y。
     /// </summary>
     public Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
         CancellationToken cancellationToken)
