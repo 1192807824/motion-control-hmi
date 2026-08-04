@@ -661,18 +661,30 @@ public partial class UsbMicroscopePage : UserControl
 
     private void ApplyZoomTransform()
     {
-        if (PreviewImage is null)
+        if (ZoomContent is null)
         {
             return;
         }
 
-        PreviewImage.RenderTransform = new MatrixTransform(
+        ZoomContent.RenderTransform = new MatrixTransform(
             _zoomScale,
             0,
             0,
             _zoomScale,
             _zoomOffsetX,
             _zoomOffsetY);
+
+        if (CircleAnnotationEllipse is not null)
+        {
+            CircleAnnotationEllipse.StrokeThickness = 3 / _zoomScale;
+        }
+
+        foreach (var marker in _circleFitPointMarkers)
+        {
+            marker.Width = 10 / _zoomScale;
+            marker.Height = 10 / _zoomScale;
+            marker.StrokeThickness = 1.5 / _zoomScale;
+        }
 
         if (ResetZoomButton is not null)
         {
@@ -954,11 +966,11 @@ public partial class UsbMicroscopePage : UserControl
     {
         var marker = new ShapeEllipse
         {
-            Width = 10,
-            Height = 10,
+            Width = 10 / _zoomScale,
+            Height = 10 / _zoomScale,
             Fill = new SolidColorBrush(Color.FromRgb(255, 214, 64)),
             Stroke = new SolidColorBrush(Color.FromRgb(30, 35, 40)),
-            StrokeThickness = 1.5,
+            StrokeThickness = 1.5 / _zoomScale,
             IsHitTestVisible = false
         };
         _circleFitPointMarkers.Add(marker);
@@ -1048,17 +1060,7 @@ public partial class UsbMicroscopePage : UserControl
 
     private Rect GetDisplayedImageRect()
     {
-        var baseRect = GetBaseImageRect();
-        if (baseRect.IsEmpty)
-        {
-            return Rect.Empty;
-        }
-
-        return new Rect(
-            baseRect.X * _zoomScale + _zoomOffsetX,
-            baseRect.Y * _zoomScale + _zoomOffsetY,
-            baseRect.Width * _zoomScale,
-            baseRect.Height * _zoomScale);
+        return GetBaseImageRect();
     }
 
     private Rect GetBaseImageRect()
@@ -1142,7 +1144,7 @@ public partial class UsbMicroscopePage : UserControl
             var displayedRect = GetDisplayedImageRect();
             var displayScale = displayedRect.IsEmpty || frame.PixelWidth <= 0
                 ? 1d
-                : displayedRect.Width / frame.PixelWidth;
+                : displayedRect.Width / frame.PixelWidth * _zoomScale;
             var pen = new Pen(
                 new SolidColorBrush(Color.FromRgb(255, 59, 66)),
                 Math.Max(2d, 3d / displayScale));

@@ -183,24 +183,26 @@
             <Grid x:Name="PreviewSurface"
                   Background="Transparent"
                   PreviewMouseWheel="PreviewSurface_PreviewMouseWheel">
-                <Image x:Name="PreviewImage"
-                       Stretch="Uniform"
-                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <Grid x:Name="ZoomContent">
+                    <Image x:Name="PreviewImage"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
 
-                <Canvas x:Name="AnnotationCanvas"
-                        Background="Transparent"
-                        IsHitTestVisible="False"
-                        SizeChanged="AnnotationCanvas_SizeChanged"
-                        MouseLeftButtonDown="AnnotationCanvas_MouseLeftButtonDown"
-                        MouseMove="AnnotationCanvas_MouseMove"
-                        MouseLeftButtonUp="AnnotationCanvas_MouseLeftButtonUp">
-                    <Ellipse x:Name="CircleAnnotationEllipse"
-                             Visibility="Collapsed"
-                             Stroke="#FF3B42"
-                             StrokeThickness="3"
-                             Fill="#18FF3B42"
-                             IsHitTestVisible="False" />
-                </Canvas>
+                    <Canvas x:Name="AnnotationCanvas"
+                            Background="Transparent"
+                            IsHitTestVisible="False"
+                            SizeChanged="AnnotationCanvas_SizeChanged"
+                            MouseLeftButtonDown="AnnotationCanvas_MouseLeftButtonDown"
+                            MouseMove="AnnotationCanvas_MouseMove"
+                            MouseLeftButtonUp="AnnotationCanvas_MouseLeftButtonUp">
+                        <Ellipse x:Name="CircleAnnotationEllipse"
+                                 Visibility="Collapsed"
+                                 Stroke="#FF3B42"
+                                 StrokeThickness="3"
+                                 Fill="#18FF3B42"
+                                 IsHitTestVisible="False" />
+                    </Canvas>
+                </Grid>
 
                 <StackPanel x:Name="PreviewPlaceholder"
                             HorizontalAlignment="Center"
