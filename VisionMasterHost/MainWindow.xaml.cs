@@ -86,7 +86,11 @@ public partial class MainWindow : Window
     private int _clickImagePixelHeight;
     private int _clickCenterInitializationQueued;
     private int _liveRenderGeneration;
+    private bool _livePreviewRenderReady;
     private TaskCompletionSource<int>? _livePreviewFirstFrameSource;
+    private TaskCompletionSource<bool> _fixedSolutionLoadSource =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private string _fixedSolutionLoadError = "固定视觉方案尚未开始加载。";
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
     private bool _showingCalibrationRender;
@@ -129,6 +133,8 @@ public partial class MainWindow : Window
         CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
         UpdateCommandState();
         SetStatus(message, StatusKind.Error);
+        _fixedSolutionLoadError = message;
+        _fixedSolutionLoadSource.TrySetResult(false);
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -297,11 +303,7 @@ public partial class MainWindow : Window
             return "标定界面已经开启。";
         }
 
-        if (!_solutionLoaded)
-        {
-            throw new InvalidOperationException(
-                $"固定方案尚未加载完成。请等待程序启动加载完成，或确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
-        }
+        await WaitForFixedSolutionAsync();
 
         await ActivateCalibrationProcedureAsync(_activeCalibrationProcedureName);
         return $"标定界面已开启：{_activeCalibrationProcedureName}。";
@@ -331,10 +333,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("九点标定正在执行，不能切换视觉流程。");
         }
 
-        if (!_solutionLoaded)
-        {
-            throw new InvalidOperationException("固定视觉方案尚未加载完成。");
-        }
+        await WaitForFixedSolutionAsync();
 
         var procedure = GetRequiredProcedure(procedureName);
         StopAllContinuousExecutionNoThrow();
@@ -375,11 +374,7 @@ public partial class MainWindow : Window
     private async Task<string> ActivateInspectionViewAsync()
     {
         StopAllContinuousExecutionNoThrow();
-        if (!_solutionLoaded)
-        {
-            throw new InvalidOperationException(
-                $"固定方案尚未加载完成。请等待程序启动加载完成，或确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。");
-        }
+        await WaitForFixedSolutionAsync();
 
         _inspectionProcedure ??= GetRequiredProcedure(InspectionProcedureName);
         _calibrationViewActive = false;
@@ -2547,6 +2542,11 @@ public partial class MainWindow : Window
                 }
             },
             DispatcherPriority.Render);
+        if (!_livePreviewRenderReady)
+        {
+            return;
+        }
+
         if (_clickCenterPixelReady)
         {
             QueueImageCenterCrosshair();
@@ -2867,22 +2867,27 @@ public partial class MainWindow : Window
 
     private void LoadFixedSolution()
     {
-        var solutionPath = GetFixedSolutionPath();
-        if (!File.Exists(solutionPath))
+        if (_fixedSolutionLoadSource.Task.IsCompleted)
         {
-            SetStatus(
-                $"未找到固定视觉方案。请将“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”放到当前用户桌面。",
-                StatusKind.Error);
-            return;
+            _fixedSolutionLoadSource =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         _initializingFixedSolution = true;
         SetBusy(true);
-        SetStatus("正在加载固定视觉方案…", StatusKind.Busy);
-
+        var solutionPath = GetFixedSolutionPath();
         var previousSolutionClosed = false;
         try
         {
+            if (!File.Exists(solutionPath))
+            {
+                _fixedSolutionLoadError =
+                    $"未找到固定视觉方案。请将“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”放到当前用户桌面。";
+                SetStatus(_fixedSolutionLoadError, StatusKind.Error);
+                return;
+            }
+
+            SetStatus("正在加载固定视觉方案…", StatusKind.Busy);
             CloseCurrentSolution();
             previousSolutionClosed = true;
             _loadedSolutionPath = Path.GetFullPath(solutionPath);
@@ -2911,6 +2916,7 @@ public partial class MainWindow : Window
             SolutionPathTextBox.Text = _loadedSolutionPath;
             PopulateImageSteps(CalibrationProcedureName, _previewProcedure);
             SaveSettingsNoThrow();
+            _fixedSolutionLoadError = "";
 
             UpdateCommandState();
             SetStatus(
@@ -2924,12 +2930,31 @@ public partial class MainWindow : Window
                 CloseCurrentSolutionNoThrow();
             }
 
-            SetStatus($"固定视觉方案加载失败：{FormatException(exception)}", StatusKind.Error);
+            _fixedSolutionLoadError = $"固定视觉方案加载失败：{FormatException(exception)}";
+            SetStatus(_fixedSolutionLoadError, StatusKind.Error);
         }
         finally
         {
             _initializingFixedSolution = false;
             SetBusy(false);
+            _fixedSolutionLoadSource.TrySetResult(_solutionLoaded);
+        }
+    }
+
+    private async Task WaitForFixedSolutionAsync()
+    {
+        var loadSource = _fixedSolutionLoadSource;
+        if (!loadSource.Task.IsCompleted || _initializingFixedSolution)
+        {
+            await loadSource.Task;
+        }
+
+        if (!_solutionLoaded)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(_fixedSolutionLoadError)
+                    ? $"固定视觉方案加载失败，请确认桌面存在“{FixedSolutionFileName}”或“{FallbackSolutionFileName}”。"
+                    : _fixedSolutionLoadError);
         }
     }
 
@@ -3177,15 +3202,17 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("固定视觉方案或实时相机流程尚未就绪。");
         }
 
-        ApplyLiveRenderLayout();
-        RefreshRenderLayout();
-
         // ContinuousRunEnable returns before the camera has produced its first frame.
+        // 先解绑空结果的渲染源，只监听模块结果；如果此时就显示渲染控件，
+        // VisionMaster 会在相机首帧到达前弹出一次“无画面”。
+        var imageOption = ImageStepComboBox.SelectedItem as VisionModuleOption
+            ?? throw new InvalidOperationException("当前实时画面模块尚未选择。");
+        PrepareImageStepForFirstFrame(imageOption);
         ImagePlaceholderText.Text = "正在连接相机，等待首帧…";
         ImagePlaceholder.Visibility = Visibility.Visible;
         var firstFrameSource = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         _livePreviewFirstFrameSource = firstFrameSource;
-        if (!TryStartLivePreview(out var previewError))
+        if (!TryStartLivePreview(out var previewError, bindSelectedImageStep: false))
         {
             _livePreviewFirstFrameSource = null;
             throw new InvalidOperationException($"实时画面启动失败：{previewError}");
@@ -3229,6 +3256,14 @@ public partial class MainWindow : Window
             }
         }
 
+        // 模块已经有有效结果后再绑定并显示，避免厂商渲染控件读取空结果。
+        VisionRenderControl.ModuleSource = imageOption.Module;
+        ApplyLiveRenderLayout();
+        RefreshRenderLayout();
+        VisionRenderControl.UpdateVMResultShow();
+        _livePreviewRenderReady = true;
+        ImagePlaceholder.Visibility = Visibility.Collapsed;
+        QueueClickCenterInitialization();
         SetStatus("实时画面已就绪。", StatusKind.Success);
         return "实时画面已就绪。";
     }
@@ -3440,7 +3475,9 @@ public partial class MainWindow : Window
         VisionRenderControl.UpdateVMResultShow();
     }
 
-    private bool TryStartLivePreview(out string errorMessage)
+    private bool TryStartLivePreview(
+        out string errorMessage,
+        bool bindSelectedImageStep = true)
     {
         if (!_solutionLoaded || _previewProcedure is null)
         {
@@ -3457,7 +3494,8 @@ public partial class MainWindow : Window
         var stage = "绑定实时画面";
         try
         {
-            if (ImageStepComboBox.SelectedItem is VisionModuleOption option)
+            if (bindSelectedImageStep &&
+                ImageStepComboBox.SelectedItem is VisionModuleOption option)
             {
                 BindImageStep(option, persistSelection: false);
             }
@@ -3479,17 +3517,10 @@ public partial class MainWindow : Window
 
     private void BindImageStep(VisionModuleOption option, bool persistSelection)
     {
-        DetachCrosshairModule();
-        _clickCenterPixelReady = false;
-        _clickImagePixelWidth = 0;
-        _clickImagePixelHeight = 0;
-        _displayedModule = option.Module as VmModule;
-        Interlocked.Increment(ref _liveRenderGeneration);
-        ImagePlaceholder.Visibility = Visibility.Visible;
+        PrepareImageStepForFirstFrame(option);
         VisionRenderControl.ModuleSource = option.Module;
+        _livePreviewRenderReady = true;
 
-        CenterCrosshair.Visibility = Visibility.Collapsed;
-        AttachCrosshairModule();
         if (!persistSelection)
         {
             return;
@@ -3497,6 +3528,30 @@ public partial class MainWindow : Window
 
         _settings.ImageModuleKey = option.ModuleKey;
         SaveSettingsNoThrow();
+    }
+
+    private void PrepareImageStepForFirstFrame(VisionModuleOption option)
+    {
+        DetachCrosshairModule();
+        _livePreviewRenderReady = false;
+        _clickCenterPixelReady = false;
+        _clickImagePixelWidth = 0;
+        _clickImagePixelHeight = 0;
+        _displayedModule = option.Module as VmModule;
+        Interlocked.Increment(ref _liveRenderGeneration);
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        try
+        {
+            VisionRenderControl.ModuleSource = null;
+            VisionRenderControl.ClearDisplayView();
+        }
+        catch
+        {
+            // 清空旧帧只影响显示；相机首帧仍通过模块结果回调判定。
+        }
+
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        AttachCrosshairModule();
     }
 
     private void SetBusy(bool busy)

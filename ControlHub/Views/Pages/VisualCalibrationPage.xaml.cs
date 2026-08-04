@@ -49,6 +49,7 @@ public partial class VisualCalibrationPage : UserControl
         Interval = TimeSpan.FromMilliseconds(500)
     };
     private bool _startRequested;
+    private Task? _hostStartTask;
     private bool _shutdown;
     private bool _hostReady;
     private bool _hostCanRestart;
@@ -653,15 +654,25 @@ public partial class VisualCalibrationPage : UserControl
 
     public async Task EnsureStartedAsync()
     {
-        if (_startRequested || _shutdown)
+        if (_shutdown)
         {
             return;
         }
 
-        _startRequested = true;
-        _hostCanRestart = false;
-        UpdateCommandState();
-        await VisionHost.StartAsync();
+        if (!_startRequested)
+        {
+            _startRequested = true;
+            _hostCanRestart = false;
+            UpdateCommandState();
+            _hostStartTask = VisionHost.StartAsync();
+        }
+
+        // 菜单点击可能与主窗口启动时的预加载同时发生。所有调用者都等待同一个
+        // 启动任务，不能仅凭“已请求启动”就继续向尚未就绪的宿主发送命令。
+        if (_hostStartTask is not null)
+        {
+            await _hostStartTask;
+        }
     }
 
     public async Task ActivateCalibrationViewAsync()
