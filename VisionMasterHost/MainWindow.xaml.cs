@@ -9,7 +9,6 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using GlobalVariableModuleCs;
-using GeometryCreateCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSCircleFitModuCs;
@@ -17,7 +16,6 @@ using IMVSLineFindModuCs;
 using IMVSL2LMeasureModuCs;
 using IMVSNPointCalibModuCs;
 using IMVSRectFindModuCs;
-using ShellModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
 using VMControls.Interface;
@@ -43,10 +41,9 @@ public partial class MainWindow : Window
     private const string RotationCenterCircleModuleName = "圆拟合1";
     private const string LowerCameraCorrectionProcedureName = "下相机纠偏";
     private const string LowerCameraCorrectionImageSourceName = "图像源1";
-    private const string LowerCameraCorrectionGeometryModuleName = "几何创建1";
     private const string LowerCameraCorrectionLineLineModuleName = "线线测量1";
-    private const string LowerCameraCorrectionScriptModuleName = "脚本1";
     private const string LowerCameraCorrectionTransformModuleName = "标定转换1";
+    private const string LowerCameraCorrectionCenterTransformModuleName = "标定转换2";
     private const string GlobalVariableModuleName = "全局变量1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
@@ -567,43 +564,25 @@ public partial class MainWindow : Window
         var imageSourceModule = ResolveNamedModule<VmModule>(
             LowerCameraCorrectionProcedureName,
             LowerCameraCorrectionImageSourceName);
-        var geometryModule = ResolveNamedModule<GeometryCreateTool>(
-            LowerCameraCorrectionProcedureName,
-            LowerCameraCorrectionGeometryModuleName);
         var lineLineModule = ResolveNamedModule<IMVSL2LMeasureModuTool>(
             LowerCameraCorrectionProcedureName,
             LowerCameraCorrectionLineLineModuleName);
-        var scriptModule = ResolveNamedModule<ShellModuleTool>(
-            LowerCameraCorrectionProcedureName,
-            LowerCameraCorrectionScriptModuleName);
         var transformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
             LowerCameraCorrectionProcedureName,
             LowerCameraCorrectionTransformModuleName);
+        var centerTransformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
+            LowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionCenterTransformModuleName);
 
         StopAllContinuousExecutionNoThrow();
         var globalVariables = ResolveGlobalVariableModule();
-        TrySetFirstExistingGlobalFloat(
-            globalVariables,
-            ["旋转中心X", "旋转X", "RX"],
-            rotationCenterX);
-        TrySetFirstExistingGlobalFloat(
-            globalVariables,
-            ["旋转中心Y", "旋转Y", "RY"],
-            rotationCenterY);
+        globalVariables.SetVarFloat("旋转中心X", [rotationCenterX]);
+        globalVariables.SetVarFloat("旋转中心Y", [rotationCenterY]);
 
-        // 不再读取示教直线。以旋转中心为原点构造水平基准线，
-        // 当前吸嘴直线相对该基准线的夹角就是本次R轴纠偏角。
-        geometryModule.ModuParams.InputLine =
-        [
-            new VM.PlatformSDKCS.Line
-            {
-                StartPoint = new VM.PlatformSDKCS.PointF { X = rotationCenterX - 100f, Y = rotationCenterY },
-                EndPoint = new VM.PlatformSDKCS.PointF { X = rotationCenterX + 100f, Y = rotationCenterY }
-            }
-        ];
-        scriptModule.ModuParams.SetInputFloat("RX", [rotationCenterX]);
-        scriptModule.ModuParams.SetInputFloat("RY", [rotationCenterY]);
+        // “旋转计算1”的旋转中心坐标已经连接到这两个全局变量。
+        // 应用程序只写入记录好的圆心X/Y，其余点、角度和差值全部由纠偏流程内部计算。
         transformModule.ModuParams.LoadCalibPath = calibrationPath;
+        centerTransformModule.ModuParams.LoadCalibPath = calibrationPath;
 
         // 主页复用原 Blob 承载区域显示纠偏画面；绑定图像源可直接看到
         // 拍照位1/2各自触发的本次原始相机图，而不是下游转换模块的叠加结果。
@@ -611,18 +590,6 @@ public partial class MainWindow : Window
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, LowerCameraCorrectionProcedureName);
         RefreshInspectionDisplayNoThrow();
-
-        if (geometryModule.ModuResult is not { ModuStatus: 1 })
-        {
-            throw new InvalidOperationException(
-                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionGeometryModuleName}返回NG，请检查四个直线参数。");
-        }
-
-        if (scriptModule.ModuResult is not { ModuStatus: 1 })
-        {
-            throw new InvalidOperationException(
-                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionScriptModuleName}返回NG，请检查RX/RY圆心参数。");
-        }
 
         var lineLineResult = lineLineModule.ModuResult;
         if (lineLineResult is null || lineLineResult.ModuStatus != 1 ||
@@ -649,18 +616,12 @@ public partial class MainWindow : Window
         var transformedX = transformed.X;
         var transformedY = transformed.Y;
 
-        // 把旋转圆心按同一标定文件转换到机械坐标。纠偏量直接取当前吸嘴中心
-        // 与旋转中心之差，因此不再需要保存或导入任何示教转换坐标。
-        transformModule.ModuParams.InputPoint =
-        [
-            new VM.PlatformSDKCS.PointF { X = rotationCenterX, Y = rotationCenterY }
-        ];
-        transformModule.Run();
-        var centerTransformResult = transformModule.ModuResult;
+        var centerTransformResult = centerTransformModule.ModuResult;
         if (centerTransformResult is null || centerTransformResult.ModuStatus != 1 ||
             centerTransformResult.TransPoint is null || centerTransformResult.TransPoint.Count < 1)
         {
-            throw new InvalidOperationException("下相机纠偏未能把旋转圆心转换为机械坐标。");
+            throw new InvalidOperationException(
+                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionCenterTransformModuleName}未返回旋转中心转换坐标。");
         }
 
         var transformedCenter = centerTransformResult.TransPoint[0];
@@ -680,26 +641,6 @@ public partial class MainWindow : Window
             correctionX.ToString("R", CultureInfo.InvariantCulture),
             correctionY.ToString("R", CultureInfo.InvariantCulture),
             lineLineResult.L2LAngle.ToString("R", CultureInfo.InvariantCulture));
-    }
-
-    private static bool TrySetFirstExistingGlobalFloat(
-        GlobalVariableModuleTool module,
-        IEnumerable<string> candidateNames,
-        float value)
-    {
-        foreach (var candidateName in candidateNames)
-        {
-            try
-            {
-                module.SetVarFloat(candidateName, [value]);
-                return true;
-            }
-            catch
-            {
-            }
-        }
-
-        return false;
     }
 
     private static void EnsureProcedureRunSucceeded(VmProcedure procedure, string procedureName)
