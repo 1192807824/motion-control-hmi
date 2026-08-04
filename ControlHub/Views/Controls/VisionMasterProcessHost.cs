@@ -316,7 +316,6 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     public Task<string> SetCalibrationToolbarStateAsync(
         string calibrationFilePath,
-        string lowerCameraTeachDataFilePath,
         bool pathEnabled,
         bool chooseEnabled,
         bool importEnabled,
@@ -327,8 +326,6 @@ public sealed class VisionMasterProcessHost : HwndHost
     {
         var encodedPath = Convert.ToBase64String(
             Encoding.UTF8.GetBytes(calibrationFilePath?.Trim() ?? string.Empty));
-        var encodedTeachDataPath = Convert.ToBase64String(
-            Encoding.UTF8.GetBytes(lowerCameraTeachDataFilePath?.Trim() ?? string.Empty));
         return SendCalibrationCommandAsync(
             string.Join(
                 "\t",
@@ -339,8 +336,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 importEnabled ? "1" : "0",
                 loadProfileEnabled ? "1" : "0",
                 saveProfileEnabled ? "1" : "0",
-                simplifiedMode ? "1" : "0",
-                encodedTeachDataPath),
+                simplifiedMode ? "1" : "0"),
             cancellationToken);
     }
 
@@ -404,14 +400,9 @@ public sealed class VisionMasterProcessHost : HwndHost
                 state.RotationCenterEnabled ? "1" : "0",
                 state.RotationCenterRunning ? "1" : "0",
                 Encode(state.RotationCenterStatus),
-                state.LowerCameraTeachEnabled ? "1" : "0",
-                state.LowerCameraTeachRunning ? "1" : "0",
-                Encode(state.LowerCameraTeachStatus),
                 state.LowerCameraCorrectionTestEnabled ? "1" : "0",
                 state.LowerCameraCorrectionTestRunning ? "1" : "0",
-                Encode(state.LowerCameraCorrectionTestStatus),
-                state.LowerCameraTeachDataImportEnabled ? "1" : "0",
-                Encode(state.LowerCameraTeachDataFilePath)),
+                Encode(state.LowerCameraCorrectionTestStatus)),
             cancellationToken);
     }
 
@@ -467,73 +458,25 @@ public sealed class VisionMasterProcessHost : HwndHost
         return new VisionRotationCenterResult(centerX, centerY);
     }
 
-    public async Task<VisionLowerCameraTeachResult> RunLowerCameraTeachAsync(
-        string calibrationFilePath,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
-        var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath));
-        var response = await SendCalibrationCommandAsync(
-            $"RUN_LOWER_CAMERA_TEACH\t{encodedPath}",
-            cancellationToken);
-        var parts = response.Split('\t');
-        if (parts.Length != 6)
-        {
-            throw new InvalidDataException("VisionMaster 返回的下相机示教数据数量不正确。");
-        }
-
-        var values = new double[6];
-        for (var index = 0; index < values.Length; index++)
-        {
-            if (!double.TryParse(
-                    parts[index],
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out values[index]) ||
-                !double.IsFinite(values[index]))
-            {
-                throw new InvalidDataException($"VisionMaster 返回的下相机示教数据{index + 1}无效。");
-            }
-        }
-
-        return new VisionLowerCameraTeachResult(
-            values[0], values[1], values[2], values[3], values[4], values[5]);
-    }
-
     public async Task<VisionLowerCameraCorrectionResult> RunLowerCameraCorrectionAsync(
-        double lineStartX,
-        double lineStartY,
-        double lineEndX,
-        double lineEndY,
         double circleCenterX,
         double circleCenterY,
-        double taughtTransformedX,
-        double taughtTransformedY,
         string calibrationFilePath,
         CancellationToken cancellationToken)
     {
-        var values = new[]
+        if (!double.IsFinite(circleCenterX) || !double.IsFinite(circleCenterY))
         {
-            lineStartX,
-            lineStartY,
-            lineEndX,
-            lineEndY,
-            circleCenterX,
-            circleCenterY,
-            taughtTransformedX,
-            taughtTransformedY
-        };
-        if (values.Any(value => !double.IsFinite(value)))
-        {
-            throw new ArgumentOutOfRangeException(nameof(lineStartX), "下相机纠偏输入必须是有效数字。");
+            throw new ArgumentOutOfRangeException(nameof(circleCenterX), "下相机旋转圆心必须是有效数字。");
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
-        var commandParts = new List<string> { "RUN_LOWER_CAMERA_CORRECTION" };
-        commandParts.AddRange(values.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
-        commandParts.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath)));
         var response = await SendCalibrationCommandAsync(
-            string.Join("\t", commandParts),
+            string.Join(
+                "\t",
+                "RUN_LOWER_CAMERA_CORRECTION",
+                circleCenterX.ToString("R", CultureInfo.InvariantCulture),
+                circleCenterY.ToString("R", CultureInfo.InvariantCulture),
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath))),
             cancellationToken);
         var parts = response.Split('\t');
         if (parts.Length != 3 ||
@@ -1550,26 +1493,13 @@ public sealed record CalibrationSidebarState(
     bool RotationCenterEnabled,
     bool RotationCenterRunning,
     string RotationCenterStatus,
-    bool LowerCameraTeachEnabled,
-    bool LowerCameraTeachRunning,
-    string LowerCameraTeachStatus,
     bool LowerCameraCorrectionTestEnabled,
     bool LowerCameraCorrectionTestRunning,
-    string LowerCameraCorrectionTestStatus,
-    bool LowerCameraTeachDataImportEnabled,
-    string LowerCameraTeachDataFilePath);
+    string LowerCameraCorrectionTestStatus);
 
 public sealed record VisionRotationPoint(double X, double Y);
 
 public sealed record VisionRotationCenterResult(double CenterX, double CenterY);
-
-public sealed record VisionLowerCameraTeachResult(
-    double LineStartX,
-    double LineStartY,
-    double LineEndX,
-    double LineEndY,
-    double TransformedX,
-    double TransformedY);
 
 public sealed record VisionLowerCameraCorrectionResult(
     double CorrectionX,

@@ -43,9 +43,6 @@ public partial class MainWindow : Window
     private const string RotationPointRectangleModuleName = "矩形检测1";
     private const string RotationCenterProcedureName = "计算旋转中心";
     private const string RotationCenterCircleModuleName = "圆拟合1";
-    private const string LowerCameraTeachProcedureName = "下相机示教流程";
-    private const string LowerCameraTeachLineModuleName = "直线查找1";
-    private const string LowerCameraTeachTransformModuleName = "标定转换1";
     private const string LowerCameraCorrectionProcedureName = "下相机纠偏";
     private const string LowerCameraCorrectionImageSourceName = "图像源1";
     private const string LowerCameraCorrectionGeometryModuleName = "几何创建1";
@@ -287,7 +284,6 @@ public partial class MainWindow : Window
             "RUN_NOZZLE_POINTS" => RunNozzlePointInspection(parts),
             "RUN_ROTATION_CENTER_CAPTURE" => RunRotationCenterCapture(parts),
             "CALCULATE_ROTATION_CENTER" => CalculateRotationCenter(parts),
-            "RUN_LOWER_CAMERA_TEACH" => RunLowerCameraTeach(parts),
             "RUN_LOWER_CAMERA_CORRECTION" => RunLowerCameraCorrection(parts),
             _ => throw new InvalidOperationException($"不支持的视觉标定命令：{parts[0]}")
         };
@@ -554,87 +550,26 @@ public partial class MainWindow : Window
         }
     }
 
-    private string RunLowerCameraTeach(IReadOnlyList<string> parts)
-    {
-        if (parts.Count != 2)
-        {
-            throw new InvalidDataException("下相机示教命令必须包含当前吸嘴的标定文件路径。");
-        }
-
-        EnsureRotationCenterCommandReady();
-        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[1]);
-        var procedure = GetRequiredProcedure(LowerCameraTeachProcedureName);
-        var lineModule = ResolveNamedModule<IMVSLineFindModuTool>(
-            LowerCameraTeachProcedureName,
-            LowerCameraTeachLineModuleName);
-        var transformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
-            LowerCameraTeachProcedureName,
-            LowerCameraTeachTransformModuleName);
-
-        StopAllContinuousExecutionNoThrow();
-        transformModule.ModuParams.LoadCalibPath = calibrationPath;
-        BindInspectionResultModule(transformModule);
-        procedure.Run(true);
-        EnsureProcedureRunSucceeded(procedure, LowerCameraTeachProcedureName);
-
-        var lineResult = lineModule.ModuResult;
-        var line = lineResult?.OutputLine;
-        if (lineResult is null || lineResult.ModuStatus != 1 || line is null)
-        {
-            throw new InvalidOperationException(
-                $"{LowerCameraTeachProcedureName}.{LowerCameraTeachLineModuleName}返回NG，请检查吸嘴图像和直线查找参数。");
-        }
-
-        var transformResult = transformModule.ModuResult;
-        if (transformResult is null || transformResult.ModuStatus != 1 ||
-            transformResult.TransPoint is null || transformResult.TransPoint.Count < 1)
-        {
-            throw new InvalidOperationException(
-                $"{LowerCameraTeachProcedureName}.{LowerCameraTeachTransformModuleName}未返回转换坐标，请检查标定文件和模块输入连线。");
-        }
-
-        var start = line.StartPoint;
-        var end = line.EndPoint;
-        var transformed = transformResult.TransPoint[0];
-        var values = new[]
-        {
-            start.X, start.Y, end.X, end.Y, transformed.X, transformed.Y
-        };
-        if (values.Any(value => float.IsNaN(value) || float.IsInfinity(value)))
-        {
-            throw new InvalidOperationException("下相机示教流程返回的直线或转换坐标无效。");
-        }
-
-        SetStatus(
-            $"下相机示教完成：起点({start.X:0.###}, {start.Y:0.###})，终点({end.X:0.###}, {end.Y:0.###})，转换({transformed.X:0.###}, {transformed.Y:0.###})",
-            StatusKind.Success);
-        return string.Join(
-            "\t",
-            values.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
-    }
-
     private string RunLowerCameraCorrection(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 10)
+        if (parts.Count != 4)
         {
             throw new InvalidDataException(
-                "下相机纠偏命令必须包含直线起终点、旋转圆心、示教转换坐标和当前吸嘴标定文件。");
+                "下相机纠偏命令必须包含旋转圆心和当前吸嘴标定文件。");
         }
 
         EnsureRotationCenterCommandReady();
-        var values = new float[8];
-        for (var index = 0; index < values.Length; index++)
+        var centerX = ParseFiniteDouble(parts[1], "旋转圆心X");
+        var centerY = ParseFiniteDouble(parts[2], "旋转圆心Y");
+        if (centerX < float.MinValue || centerX > float.MaxValue ||
+            centerY < float.MinValue || centerY > float.MaxValue)
         {
-            var value = ParseFiniteDouble(parts[index + 1], $"下相机纠偏参数{index + 1}");
-            if (value < float.MinValue || value > float.MaxValue)
-            {
-                throw new InvalidDataException($"下相机纠偏参数{index + 1}超出float范围。");
-            }
-
-            values[index] = (float)value;
+            throw new InvalidDataException("下相机旋转圆心超出float范围。");
         }
 
-        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[9]);
+        var rotationCenterX = (float)centerX;
+        var rotationCenterY = (float)centerY;
+        var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[3]);
         var procedure = GetRequiredProcedure(LowerCameraCorrectionProcedureName);
         var imageSourceModule = ResolveNamedModule<VmModule>(
             LowerCameraCorrectionProcedureName,
@@ -654,29 +589,27 @@ public partial class MainWindow : Window
 
         StopAllContinuousExecutionNoThrow();
         var globalVariables = ResolveGlobalVariableModule();
-        globalVariables.SetVarFloat("1x", [values[0]]);
-        globalVariables.SetVarFloat("1y", [values[1]]);
-        globalVariables.SetVarFloat("2x", [values[2]]);
-        globalVariables.SetVarFloat("2y", [values[3]]);
         TrySetFirstExistingGlobalFloat(
             globalVariables,
             ["旋转中心X", "旋转X", "RX"],
-            values[4]);
+            rotationCenterX);
         TrySetFirstExistingGlobalFloat(
             globalVariables,
             ["旋转中心Y", "旋转Y", "RY"],
-            values[5]);
+            rotationCenterY);
 
+        // 不再读取示教直线。以旋转中心为原点构造水平基准线，
+        // 当前吸嘴直线相对该基准线的夹角就是本次R轴纠偏角。
         geometryModule.ModuParams.InputLine =
         [
             new VM.PlatformSDKCS.Line
             {
-                StartPoint = new VM.PlatformSDKCS.PointF { X = values[0], Y = values[1] },
-                EndPoint = new VM.PlatformSDKCS.PointF { X = values[2], Y = values[3] }
+                StartPoint = new VM.PlatformSDKCS.PointF { X = rotationCenterX - 100f, Y = rotationCenterY },
+                EndPoint = new VM.PlatformSDKCS.PointF { X = rotationCenterX + 100f, Y = rotationCenterY }
             }
         ];
-        scriptModule.ModuParams.SetInputFloat("RX", [values[4]]);
-        scriptModule.ModuParams.SetInputFloat("RY", [values[5]]);
+        scriptModule.ModuParams.SetInputFloat("RX", [rotationCenterX]);
+        scriptModule.ModuParams.SetInputFloat("RY", [rotationCenterY]);
         transformModule.ModuParams.LoadCalibPath = calibrationPath;
 
         // 主页复用原 Blob 承载区域显示纠偏画面；绑定图像源可直接看到
@@ -720,9 +653,26 @@ public partial class MainWindow : Window
         {
             throw new InvalidOperationException("下相机纠偏返回的转换坐标X/Y无效。");
         }
+        var transformedX = transformed.X;
+        var transformedY = transformed.Y;
 
-        var correctionX = transformed.X - values[6];
-        var correctionY = transformed.Y - values[7];
+        // 把旋转圆心按同一标定文件转换到机械坐标。纠偏量直接取当前吸嘴中心
+        // 与旋转中心之差，因此不再需要保存或导入任何示教转换坐标。
+        transformModule.ModuParams.InputPoint =
+        [
+            new VM.PlatformSDKCS.PointF { X = rotationCenterX, Y = rotationCenterY }
+        ];
+        transformModule.Run();
+        var centerTransformResult = transformModule.ModuResult;
+        if (centerTransformResult is null || centerTransformResult.ModuStatus != 1 ||
+            centerTransformResult.TransPoint is null || centerTransformResult.TransPoint.Count < 1)
+        {
+            throw new InvalidOperationException("下相机纠偏未能把旋转圆心转换为机械坐标。");
+        }
+
+        var transformedCenter = centerTransformResult.TransPoint[0];
+        var correctionX = transformedX - transformedCenter.X;
+        var correctionY = transformedY - transformedCenter.Y;
         if (float.IsNaN(correctionX) || float.IsInfinity(correctionX) ||
             float.IsNaN(correctionY) || float.IsInfinity(correctionY))
         {
@@ -1040,7 +990,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationToolbarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 9)
+        if (parts.Count != 8)
         {
             throw new InvalidDataException("标定文件菜单状态参数不正确。");
         }
@@ -1067,17 +1017,6 @@ public partial class MainWindow : Window
         LoadCalibrationProfileToolbarButton.IsEnabled = parts[5] == "1";
         SaveCalibrationProfileToolbarButton.IsEnabled = parts[6] == "1";
         var simplifiedMode = parts[7] == "1";
-        var lowerCameraTeachDataFilePath = Encoding.UTF8.GetString(
-            Convert.FromBase64String(parts[8]));
-        CalibrationTeachDataFilePanel.Visibility = simplifiedMode
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        CalibrationTeachDataFileTextBox.Text = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
-            ? "未设置"
-            : Path.GetFileName(lowerCameraTeachDataFilePath.Trim());
-        CalibrationTeachDataFileTextBox.ToolTip = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
-            ? "当前吸嘴纠偏所应用的示教数据文件尚未设置"
-            : $"当前吸嘴纠偏应用：{lowerCameraTeachDataFilePath}";
         LoadCalibrationProfileToolbarButton.Visibility = simplifiedMode
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -1132,7 +1071,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 44)
+        if (parts.Count != 39)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -1246,51 +1185,31 @@ public partial class MainWindow : Window
                 ? "StopRotationCenter"
                 : "CalculateRotationCenter";
             SidebarRotationCenterButton.Content = rotationCenterRunning
-                ? "停止旋转中心 / 自动示教"
+                ? "停止旋转中心计算"
                 : $"计算旋转中心并保存 · {lowerCameraNozzleName}";
             SidebarRotationCenterStatusText.Text = Decode(parts[35]);
             SidebarRotationCenterStatusText.Foreground = rotationCenterRunning
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
                 : new SolidColorBrush(Color.FromRgb(175, 192, 205));
-            var lowerCameraTeachRunning = parts[37] == "1";
-            SidebarLowerCameraTeachSection.Visibility = simplifiedMode
+            SidebarLowerCameraCorrectionSection.Visibility = simplifiedMode
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             SidebarClickMoveSection.Visibility = simplifiedMode
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-            SidebarLowerCameraTeachButton.IsEnabled = parts[36] == "1" || lowerCameraTeachRunning;
-            SidebarLowerCameraTeachButton.Tag = lowerCameraTeachRunning
-                ? "StopLowerCameraTeach"
-                : "RunLowerCameraTeach";
-            SidebarLowerCameraTeachButton.Content = lowerCameraTeachRunning
-                ? "停止下相机示教"
-                : $"执行并保存示教 · {lowerCameraNozzleName}";
-            SidebarLowerCameraTeachStatusText.Text = Decode(parts[38]);
-            SidebarLowerCameraTeachStatusText.Foreground = lowerCameraTeachRunning
-                ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
-                : new SolidColorBrush(Color.FromRgb(175, 192, 205));
-            var lowerCameraCorrectionTestRunning = parts[40] == "1";
+            var lowerCameraCorrectionTestRunning = parts[37] == "1";
             SidebarLowerCameraCorrectionTestButton.IsEnabled =
-                parts[39] == "1" || lowerCameraCorrectionTestRunning;
+                parts[36] == "1" || lowerCameraCorrectionTestRunning;
             SidebarLowerCameraCorrectionTestButton.Tag = lowerCameraCorrectionTestRunning
                 ? "StopLowerCameraCorrectionTest"
                 : "RunLowerCameraCorrectionTest";
             SidebarLowerCameraCorrectionTestButton.Content = lowerCameraCorrectionTestRunning
                 ? "停止纠偏测试"
                 : $"纠偏测试 · {lowerCameraNozzleName}";
-            SidebarLowerCameraCorrectionTestStatusText.Text = Decode(parts[41]);
+            SidebarLowerCameraCorrectionTestStatusText.Text = Decode(parts[38]);
             SidebarLowerCameraCorrectionTestStatusText.Foreground = lowerCameraCorrectionTestRunning
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))
                 : new SolidColorBrush(Color.FromRgb(175, 192, 205));
-            SidebarImportLowerCameraTeachDataButton.IsEnabled = parts[42] == "1";
-            var lowerCameraTeachDataFilePath = Decode(parts[43]);
-            SidebarLowerCameraTeachDataFileText.Text = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
-                ? "示教应用文件：未设置"
-                : $"示教应用文件：{Path.GetFileName(lowerCameraTeachDataFilePath)}";
-            SidebarLowerCameraTeachDataFileText.ToolTip = string.IsNullOrWhiteSpace(lowerCameraTeachDataFilePath)
-                ? "当前吸嘴纠偏所应用的示教数据文件尚未设置"
-                : $"当前吸嘴纠偏应用：{lowerCameraTeachDataFilePath}";
             SidebarClickTargetComboBox.Visibility = Visibility.Visible;
             SidebarClickMoveStepText.Text = "4";
             SidebarClickMoveTitleText.Text = "点击移动";

@@ -48,6 +48,8 @@ public partial class ConnectionConfigPage : UserControl
     private bool _connecting;
     private bool _tcpConnecting;
     private bool _meterOperationRunning;
+    private bool _serialConnecting;
+    private bool _serialMeterOperationRunning;
     private bool _loaded;
     private bool _vibrationSequenceRunning;
     private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
@@ -63,7 +65,7 @@ public partial class ConnectionConfigPage : UserControl
         _tcpClient.DataReceived += TcpClient_DataReceived;
         _tcpClient.ConnectionClosed += TcpClient_ConnectionClosed;
         _generalTcpClient.ConnectionClosed += GeneralTcpClient_ConnectionClosed;
-        _serialClient.DataReceived += SerialClient_DataReceived;
+        _serialClient.ResponseReceived += SerialClient_ResponseReceived;
         _serialClient.ConnectionClosed += SerialClient_ConnectionClosed;
     }
 
@@ -92,7 +94,7 @@ public partial class ConnectionConfigPage : UserControl
         _tcpClient.DataReceived -= TcpClient_DataReceived;
         _tcpClient.ConnectionClosed -= TcpClient_ConnectionClosed;
         _generalTcpClient.ConnectionClosed -= GeneralTcpClient_ConnectionClosed;
-        _serialClient.DataReceived -= SerialClient_DataReceived;
+        _serialClient.ResponseReceived -= SerialClient_ResponseReceived;
         _serialClient.ConnectionClosed -= SerialClient_ConnectionClosed;
         _tcpClient.Dispose();
         _generalTcpClient.Dispose();
@@ -110,7 +112,7 @@ public partial class ConnectionConfigPage : UserControl
         _loaded = true;
         AddLog("\u8fde\u63a5\u914d\u7f6e\u9875\u5df2\u52a0\u8f7d");
         AddTcpLog("E4981A连接配置已加载");
-        AddSerialLog("串口连接配置已加载");
+        AddSerialLog("SM7110串口连接配置已加载");
         RefreshSerialOptionLists();
         RefreshSerialPorts();
         await AutoConnectAsync();
@@ -406,7 +408,7 @@ public partial class ConnectionConfigPage : UserControl
         SaveSerialSettings(writeLog: true);
     }
 
-    private void ConnectSerial_Click(object sender, RoutedEventArgs e)
+    private async void ConnectSerial_Click(object sender, RoutedEventArgs e)
     {
         if (SerialSettings is not { } settings)
         {
@@ -414,23 +416,48 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         SaveSerialSettings(writeLog: false);
-        ConnectSerial(settings);
+        await ConnectSerialAsync(settings);
     }
 
-    private void ConnectSerial(SerialConnectionSettings settings)
+    private async Task ConnectSerialAsync(SerialConnectionSettings settings)
     {
+        if (_serialConnecting)
+        {
+            AddSerialLog("SM7110正在连接，请稍候");
+            return;
+        }
+
+        _serialConnecting = true;
         try
         {
+            SM7110Protocol.ValidateSettings(settings);
             _serialClient.Connect(settings);
+            AddSerialLog($"串口已打开 {settings.PortName}，{settings.BaudRate} bps，正在识别仪表");
+            var identity = await QuerySerialMeterAsync("*IDN?");
+            if (!SM7110Protocol.IsSupportedIdentity(identity))
+            {
+                _serialClient.Close();
+                throw new InvalidDataException($"已连接的设备不是SM7110/SM7120：{identity}");
+            }
+
+            UpdateSerialMeterIdentity(identity);
+            await SendSerialMeterCommandAsync(":STOP:CONDition DISCharge");
+            await SendSerialMeterCommandAsync(":STOP");
             settings.LastSuccessfulConnectionSignature = CreateSerialConnectionSignature(settings);
             _serialSettingsStore.Save(settings);
-            SetSerialStatus($"已连接：{settings.PortName}");
-            AddSerialLog($"串口已连接 {settings.PortName}，{settings.BaudRate} bps");
+            SetSerialStatus($"SM7110已连接：{settings.PortName}");
+            AddSerialLog($"SM7110身份确认成功：{identity}");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or
+                                   InvalidOperationException or ArgumentException or ObjectDisposedException)
         {
+            _serialClient.Close();
             SetSerialStatus("连接失败");
             AddSerialLog($"连接失败：{ex.Message}");
+        }
+        finally
+        {
+            _serialConnecting = false;
         }
     }
 
@@ -438,10 +465,10 @@ public partial class ConnectionConfigPage : UserControl
     {
         _serialClient.Close();
         SetSerialStatus("未连接");
-        AddSerialLog("已断开串口连接");
+        AddSerialLog("已断开SM7110串口连接");
     }
 
-    private void SendSerialMessage_Click(object sender, RoutedEventArgs e)
+    private async void SendSerialMessage_Click(object sender, RoutedEventArgs e)
     {
         if (SerialSettings is not { } settings)
         {
@@ -460,17 +487,94 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        try
+        var command = settings.ManualSendText.Trim();
+        await RunSerialMeterOperationAsync("手动命令", async () =>
         {
-            var payload = BuildPayload(settings.ManualSendText, settings.AppendNewLine, settings.NewLine);
-            _serialClient.Write(payload);
-            AddSerialLog($"TX [ASCII]  {FormatPayload(payload)}");
-        }
-        catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+            if (!settings.AppendNewLine)
+            {
+                throw new InvalidOperationException("SM7110命令必须追加结束符。");
+            }
+
+            if (SM7110Protocol.ExpectsResponse(command))
+            {
+                var response = await QuerySerialMeterAsync(command);
+                if (string.Equals(command, "*IDN?", StringComparison.OrdinalIgnoreCase))
+                {
+                    UpdateSerialMeterIdentity(response);
+                }
+            }
+            else
+            {
+                await SendSerialMeterCommandAsync(command);
+            }
+        });
+    }
+
+    private async void ApplySerialMeterSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (SerialSettings is not { } settings)
         {
-            SetSerialStatus("通讯异常");
-            AddSerialLog($"发送失败：{ex.Message}");
+            return;
         }
+
+        CommitInputBindings(this);
+        SaveSerialSettings(writeLog: false);
+        await RunSerialMeterOperationAsync("下发测试参数", async () =>
+        {
+            var commands = SM7110Protocol.BuildSetupCommands(settings);
+            foreach (var command in commands)
+            {
+                await SendSerialMeterCommandAsync(command);
+            }
+            AddSerialLog($"SM7110测试参数下发完成，共{commands.Count}条命令，当前保持停止放电状态");
+        });
+    }
+
+    private async void TriggerSerialMeterTest_Click(object sender, RoutedEventArgs e)
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        CommitInputBindings(this);
+        SaveSerialSettings(writeLog: false);
+        await RunSerialMeterOperationAsync("单次测量", async () =>
+        {
+            var setupCommands = SM7110Protocol.BuildSetupCommands(settings);
+            foreach (var command in setupCommands)
+            {
+                await SendSerialMeterCommandAsync(command);
+            }
+            await SendSerialMeterCommandAsync(":STARt");
+            try
+            {
+                var response = await QuerySerialMeterAsync("*TRG;*WAI;:MEASure:RESult? 3");
+                UpdateSerialMeterResult(SM7110Protocol.ParseMeasurementResult(response, settings.MeasurementMode));
+            }
+            finally
+            {
+                try
+                {
+                    await SendSerialMeterCommandAsync(":STOP");
+                    AddSerialLog("测量结束，已停止输出并进入放电状态");
+                }
+                catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+                {
+                    AddSerialLog($"警告：测量结束后停止放电命令发送失败：{ex.Message}");
+                }
+            }
+        });
+    }
+
+    private async void StopSerialMeter_Click(object sender, RoutedEventArgs e)
+    {
+        await RunSerialMeterOperationAsync("停止并放电", async () =>
+        {
+            await SendSerialMeterCommandAsync(":STOP");
+            SerialMeterResultStatusText.Text = "已停止并放电";
+            SerialMeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(98, 181, 255));
+        });
     }
 
     private void ClearSerialLog_Click(object sender, RoutedEventArgs e)
@@ -539,15 +643,18 @@ public partial class ConnectionConfigPage : UserControl
         if (SerialSettings is { } serialSettings &&
             HasSuccessfulSerialConnection(serialSettings))
         {
-            AddSerialLog("程序启动，正在自动连接串口");
-            ConnectSerial(serialSettings);
+            AddSerialLog("程序启动，正在自动连接SM7110");
         }
         else
         {
             AddSerialLog("未自动连接：当前串口配置尚未成功连接过");
         }
 
-        var connectionTasks = new List<Task>(2);
+        var connectionTasks = new List<Task>(3);
+        if (SerialSettings is { } autoSerialSettings && HasSuccessfulSerialConnection(autoSerialSettings))
+        {
+            connectionTasks.Add(ConnectSerialAsync(autoSerialSettings));
+        }
         if (Settings is { } feederSettings &&
             HasSuccessfulTcpConnection(
                 feederSettings.LastSuccessfulConnectionSignature,
@@ -887,7 +994,7 @@ public partial class ConnectionConfigPage : UserControl
         _serialSettingsStore.Save(settings);
         if (writeLog)
         {
-            AddSerialLog("串口连接配置已保存");
+            AddSerialLog("SM7110串口连接与测试参数已保存");
         }
     }
 
@@ -1078,6 +1185,84 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    private async Task RunSerialMeterOperationAsync(string actionName, Func<Task> operation)
+    {
+        if (_serialMeterOperationRunning)
+        {
+            AddSerialLog($"{actionName}未执行：SM7110正在处理上一条命令");
+            return;
+        }
+        if (!_serialClient.IsConnected)
+        {
+            AddSerialLog($"{actionName}失败：请先连接SM7110");
+            return;
+        }
+
+        _serialMeterOperationRunning = true;
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or
+                                   InvalidOperationException or FormatException or ObjectDisposedException)
+        {
+            if (!_serialClient.IsConnected)
+            {
+                SetSerialStatus("通讯异常");
+            }
+            AddSerialLog($"{actionName}失败：{ex.Message}");
+        }
+        finally
+        {
+            _serialMeterOperationRunning = false;
+        }
+    }
+
+    private async Task SendSerialMeterCommandAsync(string command)
+    {
+        var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
+        AddSerialLog($"TX [SCPI]  {command}");
+        await _serialClient.SendCommandAsync(
+            command,
+            terminator,
+            settings.CommandTimeoutMilliseconds,
+            _lifetimeCancellation.Token);
+    }
+
+    private async Task<string> QuerySerialMeterAsync(string command)
+    {
+        var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
+        AddSerialLog($"TX [SCPI]  {command}");
+        return await _serialClient.QueryAsync(
+            command,
+            terminator,
+            settings.CommandTimeoutMilliseconds,
+            _lifetimeCancellation.Token);
+    }
+
+    private void UpdateSerialMeterIdentity(string identity)
+    {
+        SerialMeterIdentityText.Text = identity;
+        SerialMeterIdentityText.ToolTip = identity;
+    }
+
+    private void UpdateSerialMeterResult(SM7110MeasurementResult result)
+    {
+        SerialMeterResultStatusText.Text = result.StatusDescription;
+        SerialMeterResultStatusText.Foreground = new SolidColorBrush(
+            result.IsSuccessful ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
+        SerialMeterValueText.Text = result.Value.ToString("G9");
+        SerialMeterUnitText.Text = result.Unit;
+        SerialMeterRawResultText.Text = result.RawResponse;
+        SerialMeterRawResultText.ToolTip = result.RawResponse;
+        AddSerialLog($"测试结果：{result.StatusDescription}，数值={result.Value:G9} {result.Unit}");
+    }
+
     private async Task SendMeterCommandAsync(string command)
     {
         var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
@@ -1151,10 +1336,10 @@ public partial class ConnectionConfigPage : UserControl
         }));
     }
 
-    private void SerialClient_DataReceived(byte[] payload)
+    private void SerialClient_ResponseReceived(string response)
     {
         Dispatcher.BeginInvoke(new Action(() =>
-            AddSerialLog($"RX [ASCII]  {FormatPayload(payload)}")));
+            AddSerialLog($"RX [SCPI]  {response}")));
     }
 
     private void SerialClient_ConnectionClosed(Exception? exception)
@@ -1163,8 +1348,8 @@ public partial class ConnectionConfigPage : UserControl
         {
             SetSerialStatus("未连接");
             AddSerialLog(exception is null
-                ? "串口连接已关闭"
-                : $"串口连接中断：{exception.Message}");
+                ? "SM7110串口连接已关闭"
+                : $"SM7110串口连接中断：{exception.Message}");
         }));
     }
 

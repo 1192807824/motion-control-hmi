@@ -403,34 +403,6 @@
                             Click="CalibrationToolbarAction_Click" />
                 </StackPanel>
 
-                <Border Grid.Column="13" Width="1" Height="34" Background="#345269" />
-
-                <Grid Grid.Column="14"
-                      x:Name="CalibrationTeachDataFilePanel"
-                      Margin="12,0,0,0"
-                      HorizontalAlignment="Left"
-                      Visibility="Collapsed">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="200" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="示教文件"
-                               Style="{StaticResource FieldLabel}"
-                               Margin="0,0,8,0" />
-                    <TextBox Grid.Column="1"
-                             x:Name="CalibrationTeachDataFileTextBox"
-                             Height="40"
-                             Padding="8,0"
-                             VerticalContentAlignment="Center"
-                             IsReadOnly="True"
-                             Background="#0B2235"
-                             Foreground="#49D17D"
-                             BorderBrush="#35546B"
-                             BorderThickness="1"
-                             Text="未设置"
-                             ToolTip="当前吸嘴纠偏所应用的示教数据文件" />
-                </Grid>
-
                 <StackPanel Grid.Column="14"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right">
@@ -614,12 +586,12 @@
                                     <TextBlock Text="3" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="旋转中心 + 自动示教" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock Text="旋转中心" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
                             </StackPanel>
                             <Button x:Name="SidebarRotationCenterButton"
                                     Tag="CalculateRotationCenter"
                                     Margin="26,0,0,6"
-                                    Content="计算旋转中心并保存示教数据"
+                                    Content="计算并保存旋转中心"
                                     Style="{StaticResource SidebarButton}"
                                     Background="#6B3FD6"
                                     BorderBrush="#8A63E8"
@@ -694,7 +666,7 @@
                         </StackPanel>
                     </Border>
 
-                    <Border x:Name="SidebarLowerCameraTeachSection"
+                    <Border x:Name="SidebarLowerCameraCorrectionSection"
                             Style="{StaticResource SidebarSection}"
                             Visibility="Collapsed">
                         <StackPanel>
@@ -703,39 +675,8 @@
                                     <TextBlock Text="4" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="示教数据（可单独重做）" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock Text="纠偏验证" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
                             </StackPanel>
-                            <TextBlock x:Name="SidebarLowerCameraTeachDataFileText"
-                                       Margin="26,0,0,6"
-                                       Text="示教应用文件：未设置"
-                                       Foreground="#49D17D"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"
-                                       ToolTip="当前吸嘴纠偏所应用的示教数据文件" />
-                            <Button x:Name="SidebarLowerCameraTeachButton"
-                                    Tag="RunLowerCameraTeach"
-                                    Margin="26,0,0,6"
-                                    Content="执行并保存示教"
-                                    Style="{StaticResource SidebarButton}"
-                                    Background="#0B6A88"
-                                    BorderBrush="#1496B8"
-                                    Click="CalibrationSidebarButton_Click" />
-                            <TextBlock x:Name="SidebarLowerCameraTeachStatusText"
-                                       Margin="26,0,0,0"
-                                       Text="旋转中心完成后可执行"
-                                       Foreground="#AFC0CD"
-                                       FontSize="11"
-                                       LineHeight="19"
-                                       TextWrapping="Wrap"
-                                       TextAlignment="Center" />
-                            <Button x:Name="SidebarImportLowerCameraTeachDataButton"
-                                    Tag="ImportLowerCameraTeachData"
-                                    Margin="26,10,0,6"
-                                    Content="导入8项示教数据"
-                                    Style="{StaticResource SidebarButton}"
-                                    Background="#102A3E"
-                                    BorderBrush="#35546B"
-                                    Click="CalibrationSidebarButton_Click" />
                             <Button x:Name="SidebarLowerCameraCorrectionTestButton"
                                     Tag="RunLowerCameraCorrectionTest"
                                     Margin="26,0,0,6"
@@ -746,7 +687,7 @@
                                     Click="CalibrationSidebarButton_Click" />
                             <TextBlock x:Name="SidebarLowerCameraCorrectionTestStatusText"
                                        Margin="26,0,0,0"
-                                       Text="示教数据保存后可测试"
+                                       Text="旋转中心完成后可测试"
                                        Foreground="#AFC0CD"
                                        FontSize="11"
                                        LineHeight="19"

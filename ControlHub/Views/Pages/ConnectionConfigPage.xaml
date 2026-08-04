@@ -517,7 +517,7 @@
                                                VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="串口连接"
+                                    <TextBlock Text="SM7110 仪表"
                                                FontSize="15"
                                                FontWeight="Bold"
                                                Foreground="#F4F8FB" />
@@ -1237,7 +1237,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="连接对象" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Text="串口连接" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
+                            <TextBlock Text="SM7110 超高阻计" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                             <TextBlock Text="串口" Style="{StaticResource MetricLabel}" />
@@ -1248,25 +1248,17 @@
                             <TextBlock Text="{Binding SerialConnectionSettings.BaudRate}" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="3" VerticalAlignment="Center">
-                            <TextBlock Text="数据格式" Style="{StaticResource MetricLabel}" />
-                            <TextBlock Style="{StaticResource MetricValue}" Margin="0,6,0,0">
-                                <TextBlock.Text>
-                                    <MultiBinding StringFormat="{}{0}-{1}-{2}">
-                                        <Binding Path="SerialConnectionSettings.DataBits" />
-                                        <Binding Path="SerialConnectionSettings.Parity" />
-                                        <Binding Path="SerialConnectionSettings.StopBits" />
-                                    </MultiBinding>
-                                </TextBlock.Text>
-                            </TextBlock>
+                            <TextBlock Text="协议" Style="{StaticResource MetricLabel}" />
+                            <TextBlock Text="SCPI / RS-232C" Style="{StaticResource MetricValue}" Margin="0,6,0,0" />
                         </StackPanel>
                         <StackPanel Grid.Column="4"
                                     Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center">
-                            <Button Content="保存"
+                            <Button Content="保存参数"
                                     Style="{StaticResource SecondaryButton}"
                                     Click="SaveSerialSettings_Click" />
-                            <Button Content="连接"
+                            <Button Content="连接仪表"
                                     Style="{StaticResource PrimaryButton}"
                                     Background="{StaticResource AccentGreen}"
                                     BorderBrush="#16723F"
@@ -1288,14 +1280,11 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="260" />
-                            <RowDefinition Height="10" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                        <Border Grid.Row="0" Style="{StaticResource Panel}">
+                    <ScrollViewer Grid.Column="0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                        <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="44" />
@@ -1306,7 +1295,7 @@
                                         BorderThickness="0,0,0,1"
                                         CornerRadius="6,6,0,0"
                                         Padding="14,0">
-                                    <TextBlock Text="串口参数" Style="{StaticResource PanelTitle}" />
+                                    <TextBlock Text="SM7110 串口参数" Style="{StaticResource PanelTitle}" />
                                 </Border>
                                 <Grid Grid.Row="1" Margin="14,12">
                                     <Grid.ColumnDefinitions>
@@ -1358,15 +1347,151 @@
                                               Grid.Column="4"
                                               Style="{StaticResource ConfigComboBox}"
                                               SelectedItem="{Binding SerialConnectionSettings.NewLine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Grid.Row="3" Text="命令超时(ms)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Row="3"
+                                             Grid.Column="1"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding SerialConnectionSettings.CommandTimeoutMilliseconds, UpdateSourceTrigger=LostFocus}" />
+                                    <TextBlock Grid.Row="3"
+                                               Grid.Column="3"
+                                               Grid.ColumnSpan="2"
+                                               Text="响应按 CR/LF 完整行接收"
+                                               Style="{StaticResource FieldLabel}" />
                                 </Grid>
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="2" Style="{StaticResource Panel}">
+                        <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="44" />
-                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Border Background="{StaticResource PanelHeader}"
+                                        BorderBrush="{StaticResource PanelBorder}"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="6,6,0,0"
+                                        Padding="14,0">
+                                    <TextBlock Text="SM7110 测量与安全参数" Style="{StaticResource PanelTitle}" />
+                                </Border>
+                                <Grid Grid.Row="1" Margin="14,10,14,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="40" />
+                                        <RowDefinition Height="40" />
+                                        <RowDefinition Height="40" />
+                                        <RowDefinition Height="40" />
+                                        <RowDefinition Height="42" />
+                                        <RowDefinition Height="54" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Text="测量模式" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedValuePath="Content"
+                                              SelectedValue="{Binding SerialConnectionSettings.MeasurementMode, Mode=TwoWay}">
+                                        <ComboBoxItem Content="R" ToolTip="电阻" />
+                                        <ComboBoxItem Content="A" ToolTip="电流" />
+                                        <ComboBoxItem Content="RS" ToolTip="表面电阻率" />
+                                        <ComboBoxItem Content="RV" ToolTip="体积电阻率" />
+                                        <ComboBoxItem Content="RL" ToolTip="液体体积电阻率" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Column="3" Text="施加电压(V)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Column="4"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding SerialConnectionSettings.AppliedVoltageVolts, UpdateSourceTrigger=LostFocus}" />
+
+                                    <TextBlock Grid.Row="1" Text="测量速度" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Grid.Row="1" Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedValuePath="Content"
+                                              SelectedValue="{Binding SerialConnectionSettings.MeasurementSpeed, Mode=TwoWay}">
+                                        <ComboBoxItem Content="SLOW2" /><ComboBoxItem Content="SLOW" />
+                                        <ComboBoxItem Content="MED" /><ComboBoxItem Content="FAST2" />
+                                        <ComboBoxItem Content="FAST" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="电流量程" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Grid.Row="1" Grid.Column="4"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedValuePath="Content"
+                                              SelectedValue="{Binding SerialConnectionSettings.MeasurementRange, Mode=TwoWay}">
+                                        <ComboBoxItem Content="AUTO" /><ComboBoxItem Content="20pA" />
+                                        <ComboBoxItem Content="200pA" /><ComboBoxItem Content="2nA" />
+                                        <ComboBoxItem Content="20nA" /><ComboBoxItem Content="200nA" />
+                                        <ComboBoxItem Content="2uA" /><ComboBoxItem Content="20uA" />
+                                        <ComboBoxItem Content="200uA" /><ComboBoxItem Content="2mA" />
+                                    </ComboBox>
+
+                                    <TextBlock Grid.Row="2" Text="平均模式" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Grid.Row="2" Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedValuePath="Content"
+                                              SelectedValue="{Binding SerialConnectionSettings.AverageMode, Mode=TwoWay}">
+                                        <ComboBoxItem Content="OFF" /><ComboBoxItem Content="HOLD" />
+                                        <ComboBoxItem Content="AUTO" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="2" Grid.Column="3" Text="移动平均次数" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Grid.Row="2" Grid.Column="4"
+                                             Style="{StaticResource ConfigInput}"
+                                             Text="{Binding SerialConnectionSettings.AverageCount, UpdateSourceTrigger=LostFocus}" />
+
+                                    <TextBlock Grid.Row="3" Text="充电电流上限" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox Grid.Row="3" Grid.Column="1"
+                                              Style="{StaticResource ConfigComboBox}"
+                                              SelectedValuePath="Content"
+                                              SelectedValue="{Binding SerialConnectionSettings.CurrentLimit, Mode=TwoWay}">
+                                        <ComboBoxItem Content="1.8mA" /><ComboBoxItem Content="5mA" />
+                                        <ComboBoxItem Content="10mA" /><ComboBoxItem Content="50mA" />
+                                    </ComboBox>
+                                    <CheckBox Grid.Row="3" Grid.Column="3" Grid.ColumnSpan="2"
+                                              Style="{StaticResource ConfigCheckBox}"
+                                              Content="启用充电电流限制"
+                                              IsChecked="{Binding SerialConnectionSettings.CurrentLimitEnabled}" />
+
+                                    <CheckBox Grid.Row="4" Grid.ColumnSpan="2"
+                                              Style="{StaticResource ConfigCheckBox}"
+                                              Content="启用仪表联锁"
+                                              IsChecked="{Binding SerialConnectionSettings.InterlockEnabled}" />
+                                    <TextBlock Grid.Row="4" Grid.Column="3" Grid.ColumnSpan="2"
+                                               Text="单次测量结束后自动停止并放电"
+                                               Foreground="#73D9A2"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
+
+                                    <StackPanel Grid.Row="5" Grid.ColumnSpan="5"
+                                                Orientation="Horizontal"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center">
+                                        <Button Content="下发测试参数"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Click="ApplySerialMeterSettings_Click" />
+                                        <Button Content="单次测量"
+                                                Style="{StaticResource PrimaryButton}"
+                                                Background="{StaticResource AccentGreen}"
+                                                BorderBrush="#16723F"
+                                                Click="TriggerSerialMeterTest_Click" />
+                                        <Button Content="停止并放电"
+                                                Style="{StaticResource PrimaryButton}"
+                                                Background="#A84747"
+                                                BorderBrush="#C55F5F"
+                                                Margin="0"
+                                                Click="StopSerialMeter_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource Panel}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="44" />
+                                    <RowDefinition Height="110" />
                                     <RowDefinition Height="42" />
                                     <RowDefinition Height="54" />
                                 </Grid.RowDefinitions>
@@ -1375,7 +1500,7 @@
                                         BorderThickness="0,0,0,1"
                                         CornerRadius="6,6,0,0"
                                         Padding="14,0">
-                                    <TextBlock Text="数据收发" Style="{StaticResource PanelTitle}" />
+                                    <TextBlock Text="SCPI 手动命令" Style="{StaticResource PanelTitle}" />
                                 </Border>
                                 <TextBox Grid.Row="1"
                                          Margin="14,12,14,0"
@@ -1410,9 +1535,17 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
-                    </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
 
-                    <Border Grid.Column="2" Style="{StaticResource Panel}">
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="270" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource Panel}">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
@@ -1423,7 +1556,70 @@
                                     BorderThickness="0,0,0,1"
                                     CornerRadius="6,6,0,0"
                                     Padding="14,0">
-                                <TextBlock Text="通讯日志" Style="{StaticResource PanelTitle}" />
+                                <TextBlock Text="SM7110 仪表状态与测试结果" Style="{StaticResource PanelTitle}" />
+                            </Border>
+                            <Grid Grid.Row="1" Margin="14,10,14,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="96" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="46" />
+                                    <RowDefinition Height="42" />
+                                    <RowDefinition Height="58" />
+                                    <RowDefinition Height="42" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="仪表型号" Style="{StaticResource FieldLabel}" />
+                                <TextBlock x:Name="SerialMeterIdentityText"
+                                           Grid.Column="1"
+                                           Text="尚未识别"
+                                           Style="{StaticResource MetricValue}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Grid.Row="1" Text="测量状态" Style="{StaticResource FieldLabel}" />
+                                <TextBlock x:Name="SerialMeterResultStatusText"
+                                           Grid.Row="1" Grid.Column="1"
+                                           Text="等待测量"
+                                           Foreground="#62B5FF"
+                                           FontSize="16"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Text="测量值" Style="{StaticResource FieldLabel}" />
+                                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock x:Name="SerialMeterValueText"
+                                               Text="--"
+                                               Foreground="#F4F8FB"
+                                               FontSize="28"
+                                               FontWeight="Bold" />
+                                    <TextBlock x:Name="SerialMeterUnitText"
+                                               Text=""
+                                               Foreground="#9FB3C2"
+                                               FontSize="14"
+                                               Margin="10,10,0,0" />
+                                </StackPanel>
+                                <TextBlock Grid.Row="3" Text="原始返回" Style="{StaticResource FieldLabel}" />
+                                <TextBlock x:Name="SerialMeterRawResultText"
+                                           Grid.Row="3" Grid.Column="1"
+                                           Text="--"
+                                           FontFamily="Consolas"
+                                           Foreground="#D8E4EC"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource Panel}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource PanelHeader}"
+                                    BorderBrush="{StaticResource PanelBorder}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="6,6,0,0"
+                                    Padding="14,0">
+                                <TextBlock Text="SM7110 通讯日志" Style="{StaticResource PanelTitle}" />
                             </Border>
                             <ListBox x:Name="SerialConnectionLogListBox"
                                      Grid.Row="1"
@@ -1443,6 +1639,7 @@
                             </ListBox>
                         </Grid>
                     </Border>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>

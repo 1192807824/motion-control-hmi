@@ -11,8 +11,18 @@ public sealed class SerialConnectionSettings : INotifyPropertyChanged
     private string _parity = "None";
     private string _stopBits = "One";
     private string _newLine = "\\r\\n";
-    private string _manualSendText = "";
+    private string _manualSendText = "*IDN?";
     private bool _appendNewLine = true;
+    private int _commandTimeoutMilliseconds = 10_000;
+    private string _measurementMode = "R";
+    private double _appliedVoltageVolts = 100;
+    private string _measurementSpeed = "MED";
+    private string _measurementRange = "AUTO";
+    private string _averageMode = "OFF";
+    private int _averageCount = 5;
+    private bool _interlockEnabled = true;
+    private bool _currentLimitEnabled = true;
+    private string _currentLimit = "1.8mA";
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -63,6 +73,66 @@ public sealed class SerialConnectionSettings : INotifyPropertyChanged
     {
         get => _appendNewLine;
         set => SetField(ref _appendNewLine, value);
+    }
+
+    public int CommandTimeoutMilliseconds
+    {
+        get => _commandTimeoutMilliseconds;
+        set => SetField(ref _commandTimeoutMilliseconds, value);
+    }
+
+    public string MeasurementMode
+    {
+        get => _measurementMode;
+        set => SetField(ref _measurementMode, value);
+    }
+
+    public double AppliedVoltageVolts
+    {
+        get => _appliedVoltageVolts;
+        set => SetField(ref _appliedVoltageVolts, value);
+    }
+
+    public string MeasurementSpeed
+    {
+        get => _measurementSpeed;
+        set => SetField(ref _measurementSpeed, value);
+    }
+
+    public string MeasurementRange
+    {
+        get => _measurementRange;
+        set => SetField(ref _measurementRange, value);
+    }
+
+    public string AverageMode
+    {
+        get => _averageMode;
+        set => SetField(ref _averageMode, value);
+    }
+
+    public int AverageCount
+    {
+        get => _averageCount;
+        set => SetField(ref _averageCount, value);
+    }
+
+    public bool InterlockEnabled
+    {
+        get => _interlockEnabled;
+        set => SetField(ref _interlockEnabled, value);
+    }
+
+    public bool CurrentLimitEnabled
+    {
+        get => _currentLimitEnabled;
+        set => SetField(ref _currentLimitEnabled, value);
+    }
+
+    public string CurrentLimit
+    {
+        get => _currentLimit;
+        set => SetField(ref _currentLimit, value);
     }
 
     public string? LastSuccessfulConnectionSignature

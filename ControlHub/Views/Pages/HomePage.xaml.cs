@@ -155,7 +155,6 @@ public partial class HomePage : UserControl
             : new Dictionary<int, int>();
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
-    private readonly LowerCameraTeachDataStore _lowerCameraTeachDataStore = new();
     private HomePageSettings _homeSettings = new();
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
@@ -891,7 +890,8 @@ public partial class HomePage : UserControl
             try
             {
                 nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-                    nozzle1Profile.TeachData,
+                    nozzle1Profile.RotationCenterX,
+                    nozzle1Profile.RotationCenterY,
                     nozzle1Profile.CalibrationFilePath,
                     cancellationToken);
             }
@@ -930,7 +930,8 @@ public partial class HomePage : UserControl
                 try
                 {
                     nozzle2Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-                        nozzle2Profile.TeachData,
+                        nozzle2Profile.RotationCenterX,
+                        nozzle2Profile.RotationCenterY,
                         nozzle2Profile.CalibrationFilePath,
                         cancellationToken);
                 }
@@ -991,20 +992,23 @@ public partial class HomePage : UserControl
 
     private LowerCameraCorrectionProfile ReadLowerCameraCorrectionProfile(int nozzleNumber)
     {
-        var configuredTeachDataPath = nozzleNumber == 2
-            ? _visionCalibration.Settings.LowerCameraNozzle2TeachDataFilePath
-            : _visionCalibration.Settings.LowerCameraNozzle1TeachDataFilePath;
-        var teachDataPath = string.IsNullOrWhiteSpace(configuredTeachDataPath)
-            ? LowerCameraTeachDataStore.GetDefaultFilePath(nozzleNumber)
-            : Path.GetFullPath(configuredTeachDataPath.Trim());
-        if (!File.Exists(teachDataPath))
+        var rotationCenterCalibrated = nozzleNumber == 2
+            ? _visionCalibration.Settings.LowerCameraNozzle2RotationCenterCalibrated
+            : _visionCalibration.Settings.LowerCameraNozzle1RotationCenterCalibrated;
+        var rotationCenterX = nozzleNumber == 2
+            ? _visionCalibration.Settings.LowerCameraNozzle2RotationCenterX
+            : _visionCalibration.Settings.LowerCameraNozzle1RotationCenterX;
+        var rotationCenterY = nozzleNumber == 2
+            ? _visionCalibration.Settings.LowerCameraNozzle2RotationCenterY
+            : _visionCalibration.Settings.LowerCameraNozzle1RotationCenterY;
+        if (!rotationCenterCalibrated ||
+            !double.IsFinite(rotationCenterX) ||
+            !double.IsFinite(rotationCenterY))
         {
-            throw new FileNotFoundException(
-                $"下相机吸嘴{nozzleNumber}示教数据不存在，请先完成该吸嘴标定、旋转中心和示教。",
-                teachDataPath);
+            throw new InvalidOperationException(
+                $"下相机吸嘴{nozzleNumber}旋转中心不存在，请先完成该吸嘴的旋转中心计算。");
         }
 
-        var teachData = _lowerCameraTeachDataStore.Load(teachDataPath);
         var configuredPath = nozzleNumber == 2
             ? _visionCalibration.Settings.LowerCameraNozzle2CalibrationFilePath
             : string.IsNullOrWhiteSpace(_visionCalibration.Settings.LowerCameraNozzle1CalibrationFilePath)
@@ -1023,7 +1027,10 @@ public partial class HomePage : UserControl
                 calibrationPath);
         }
 
-        return new LowerCameraCorrectionProfile(nozzleNumber, calibrationPath, teachData);
+        return new LowerCameraCorrectionProfile(
+            calibrationPath,
+            rotationCenterX,
+            rotationCenterY);
     }
 
     private static LowerCameraPlacementTarget CalculateLowerCameraPlacementTarget(
@@ -1394,7 +1401,7 @@ public partial class HomePage : UserControl
             // BIN配置点是两个吸嘴的中间位置，启动时锁定，避免运行中修改导致下料点变化。
             _binDropPositions = ReadBinDropPositions();
 
-            // 两个下相机拍照位、两个吸嘴的示教数据和标定文件在启动时一次性锁定。
+            // 两个下相机拍照位、两个吸嘴的旋转中心和标定文件在启动时一次性锁定。
             _lowerCameraPhotoPositions = ReadLowerCameraPhotoPositions();
             var lowerCameraNozzle1Profile = ReadLowerCameraCorrectionProfile(1);
             var lowerCameraNozzle2Profile = ReadLowerCameraCorrectionProfile(2);
@@ -5169,9 +5176,9 @@ public partial class HomePage : UserControl
         double Position2Y);
 
     private sealed record LowerCameraCorrectionProfile(
-        int NozzleNumber,
         string CalibrationFilePath,
-        LowerCameraTeachData TeachData);
+        double RotationCenterX,
+        double RotationCenterY);
 
     private sealed record LowerCameraCorrectionResults(
         VisionLowerCameraCorrectionResult? Nozzle1,
