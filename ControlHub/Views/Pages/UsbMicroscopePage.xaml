@@ -71,7 +71,7 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
                 <TextBlock Grid.Column="2"
-                           Text="点选圆：沿物体边缘点击至少 3 个点；完成后可拖动圆"
+                           Text="滚轮缩放画面；沿物体边缘点击至少 3 个点生成圆，完成后可拖动"
                            Foreground="#8FB2C9"
                            FontSize="12"
                            VerticalAlignment="Center" />
@@ -180,7 +180,9 @@
                 BorderThickness="1"
                 CornerRadius="4"
                 ClipToBounds="True">
-            <Grid x:Name="PreviewSurface">
+            <Grid x:Name="PreviewSurface"
+                  Background="Transparent"
+                  PreviewMouseWheel="PreviewSurface_PreviewMouseWheel">
                 <Image x:Name="PreviewImage"
                        Stretch="Uniform"
                        RenderOptions.BitmapScalingMode="HighQuality" />
@@ -227,6 +229,20 @@
                                Foreground="#D8E4EC"
                                FontSize="12" />
                 </Border>
+
+                <Button x:Name="ResetZoomButton"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,12,12"
+                        Padding="10,5"
+                        Content="100%"
+                        ToolTip="点击恢复 100% 显示"
+                        Foreground="#DCEAF3"
+                        Background="#B21A2D3B"
+                        BorderBrush="#60798C"
+                        Cursor="Hand"
+                        IsEnabled="False"
+                        Click="ResetZoom_Click" />
             </Grid>
         </Border>
     </Grid>

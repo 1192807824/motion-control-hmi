@@ -14,6 +14,10 @@ namespace ControlHub.Views.Pages;
 
 public partial class UsbMicroscopePage : UserControl
 {
+    private const double MinimumZoomScale = 1.0;
+    private const double MaximumZoomScale = 8.0;
+    private const double ZoomStep = 1.15;
+
     private readonly CaptureDevices _captureDevices = new();
     private CaptureDevice? _captureDevice;
     private HomePage? _homeController;
@@ -34,6 +38,9 @@ public partial class UsbMicroscopePage : UserControl
     private double _circleCenterPixelX;
     private double _circleCenterPixelY;
     private double _circleRadiusPixels;
+    private double _zoomScale = MinimumZoomScale;
+    private double _zoomOffsetX;
+    private double _zoomOffsetY;
     private long _receivedFrames;
 
     public UsbMicroscopePage()
@@ -205,6 +212,7 @@ public partial class UsbMicroscopePage : UserControl
         _latestFrame = null;
         _receivedFrames = 0;
         ClearCircle();
+        ResetZoom();
         PreviewImage.Source = null;
         PreviewPlaceholder.Visibility = Visibility.Visible;
         FrameStatusText.Text = "正在等待显微镜画面…";
@@ -286,6 +294,7 @@ public partial class UsbMicroscopePage : UserControl
 
         _latestFrame = null;
         ClearCircle();
+        ResetZoom();
         PreviewImage.Source = null;
         PreviewPlaceholder.Visibility = Visibility.Visible;
         FrameStatusText.Text = "尚未接收画面";
@@ -590,8 +599,125 @@ public partial class UsbMicroscopePage : UserControl
 
     private void AnnotationCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        ClampZoomOffsets();
+        ApplyZoomTransform();
         UpdateCircleOverlayFromPixels();
         UpdateCirclePointMarkers();
+    }
+
+    private void PreviewSurface_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (_latestFrame is null || e.Delta == 0)
+        {
+            return;
+        }
+
+        var oldScale = _zoomScale;
+        var scaleFactor = e.Delta > 0 ? ZoomStep : 1 / ZoomStep;
+        var newScale = Math.Clamp(oldScale * scaleFactor, MinimumZoomScale, MaximumZoomScale);
+        if (Math.Abs(newScale - oldScale) < 0.0001)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var pointer = e.GetPosition(PreviewSurface);
+        if (newScale <= MinimumZoomScale + 0.0001)
+        {
+            _zoomScale = MinimumZoomScale;
+            _zoomOffsetX = 0;
+            _zoomOffsetY = 0;
+        }
+        else
+        {
+            var imagePointX = (pointer.X - _zoomOffsetX) / oldScale;
+            var imagePointY = (pointer.Y - _zoomOffsetY) / oldScale;
+            _zoomScale = newScale;
+            _zoomOffsetX = pointer.X - imagePointX * newScale;
+            _zoomOffsetY = pointer.Y - imagePointY * newScale;
+            ClampZoomOffsets();
+        }
+
+        ApplyZoomTransform();
+        UpdateCircleOverlayFromPixels();
+        UpdateCirclePointMarkers();
+        e.Handled = true;
+    }
+
+    private void ResetZoom_Click(object sender, RoutedEventArgs e)
+    {
+        ResetZoom();
+    }
+
+    private void ResetZoom()
+    {
+        _zoomScale = MinimumZoomScale;
+        _zoomOffsetX = 0;
+        _zoomOffsetY = 0;
+        ApplyZoomTransform();
+        UpdateCircleOverlayFromPixels();
+        UpdateCirclePointMarkers();
+    }
+
+    private void ApplyZoomTransform()
+    {
+        if (PreviewImage is null)
+        {
+            return;
+        }
+
+        PreviewImage.RenderTransform = new MatrixTransform(
+            _zoomScale,
+            0,
+            0,
+            _zoomScale,
+            _zoomOffsetX,
+            _zoomOffsetY);
+
+        if (ResetZoomButton is not null)
+        {
+            ResetZoomButton.Content = $"{_zoomScale * 100:0}%";
+        }
+    }
+
+    private void ClampZoomOffsets()
+    {
+        var baseRect = GetBaseImageRect();
+        if (baseRect.IsEmpty)
+        {
+            return;
+        }
+
+        _zoomOffsetX = ClampZoomOffset(
+            _zoomOffsetX,
+            baseRect.X,
+            baseRect.Width,
+            AnnotationCanvas.ActualWidth,
+            _zoomScale);
+        _zoomOffsetY = ClampZoomOffset(
+            _zoomOffsetY,
+            baseRect.Y,
+            baseRect.Height,
+            AnnotationCanvas.ActualHeight,
+            _zoomScale);
+    }
+
+    private static double ClampZoomOffset(
+        double offset,
+        double imageStart,
+        double imageLength,
+        double viewportLength,
+        double scale)
+    {
+        var scaledLength = imageLength * scale;
+        if (scaledLength <= viewportLength)
+        {
+            return (viewportLength - scaledLength) / 2 - imageStart * scale;
+        }
+
+        var minimumOffset = viewportLength - (imageStart + imageLength) * scale;
+        var maximumOffset = -imageStart * scale;
+        return Math.Clamp(offset, minimumOffset, maximumOffset);
     }
 
     private void AddCircleFitPoint(Point viewPoint, Rect imageRect)
@@ -922,6 +1048,21 @@ public partial class UsbMicroscopePage : UserControl
 
     private Rect GetDisplayedImageRect()
     {
+        var baseRect = GetBaseImageRect();
+        if (baseRect.IsEmpty)
+        {
+            return Rect.Empty;
+        }
+
+        return new Rect(
+            baseRect.X * _zoomScale + _zoomOffsetX,
+            baseRect.Y * _zoomScale + _zoomOffsetY,
+            baseRect.Width * _zoomScale,
+            baseRect.Height * _zoomScale);
+    }
+
+    private Rect GetBaseImageRect()
+    {
         if (_latestFrame is null ||
             _latestFrame.PixelWidth <= 0 ||
             _latestFrame.PixelHeight <= 0 ||
@@ -1068,6 +1209,7 @@ public partial class UsbMicroscopePage : UserControl
         DisconnectButton.IsEnabled = connected && !busy;
         DevicePropertiesButton.IsEnabled = connected && _captureDevice?.HasPropertyPage == true;
         CaptureButton.IsEnabled = connected && _latestFrame is not null;
+        ResetZoomButton.IsEnabled = connected && _latestFrame is not null;
         DrawCircleButton.IsEnabled = connected && _latestFrame is not null;
         UndoCirclePointButton.IsEnabled = _circlePointSelectionEnabled && _circleFitPointsPixels.Count > 0;
         ClearCircleButton.IsEnabled = _hasCircle ||
