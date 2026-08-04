@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using FlashCap;
 using Microsoft.Win32;
+using ShapeEllipse = System.Windows.Shapes.Ellipse;
 
 namespace ControlHub.Views.Pages;
 
@@ -21,11 +22,15 @@ public partial class UsbMicroscopePage : UserControl
     private bool _connecting;
     private bool _shutdown;
     private bool _loadedOnce;
-    private bool _circleDrawingEnabled;
-    private bool _circleDragActive;
+    private bool _circlePointSelectionEnabled;
+    private bool _circleMoveActive;
     private bool _hasCircle;
     private bool _ddRotationRunning;
-    private Point _circleDragCenter;
+    private readonly List<Point> _circleFitPointsPixels = [];
+    private readonly List<ShapeEllipse> _circleFitPointMarkers = [];
+    private Point _circleMoveStartView;
+    private double _circleMoveStartCenterPixelX;
+    private double _circleMoveStartCenterPixelY;
     private double _circleCenterPixelX;
     private double _circleCenterPixelY;
     private double _circleRadiusPixels;
@@ -427,8 +432,48 @@ public partial class UsbMicroscopePage : UserControl
             return;
         }
 
-        SetCircleDrawingMode(true);
-        SetStatus("请在画面上按下鼠标确定圆心，拖动确定半径", MicroscopeStatus.Connected);
+        if (_circlePointSelectionEnabled)
+        {
+            if (!_hasCircle)
+            {
+                SetStatus("至少需要 3 个有效边缘点才能完成圆形拟合", MicroscopeStatus.Error);
+                return;
+            }
+
+            FinishCirclePointSelection();
+            return;
+        }
+
+        ClearCircle();
+        SetCirclePointSelectionMode(true);
+        SetStatus("请沿物体圆形边缘依次点击，至少选择 3 个点", MicroscopeStatus.Connected);
+    }
+
+    private void UndoCirclePoint_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_circlePointSelectionEnabled || _circleFitPointsPixels.Count == 0)
+        {
+            return;
+        }
+
+        _circleFitPointsPixels.RemoveAt(_circleFitPointsPixels.Count - 1);
+        RemoveLastCirclePointMarker();
+        if (_circleFitPointsPixels.Count >= 3 && TryFitCircle(
+                _circleFitPointsPixels,
+                out var centerX,
+                out var centerY,
+                out var radius))
+        {
+            ApplyFittedCircle(centerX, centerY, radius);
+        }
+        else
+        {
+            _hasCircle = false;
+            CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
+        }
+
+        UpdateCirclePointSelectionStatus();
+        UpdateControls();
     }
 
     private void ClearCircle_Click(object sender, RoutedEventArgs e)
@@ -441,7 +486,7 @@ public partial class UsbMicroscopePage : UserControl
 
     private void AnnotationCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (!_circleDrawingEnabled || _latestFrame is null)
+        if (_latestFrame is null)
         {
             return;
         }
@@ -450,85 +495,398 @@ public partial class UsbMicroscopePage : UserControl
         var point = e.GetPosition(AnnotationCanvas);
         if (imageRect.IsEmpty || !imageRect.Contains(point))
         {
-            SetStatus("请在显微镜图像范围内开始画圆", MicroscopeStatus.Error);
+            if (_circlePointSelectionEnabled)
+            {
+                SetStatus("请在显微镜图像范围内选择圆边缘点", MicroscopeStatus.Error);
+            }
             return;
         }
 
-        _circleDragCenter = point;
-        _circleDragActive = true;
-        _hasCircle = false;
-        CircleAnnotationEllipse.Visibility = Visibility.Visible;
-        UpdateCirclePreview(point, 0);
-        AnnotationCanvas.CaptureMouse();
-        e.Handled = true;
+        if (_circlePointSelectionEnabled)
+        {
+            AddCircleFitPoint(point, imageRect);
+            e.Handled = true;
+            return;
+        }
+
+        if (_hasCircle && IsPointInsideDisplayedCircle(point))
+        {
+            _circleMoveActive = true;
+            _circleMoveStartView = point;
+            _circleMoveStartCenterPixelX = _circleCenterPixelX;
+            _circleMoveStartCenterPixelY = _circleCenterPixelY;
+            AnnotationCanvas.CaptureMouse();
+            AnnotationCanvas.Cursor = Cursors.SizeAll;
+            e.Handled = true;
+        }
     }
 
     private void AnnotationCanvas_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_circleDragActive || e.LeftButton != MouseButtonState.Pressed)
+        if (!_circleMoveActive)
+        {
+            if (!_circlePointSelectionEnabled)
+            {
+                AnnotationCanvas.Cursor = _hasCircle &&
+                                          IsPointInsideDisplayedCircle(e.GetPosition(AnnotationCanvas))
+                    ? Cursors.SizeAll
+                    : Cursors.Arrow;
+            }
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed || _latestFrame is null)
         {
             return;
         }
 
-        var radius = CalculateCircleRadius(e.GetPosition(AnnotationCanvas));
-        UpdateCirclePreview(_circleDragCenter, radius);
+        var imageRect = GetDisplayedImageRect();
+        if (imageRect.IsEmpty)
+        {
+            return;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        var current = e.GetPosition(AnnotationCanvas);
+        var nextCenterX = _circleMoveStartCenterPixelX + (current.X - _circleMoveStartView.X) / scale;
+        var nextCenterY = _circleMoveStartCenterPixelY + (current.Y - _circleMoveStartView.Y) / scale;
+        if (_circleRadiusPixels * 2 <= _latestFrame.PixelWidth)
+        {
+            nextCenterX = Math.Clamp(
+                nextCenterX,
+                _circleRadiusPixels,
+                _latestFrame.PixelWidth - _circleRadiusPixels);
+        }
+
+        if (_circleRadiusPixels * 2 <= _latestFrame.PixelHeight)
+        {
+            nextCenterY = Math.Clamp(
+                nextCenterY,
+                _circleRadiusPixels,
+                _latestFrame.PixelHeight - _circleRadiusPixels);
+        }
+
+        _circleCenterPixelX = nextCenterX;
+        _circleCenterPixelY = nextCenterY;
+        UpdateCircleOverlayFromPixels();
+        e.Handled = true;
     }
 
     private void AnnotationCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_circleDragActive || _latestFrame is null)
+        if (!_circleMoveActive)
         {
             return;
         }
 
-        var radius = CalculateCircleRadius(e.GetPosition(AnnotationCanvas));
-        _circleDragActive = false;
+        _circleMoveActive = false;
         AnnotationCanvas.ReleaseMouseCapture();
-
-        var imageRect = GetDisplayedImageRect();
-        var scale = imageRect.IsEmpty || _latestFrame.PixelWidth <= 0
-            ? 0
-            : imageRect.Width / _latestFrame.PixelWidth;
-        if (radius < 3 || scale <= 0)
-        {
-            ClearCircle();
-            SetStatus("圆太小，请重新画圆", MicroscopeStatus.Error);
-            return;
-        }
-
-        _circleCenterPixelX = (_circleDragCenter.X - imageRect.X) / scale;
-        _circleCenterPixelY = (_circleDragCenter.Y - imageRect.Y) / scale;
-        _circleRadiusPixels = radius / scale;
-        _hasCircle = true;
-        UpdateCircleOverlayFromPixels();
-        SetCircleDrawingMode(false);
+        AnnotationCanvas.Cursor = Cursors.SizeAll;
         SetStatus(
-            $"圆形标记完成：圆心({_circleCenterPixelX:0}, {_circleCenterPixelY:0})，半径{_circleRadiusPixels:0}像素",
+            $"圆已移动：圆心({_circleCenterPixelX:0}, {_circleCenterPixelY:0})，半径{_circleRadiusPixels:0}像素",
             MicroscopeStatus.Connected);
-        UpdateControls();
         e.Handled = true;
     }
 
     private void AnnotationCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         UpdateCircleOverlayFromPixels();
+        UpdateCirclePointMarkers();
     }
 
-    private double CalculateCircleRadius(Point currentPoint)
+    private void AddCircleFitPoint(Point viewPoint, Rect imageRect)
     {
+        if (_latestFrame is null || imageRect.IsEmpty)
+        {
+            return;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        var pixelPoint = new Point(
+            (viewPoint.X - imageRect.X) / scale,
+            (viewPoint.Y - imageRect.Y) / scale);
+        _circleFitPointsPixels.Add(pixelPoint);
+        AddCirclePointMarker(pixelPoint);
+
+        if (_circleFitPointsPixels.Count >= 3)
+        {
+            if (TryFitCircle(
+                    _circleFitPointsPixels,
+                    out var centerX,
+                    out var centerY,
+                    out var radius))
+            {
+                ApplyFittedCircle(centerX, centerY, radius);
+            }
+            else
+            {
+                _hasCircle = false;
+                CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        UpdateCirclePointSelectionStatus();
+        UpdateControls();
+    }
+
+    private void UpdateCirclePointSelectionStatus()
+    {
+        var pointCount = _circleFitPointsPixels.Count;
+        DrawCircleButton.Content = _hasCircle ? $"完成点选({pointCount})" : $"点选中({pointCount}/3)";
+        if (_hasCircle)
+        {
+            SetStatus(
+                $"已用 {pointCount} 个点拟合圆；可继续加点提高精度，或点击“完成点选”",
+                MicroscopeStatus.Connected);
+        }
+        else if (pointCount >= 3)
+        {
+            SetStatus("所选点接近直线，无法拟合圆；请撤销或继续选择其他边缘点", MicroscopeStatus.Error);
+        }
+        else
+        {
+            SetStatus($"已选择 {pointCount} 个点，还需至少 {3 - pointCount} 个点", MicroscopeStatus.Connected);
+        }
+    }
+
+    private void FinishCirclePointSelection()
+    {
+        _circlePointSelectionEnabled = false;
+        _circleFitPointsPixels.Clear();
+        RemoveAllCirclePointMarkers();
+        AnnotationCanvas.IsHitTestVisible = true;
+        AnnotationCanvas.Cursor = Cursors.Arrow;
+        DrawCircleButton.Content = "重新点选";
+        SetStatus("圆形拟合完成；按住圆内部即可拖动圆心", MicroscopeStatus.Connected);
+        UpdateControls();
+    }
+
+    private void ApplyFittedCircle(double centerX, double centerY, double radius)
+    {
+        _circleCenterPixelX = centerX;
+        _circleCenterPixelY = centerY;
+        _circleRadiusPixels = radius;
+        _hasCircle = true;
+        UpdateCircleOverlayFromPixels();
+    }
+
+    private static bool TryFitCircle(
+        IReadOnlyList<Point> points,
+        out double centerX,
+        out double centerY,
+        out double radius)
+    {
+        centerX = 0;
+        centerY = 0;
+        radius = 0;
+        if (points.Count < 3)
+        {
+            return false;
+        }
+
+        var meanX = points.Average(point => point.X);
+        var meanY = points.Average(point => point.Y);
+        var matrix = new double[3, 3];
+        var vector = new double[3];
+        foreach (var point in points)
+        {
+            var x = point.X - meanX;
+            var y = point.Y - meanY;
+            var squared = x * x + y * y;
+            matrix[0, 0] += x * x;
+            matrix[0, 1] += x * y;
+            matrix[0, 2] += x;
+            matrix[1, 0] += x * y;
+            matrix[1, 1] += y * y;
+            matrix[1, 2] += y;
+            matrix[2, 0] += x;
+            matrix[2, 1] += y;
+            matrix[2, 2] += 1;
+            vector[0] -= x * squared;
+            vector[1] -= y * squared;
+            vector[2] -= squared;
+        }
+
+        if (!TrySolveThreeByThree(matrix, vector, out var solution))
+        {
+            return false;
+        }
+
+        var localCenterX = -solution[0] / 2;
+        var localCenterY = -solution[1] / 2;
+        var radiusSquared = localCenterX * localCenterX +
+                            localCenterY * localCenterY -
+                            solution[2];
+        if (!double.IsFinite(radiusSquared) || radiusSquared <= 4)
+        {
+            return false;
+        }
+
+        centerX = localCenterX + meanX;
+        centerY = localCenterY + meanY;
+        radius = Math.Sqrt(radiusSquared);
+        return double.IsFinite(centerX) && double.IsFinite(centerY) && double.IsFinite(radius);
+    }
+
+    private static bool TrySolveThreeByThree(double[,] matrix, double[] vector, out double[] solution)
+    {
+        solution = new double[3];
+        var augmented = new double[3, 4];
+        var largestCoefficient = 0d;
+        for (var row = 0; row < 3; row++)
+        {
+            for (var column = 0; column < 3; column++)
+            {
+                augmented[row, column] = matrix[row, column];
+                largestCoefficient = Math.Max(largestCoefficient, Math.Abs(matrix[row, column]));
+            }
+            augmented[row, 3] = vector[row];
+        }
+
+        var pivotTolerance = Math.Max(1e-9, largestCoefficient * 1e-10);
+        for (var pivotColumn = 0; pivotColumn < 3; pivotColumn++)
+        {
+            var pivotRow = pivotColumn;
+            for (var row = pivotColumn + 1; row < 3; row++)
+            {
+                if (Math.Abs(augmented[row, pivotColumn]) > Math.Abs(augmented[pivotRow, pivotColumn]))
+                {
+                    pivotRow = row;
+                }
+            }
+
+            if (Math.Abs(augmented[pivotRow, pivotColumn]) <= pivotTolerance)
+            {
+                return false;
+            }
+
+            if (pivotRow != pivotColumn)
+            {
+                for (var column = pivotColumn; column < 4; column++)
+                {
+                    (augmented[pivotColumn, column], augmented[pivotRow, column]) =
+                        (augmented[pivotRow, column], augmented[pivotColumn, column]);
+                }
+            }
+
+            var pivot = augmented[pivotColumn, pivotColumn];
+            for (var column = pivotColumn; column < 4; column++)
+            {
+                augmented[pivotColumn, column] /= pivot;
+            }
+
+            for (var row = 0; row < 3; row++)
+            {
+                if (row == pivotColumn)
+                {
+                    continue;
+                }
+
+                var factor = augmented[row, pivotColumn];
+                for (var column = pivotColumn; column < 4; column++)
+                {
+                    augmented[row, column] -= factor * augmented[pivotColumn, column];
+                }
+            }
+        }
+
+        for (var row = 0; row < 3; row++)
+        {
+            solution[row] = augmented[row, 3];
+            if (!double.IsFinite(solution[row]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool IsPointInsideDisplayedCircle(Point point)
+    {
+        if (!_hasCircle || _latestFrame is null)
+        {
+            return false;
+        }
+
         var imageRect = GetDisplayedImageRect();
         if (imageRect.IsEmpty)
         {
-            return 0;
+            return false;
         }
 
-        var deltaX = currentPoint.X - _circleDragCenter.X;
-        var deltaY = currentPoint.Y - _circleDragCenter.Y;
-        var requestedRadius = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
-        var maximumRadius = Math.Min(
-            Math.Min(_circleDragCenter.X - imageRect.Left, imageRect.Right - _circleDragCenter.X),
-            Math.Min(_circleDragCenter.Y - imageRect.Top, imageRect.Bottom - _circleDragCenter.Y));
-        return Math.Clamp(requestedRadius, 0, Math.Max(0, maximumRadius));
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        var centerX = imageRect.X + _circleCenterPixelX * scale;
+        var centerY = imageRect.Y + _circleCenterPixelY * scale;
+        var deltaX = point.X - centerX;
+        var deltaY = point.Y - centerY;
+        var radius = _circleRadiusPixels * scale;
+        return deltaX * deltaX + deltaY * deltaY <= radius * radius;
+    }
+
+    private void AddCirclePointMarker(Point pixelPoint)
+    {
+        var marker = new ShapeEllipse
+        {
+            Width = 10,
+            Height = 10,
+            Fill = new SolidColorBrush(Color.FromRgb(255, 214, 64)),
+            Stroke = new SolidColorBrush(Color.FromRgb(30, 35, 40)),
+            StrokeThickness = 1.5,
+            IsHitTestVisible = false
+        };
+        _circleFitPointMarkers.Add(marker);
+        AnnotationCanvas.Children.Add(marker);
+        PositionCirclePointMarker(marker, pixelPoint);
+    }
+
+    private void PositionCirclePointMarker(ShapeEllipse marker, Point pixelPoint)
+    {
+        if (_latestFrame is null)
+        {
+            return;
+        }
+
+        var imageRect = GetDisplayedImageRect();
+        if (imageRect.IsEmpty)
+        {
+            return;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        Canvas.SetLeft(marker, imageRect.X + pixelPoint.X * scale - marker.Width / 2);
+        Canvas.SetTop(marker, imageRect.Y + pixelPoint.Y * scale - marker.Height / 2);
+    }
+
+    private void UpdateCirclePointMarkers()
+    {
+        for (var index = 0; index < Math.Min(
+                 _circleFitPointsPixels.Count,
+                 _circleFitPointMarkers.Count); index++)
+        {
+            PositionCirclePointMarker(_circleFitPointMarkers[index], _circleFitPointsPixels[index]);
+        }
+    }
+
+    private void RemoveLastCirclePointMarker()
+    {
+        if (_circleFitPointMarkers.Count == 0)
+        {
+            return;
+        }
+
+        var marker = _circleFitPointMarkers[^1];
+        _circleFitPointMarkers.RemoveAt(_circleFitPointMarkers.Count - 1);
+        AnnotationCanvas.Children.Remove(marker);
+    }
+
+    private void RemoveAllCirclePointMarkers()
+    {
+        foreach (var marker in _circleFitPointMarkers)
+        {
+            AnnotationCanvas.Children.Remove(marker);
+        }
+        _circleFitPointMarkers.Clear();
     }
 
     private void UpdateCirclePreview(Point center, double radius)
@@ -585,23 +943,29 @@ public partial class UsbMicroscopePage : UserControl
             height);
     }
 
-    private void SetCircleDrawingMode(bool enabled)
+    private void SetCirclePointSelectionMode(bool enabled)
     {
-        _circleDrawingEnabled = enabled;
-        AnnotationCanvas.IsHitTestVisible = enabled;
-        DrawCircleButton.Content = enabled ? "拖动画圆…" : _hasCircle ? "重画圆" : "画圆";
+        _circlePointSelectionEnabled = enabled;
+        AnnotationCanvas.IsHitTestVisible = enabled || _hasCircle;
+        AnnotationCanvas.Cursor = enabled
+            ? Cursors.Cross
+            : _hasCircle ? Cursors.SizeAll : Cursors.Arrow;
+        DrawCircleButton.Content = enabled ? "点选中(0/3)" : _hasCircle ? "重新点选" : "点选圆";
         UpdateControls();
     }
 
     private void ClearCircle()
     {
-        _circleDragActive = false;
+        _circleMoveActive = false;
         _hasCircle = false;
         _circleRadiusPixels = 0;
+        _circleFitPointsPixels.Clear();
+        RemoveAllCirclePointMarkers();
         if (AnnotationCanvas is not null)
         {
             AnnotationCanvas.ReleaseMouseCapture();
             AnnotationCanvas.IsHitTestVisible = false;
+            AnnotationCanvas.Cursor = Cursors.Arrow;
         }
 
         if (CircleAnnotationEllipse is not null)
@@ -609,10 +973,15 @@ public partial class UsbMicroscopePage : UserControl
             CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
         }
 
-        _circleDrawingEnabled = false;
+        _circlePointSelectionEnabled = false;
         if (DrawCircleButton is not null)
         {
-            DrawCircleButton.Content = "画圆";
+            DrawCircleButton.Content = "点选圆";
+        }
+
+        if (UndoCirclePointButton is not null)
+        {
+            UndoCirclePointButton.IsEnabled = false;
         }
 
         UpdateControls();
@@ -699,8 +1068,11 @@ public partial class UsbMicroscopePage : UserControl
         DisconnectButton.IsEnabled = connected && !busy;
         DevicePropertiesButton.IsEnabled = connected && _captureDevice?.HasPropertyPage == true;
         CaptureButton.IsEnabled = connected && _latestFrame is not null;
-        DrawCircleButton.IsEnabled = connected && _latestFrame is not null && !_circleDrawingEnabled;
-        ClearCircleButton.IsEnabled = _hasCircle || _circleDrawingEnabled;
+        DrawCircleButton.IsEnabled = connected && _latestFrame is not null;
+        UndoCirclePointButton.IsEnabled = _circlePointSelectionEnabled && _circleFitPointsPixels.Count > 0;
+        ClearCircleButton.IsEnabled = _hasCircle ||
+                                      _circlePointSelectionEnabled ||
+                                      _circleFitPointsPixels.Count > 0;
         RotateDdButton.IsEnabled = connected &&
                                    _latestFrame is not null &&
                                    _homeController is not null &&
