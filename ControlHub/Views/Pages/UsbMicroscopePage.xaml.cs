@@ -29,15 +29,23 @@ public partial class UsbMicroscopePage : UserControl
     private bool _circlePointSelectionEnabled;
     private bool _circleMoveActive;
     private bool _hasCircle;
+    private bool _rectanglePointSelectionEnabled;
+    private bool _rectangleMoveActive;
+    private bool _hasRectangle;
     private bool _ddRotationRunning;
     private readonly List<Point> _circleFitPointsPixels = [];
-    private readonly List<ShapeEllipse> _circleFitPointMarkers = [];
+    private readonly List<Point> _rectangleFitPointsPixels = [];
+    private readonly List<ShapeEllipse> _selectionPointMarkers = [];
     private Point _circleMoveStartView;
     private double _circleMoveStartCenterPixelX;
     private double _circleMoveStartCenterPixelY;
     private double _circleCenterPixelX;
     private double _circleCenterPixelY;
     private double _circleRadiusPixels;
+    private Point _rectangleMoveStartView;
+    private Point[] _rectangleMoveStartCornersPixels = [];
+    private Point[] _rectangleCornersPixels = [];
+    private bool _rectangleIsSquare;
     private double _zoomScale = MinimumZoomScale;
     private double _zoomOffsetX;
     private double _zoomOffsetY;
@@ -211,7 +219,7 @@ public partial class UsbMicroscopePage : UserControl
         _connecting = true;
         _latestFrame = null;
         _receivedFrames = 0;
-        ClearCircle();
+        ClearAnnotations();
         ResetZoom();
         PreviewImage.Source = null;
         PreviewPlaceholder.Visibility = Visibility.Visible;
@@ -293,7 +301,7 @@ public partial class UsbMicroscopePage : UserControl
         }
 
         _latestFrame = null;
-        ClearCircle();
+        ClearAnnotations();
         ResetZoom();
         PreviewImage.Source = null;
         PreviewPlaceholder.Visibility = Visibility.Visible;
@@ -350,6 +358,7 @@ public partial class UsbMicroscopePage : UserControl
             PreviewImage.Source = frame;
             PreviewPlaceholder.Visibility = Visibility.Collapsed;
             UpdateCircleOverlayFromPixels();
+            UpdateRectangleOverlayFromPixels();
             UpdateControls();
 
             if (receivedFrames == 1 || receivedFrames % 10 == 0)
@@ -453,42 +462,63 @@ public partial class UsbMicroscopePage : UserControl
             return;
         }
 
-        ClearCircle();
+        ClearAnnotations();
         SetCirclePointSelectionMode(true);
         SetStatus("请沿物体圆形边缘依次点击，至少选择 3 个点", MicroscopeStatus.Connected);
     }
 
-    private void UndoCirclePoint_Click(object sender, RoutedEventArgs e)
+    private void DrawRectangle_Click(object sender, RoutedEventArgs e)
     {
-        if (!_circlePointSelectionEnabled || _circleFitPointsPixels.Count == 0)
+        if (_latestFrame is null)
         {
+            SetStatus("请先连接显微镜并等待实时画面", MicroscopeStatus.Error);
             return;
         }
 
-        _circleFitPointsPixels.RemoveAt(_circleFitPointsPixels.Count - 1);
-        RemoveLastCirclePointMarker();
-        if (_circleFitPointsPixels.Count >= 3 && TryFitCircle(
-                _circleFitPointsPixels,
-                out var centerX,
-                out var centerY,
-                out var radius))
+        ClearAnnotations();
+        SetRectanglePointSelectionMode(true);
+        SetStatus("请依次点击矩形或正方形的 4 个角点，点选顺序不限", MicroscopeStatus.Connected);
+    }
+
+    private void UndoPoint_Click(object sender, RoutedEventArgs e)
+    {
+        if (_circlePointSelectionEnabled && _circleFitPointsPixels.Count > 0)
         {
-            ApplyFittedCircle(centerX, centerY, radius);
+            _circleFitPointsPixels.RemoveAt(_circleFitPointsPixels.Count - 1);
+            RemoveLastSelectionPointMarker();
+            if (_circleFitPointsPixels.Count >= 3 && TryFitCircle(
+                    _circleFitPointsPixels,
+                    out var centerX,
+                    out var centerY,
+                    out var radius))
+            {
+                ApplyFittedCircle(centerX, centerY, radius);
+            }
+            else
+            {
+                _hasCircle = false;
+                CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
+            }
+
+            UpdateCirclePointSelectionStatus();
         }
-        else
+        else if (_rectanglePointSelectionEnabled && _rectangleFitPointsPixels.Count > 0)
         {
-            _hasCircle = false;
-            CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
+            _rectangleFitPointsPixels.RemoveAt(_rectangleFitPointsPixels.Count - 1);
+            RemoveLastSelectionPointMarker();
+            _hasRectangle = false;
+            _rectangleCornersPixels = [];
+            RectangleAnnotationPolygon.Visibility = Visibility.Collapsed;
+            UpdateRectanglePointSelectionStatus();
         }
 
-        UpdateCirclePointSelectionStatus();
         UpdateControls();
     }
 
-    private void ClearCircle_Click(object sender, RoutedEventArgs e)
+    private void ClearAnnotation_Click(object sender, RoutedEventArgs e)
     {
-        ClearCircle();
-        SetStatus("圆形标记已清除", _captureDevice is null
+        ClearAnnotations();
+        SetStatus("图形标记已清除", _captureDevice is null
             ? MicroscopeStatus.Ready
             : MicroscopeStatus.Connected);
     }
@@ -508,12 +538,23 @@ public partial class UsbMicroscopePage : UserControl
             {
                 SetStatus("请在显微镜图像范围内选择圆边缘点", MicroscopeStatus.Error);
             }
+            else if (_rectanglePointSelectionEnabled)
+            {
+                SetStatus("请在显微镜图像范围内选择矩形角点", MicroscopeStatus.Error);
+            }
             return;
         }
 
         if (_circlePointSelectionEnabled)
         {
             AddCircleFitPoint(point, imageRect);
+            e.Handled = true;
+            return;
+        }
+
+        if (_rectanglePointSelectionEnabled)
+        {
+            AddRectangleFitPoint(point, imageRect);
             e.Handled = true;
             return;
         }
@@ -527,17 +568,29 @@ public partial class UsbMicroscopePage : UserControl
             AnnotationCanvas.CaptureMouse();
             AnnotationCanvas.Cursor = Cursors.SizeAll;
             e.Handled = true;
+            return;
+        }
+
+        if (_hasRectangle && IsPointInsideDisplayedRectangle(point))
+        {
+            _rectangleMoveActive = true;
+            _rectangleMoveStartView = point;
+            _rectangleMoveStartCornersPixels = [.. _rectangleCornersPixels];
+            AnnotationCanvas.CaptureMouse();
+            AnnotationCanvas.Cursor = Cursors.SizeAll;
+            e.Handled = true;
         }
     }
 
     private void AnnotationCanvas_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_circleMoveActive)
+        if (!_circleMoveActive && !_rectangleMoveActive)
         {
-            if (!_circlePointSelectionEnabled)
+            if (!_circlePointSelectionEnabled && !_rectanglePointSelectionEnabled)
             {
-                AnnotationCanvas.Cursor = _hasCircle &&
-                                          IsPointInsideDisplayedCircle(e.GetPosition(AnnotationCanvas))
+                var point = e.GetPosition(AnnotationCanvas);
+                AnnotationCanvas.Cursor = (_hasCircle && IsPointInsideDisplayedCircle(point)) ||
+                                          (_hasRectangle && IsPointInsideDisplayedRectangle(point))
                     ? Cursors.SizeAll
                     : Cursors.Arrow;
             }
@@ -557,43 +610,73 @@ public partial class UsbMicroscopePage : UserControl
 
         var scale = imageRect.Width / _latestFrame.PixelWidth;
         var current = e.GetPosition(AnnotationCanvas);
-        var nextCenterX = _circleMoveStartCenterPixelX + (current.X - _circleMoveStartView.X) / scale;
-        var nextCenterY = _circleMoveStartCenterPixelY + (current.Y - _circleMoveStartView.Y) / scale;
-        if (_circleRadiusPixels * 2 <= _latestFrame.PixelWidth)
+        if (_circleMoveActive)
         {
-            nextCenterX = Math.Clamp(
-                nextCenterX,
-                _circleRadiusPixels,
-                _latestFrame.PixelWidth - _circleRadiusPixels);
-        }
+            var nextCenterX = _circleMoveStartCenterPixelX + (current.X - _circleMoveStartView.X) / scale;
+            var nextCenterY = _circleMoveStartCenterPixelY + (current.Y - _circleMoveStartView.Y) / scale;
+            if (_circleRadiusPixels * 2 <= _latestFrame.PixelWidth)
+            {
+                nextCenterX = Math.Clamp(
+                    nextCenterX,
+                    _circleRadiusPixels,
+                    _latestFrame.PixelWidth - _circleRadiusPixels);
+            }
 
-        if (_circleRadiusPixels * 2 <= _latestFrame.PixelHeight)
+            if (_circleRadiusPixels * 2 <= _latestFrame.PixelHeight)
+            {
+                nextCenterY = Math.Clamp(
+                    nextCenterY,
+                    _circleRadiusPixels,
+                    _latestFrame.PixelHeight - _circleRadiusPixels);
+            }
+
+            _circleCenterPixelX = nextCenterX;
+            _circleCenterPixelY = nextCenterY;
+            UpdateCircleOverlayFromPixels();
+        }
+        else if (_rectangleMoveActive && _rectangleMoveStartCornersPixels.Length == 4)
         {
-            nextCenterY = Math.Clamp(
-                nextCenterY,
-                _circleRadiusPixels,
-                _latestFrame.PixelHeight - _circleRadiusPixels);
+            var deltaX = (current.X - _rectangleMoveStartView.X) / scale;
+            var deltaY = (current.Y - _rectangleMoveStartView.Y) / scale;
+            var minimumX = _rectangleMoveStartCornersPixels.Min(point => point.X);
+            var maximumX = _rectangleMoveStartCornersPixels.Max(point => point.X);
+            var minimumY = _rectangleMoveStartCornersPixels.Min(point => point.Y);
+            var maximumY = _rectangleMoveStartCornersPixels.Max(point => point.Y);
+            deltaX = Math.Clamp(deltaX, -minimumX, _latestFrame.PixelWidth - maximumX);
+            deltaY = Math.Clamp(deltaY, -minimumY, _latestFrame.PixelHeight - maximumY);
+            _rectangleCornersPixels = _rectangleMoveStartCornersPixels
+                .Select(point => new Point(point.X + deltaX, point.Y + deltaY))
+                .ToArray();
+            UpdateRectangleOverlayFromPixels();
         }
-
-        _circleCenterPixelX = nextCenterX;
-        _circleCenterPixelY = nextCenterY;
-        UpdateCircleOverlayFromPixels();
         e.Handled = true;
     }
 
     private void AnnotationCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_circleMoveActive)
+        if (!_circleMoveActive && !_rectangleMoveActive)
         {
             return;
         }
 
+        var movedCircle = _circleMoveActive;
         _circleMoveActive = false;
+        _rectangleMoveActive = false;
         AnnotationCanvas.ReleaseMouseCapture();
         AnnotationCanvas.Cursor = Cursors.SizeAll;
-        SetStatus(
-            $"圆已移动：圆心({_circleCenterPixelX:0}, {_circleCenterPixelY:0})，半径{_circleRadiusPixels:0}像素",
-            MicroscopeStatus.Connected);
+        if (movedCircle)
+        {
+            SetStatus(
+                $"圆已移动：圆心({_circleCenterPixelX:0}, {_circleCenterPixelY:0})，半径{_circleRadiusPixels:0}像素",
+                MicroscopeStatus.Connected);
+        }
+        else
+        {
+            var (width, height) = GetRectangleDimensions(_rectangleCornersPixels);
+            SetStatus(
+                $"{(_rectangleIsSquare ? "正方形" : "矩形")}已移动：{width:0} × {height:0} 像素",
+                MicroscopeStatus.Connected);
+        }
         e.Handled = true;
     }
 
@@ -602,7 +685,8 @@ public partial class UsbMicroscopePage : UserControl
         ClampZoomOffsets();
         ApplyZoomTransform();
         UpdateCircleOverlayFromPixels();
-        UpdateCirclePointMarkers();
+        UpdateRectangleOverlayFromPixels();
+        UpdateSelectionPointMarkers();
     }
 
     private void PreviewSurface_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -640,7 +724,8 @@ public partial class UsbMicroscopePage : UserControl
 
         ApplyZoomTransform();
         UpdateCircleOverlayFromPixels();
-        UpdateCirclePointMarkers();
+        UpdateRectangleOverlayFromPixels();
+        UpdateSelectionPointMarkers();
         e.Handled = true;
     }
 
@@ -656,7 +741,8 @@ public partial class UsbMicroscopePage : UserControl
         _zoomOffsetY = 0;
         ApplyZoomTransform();
         UpdateCircleOverlayFromPixels();
-        UpdateCirclePointMarkers();
+        UpdateRectangleOverlayFromPixels();
+        UpdateSelectionPointMarkers();
     }
 
     private void ApplyZoomTransform()
@@ -679,7 +765,12 @@ public partial class UsbMicroscopePage : UserControl
             CircleAnnotationEllipse.StrokeThickness = 3 / _zoomScale;
         }
 
-        foreach (var marker in _circleFitPointMarkers)
+        if (RectangleAnnotationPolygon is not null)
+        {
+            RectangleAnnotationPolygon.StrokeThickness = 3 / _zoomScale;
+        }
+
+        foreach (var marker in _selectionPointMarkers)
         {
             marker.Width = 10 / _zoomScale;
             marker.Height = 10 / _zoomScale;
@@ -744,7 +835,7 @@ public partial class UsbMicroscopePage : UserControl
             (viewPoint.X - imageRect.X) / scale,
             (viewPoint.Y - imageRect.Y) / scale);
         _circleFitPointsPixels.Add(pixelPoint);
-        AddCirclePointMarker(pixelPoint);
+        AddSelectionPointMarker(pixelPoint);
 
         if (_circleFitPointsPixels.Count >= 3)
         {
@@ -791,7 +882,7 @@ public partial class UsbMicroscopePage : UserControl
     {
         _circlePointSelectionEnabled = false;
         _circleFitPointsPixels.Clear();
-        RemoveAllCirclePointMarkers();
+        RemoveAllSelectionPointMarkers();
         AnnotationCanvas.IsHitTestVisible = true;
         AnnotationCanvas.Cursor = Cursors.Arrow;
         DrawCircleButton.Content = "重新点选";
@@ -806,6 +897,189 @@ public partial class UsbMicroscopePage : UserControl
         _circleRadiusPixels = radius;
         _hasCircle = true;
         UpdateCircleOverlayFromPixels();
+    }
+
+    private void AddRectangleFitPoint(Point viewPoint, Rect imageRect)
+    {
+        if (_latestFrame is null || imageRect.IsEmpty || _rectangleFitPointsPixels.Count >= 4)
+        {
+            return;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        var pixelPoint = new Point(
+            (viewPoint.X - imageRect.X) / scale,
+            (viewPoint.Y - imageRect.Y) / scale);
+        _rectangleFitPointsPixels.Add(pixelPoint);
+        AddSelectionPointMarker(pixelPoint);
+
+        if (_rectangleFitPointsPixels.Count == 4)
+        {
+            if (TryFitRectangle(
+                    _rectangleFitPointsPixels,
+                    out var corners,
+                    out var isSquare))
+            {
+                _rectangleCornersPixels = corners;
+                _rectangleIsSquare = isSquare;
+                _hasRectangle = true;
+                UpdateRectangleOverlayFromPixels();
+                FinishRectanglePointSelection();
+                return;
+            }
+
+            SetStatus("这 4 个点无法组成有效矩形，请撤销后重新选择角点", MicroscopeStatus.Error);
+        }
+
+        UpdateRectanglePointSelectionStatus();
+        UpdateControls();
+    }
+
+    private void UpdateRectanglePointSelectionStatus()
+    {
+        var pointCount = _rectangleFitPointsPixels.Count;
+        DrawRectangleButton.Content = $"点选中({pointCount}/4)";
+        if (pointCount < 4)
+        {
+            SetStatus($"已选择 {pointCount} 个角点，还需 {4 - pointCount} 个点", MicroscopeStatus.Connected);
+        }
+    }
+
+    private void FinishRectanglePointSelection()
+    {
+        _rectanglePointSelectionEnabled = false;
+        _rectangleFitPointsPixels.Clear();
+        RemoveAllSelectionPointMarkers();
+        AnnotationCanvas.IsHitTestVisible = true;
+        AnnotationCanvas.Cursor = Cursors.Arrow;
+        DrawRectangleButton.Content = "重新点选矩形";
+        var (width, height) = GetRectangleDimensions(_rectangleCornersPixels);
+        SetStatus(
+            $"{(_rectangleIsSquare ? "正方形" : "矩形")}生成完成：{width:0} × {height:0} 像素；按住内部可拖动",
+            MicroscopeStatus.Connected);
+        UpdateControls();
+    }
+
+    private static bool TryFitRectangle(
+        IReadOnlyList<Point> points,
+        out Point[] corners,
+        out bool isSquare)
+    {
+        corners = [];
+        isSquare = false;
+        if (points.Count != 4)
+        {
+            return false;
+        }
+
+        var bestArea = double.PositiveInfinity;
+        var bestCosine = 0d;
+        var bestSine = 0d;
+        var bestMinimumU = 0d;
+        var bestMaximumU = 0d;
+        var bestMinimumV = 0d;
+        var bestMaximumV = 0d;
+
+        for (var first = 0; first < points.Count - 1; first++)
+        {
+            for (var second = first + 1; second < points.Count; second++)
+            {
+                var deltaX = points[second].X - points[first].X;
+                var deltaY = points[second].Y - points[first].Y;
+                var length = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
+                if (length < 2)
+                {
+                    continue;
+                }
+
+                var cosine = deltaX / length;
+                var sine = deltaY / length;
+                var minimumU = double.PositiveInfinity;
+                var maximumU = double.NegativeInfinity;
+                var minimumV = double.PositiveInfinity;
+                var maximumV = double.NegativeInfinity;
+                foreach (var point in points)
+                {
+                    var u = point.X * cosine + point.Y * sine;
+                    var v = -point.X * sine + point.Y * cosine;
+                    minimumU = Math.Min(minimumU, u);
+                    maximumU = Math.Max(maximumU, u);
+                    minimumV = Math.Min(minimumV, v);
+                    maximumV = Math.Max(maximumV, v);
+                }
+
+                var width = maximumU - minimumU;
+                var height = maximumV - minimumV;
+                var area = width * height;
+                if (width < 2 || height < 2 || !double.IsFinite(area) || area >= bestArea)
+                {
+                    continue;
+                }
+
+                bestArea = area;
+                bestCosine = cosine;
+                bestSine = sine;
+                bestMinimumU = minimumU;
+                bestMaximumU = maximumU;
+                bestMinimumV = minimumV;
+                bestMaximumV = maximumV;
+            }
+        }
+
+        if (!double.IsFinite(bestArea))
+        {
+            return false;
+        }
+
+        var fittedWidth = bestMaximumU - bestMinimumU;
+        var fittedHeight = bestMaximumV - bestMinimumV;
+        var aspectRatio = Math.Max(fittedWidth, fittedHeight) / Math.Min(fittedWidth, fittedHeight);
+        isSquare = aspectRatio <= 1.12;
+        if (isSquare)
+        {
+            var centerU = (bestMinimumU + bestMaximumU) / 2;
+            var centerV = (bestMinimumV + bestMaximumV) / 2;
+            var halfSide = (fittedWidth + fittedHeight) / 4;
+            bestMinimumU = centerU - halfSide;
+            bestMaximumU = centerU + halfSide;
+            bestMinimumV = centerV - halfSide;
+            bestMaximumV = centerV + halfSide;
+        }
+
+        Point FromAxes(double u, double v)
+        {
+            return new Point(
+                u * bestCosine - v * bestSine,
+                u * bestSine + v * bestCosine);
+        }
+
+        corners =
+        [
+            FromAxes(bestMinimumU, bestMinimumV),
+            FromAxes(bestMaximumU, bestMinimumV),
+            FromAxes(bestMaximumU, bestMaximumV),
+            FromAxes(bestMinimumU, bestMaximumV)
+        ];
+        return corners.All(point => double.IsFinite(point.X) && double.IsFinite(point.Y));
+    }
+
+    private static (double Width, double Height) GetRectangleDimensions(IReadOnlyList<Point> corners)
+    {
+        if (corners.Count != 4)
+        {
+            return (0, 0);
+        }
+
+        var width = (Distance(corners[0], corners[1]) + Distance(corners[2], corners[3])) / 2;
+        var height = (Distance(corners[1], corners[2]) + Distance(corners[3], corners[0])) / 2;
+        return (width, height);
+    }
+
+    private static double Distance(Point first, Point second)
+    {
+        var deltaX = second.X - first.X;
+        var deltaY = second.Y - first.Y;
+        return Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
     }
 
     private static bool TryFitCircle(
@@ -962,7 +1236,49 @@ public partial class UsbMicroscopePage : UserControl
         return deltaX * deltaX + deltaY * deltaY <= radius * radius;
     }
 
-    private void AddCirclePointMarker(Point pixelPoint)
+    private bool IsPointInsideDisplayedRectangle(Point point)
+    {
+        if (!_hasRectangle || _latestFrame is null || _rectangleCornersPixels.Length != 4)
+        {
+            return false;
+        }
+
+        var imageRect = GetDisplayedImageRect();
+        if (imageRect.IsEmpty)
+        {
+            return false;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        var corners = _rectangleCornersPixels
+            .Select(corner => new Point(
+                imageRect.X + corner.X * scale,
+                imageRect.Y + corner.Y * scale))
+            .ToArray();
+        double? expectedSign = null;
+        for (var index = 0; index < corners.Length; index++)
+        {
+            var start = corners[index];
+            var end = corners[(index + 1) % corners.Length];
+            var cross = (end.X - start.X) * (point.Y - start.Y) -
+                        (end.Y - start.Y) * (point.X - start.X);
+            if (Math.Abs(cross) < 0.001)
+            {
+                continue;
+            }
+
+            var sign = Math.Sign(cross);
+            expectedSign ??= sign;
+            if (sign != expectedSign)
+            {
+                return false;
+            }
+        }
+
+        return expectedSign.HasValue;
+    }
+
+    private void AddSelectionPointMarker(Point pixelPoint)
     {
         var marker = new ShapeEllipse
         {
@@ -973,12 +1289,12 @@ public partial class UsbMicroscopePage : UserControl
             StrokeThickness = 1.5 / _zoomScale,
             IsHitTestVisible = false
         };
-        _circleFitPointMarkers.Add(marker);
+        _selectionPointMarkers.Add(marker);
         AnnotationCanvas.Children.Add(marker);
-        PositionCirclePointMarker(marker, pixelPoint);
+        PositionSelectionPointMarker(marker, pixelPoint);
     }
 
-    private void PositionCirclePointMarker(ShapeEllipse marker, Point pixelPoint)
+    private void PositionSelectionPointMarker(ShapeEllipse marker, Point pixelPoint)
     {
         if (_latestFrame is null)
         {
@@ -996,35 +1312,38 @@ public partial class UsbMicroscopePage : UserControl
         Canvas.SetTop(marker, imageRect.Y + pixelPoint.Y * scale - marker.Height / 2);
     }
 
-    private void UpdateCirclePointMarkers()
+    private void UpdateSelectionPointMarkers()
     {
+        IReadOnlyList<Point> points = _rectanglePointSelectionEnabled
+            ? _rectangleFitPointsPixels
+            : _circleFitPointsPixels;
         for (var index = 0; index < Math.Min(
-                 _circleFitPointsPixels.Count,
-                 _circleFitPointMarkers.Count); index++)
+                 points.Count,
+                 _selectionPointMarkers.Count); index++)
         {
-            PositionCirclePointMarker(_circleFitPointMarkers[index], _circleFitPointsPixels[index]);
+            PositionSelectionPointMarker(_selectionPointMarkers[index], points[index]);
         }
     }
 
-    private void RemoveLastCirclePointMarker()
+    private void RemoveLastSelectionPointMarker()
     {
-        if (_circleFitPointMarkers.Count == 0)
+        if (_selectionPointMarkers.Count == 0)
         {
             return;
         }
 
-        var marker = _circleFitPointMarkers[^1];
-        _circleFitPointMarkers.RemoveAt(_circleFitPointMarkers.Count - 1);
+        var marker = _selectionPointMarkers[^1];
+        _selectionPointMarkers.RemoveAt(_selectionPointMarkers.Count - 1);
         AnnotationCanvas.Children.Remove(marker);
     }
 
-    private void RemoveAllCirclePointMarkers()
+    private void RemoveAllSelectionPointMarkers()
     {
-        foreach (var marker in _circleFitPointMarkers)
+        foreach (var marker in _selectionPointMarkers)
         {
             AnnotationCanvas.Children.Remove(marker);
         }
-        _circleFitPointMarkers.Clear();
+        _selectionPointMarkers.Clear();
     }
 
     private void UpdateCirclePreview(Point center, double radius)
@@ -1058,6 +1377,31 @@ public partial class UsbMicroscopePage : UserControl
         CircleAnnotationEllipse.Visibility = Visibility.Visible;
     }
 
+    private void UpdateRectangleOverlayFromPixels()
+    {
+        if (!_hasRectangle ||
+            _latestFrame is null ||
+            _rectangleCornersPixels.Length != 4 ||
+            AnnotationCanvas is null)
+        {
+            return;
+        }
+
+        var imageRect = GetDisplayedImageRect();
+        if (imageRect.IsEmpty || _latestFrame.PixelWidth <= 0)
+        {
+            RectangleAnnotationPolygon.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var scale = imageRect.Width / _latestFrame.PixelWidth;
+        RectangleAnnotationPolygon.Points = new PointCollection(
+            _rectangleCornersPixels.Select(point => new Point(
+                imageRect.X + point.X * scale,
+                imageRect.Y + point.Y * scale)));
+        RectangleAnnotationPolygon.Visibility = Visibility.Visible;
+    }
+
     private Rect GetDisplayedImageRect()
     {
         return GetBaseImageRect();
@@ -1089,21 +1433,37 @@ public partial class UsbMicroscopePage : UserControl
     private void SetCirclePointSelectionMode(bool enabled)
     {
         _circlePointSelectionEnabled = enabled;
-        AnnotationCanvas.IsHitTestVisible = enabled || _hasCircle;
+        AnnotationCanvas.IsHitTestVisible = enabled || _hasCircle || _hasRectangle;
         AnnotationCanvas.Cursor = enabled
             ? Cursors.Cross
-            : _hasCircle ? Cursors.SizeAll : Cursors.Arrow;
+            : _hasCircle || _hasRectangle ? Cursors.SizeAll : Cursors.Arrow;
         DrawCircleButton.Content = enabled ? "点选中(0/3)" : _hasCircle ? "重新点选" : "点选圆";
         UpdateControls();
     }
 
-    private void ClearCircle()
+    private void SetRectanglePointSelectionMode(bool enabled)
+    {
+        _rectanglePointSelectionEnabled = enabled;
+        AnnotationCanvas.IsHitTestVisible = enabled || _hasCircle || _hasRectangle;
+        AnnotationCanvas.Cursor = enabled
+            ? Cursors.Cross
+            : _hasCircle || _hasRectangle ? Cursors.SizeAll : Cursors.Arrow;
+        DrawRectangleButton.Content = enabled ? "点选中(0/4)" : _hasRectangle ? "重新点选矩形" : "点选矩形";
+        UpdateControls();
+    }
+
+    private void ClearAnnotations()
     {
         _circleMoveActive = false;
+        _rectangleMoveActive = false;
         _hasCircle = false;
+        _hasRectangle = false;
         _circleRadiusPixels = 0;
         _circleFitPointsPixels.Clear();
-        RemoveAllCirclePointMarkers();
+        _rectangleFitPointsPixels.Clear();
+        _rectangleCornersPixels = [];
+        _rectangleMoveStartCornersPixels = [];
+        RemoveAllSelectionPointMarkers();
         if (AnnotationCanvas is not null)
         {
             AnnotationCanvas.ReleaseMouseCapture();
@@ -1116,15 +1476,27 @@ public partial class UsbMicroscopePage : UserControl
             CircleAnnotationEllipse.Visibility = Visibility.Collapsed;
         }
 
+        if (RectangleAnnotationPolygon is not null)
+        {
+            RectangleAnnotationPolygon.Visibility = Visibility.Collapsed;
+            RectangleAnnotationPolygon.Points.Clear();
+        }
+
         _circlePointSelectionEnabled = false;
+        _rectanglePointSelectionEnabled = false;
         if (DrawCircleButton is not null)
         {
             DrawCircleButton.Content = "点选圆";
         }
 
-        if (UndoCirclePointButton is not null)
+        if (DrawRectangleButton is not null)
         {
-            UndoCirclePointButton.IsEnabled = false;
+            DrawRectangleButton.Content = "点选矩形";
+        }
+
+        if (UndoPointButton is not null)
+        {
+            UndoPointButton.IsEnabled = false;
         }
 
         UpdateControls();
@@ -1132,7 +1504,9 @@ public partial class UsbMicroscopePage : UserControl
 
     private BitmapSource CreateAnnotatedFrame(BitmapSource frame)
     {
-        if (!_hasCircle || _circleRadiusPixels <= 0)
+        var drawCircle = _hasCircle && _circleRadiusPixels > 0;
+        var drawRectangle = _hasRectangle && _rectangleCornersPixels.Length == 4;
+        if (!drawCircle && !drawRectangle)
         {
             return frame;
         }
@@ -1145,16 +1519,35 @@ public partial class UsbMicroscopePage : UserControl
             var displayScale = displayedRect.IsEmpty || frame.PixelWidth <= 0
                 ? 1d
                 : displayedRect.Width / frame.PixelWidth * _zoomScale;
-            var pen = new Pen(
-                new SolidColorBrush(Color.FromRgb(255, 59, 66)),
-                Math.Max(2d, 3d / displayScale));
-            pen.Freeze();
-            drawing.DrawEllipse(
-                null,
-                pen,
-                new Point(_circleCenterPixelX, _circleCenterPixelY),
-                _circleRadiusPixels,
-                _circleRadiusPixels);
+            var strokeThickness = Math.Max(2d, 3d / displayScale);
+            if (drawCircle)
+            {
+                var circlePen = new Pen(
+                    new SolidColorBrush(Color.FromRgb(255, 59, 66)),
+                    strokeThickness);
+                circlePen.Freeze();
+                drawing.DrawEllipse(
+                    null,
+                    circlePen,
+                    new Point(_circleCenterPixelX, _circleCenterPixelY),
+                    _circleRadiusPixels,
+                    _circleRadiusPixels);
+            }
+
+            if (drawRectangle)
+            {
+                var rectanglePen = new Pen(
+                    new SolidColorBrush(Color.FromRgb(53, 213, 255)),
+                    strokeThickness);
+                rectanglePen.Freeze();
+                for (var index = 0; index < _rectangleCornersPixels.Length; index++)
+                {
+                    drawing.DrawLine(
+                        rectanglePen,
+                        _rectangleCornersPixels[index],
+                        _rectangleCornersPixels[(index + 1) % _rectangleCornersPixels.Length]);
+                }
+            }
         }
 
         var dpiX = frame.DpiX > 0 ? frame.DpiX : 96;
@@ -1213,10 +1606,15 @@ public partial class UsbMicroscopePage : UserControl
         CaptureButton.IsEnabled = connected && _latestFrame is not null;
         ResetZoomButton.IsEnabled = connected && _latestFrame is not null;
         DrawCircleButton.IsEnabled = connected && _latestFrame is not null;
-        UndoCirclePointButton.IsEnabled = _circlePointSelectionEnabled && _circleFitPointsPixels.Count > 0;
-        ClearCircleButton.IsEnabled = _hasCircle ||
-                                      _circlePointSelectionEnabled ||
-                                      _circleFitPointsPixels.Count > 0;
+        DrawRectangleButton.IsEnabled = connected && _latestFrame is not null;
+        UndoPointButton.IsEnabled = (_circlePointSelectionEnabled && _circleFitPointsPixels.Count > 0) ||
+                                    (_rectanglePointSelectionEnabled && _rectangleFitPointsPixels.Count > 0);
+        ClearAnnotationButton.IsEnabled = _hasCircle ||
+                                          _hasRectangle ||
+                                          _circlePointSelectionEnabled ||
+                                          _rectanglePointSelectionEnabled ||
+                                          _circleFitPointsPixels.Count > 0 ||
+                                          _rectangleFitPointsPixels.Count > 0;
         RotateDdButton.IsEnabled = connected &&
                                    _latestFrame is not null &&
                                    _homeController is not null &&

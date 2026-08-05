@@ -71,7 +71,7 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
                 <TextBlock Grid.Column="2"
-                           Text="滚轮缩放画面；沿物体边缘点击至少 3 个点生成圆，完成后可拖动"
+                           Text="滚轮缩放；圆选至少 3 点，矩形/正方形任选 4 个角点；生成后可拖动"
                            Foreground="#8FB2C9"
                            FontSize="12"
                            VerticalAlignment="Center" />
@@ -141,20 +141,27 @@
                             BorderBrush="#A273D7"
                             IsEnabled="False"
                             Click="DrawCircle_Click" />
-                    <Button x:Name="UndoCirclePointButton"
+                    <Button x:Name="DrawRectangleButton"
+                            Content="点选矩形"
+                            Style="{StaticResource MicroscopeButton}"
+                            Background="#187F94"
+                            BorderBrush="#36ABC0"
+                            IsEnabled="False"
+                            Click="DrawRectangle_Click" />
+                    <Button x:Name="UndoPointButton"
                             Content="撤销点"
                             Style="{StaticResource MicroscopeButton}"
                             Background="#294A64"
                             BorderBrush="#45647A"
                             IsEnabled="False"
-                            Click="UndoCirclePoint_Click" />
-                    <Button x:Name="ClearCircleButton"
-                            Content="清除圆"
+                            Click="UndoPoint_Click" />
+                    <Button x:Name="ClearAnnotationButton"
+                            Content="清除标记"
                             Style="{StaticResource MicroscopeButton}"
                             Background="#294A64"
                             BorderBrush="#45647A"
                             IsEnabled="False"
-                            Click="ClearCircle_Click" />
+                            Click="ClearAnnotation_Click" />
                     <Button x:Name="RotateDdButton"
                             Content="转动一次"
                             ToolTip="DD 马达轴正向移动 22500 脉冲"
@@ -200,6 +207,12 @@
                                  Stroke="#FF3B42"
                                  StrokeThickness="3"
                                  Fill="#18FF3B42"
+                                 IsHitTestVisible="False" />
+                        <Polygon x:Name="RectangleAnnotationPolygon"
+                                 Visibility="Collapsed"
+                                 Stroke="#35D5FF"
+                                 StrokeThickness="3"
+                                 Fill="#1835D5FF"
                                  IsHitTestVisible="False" />
                     </Canvas>
                 </Grid>
