@@ -1496,6 +1496,7 @@ public partial class HomePage : UserControl
             var preserveCorrectionFailureDisplay = false;
             var pendingPickupBatches = new Queue<NozzlePickupBatch>();
             var vibrateWhenPickupCacheDrained = false;
+            var consecutiveEmptyInspectionCount = 0;
 
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
@@ -1575,12 +1576,54 @@ public partial class HomePage : UserControl
 
                     if (blobResult.Rectangles.Count == 0)
                     {
+                        consecutiveEmptyInspectionCount++;
                         SetStartProductionStatus(
-                            "本次找芯片流程返回0个结果，缓存仍为空，下一轮将重新拍照。",
+                            $"连续第{consecutiveEmptyInspectionCount}次未找到芯片，正在执行一键震动…",
                             Color.FromRgb(242, 181, 68));
-                        await Task.Yield();
-                        continue;
+                        var vibrationStarted = _connectionConfigController is not null &&
+                                               await _connectionConfigController.RunOneKeyVibrationAsync(
+                                                   _productionCancellation.Token);
+
+                        if (consecutiveEmptyInspectionCount < 2)
+                        {
+                            SetStartProductionStatus(
+                                vibrationStarted
+                                    ? "第1次未找到芯片，一键震动完成，正在重新拍照。"
+                                    : "第1次未找到芯片，但一键震动未执行（请检查振动盘连接）；仍将重新拍照。",
+                                Color.FromRgb(242, 181, 68));
+                            await Task.Yield();
+                            continue;
+                        }
+
+                        SetStartProductionStatus(
+                            vibrationStarted
+                                ? "连续2次未找到芯片，一键震动完成；停止上料，正在把转盘中的料全部下完…"
+                                : "连续2次未找到芯片，一键震动未执行（请检查振动盘连接）；停止上料，正在把转盘中的料全部下完…",
+                            Color.FromRgb(242, 181, 68));
+                        await DrainCarouselAsync(
+                            carouselStations,
+                            axis0PulseDistance,
+                            ProductionHandlingAxisNos,
+                            activeCarouselAdvanceTask,
+                            activeFinalTestTask,
+                            activeSecondSetUnloadTask,
+                            activeSecondSetPickupTask,
+                            _productionCancellation.Token);
+                        activeCarouselAdvanceTask = null;
+                        activeFinalTestTask = Task.FromResult(0);
+                        activeSecondSetUnloadTask = Task.CompletedTask;
+                        activeSecondSetPickupTask = Task.CompletedTask;
+                        SetStartProductionStatus(
+                            vibrationStarted
+                                ? "连续2次未找到芯片；转盘中的料已全部下完，生产正常结束。"
+                                : "连续2次未找到芯片；转盘中的料已全部下完，生产已结束（振动盘未执行震动，请检查连接）。",
+                            vibrationStarted
+                                ? Color.FromRgb(73, 209, 125)
+                                : Color.FromRgb(242, 181, 68));
+                        return;
                     }
+
+                    consecutiveEmptyInspectionCount = 0;
 
                     try
                     {
@@ -2257,6 +2300,95 @@ public partial class HomePage : UserControl
             SecondSetUnloadTask = secondSetUnloadTask,
             SecondSetPickupTask = secondSetPickupTask
         };
+    }
+
+    /// <summary>
+    /// 停止继续上料后，让转盘上的现有物料继续完成测试、转位和第二套下料，直到转盘为空。
+    /// </summary>
+    private async Task DrainCarouselAsync(
+        CarouselStationState[] carouselStations,
+        double axis0PulseDistance,
+        IReadOnlyCollection<int>? allowedMovingAxisNos,
+        Task<CarouselAdvanceResult>? activeCarouselAdvanceTask,
+        Task<int> activeFinalTestTask,
+        Task activeSecondSetUnloadTask,
+        Task activeSecondSetPickupTask,
+        CancellationToken cancellationToken)
+    {
+        var currentCarouselAdvanceTask = activeCarouselAdvanceTask;
+        var currentFinalTestTask = activeFinalTestTask;
+        var currentSecondSetUnloadTask = activeSecondSetUnloadTask;
+        var currentSecondSetPickupTask = activeSecondSetPickupTask;
+
+        try
+        {
+            if (currentCarouselAdvanceTask is not null)
+            {
+                SetStartProductionStatus(
+                    "停止上料，正在等待当前DD转位完成后继续排空转盘…",
+                    Color.FromRgb(242, 181, 68));
+                var activeResult = await currentCarouselAdvanceTask;
+                currentCarouselAdvanceTask = null;
+                currentFinalTestTask = activeResult.FinalTestTask;
+                currentSecondSetUnloadTask = activeResult.SecondSetUnloadTask;
+                currentSecondSetPickupTask = activeResult.SecondSetPickupTask;
+
+                // 取料完成信号会同步清空13/14工位，等待后再判断转盘是否仍有料。
+                await currentSecondSetPickupTask;
+            }
+
+            while (CountOccupiedCarouselStations(carouselStations) > 0)
+            {
+                var occupiedCount = CountOccupiedCarouselStations(carouselStations);
+                SetStartProductionStatus(
+                    $"排空转盘中：当前还有 {occupiedCount} 颗料，DD继续转位并下料…",
+                    Color.FromRgb(242, 181, 68));
+
+                currentCarouselAdvanceTask = StartCarouselAfterSafetyBarrierAsync(
+                    currentFinalTestTask,
+                    currentSecondSetPickupTask,
+                    currentSecondSetUnloadTask,
+                    Task.CompletedTask,
+                    carouselStations,
+                    axis0PulseDistance,
+                    allowedMovingAxisNos,
+                    cancellationToken);
+                var drainResult = await currentCarouselAdvanceTask;
+                currentCarouselAdvanceTask = null;
+                currentFinalTestTask = drainResult.FinalTestTask;
+                currentSecondSetUnloadTask = drainResult.SecondSetUnloadTask;
+                currentSecondSetPickupTask = drainResult.SecondSetPickupTask;
+
+                // 等待本次13/14工位取料完成，确保占料缓存已更新后再决定是否继续转位。
+                await currentSecondSetPickupTask;
+            }
+
+            if (!currentSecondSetUnloadTask.IsCompleted)
+            {
+                SetStartProductionStatus(
+                    "转盘已空，正在等待第二套把最后一批料放入BIN…",
+                    Color.FromRgb(242, 181, 68));
+            }
+
+            await Task.WhenAll(
+                currentFinalTestTask,
+                currentSecondSetPickupTask,
+                currentSecondSetUnloadTask);
+        }
+        finally
+        {
+            // 排空途中若停止或故障，也要观察所有已启动任务，避免遗留未观察异常。
+            await ObserveCarouselAdvanceTaskNoThrowAsync(currentCarouselAdvanceTask);
+            await ObserveTaskNoThrowAsync(currentFinalTestTask);
+            await ObserveTaskNoThrowAsync(currentSecondSetPickupTask);
+            await ObserveTaskNoThrowAsync(currentSecondSetUnloadTask);
+        }
+    }
+
+    private static int CountOccupiedCarouselStations(IReadOnlyList<CarouselStationState> carouselStations)
+    {
+        return Enumerable.Range(1, Math.Min(CarouselStationCount, carouselStations.Count - 1))
+            .Count(station => carouselStations[station].Occupied);
     }
 
     private Task StartSecondSetUnloadIfReadyAsync(

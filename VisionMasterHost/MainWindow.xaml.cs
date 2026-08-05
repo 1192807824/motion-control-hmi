@@ -813,15 +813,19 @@ public partial class MainWindow : Window
             RefreshInspectionDisplayNoThrow();
 
             var blobResult = blobModule.ModuResult;
-            if (blobResult.ModuStatus != 1)
+            var resultCount = Math.Max(
+                0,
+                Math.Min(
+                    MaximumInspectionBlobResultCount,
+                    Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0)));
+            if (blobResult.ModuStatus != 1 && (isNozzlePointProcedure || resultCount > 0))
             {
                 throw new InvalidOperationException(
                     $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
             }
 
-            var resultCount = Math.Min(
-                MaximumInspectionBlobResultCount,
-                Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0));
+            // 生产找芯片时，Blob模块的“未找到目标”会以NG且0个结果返回。
+            // 这是正常的缺料判定，交给主页执行震动、重拍和排空收尾，不能在视觉进程内报错。
             List<RectangleBlobCandidate> candidates;
             if (isNozzlePointProcedure)
             {
