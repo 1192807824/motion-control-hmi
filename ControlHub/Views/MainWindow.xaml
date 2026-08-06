@@ -115,7 +115,11 @@
                         <Border Width="1" Height="24" Background="#44627D" Margin="20,0,18,0" />
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="当前配方" Foreground="#AFC1D2" FontSize="11" FontWeight="SemiBold" />
-                            <TextBlock Text="产品A_20240520" Foreground="#F2F7FB" FontSize="14" FontWeight="Bold" />
+                            <TextBlock x:Name="CurrentRecipeNameText"
+                                       Text="未应用配方"
+                                       Foreground="#F2F7FB"
+                                       FontSize="14"
+                                       FontWeight="Bold" />
                         </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">

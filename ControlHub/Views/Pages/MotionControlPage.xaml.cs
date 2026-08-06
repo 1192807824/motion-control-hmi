@@ -70,6 +70,138 @@ public partial class MotionControlPage : UserControl
 
     public event EventHandler? EmergencyStopIssued;
 
+    public IReadOnlyDictionary<int, AxisSettings> CaptureRecipeAxisSettings()
+    {
+        if (Axes is not { Count: > 0 } axes)
+        {
+            return new Dictionary<int, AxisSettings>();
+        }
+
+        CommitAndSaveAxisSettingsOrThrow();
+        return axes.ToDictionary(
+            axis => axis.AxisNo,
+            axis => new AxisSettings(
+                axis.Name,
+                axis.JogSpeed,
+                axis.JogDistance,
+                ConfigurationVersion: 2));
+    }
+
+    public MotionRecipeSettings CaptureRecipeMotionSettings()
+    {
+        CommitAndSaveAxisSettingsOrThrow();
+        return new MotionRecipeSettings
+        {
+            HomeTimeoutSeconds = _motionOptions.HomeTimeoutSeconds,
+            DefaultMoveProfile = ProductRecipeStore.Clone(_motionOptions.MoveProfile),
+            AxisMoveProfiles = ProductRecipeStore.Clone(_motionOptions.AxisMoveProfiles),
+            DefaultHomeProfile = ProductRecipeStore.Clone(_motionOptions.HomeProfile),
+            AxisHomeProfiles = ProductRecipeStore.Clone(_motionOptions.AxisHomeProfiles),
+            HomeSequence = _motionOptions.HomeSequence.ToArray(),
+            IoPointNames = new Dictionary<string, string>(_motionOptions.IoPointNames)
+        };
+    }
+
+    public void ApplyRecipeAxisSettings(IReadOnlyDictionary<int, AxisSettings> settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (_activeJogAxisNo is not null ||
+            _activePositionAxisNo is not null ||
+            _homeDeadlines.Count > 0 ||
+            _pendingStopAxisNos.Count > 0 ||
+            _calibrationOperationActive)
+        {
+            throw new InvalidOperationException("运动控制正在执行命令，不能切换配方轴参数。");
+        }
+
+        if (Axes is not { Count: > 0 } axes)
+        {
+            return;
+        }
+
+        _loadingAxisSettings = true;
+        try
+        {
+            foreach (var axis in axes)
+            {
+                if (!settings.TryGetValue(axis.AxisNo, out var saved))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(saved.Name))
+                {
+                    axis.Name = saved.Name;
+                }
+                if (saved.JogSpeed is { } speed)
+                {
+                    axis.JogSpeed = speed;
+                }
+                if (saved.JogDistance is { } distance)
+                {
+                    axis.JogDistance = distance;
+                }
+            }
+        }
+        finally
+        {
+            _loadingAxisSettings = false;
+        }
+
+        SaveAxisSettingsOrThrow();
+    }
+
+    public void ApplyRecipeMotionSettings(MotionRecipeSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (_activeJogAxisNo is not null ||
+            _activePositionAxisNo is not null ||
+            _homeDeadlines.Count > 0 ||
+            _pendingStopAxisNos.Count > 0 ||
+            _calibrationOperationActive)
+        {
+            throw new InvalidOperationException("运动控制正在执行命令，不能切换配方运动曲线。");
+        }
+
+        CopyProfile(settings.DefaultMoveProfile, _motionOptions.MoveProfile);
+        _motionOptions.AxisMoveProfiles.Clear();
+        foreach (var (axisNo, profile) in settings.AxisMoveProfiles)
+        {
+            _motionOptions.AxisMoveProfiles[axisNo] = ProductRecipeStore.Clone(profile);
+        }
+
+        CopyProfile(settings.DefaultHomeProfile, _motionOptions.HomeProfile);
+        _motionOptions.AxisHomeProfiles.Clear();
+        foreach (var (axisNo, profile) in settings.AxisHomeProfiles)
+        {
+            _motionOptions.AxisHomeProfiles[axisNo] = ProductRecipeStore.Clone(profile);
+        }
+
+        _motionOptions.HomeTimeoutSeconds = settings.HomeTimeoutSeconds;
+        _motionOptions.HomeSequence = settings.HomeSequence.ToArray();
+        _motionOptions.IoPointNames = new Dictionary<string, string>(settings.IoPointNames);
+        _motionOptions.Validate();
+        _motionOptionsStore.Save(_motionOptions);
+
+        if (SelectedAxis is { } selectedAxis)
+        {
+            Tuning.LoadFrom(_motionOptions.GetMoveProfile(selectedAxis.HardwareAxisNo));
+            HomeTuning.LoadFrom(
+                _motionOptions.GetHomeProfile(selectedAxis.HardwareAxisNo),
+                _motionOptions.HomeTimeoutSeconds,
+                GetHomeSequenceOrder(selectedAxis.HardwareAxisNo));
+        }
+    }
+
+    private static void CopyProfile<T>(T source, T destination)
+    {
+        foreach (var property in typeof(T).GetProperties()
+                     .Where(property => property.CanRead && property.CanWrite))
+        {
+            property.SetValue(destination, property.GetValue(source));
+        }
+    }
+
     public MotionControlPage()
     {
         InitializeComponent();
@@ -220,6 +352,91 @@ public partial class MotionControlPage : UserControl
     public void Shutdown()
     {
         _ = TryShutdown(out _);
+    }
+
+    /// <summary>
+    /// 从运动页之外的手动面板启动指定轴连续点动。
+    /// 仍共用本页的伺服、报警、限位、安全锁和停止确认链。
+    /// </summary>
+    public void StartExternalJog(int hardwareAxisNo, double signedVelocity, string sourceName)
+    {
+        if (hardwareAxisNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        if (!double.IsFinite(signedVelocity) || signedVelocity == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(signedVelocity), "点动速度必须是非零有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (ViewModel?.MotionControlsEnabled != true)
+        {
+            throw new InvalidOperationException("运动控制尚未就绪。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零、标定或停止流程，不能启动手动点动。");
+        }
+
+        if (hardwareAxisNo >= _motionCard.AxisCount)
+        {
+            throw new InvalidOperationException(
+                $"硬件轴 {hardwareAxisNo} 当前不可用，控制卡只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var axis = Axes?.FirstOrDefault(item =>
+                       item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+        var snapshot = _motionCard.ReadAxis(hardwareAxisNo);
+        ApplySnapshot(axis, snapshot);
+        EnsureRelativeAxisReady(axis, snapshot, signedVelocity);
+
+        try
+        {
+            _motionCard.Jog(hardwareAxisNo, signedVelocity);
+        }
+        catch (Exception exception)
+        {
+            axis.State = "外部点动启动失败";
+            RecordAlarm($"AXIS-{hardwareAxisNo:00}-EXTERNAL-JOG", FormatException(exception));
+            throw;
+        }
+
+        _activeJogAxisNo = hardwareAxisNo;
+        _activeJogInputOwner = null;
+        _commandStopwatch = Stopwatch.StartNew();
+        axis.IsMoving = true;
+        axis.State = signedVelocity > 0 ? "外部面板正向 JOG" : "外部面板负向 JOG";
+        SetCommandStage(
+            CommandStage.Running,
+            $"{(string.IsNullOrWhiteSpace(sourceName) ? "外部面板" : sourceName)}点动中");
+    }
+
+    public void StopExternalJog(int hardwareAxisNo, string reason)
+    {
+        if (_activeJogAxisNo != hardwareAxisNo)
+        {
+            return;
+        }
+
+        StopActiveJog(string.IsNullOrWhiteSpace(reason) ? "外部面板松开" : reason);
     }
 
     public CalibrationCenterPosition CaptureCalibrationCenter(

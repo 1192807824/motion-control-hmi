@@ -63,6 +63,14 @@ public sealed class VisualCalibrationSettings
 
     public string ActiveCalibrationMode { get; set; } = "";
 
+    public int ManualJogNozzle { get; set; } = 1;
+
+    public double ManualJogXyVelocityPulsesPerSecond { get; set; } = 100_000;
+
+    public double ManualJogZVelocityPulsesPerSecond { get; set; } = 50_000;
+
+    public double ManualJogRVelocityPulsesPerSecond { get; set; } = 50_000;
+
     public double StepXPulses { get; set; } = 100_000;
 
     public double StepYPulses { get; set; } = 100_000;

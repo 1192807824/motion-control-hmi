@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Interop;
+using ControlHub.Services.Persistence;
 
 namespace ControlHub.Views.Controls;
 
@@ -44,6 +45,8 @@ public sealed class VisionMasterProcessHost : HwndHost
     private IntPtr _visionWindow;
     private IntPtr _activeDisplayWindow;
     private bool _disposed;
+    private string? _solutionPath;
+    private VisionProcedureNames _procedureNames = new();
 
     public event EventHandler? Started;
 
@@ -58,6 +61,24 @@ public sealed class VisionMasterProcessHost : HwndHost
     public event EventHandler<CalibrationToolbarActionEventArgs>? CalibrationToolbarActionRequested;
 
     public event EventHandler<CalibrationSidebarActionEventArgs>? CalibrationSidebarActionRequested;
+
+    public string? SolutionPath => _solutionPath;
+
+    public VisionProcedureNames ProcedureNames => ProductRecipeStore.Clone(_procedureNames);
+
+    public void SetSolutionPath(string? solutionPath)
+    {
+        _solutionPath = string.IsNullOrWhiteSpace(solutionPath)
+            ? null
+            : Path.GetFullPath(solutionPath);
+    }
+
+    public void SetProcedureNames(VisionProcedureNames procedureNames)
+    {
+        ArgumentNullException.ThrowIfNull(procedureNames);
+        procedureNames.Validate();
+        _procedureNames = ProductRecipeStore.Clone(procedureNames);
+    }
 
     public async Task StartAsync()
     {
@@ -126,16 +147,36 @@ public sealed class VisionMasterProcessHost : HwndHost
         Process process;
         try
         {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                WorkingDirectory = Path.GetDirectoryName(executablePath)!,
+                UseShellExecute = false,
+                CreateNoWindow = false
+            };
+            startInfo.ArgumentList.Add("--embedded");
+            startInfo.ArgumentList.Add("--parent-pid");
+            startInfo.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--pipe-name");
+            startInfo.ArgumentList.Add(_pipeName);
+            startInfo.ArgumentList.Add("--event-pipe-name");
+            startInfo.ArgumentList.Add(_eventPipeName);
+            if (!string.IsNullOrWhiteSpace(_solutionPath))
+            {
+                startInfo.ArgumentList.Add("--solution-path");
+                startInfo.ArgumentList.Add(_solutionPath);
+            }
+            AddProcedureNameArgument(startInfo, "--inspection-procedure", _procedureNames.Inspection);
+            AddProcedureNameArgument(startInfo, "--nozzle-teaching-procedure", _procedureNames.NozzleTeaching);
+            AddProcedureNameArgument(startInfo, "--calibration-procedure", _procedureNames.Calibration);
+            AddProcedureNameArgument(startInfo, "--lower-calibration-procedure", _procedureNames.LowerCameraCalibration);
+            AddProcedureNameArgument(startInfo, "--rotation-point-procedure", _procedureNames.RotationPoint);
+            AddProcedureNameArgument(startInfo, "--rotation-center-procedure", _procedureNames.RotationCenter);
+            AddProcedureNameArgument(startInfo, "--lower-correction-procedure", _procedureNames.LowerCameraCorrection);
+
             process = new Process
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = executablePath,
-                    Arguments = $"--embedded --parent-pid {Environment.ProcessId} --pipe-name {_pipeName} --event-pipe-name {_eventPipeName}",
-                    WorkingDirectory = Path.GetDirectoryName(executablePath)!,
-                    UseShellExecute = false,
-                    CreateNoWindow = false
-                },
+                StartInfo = startInfo,
                 EnableRaisingEvents = true
             };
             process.Exited += VisionProcess_Exited;
@@ -187,6 +228,15 @@ public sealed class VisionMasterProcessHost : HwndHost
                 RaiseFailed(exception.Message);
             }
         }
+    }
+
+    private static void AddProcedureNameArgument(
+        ProcessStartInfo startInfo,
+        string optionName,
+        string procedureName)
+    {
+        startInfo.ArgumentList.Add(optionName);
+        startInfo.ArgumentList.Add(procedureName);
     }
 
     public async Task RestartAsync()

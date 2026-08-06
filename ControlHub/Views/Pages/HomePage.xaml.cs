@@ -53,8 +53,8 @@ public partial class HomePage : UserControl
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
     private const double HomePageCompletionTolerance = 100d;
-    private const double MoveOutAbsolutePosition = 250_000d;
-    private const double TestStationReturnAbsolutePosition = 200_000d;
+    private const double DefaultTestStationPressPosition = 250_000d;
+    private const double DefaultTestStationWaitPosition = 200_000d;
     private const int SecondSetNozzle2UnloadStation = 13;
     private const int SecondSetNozzle1UnloadStation = 14;
     private const double FirstSetXyVelocity = 100_000d;
@@ -67,7 +67,7 @@ public partial class HomePage : UserControl
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
-    private const int TestStationDwellMilliseconds = 100;
+    private const int DefaultTestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
     private static readonly bool AutomaticTestStationActionsEnabled = false;
     private const string CarouselStatusLoaded = "有料";
@@ -147,6 +147,12 @@ public partial class HomePage : UserControl
             [6] = 14,
             [7] = 15
         };
+    private static readonly TestStationDefinition[] TestStationDefinitions =
+    [
+        new(5, 13, "测试站 01"),
+        new(6, 14, "测试站 02"),
+        new(7, 15, "测试站 03")
+    ];
     private static readonly IReadOnlyDictionary<int, int> EnabledTestStationAxisByStation =
         AutomaticTestStationActionsEnabled
             ? TestStationAxisByStation
@@ -179,6 +185,7 @@ public partial class HomePage : UserControl
     private BinDropPositions? _binDropPositions;
     private LowerCameraPhotoPositions? _lowerCameraPhotoPositions;
     private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
+    private IReadOnlyDictionary<int, TestStationSettings>? _testStationSettings;
     private readonly Dictionary<int, ProductionAxisMotionEditors> _productionAxisMotionEditors = [];
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
@@ -364,6 +371,32 @@ public partial class HomePage : UserControl
         }
 
         return ParameterSettingsPanel;
+    }
+
+    public HomePageSettings CaptureRecipeSettings()
+    {
+        SavePresetPositionsFromInputs();
+        SaveLowerCameraPhotoPositionsFromInputs();
+        SaveProductionAxisParametersFromInputs();
+        SaveTestStationParametersFromInputs();
+        SaveProductionZPositionsFromInputs();
+        SaveSecondSetXyPositionsFromInputs();
+        SaveBinPositionsFromInputs();
+        return ProductRecipeStore.Clone(_homeSettings);
+    }
+
+    public void ApplyRecipeSettings(HomePageSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (_startSequenceRunning || _oneKeyResetRunning || _presetPositionMoveRunning ||
+            _assignedNozzleMoveRunning)
+        {
+            throw new InvalidOperationException("设备正在运行，不能切换产品配方。");
+        }
+
+        _homeSettingsStore.Save(ProductRecipeStore.Clone(settings));
+        LoadPresetPositions();
+        UpdateHomeCommandState();
     }
 
     public void AttachMotionController(MotionControlPage motionController)
@@ -1386,6 +1419,7 @@ public partial class HomePage : UserControl
             ApplyProductionAxisMotionSettings(
                 motionController,
                 _productionAxisMotionSettings);
+            _testStationSettings = ReadTestStationSettings();
             var velocity = GetProductionAxisMotionSettings(
                 VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
             var firstSetYVelocity = GetProductionAxisMotionSettings(
@@ -1496,7 +1530,6 @@ public partial class HomePage : UserControl
             var preserveCorrectionFailureDisplay = false;
             var pendingPickupBatches = new Queue<NozzlePickupBatch>();
             var vibrateWhenPickupCacheDrained = false;
-            var consecutiveEmptyInspectionCount = 0;
 
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
@@ -1576,54 +1609,12 @@ public partial class HomePage : UserControl
 
                     if (blobResult.Rectangles.Count == 0)
                     {
-                        consecutiveEmptyInspectionCount++;
                         SetStartProductionStatus(
-                            $"连续第{consecutiveEmptyInspectionCount}次未找到芯片，正在执行一键震动…",
+                            "本次找芯片流程返回0个结果，缓存仍为空，下一轮将重新拍照。",
                             Color.FromRgb(242, 181, 68));
-                        var vibrationStarted = _connectionConfigController is not null &&
-                                               await _connectionConfigController.RunOneKeyVibrationAsync(
-                                                   _productionCancellation.Token);
-
-                        if (consecutiveEmptyInspectionCount < 2)
-                        {
-                            SetStartProductionStatus(
-                                vibrationStarted
-                                    ? "第1次未找到芯片，一键震动完成，正在重新拍照。"
-                                    : "第1次未找到芯片，但一键震动未执行（请检查振动盘连接）；仍将重新拍照。",
-                                Color.FromRgb(242, 181, 68));
-                            await Task.Yield();
-                            continue;
-                        }
-
-                        SetStartProductionStatus(
-                            vibrationStarted
-                                ? "连续2次未找到芯片，一键震动完成；停止上料，正在把转盘中的料全部下完…"
-                                : "连续2次未找到芯片，一键震动未执行（请检查振动盘连接）；停止上料，正在把转盘中的料全部下完…",
-                            Color.FromRgb(242, 181, 68));
-                        await DrainCarouselAsync(
-                            carouselStations,
-                            axis0PulseDistance,
-                            ProductionHandlingAxisNos,
-                            activeCarouselAdvanceTask,
-                            activeFinalTestTask,
-                            activeSecondSetUnloadTask,
-                            activeSecondSetPickupTask,
-                            _productionCancellation.Token);
-                        activeCarouselAdvanceTask = null;
-                        activeFinalTestTask = Task.FromResult(0);
-                        activeSecondSetUnloadTask = Task.CompletedTask;
-                        activeSecondSetPickupTask = Task.CompletedTask;
-                        SetStartProductionStatus(
-                            vibrationStarted
-                                ? "连续2次未找到芯片；转盘中的料已全部下完，生产正常结束。"
-                                : "连续2次未找到芯片；转盘中的料已全部下完，生产已结束（振动盘未执行震动，请检查连接）。",
-                            vibrationStarted
-                                ? Color.FromRgb(73, 209, 125)
-                                : Color.FromRgb(242, 181, 68));
-                        return;
+                        await Task.Yield();
+                        continue;
                     }
-
-                    consecutiveEmptyInspectionCount = 0;
 
                     try
                     {
@@ -1982,6 +1973,7 @@ public partial class HomePage : UserControl
             _binDropPositions = null;
             _lowerCameraPhotoPositions = null;
             _productionAxisMotionSettings = null;
+            _testStationSettings = null;
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
 
@@ -2300,95 +2292,6 @@ public partial class HomePage : UserControl
             SecondSetUnloadTask = secondSetUnloadTask,
             SecondSetPickupTask = secondSetPickupTask
         };
-    }
-
-    /// <summary>
-    /// 停止继续上料后，让转盘上的现有物料继续完成测试、转位和第二套下料，直到转盘为空。
-    /// </summary>
-    private async Task DrainCarouselAsync(
-        CarouselStationState[] carouselStations,
-        double axis0PulseDistance,
-        IReadOnlyCollection<int>? allowedMovingAxisNos,
-        Task<CarouselAdvanceResult>? activeCarouselAdvanceTask,
-        Task<int> activeFinalTestTask,
-        Task activeSecondSetUnloadTask,
-        Task activeSecondSetPickupTask,
-        CancellationToken cancellationToken)
-    {
-        var currentCarouselAdvanceTask = activeCarouselAdvanceTask;
-        var currentFinalTestTask = activeFinalTestTask;
-        var currentSecondSetUnloadTask = activeSecondSetUnloadTask;
-        var currentSecondSetPickupTask = activeSecondSetPickupTask;
-
-        try
-        {
-            if (currentCarouselAdvanceTask is not null)
-            {
-                SetStartProductionStatus(
-                    "停止上料，正在等待当前DD转位完成后继续排空转盘…",
-                    Color.FromRgb(242, 181, 68));
-                var activeResult = await currentCarouselAdvanceTask;
-                currentCarouselAdvanceTask = null;
-                currentFinalTestTask = activeResult.FinalTestTask;
-                currentSecondSetUnloadTask = activeResult.SecondSetUnloadTask;
-                currentSecondSetPickupTask = activeResult.SecondSetPickupTask;
-
-                // 取料完成信号会同步清空13/14工位，等待后再判断转盘是否仍有料。
-                await currentSecondSetPickupTask;
-            }
-
-            while (CountOccupiedCarouselStations(carouselStations) > 0)
-            {
-                var occupiedCount = CountOccupiedCarouselStations(carouselStations);
-                SetStartProductionStatus(
-                    $"排空转盘中：当前还有 {occupiedCount} 颗料，DD继续转位并下料…",
-                    Color.FromRgb(242, 181, 68));
-
-                currentCarouselAdvanceTask = StartCarouselAfterSafetyBarrierAsync(
-                    currentFinalTestTask,
-                    currentSecondSetPickupTask,
-                    currentSecondSetUnloadTask,
-                    Task.CompletedTask,
-                    carouselStations,
-                    axis0PulseDistance,
-                    allowedMovingAxisNos,
-                    cancellationToken);
-                var drainResult = await currentCarouselAdvanceTask;
-                currentCarouselAdvanceTask = null;
-                currentFinalTestTask = drainResult.FinalTestTask;
-                currentSecondSetUnloadTask = drainResult.SecondSetUnloadTask;
-                currentSecondSetPickupTask = drainResult.SecondSetPickupTask;
-
-                // 等待本次13/14工位取料完成，确保占料缓存已更新后再决定是否继续转位。
-                await currentSecondSetPickupTask;
-            }
-
-            if (!currentSecondSetUnloadTask.IsCompleted)
-            {
-                SetStartProductionStatus(
-                    "转盘已空，正在等待第二套把最后一批料放入BIN…",
-                    Color.FromRgb(242, 181, 68));
-            }
-
-            await Task.WhenAll(
-                currentFinalTestTask,
-                currentSecondSetPickupTask,
-                currentSecondSetUnloadTask);
-        }
-        finally
-        {
-            // 排空途中若停止或故障，也要观察所有已启动任务，避免遗留未观察异常。
-            await ObserveCarouselAdvanceTaskNoThrowAsync(currentCarouselAdvanceTask);
-            await ObserveTaskNoThrowAsync(currentFinalTestTask);
-            await ObserveTaskNoThrowAsync(currentSecondSetPickupTask);
-            await ObserveTaskNoThrowAsync(currentSecondSetUnloadTask);
-        }
-    }
-
-    private static int CountOccupiedCarouselStations(IReadOnlyList<CarouselStationState> carouselStations)
-    {
-        return Enumerable.Range(1, Math.Min(CarouselStationCount, carouselStations.Count - 1))
-            .Count(station => carouselStations[station].Occupied);
     }
 
     private Task StartSecondSetUnloadIfReadyAsync(
@@ -2715,9 +2618,14 @@ public partial class HomePage : UserControl
             return 0;
         }
 
-        var axisTargets = EnabledTestStationAxisByStation
+        var activeStationParameters = EnabledTestStationAxisByStation
             .Where(pair => carouselStations[pair.Key].Occupied)
-            .ToDictionary(pair => pair.Value, _ => MoveOutAbsolutePosition);
+            .ToDictionary(
+                pair => pair.Value,
+                pair => GetTestStationSettings(pair.Key));
+        var axisTargets = activeStationParameters.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.PressPosition);
         if (axisTargets.Count == 0)
         {
             SetStartProductionStatus(
@@ -2747,18 +2655,21 @@ public partial class HomePage : UserControl
             velocityOverrides: pressVelocities);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 下压到位，停留 {TestStationDwellMilliseconds} ms…",
+            $"{string.Join("，", stations)} 下压到位，停留 {DefaultTestStationDwellMilliseconds} ms…",
             Color.FromRgb(242, 181, 68));
+        await Task.Delay(DefaultTestStationDwellMilliseconds, cancellationToken);
 
-        await Task.Delay(TestStationDwellMilliseconds, cancellationToken);
-
-        UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusReturning);
+        var returningAxes = axisTargets.Keys.ToArray();
+        var returnTargets = activeStationParameters.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.WaitPosition);
+        UpdateCarouselStationDisplay(
+            carouselStations,
+            returningAxes,
+            CarouselStatusReturning);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 停留完成，正在返回绝对位置 {TestStationReturnAbsolutePosition:0.###}，DD等待返回完成…",
+            $"轴{string.Join("/", returningAxes)}停留完成，正在返回各自等待位，DD等待全部返回…",
             Color.FromRgb(242, 181, 68));
-        var returnTargets = axisTargets.Keys.ToDictionary(
-            axisNo => axisNo,
-            _ => TestStationReturnAbsolutePosition);
         await motionController.MoveAxesAbsoluteAsync(
             returnTargets,
             cancellationToken,
@@ -2766,8 +2677,9 @@ public partial class HomePage : UserControl
             ProductionHandlingAxisNos,
             HomePageCompletionTolerance,
             velocityOverrides: pressVelocities);
+
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 已返回绝对位置 {TestStationReturnAbsolutePosition:0.###}，DD可继续下一步。",
+            $"{string.Join("，", stations)} 已返回各自等待位，DD可继续下一步。",
             Color.FromRgb(73, 209, 125));
         foreach (var station in EnabledTestStationAxisByStation.Keys
                      .Where(station => carouselStations[station].Occupied))
@@ -3911,6 +3823,15 @@ public partial class HomePage : UserControl
         }
     }
 
+    private void TestStationPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_loadingPresetPositions)
+        {
+            SaveTestStationParametersFromInputs();
+            UpdateHomeCommandState();
+        }
+    }
+
     private void LowerCameraPhotoPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SaveLowerCameraPhotoPositionsFromInputs();
@@ -3961,6 +3882,7 @@ public partial class HomePage : UserControl
         LowerCameraPhotoPosition2YTextBox.Text = FormatPresetCoordinate(
             _homeSettings.LowerCameraPhotoPosition2Y);
         LoadProductionAxisParameterEditors();
+        LoadTestStationPositionEditors();
         FirstSetNozzle1PickupZPositionTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetNozzle1PickupZPosition
             ?? _homeSettings.FirstSetPickupZPosition
@@ -4055,6 +3977,38 @@ public partial class HomePage : UserControl
             editors.DecelerationStopMilliseconds.Text =
                 FormatPresetCoordinate(settings.DecelerationStopMilliseconds);
         }
+    }
+
+    private void LoadTestStationPositionEditors()
+    {
+        _homeSettings.TestStationSettings ??= [];
+        foreach (var definition in TestStationDefinitions)
+        {
+            var settings = _homeSettings.TestStationSettings.GetValueOrDefault(definition.StationNumber)
+                           ?? new TestStationSettings
+                           {
+                               PressPosition = DefaultTestStationPressPosition,
+                               WaitPosition = DefaultTestStationWaitPosition
+                           };
+            var editors = GetTestStationPositionEditors(definition.StationNumber);
+            editors.PressPosition.Text = FormatPresetCoordinate(settings.PressPosition);
+            editors.WaitPosition.Text = FormatPresetCoordinate(settings.WaitPosition);
+        }
+    }
+
+    private (TextBox PressPosition, TextBox WaitPosition) GetTestStationPositionEditors(
+        int stationNumber)
+    {
+        return stationNumber switch
+        {
+            5 => (TestStation1PressPositionTextBox, TestStation1WaitPositionTextBox),
+            6 => (TestStation2PressPositionTextBox, TestStation2WaitPositionTextBox),
+            7 => (TestStation3PressPositionTextBox, TestStation3WaitPositionTextBox),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(stationNumber),
+                stationNumber,
+                "测试站编号必须为5、6或7。")
+        };
     }
 
     private ProductionAxisMotionSettings CreateDefaultAxisMotionSettings(
@@ -4190,6 +4144,33 @@ public partial class HomePage : UserControl
         return settingsByAxis;
     }
 
+    private IReadOnlyDictionary<int, TestStationSettings> ReadTestStationSettings()
+    {
+        var settingsByStation = new Dictionary<int, TestStationSettings>();
+        foreach (var definition in TestStationDefinitions)
+        {
+            var editors = GetTestStationPositionEditors(definition.StationNumber);
+            settingsByStation[definition.StationNumber] = new TestStationSettings
+            {
+                PressPosition = ParseFiniteCoordinate(
+                    editors.PressPosition.Text,
+                    $"{definition.DisplayName}下压位"),
+                WaitPosition = ParseFiniteCoordinate(
+                    editors.WaitPosition.Text,
+                    $"{definition.DisplayName}等待位")
+            };
+        }
+
+        return settingsByStation;
+    }
+
+    private TestStationSettings GetTestStationSettings(int stationNumber)
+    {
+        var current = _testStationSettings ?? ReadTestStationSettings();
+        return current.GetValueOrDefault(stationNumber)
+               ?? throw new InvalidOperationException($"{stationNumber}号测试站参数不存在。");
+    }
+
     private static void ValidateProductionAxisMotionSettings(
         ProductionAxisDefinition definition,
         ProductionAxisMotionSettings settings)
@@ -4223,6 +4204,44 @@ public partial class HomePage : UserControl
         catch (ArgumentException)
         {
             return false;
+        }
+    }
+
+    private bool AllTestStationParametersValid()
+    {
+        try
+        {
+            _ = ReadTestStationSettings();
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private void SaveTestStationParametersFromInputs()
+    {
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        try
+        {
+            var stationSettings = ReadTestStationSettings();
+            _homeSettings.TestStationSettings = stationSettings.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value);
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (ArgumentException)
+        {
+            // 输入尚未完成时等待用户继续编辑。
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"保存测试站位置失败：{exception.Message}", false);
         }
     }
 
@@ -4617,6 +4636,7 @@ public partial class HomePage : UserControl
             !_startSequenceRunning &&
             !_assignedNozzleMoveRunning;
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
+        var allTestStationParametersValid = AllTestStationParametersValid();
         var allZPositionsValid =
             TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out _) &&
@@ -4654,6 +4674,7 @@ public partial class HomePage : UserControl
         StartProductionButton.IsEnabled =
             visionControllersReady &&
             allProductionAxisParametersValid &&
+            allTestStationParametersValid &&
             allZPositionsValid &&
             allSecondSetXyPositionsValid &&
             allLowerCameraPhotoPositionsValid &&
@@ -4693,6 +4714,13 @@ public partial class HomePage : UserControl
         foreach (var editors in _productionAxisMotionEditors.Values)
         {
             editors.SetEnabled(commandsIdle);
+        }
+
+        foreach (var definition in TestStationDefinitions)
+        {
+            var editors = GetTestStationPositionEditors(definition.StationNumber);
+            editors.PressPosition.IsEnabled = commandsIdle;
+            editors.WaitPosition.IsEnabled = commandsIdle;
         }
 
         FirstSetNozzle1PickupZPositionTextBox.IsEnabled = commandsIdle;
@@ -5377,6 +5405,11 @@ public partial class HomePage : UserControl
         string GroupName,
         string DisplayName,
         double DefaultRunVelocity);
+
+    private readonly record struct TestStationDefinition(
+        int StationNumber,
+        int AxisNo,
+        string DisplayName);
 
     private sealed record ProductionAxisMotionEditors(
         Border Container,

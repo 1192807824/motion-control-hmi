@@ -54,6 +54,41 @@
             <Setter Property="Background" Value="#10283C" />
             <Setter Property="CornerRadius" Value="4" />
         </Style>
+        <Style x:Key="JogButton" TargetType="Button">
+            <Setter Property="Width" Value="42" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="#F4F8FB" />
+            <Setter Property="Background" Value="#123B59" />
+            <Setter Property="BorderBrush" Value="#2A789E" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="ManualJogButton_PreviewMouseLeftButtonDown" />
+            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ManualJogButton_PreviewMouseLeftButtonUp" />
+            <EventSetter Event="MouseLeave" Handler="ManualJogButton_MouseLeave" />
+            <EventSetter Event="LostMouseCapture" Handler="ManualJogButton_LostMouseCapture" />
+            <EventSetter Event="PreviewKeyDown" Handler="ManualJogButton_PreviewKeyDown" />
+            <EventSetter Event="PreviewKeyUp" Handler="ManualJogButton_PreviewKeyUp" />
+            <EventSetter Event="LostKeyboardFocus" Handler="ManualJogButton_LostKeyboardFocus" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#17577D" />
+                    <Setter Property="BorderBrush" Value="#38A0D0" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#0D6EE8" />
+                    <Setter Property="BorderBrush" Value="#5EA8FF" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.42" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="8" Background="#071D2F">
@@ -103,7 +138,6 @@
                               VerticalContentAlignment="Center"
                               SelectionChanged="AxisSet_SelectionChanged">
                         <ComboBoxItem Content="第一套 XY 标定" Tag="First" />
-                        <ComboBoxItem Content="第二套 XY 标定" Tag="Second" />
                         <ComboBoxItem Content="下相机标定" Tag="LowerCamera" />
                     </ComboBox>
                     <TextBlock x:Name="LowerCameraNozzleLabel"
@@ -221,6 +255,10 @@
         </Border>
 
         <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="156" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="0" />
@@ -550,6 +588,7 @@
             </Border>
 
             <Border Grid.Column="2"
+                    Grid.Row="0"
                     Background="#202427"
                     BorderBrush="#345269"
                     BorderThickness="1"
@@ -573,6 +612,164 @@
                                    FontSize="14"
                                    HorizontalAlignment="Center" />
                     </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Grid.Column="2"
+                    Margin="0,8,0,0"
+                    Padding="10,8"
+                    Background="#0B263A"
+                    BorderBrush="#294F68"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <Grid x:Name="ManualJogPanel">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="196" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="158" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="124" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="124" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Margin="2,0,12,0" VerticalAlignment="Center">
+                        <TextBlock Text="第一套手动点动"
+                                   Foreground="#F4F8FB"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Margin="0,3,0,7"
+                                   Text="XY 固定使用轴1/2；Z/R 按吸嘴切换"
+                                   Foreground="#8FB2C9"
+                                   FontSize="11" />
+                        <ComboBox x:Name="ManualJogNozzleComboBox"
+                                  Width="116"
+                                  HorizontalAlignment="Left"
+                                  Style="{StaticResource PanelComboBox}"
+                                  SelectionChanged="ManualJogSetting_Changed">
+                            <ComboBoxItem Content="吸嘴 1" Tag="1" />
+                            <ComboBoxItem Content="吸嘴 2" Tag="2" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Background="#294F68" />
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <TextBlock Text="XY 平移·按住运行"
+                                   Style="{StaticResource PanelLabel}"
+                                   Margin="0,0,0,1" />
+                        <Grid Width="114" Height="96" HorizontalAlignment="Center">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="32" />
+                                <RowDefinition Height="32" />
+                                <RowDefinition Height="32" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="38" />
+                                <ColumnDefinition Width="38" />
+                                <ColumnDefinition Width="38" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="1" Tag="Y:1" Content="↑"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="Y 正向（轴2）" />
+                            <Button Grid.Row="1" Grid.Column="0" Tag="X:-1" Content="←"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="X 负向（轴1）" />
+                            <Border Grid.Row="1" Grid.Column="1" Width="32" Height="28"
+                                    Margin="3" Background="#071D2F" BorderBrush="#294F68"
+                                    BorderThickness="1" CornerRadius="3">
+                                <TextBlock Text="XY" Foreground="#8FB2C9" FontSize="11"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <Button Grid.Row="1" Grid.Column="2" Tag="X:1" Content="→"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="X 正向（轴1）" />
+                            <Button Grid.Row="2" Grid.Column="1" Tag="Y:-1" Content="↓"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="Y 负向（轴2）" />
+                        </Grid>
+                    </StackPanel>
+
+                    <Border Grid.Column="3" Background="#294F68" />
+
+                    <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                        <TextBlock Text="Z 升降"
+                                   Style="{StaticResource PanelLabel}"
+                                   Margin="0,0,0,5" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Tag="Z:-1" Content="↥"
+                                    Style="{StaticResource JogButton}" ToolTip="Z 上升（负向）" />
+                            <Button Tag="Z:1" Content="↧"
+                                    Style="{StaticResource JogButton}" ToolTip="Z 下降（正向）" />
+                        </StackPanel>
+                        <TextBlock Text="上升　下降" Foreground="#8FB2C9" FontSize="10"
+                                   Margin="0,4,0,0" TextAlignment="Center" />
+                    </StackPanel>
+
+                    <Border Grid.Column="5" Background="#294F68" />
+
+                    <StackPanel Grid.Column="6" VerticalAlignment="Center">
+                        <TextBlock Text="R 旋转"
+                                   Style="{StaticResource PanelLabel}"
+                                   Margin="0,0,0,5" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Tag="R:-1" Content="↶"
+                                    Style="{StaticResource JogButton}" ToolTip="R 负向旋转" />
+                            <Button Tag="R:1" Content="↷"
+                                    Style="{StaticResource JogButton}" ToolTip="R 正向旋转" />
+                        </StackPanel>
+                        <TextBlock Text="R−　　R+" Foreground="#8FB2C9" FontSize="10"
+                                   Margin="0,4,0,0" TextAlignment="Center" />
+                    </StackPanel>
+
+                    <Border Grid.Column="7" Background="#294F68" />
+
+                    <Grid Grid.Column="8" Margin="12,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="82" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="XY 速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                        <TextBlock Grid.Column="2" Text="Z 速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                        <TextBlock Grid.Column="4" Text="R 速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                        <TextBox Grid.Row="1" x:Name="ManualJogXyVelocityTextBox"
+                                 Text="100000" Style="{StaticResource PanelInput}"
+                                 TextChanged="ManualJogSetting_Changed" />
+                        <TextBox Grid.Row="1" Grid.Column="2" x:Name="ManualJogZVelocityTextBox"
+                                 Text="50000" Style="{StaticResource PanelInput}"
+                                 TextChanged="ManualJogSetting_Changed" />
+                        <TextBox Grid.Row="1" Grid.Column="4" x:Name="ManualJogRVelocityTextBox"
+                                 Text="50000" Style="{StaticResource PanelInput}"
+                                 TextChanged="ManualJogSetting_Changed" />
+                        <Button Grid.Row="1" Grid.Column="5"
+                                x:Name="ManualJogStopButton"
+                                Margin="8,0,0,0"
+                                Content="停止"
+                                Style="{StaticResource PanelButton}"
+                                Background="#8E2029"
+                                BorderBrush="#D90D16"
+                                Click="ManualJogStop_Click" />
+                        <TextBlock Grid.Row="2" Grid.ColumnSpan="6"
+                                   x:Name="ManualJogStatusText"
+                                   Margin="0,7,0,0"
+                                   Text="按住按钮运行，松开即减速停止"
+                                   Foreground="#8FB2C9"
+                                   FontSize="11"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

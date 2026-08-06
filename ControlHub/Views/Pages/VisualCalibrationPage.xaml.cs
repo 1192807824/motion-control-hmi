@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using ControlHub.Services.Motion;
 using ControlHub.Services.Persistence;
@@ -25,6 +26,10 @@ public partial class VisualCalibrationPage : UserControl
     private const double DefaultPositionTolerancePulses = 10d;
     private const int LowerCameraNozzle1RotationAxisNo = 6;
     private const int LowerCameraNozzle2RotationAxisNo = 8;
+    private const int FirstSetNozzle1ZHardwareAxisNo = 5;
+    private const int FirstSetNozzle1RHardwareAxisNo = 6;
+    private const int FirstSetNozzle2ZHardwareAxisNo = 7;
+    private const int FirstSetNozzle2RHardwareAxisNo = 8;
     private const double RotationCenterStepPulses = 10_000d;
     private const double ArrivalPositionVelocityPulsesPerSecond = 100_000d;
     private static readonly string DefaultCalibrationDirectory = Path.Combine(
@@ -85,6 +90,7 @@ public partial class VisualCalibrationPage : UserControl
     private string _lowerCameraCorrectionTestStatus = "旋转中心完成后可执行纠偏测试。";
     private VisualCalibrationSettings _uiSettings = VisionCalibrationService.Shared.Settings;
     private bool _settingsLoaded;
+    private int? _manualJogAxisNo;
 
     private VisionCalibrationAxisPair ActiveAxisPair => _visionCalibration.ActiveAxisPair;
 
@@ -129,6 +135,183 @@ public partial class VisualCalibrationPage : UserControl
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
         UpdateCommandState();
+    }
+
+    private void ManualJogSetting_Changed(object sender, RoutedEventArgs e)
+    {
+        ScheduleCalibrationSettingsSave();
+    }
+
+    private void ManualJogButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Button button && TryStartManualJog(button))
+        {
+            button.CaptureMouse();
+        }
+    }
+
+    private void ManualJogButton_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        StopManualJog("松开点动按钮");
+        if (sender is Button button && button.IsMouseCaptured)
+        {
+            button.ReleaseMouseCapture();
+        }
+    }
+
+    private void ManualJogButton_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            StopManualJog("指针离开点动按钮");
+        }
+    }
+
+    private void ManualJogButton_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        StopManualJog("点动按钮已释放");
+    }
+
+    private void ManualJogButton_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!e.IsRepeat && e.Key is Key.Space or Key.Enter && sender is Button button)
+        {
+            _ = TryStartManualJog(button);
+            e.Handled = true;
+        }
+    }
+
+    private void ManualJogButton_PreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        if (e.Key is Key.Space or Key.Enter)
+        {
+            StopManualJog("键盘点动按键已释放");
+            e.Handled = true;
+        }
+    }
+
+    private void ManualJogButton_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        StopManualJog("点动按钮失去键盘焦点");
+    }
+
+    private void ManualJogStop_Click(object sender, RoutedEventArgs e)
+    {
+        StopManualJog("操作员点击停止");
+    }
+
+    private bool TryStartManualJog(Button button)
+    {
+        if (_manualJogAxisNo is not null)
+        {
+            return true;
+        }
+
+        try
+        {
+            if (_calibrationRunning || _clickMoveRunning || _centerSyncRunning ||
+                _calibrationProcedureSwitchRunning || _rotationCenterRunning ||
+                _lowerCameraCorrectionTestRunning || _nozzlePointFinding || _nozzlePointSaving)
+            {
+                throw new InvalidOperationException("当前标定或视觉流程正在运行，不能手动点动。");
+            }
+
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            var tag = button.Tag as string ?? "";
+            var parts = tag.Split(':');
+            if (parts.Length != 2 ||
+                !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var direction) ||
+                Math.Abs(direction) != 1)
+            {
+                throw new InvalidDataException("手动点动按钮参数无效。");
+            }
+
+            var nozzleNumber =
+                (ManualJogNozzleComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "2" ? 2 : 1;
+            var (hardwareAxisNo, velocity, displayName) = parts[0] switch
+            {
+                "X" => (
+                    VisionCalibrationService.FirstSetXHardwareAxisNo,
+                    ParsePositiveDouble(ManualJogXyVelocityTextBox.Text, "XY 点动速度"),
+                    "X"),
+                "Y" => (
+                    VisionCalibrationService.FirstSetYHardwareAxisNo,
+                    ParsePositiveDouble(ManualJogXyVelocityTextBox.Text, "XY 点动速度"),
+                    "Y"),
+                "Z" => (
+                    nozzleNumber == 2 ? FirstSetNozzle2ZHardwareAxisNo : FirstSetNozzle1ZHardwareAxisNo,
+                    ParsePositiveDouble(ManualJogZVelocityTextBox.Text, "Z 点动速度"),
+                    $"吸嘴{nozzleNumber} Z"),
+                "R" => (
+                    nozzleNumber == 2 ? FirstSetNozzle2RHardwareAxisNo : FirstSetNozzle1RHardwareAxisNo,
+                    ParsePositiveDouble(ManualJogRVelocityTextBox.Text, "R 点动速度"),
+                    $"吸嘴{nozzleNumber} R"),
+                _ => throw new InvalidDataException("手动点动轴类型无效。")
+            };
+
+            motionController.StartExternalJog(
+                hardwareAxisNo,
+                direction * velocity,
+                $"标定页 {displayName}");
+            _manualJogAxisNo = hardwareAxisNo;
+            SetManualJogStatus(
+                $"{displayName} {(direction > 0 ? "正向" : "负向")} JOG 运行中 · {velocity:0.###} pulse/s",
+                WorkflowStatus.Running);
+            SetManualJogEditorsEnabled(false);
+            ManualJogStopButton.IsEnabled = true;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            SetManualJogStatus($"点动未启动：{exception.Message}", WorkflowStatus.Error);
+            return false;
+        }
+    }
+
+    private void StopManualJog(string reason)
+    {
+        if (_manualJogAxisNo is not { } hardwareAxisNo)
+        {
+            return;
+        }
+
+        try
+        {
+            _motionController?.StopExternalJog(hardwareAxisNo, reason);
+            SetManualJogStatus("已发送减速停止，请等待轴停稳。", WorkflowStatus.Ready);
+        }
+        catch (Exception exception)
+        {
+            SetManualJogStatus($"点动停止失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            _manualJogAxisNo = null;
+            SetManualJogEditorsEnabled(true);
+            ManualJogStopButton.IsEnabled = false;
+            UpdateCommandState();
+        }
+    }
+
+    private void SetManualJogStatus(string message, WorkflowStatus status)
+    {
+        ManualJogStatusText.Text = message;
+        ManualJogStatusText.Foreground = new SolidColorBrush(status switch
+        {
+            WorkflowStatus.Error => Color.FromRgb(242, 122, 128),
+            WorkflowStatus.Running => Color.FromRgb(88, 165, 255),
+            WorkflowStatus.Success => Color.FromRgb(73, 209, 125),
+            _ => Color.FromRgb(143, 178, 201)
+        });
+    }
+
+    private void SetManualJogEditorsEnabled(bool enabled)
+    {
+        ManualJogNozzleComboBox.IsEnabled = enabled;
+        ManualJogXyVelocityTextBox.IsEnabled = enabled;
+        ManualJogZVelocityTextBox.IsEnabled = enabled;
+        ManualJogRVelocityTextBox.IsEnabled = enabled;
     }
 
     private void ArrivalPosition_Changed(object sender, TextChangedEventArgs e)
@@ -234,6 +417,7 @@ public partial class VisualCalibrationPage : UserControl
         _clickMoveCancellation?.Cancel();
         _rotationCenterCancellation?.Cancel();
         _lowerCameraCorrectionTestCancellation?.Cancel();
+        StopManualJog("标定页全轴急停");
         var issued = motionController.EmergencyStopAllAxes("视觉标定页操作员请求全轴急停");
         SetWorkflowStatus(
             issued ? "全轴急停已下发，正在确认所有轴停止。" : "急停下发失败，请立即按硬件急停。",
@@ -428,11 +612,10 @@ public partial class VisualCalibrationPage : UserControl
         return value?.Trim() switch
         {
             "LowerCamera" or "Lower" => VisualCalibrationMode.LowerCamera,
-            "Second" or "Axis34" or "2" => VisualCalibrationMode.Second,
             "First" or "Axis12" or "1" => VisualCalibrationMode.First,
-            _ => fallbackAxisSet == VisionCalibrationAxisSet.Second
-                ? VisualCalibrationMode.Second
-                : VisualCalibrationMode.First
+            // 第二套 XY 标定已从操作界面移除；旧配置自动回到第一套。
+            "Second" or "Axis34" or "2" => VisualCalibrationMode.First,
+            _ => VisualCalibrationMode.First
         };
     }
 
@@ -672,6 +855,72 @@ public partial class VisualCalibrationPage : UserControl
         if (_hostStartTask is not null)
         {
             await _hostStartTask;
+        }
+    }
+
+    public string? GetCurrentVisionSolutionPath()
+    {
+        return VisionHost.SolutionPath ?? ProductRecipeStore.FindDefaultVisionSolutionPath();
+    }
+
+    public void ConfigureRecipeVisionSolutionPath(string? solutionPath)
+    {
+        if (_startRequested)
+        {
+            throw new InvalidOperationException("视觉组件已经启动，请使用配方应用功能切换方案。");
+        }
+
+        VisionHost.SetSolutionPath(solutionPath);
+    }
+
+    public VisionProcedureNames GetCurrentVisionProcedureNames()
+    {
+        return VisionHost.ProcedureNames;
+    }
+
+    public void ConfigureRecipeVisionProcedureNames(VisionProcedureNames procedureNames)
+    {
+        if (_startRequested)
+        {
+            throw new InvalidOperationException("视觉组件已经启动，请使用配方应用功能切换流程名称。");
+        }
+
+        VisionHost.SetProcedureNames(procedureNames);
+    }
+
+    public void RefreshRecipeSettings()
+    {
+        _settingsLoaded = false;
+        ActiveCalibrationMode = ParseCalibrationMode(
+            _visionCalibration.Settings.ActiveCalibrationMode,
+            _visionCalibration.ActiveAxisSet);
+        LoadCalibrationSettings();
+        _settingsLoaded = true;
+        UpdateVisionOffsetPreview();
+        UpdateCommandState();
+    }
+
+    public async Task ApplyRecipeVisionSolutionAsync(
+        string? solutionPath,
+        VisionProcedureNames procedureNames)
+    {
+        if (_calibrationRunning)
+        {
+            throw new InvalidOperationException("九点标定正在执行，不能切换视觉配方。");
+        }
+
+        VisionHost.SetSolutionPath(solutionPath);
+        VisionHost.SetProcedureNames(procedureNames);
+        _hostReady = false;
+        _hostCanRestart = false;
+        RestartHostButton.IsEnabled = false;
+        HostPlaceholder.Visibility = Visibility.Visible;
+        SetHostStatus("正在加载配方视觉流程…", HostStatus.Starting);
+        UpdateCommandState();
+        await VisionHost.RestartAsync();
+        if (!_hostReady)
+        {
+            throw new InvalidOperationException("配方视觉流程加载失败，请检查方案文件和流程名称。");
         }
     }
 
@@ -2428,6 +2677,25 @@ public partial class VisualCalibrationPage : UserControl
         UpdateNozzleCalibrationDisplay();
         RefreshRotationCenterStatus();
         RefreshLowerCameraCorrectionTestStatus();
+        LoadManualJogSettings();
+    }
+
+    private void LoadManualJogSettings()
+    {
+        var nozzleValue = _uiSettings.ManualJogNozzle == 2 ? "2" : "1";
+        ManualJogNozzleComboBox.SelectedItem = ManualJogNozzleComboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, nozzleValue, StringComparison.Ordinal))
+            ?? ManualJogNozzleComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
+        ManualJogXyVelocityTextBox.Text = FormatPositiveSetting(
+            _uiSettings.ManualJogXyVelocityPulsesPerSecond,
+            100_000);
+        ManualJogZVelocityTextBox.Text = FormatPositiveSetting(
+            _uiSettings.ManualJogZVelocityPulsesPerSecond,
+            50_000);
+        ManualJogRVelocityTextBox.Text = FormatPositiveSetting(
+            _uiSettings.ManualJogRVelocityPulsesPerSecond,
+            50_000);
     }
 
     private void SelectClickTargetTool(VisionTargetTool targetTool)
@@ -2587,6 +2855,12 @@ public partial class VisualCalibrationPage : UserControl
 
     private void ApplyCalibrationProfile(VisionCalibrationProfile profile, string profilePath)
     {
+        if (profile.XHardwareAxisNo == VisionCalibrationService.SecondSetXHardwareAxisNo &&
+            profile.YHardwareAxisNo == VisionCalibrationService.SecondSetYHardwareAxisNo)
+        {
+            throw new InvalidDataException("第二套 XY 标定已从标定界面移除，不能加载轴3/4的旧标定配置。");
+        }
+
         _visionCalibration.ActiveAxisSet = profile.XHardwareAxisNo == VisionCalibrationService.SecondSetXHardwareAxisNo &&
             profile.YHardwareAxisNo == VisionCalibrationService.SecondSetYHardwareAxisNo
                 ? VisionCalibrationAxisSet.Second
@@ -2707,6 +2981,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void VisualCalibrationPage_Unloaded(object sender, RoutedEventArgs e)
     {
+        StopManualJog("离开视觉标定页");
         _rotationCenterCancellation?.Cancel();
         _lowerCameraCorrectionTestCancellation?.Cancel();
         SaveCalibrationSettingsNoThrow();
@@ -2721,6 +2996,26 @@ public partial class VisualCalibrationPage : UserControl
 
         try
         {
+            _uiSettings.ManualJogNozzle =
+                (ManualJogNozzleComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "2" ? 2 : 1;
+            if (TryParseFiniteDouble(ManualJogXyVelocityTextBox.Text, out var manualXyVelocity) &&
+                manualXyVelocity > 0)
+            {
+                _uiSettings.ManualJogXyVelocityPulsesPerSecond = manualXyVelocity;
+            }
+
+            if (TryParseFiniteDouble(ManualJogZVelocityTextBox.Text, out var manualZVelocity) &&
+                manualZVelocity > 0)
+            {
+                _uiSettings.ManualJogZVelocityPulsesPerSecond = manualZVelocity;
+            }
+
+            if (TryParseFiniteDouble(ManualJogRVelocityTextBox.Text, out var manualRVelocity) &&
+                manualRVelocity > 0)
+            {
+                _uiSettings.ManualJogRVelocityPulsesPerSecond = manualRVelocity;
+            }
+
             if (TryParseFiniteDouble(StepXPulsesTextBox.Text, out var stepX) && stepX > 0)
             {
                 if (IsLowerCameraMode)
@@ -2966,6 +3261,21 @@ public partial class VisualCalibrationPage : UserControl
             TryParseFiniteDouble(ArrivalPosition2XTextBox.Text, out _) &&
             TryParseFiniteDouble(ArrivalPosition2YTextBox.Text, out _);
         CalibrationEmergencyStopButton.IsEnabled = _motionController is not null;
+        var manualJogAvailable =
+            _motionController is not null &&
+            !_calibrationProcedureSwitchRunning &&
+            !_calibrationRunning &&
+            !_livePreviewStarting &&
+            !_centerSyncRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_rotationCenterRunning &&
+            !_lowerCameraCorrectionTestRunning &&
+            !_nozzlePointFinding &&
+            !_nozzlePointSaving;
+        ManualJogPanel.IsEnabled = manualJogAvailable || _manualJogAxisNo is not null;
+        SetManualJogEditorsEnabled(manualJogAvailable && _manualJogAxisNo is null);
+        ManualJogStopButton.IsEnabled = _manualJogAxisNo is not null;
         RestartHostButton.IsEnabled =
             !_calibrationRunning &&
             !_clickMoveRunning &&

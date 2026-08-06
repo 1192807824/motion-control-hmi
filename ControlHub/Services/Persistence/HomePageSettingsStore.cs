@@ -140,6 +140,8 @@ public sealed class HomePageSettings
     public double? Bin3PositionY { get; set; }
 
     public Dictionary<int, ProductionAxisMotionSettings> ProductionAxisMotionSettings { get; set; } = [];
+
+    public Dictionary<int, TestStationSettings> TestStationSettings { get; set; } = [];
 }
 
 public sealed class ProductionAxisMotionSettings
@@ -157,4 +159,11 @@ public sealed class ProductionAxisMotionSettings
     public double STimeMilliseconds { get; set; }
 
     public double DecelerationStopMilliseconds { get; set; } = 100;
+}
+
+public sealed class TestStationSettings
+{
+    public double PressPosition { get; set; }
+
+    public double WaitPosition { get; set; }
 }

@@ -28,12 +28,25 @@ public partial class MainWindow : Window
 
         _viewModel = new MainWindowViewModel();
         DataContext = _viewModel;
+        ParameterSettingsContent.ActiveRecipeChanged += ParameterSettingsContent_ActiveRecipeChanged;
+        ParameterSettingsContent.AttachRecipeContext(
+            HomeContent,
+            MotionPage,
+            VisualCalibrationContent,
+            _viewModel);
         LoadRememberedLogin();
 
         _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _clockTimer.Tick += (_, _) => _viewModel.NowText = DateTime.Now.ToString("yyyy-MM-dd  HH:mm:ss");
         _clockTimer.Start();
         Loaded += MainWindow_Loaded;
+    }
+
+    private void ParameterSettingsContent_ActiveRecipeChanged(object? sender, string? recipeName)
+    {
+        CurrentRecipeNameText.Text = string.IsNullOrWhiteSpace(recipeName)
+            ? "未应用配方"
+            : recipeName;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)

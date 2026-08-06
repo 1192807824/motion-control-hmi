@@ -84,6 +84,27 @@ public sealed class VisionCalibrationService
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    public VisualCalibrationSettings CaptureRecipeSettings()
+    {
+        return ProductRecipeStore.Clone(Settings);
+    }
+
+    public void ApplyRecipeSettings(VisualCalibrationSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var source = ProductRecipeStore.Clone(settings);
+        foreach (var property in typeof(VisualCalibrationSettings).GetProperties()
+                     .Where(property => property.CanRead && property.CanWrite))
+        {
+            property.SetValue(Settings, property.GetValue(source));
+        }
+
+        Settings.ActiveAxisSet = ToSettingsValue(ParseAxisSet(Settings.ActiveAxisSet));
+        Settings.ClickTargetTool = ToSettingsValue(ParseTargetTool(Settings.ClickTargetTool));
+        Settings.SecondClickTargetTool = ToSettingsValue(ParseTargetTool(Settings.SecondClickTargetTool));
+        Save();
+    }
+
     public string? BackupSettingsBeforeOverwrite()
     {
         return _store.BackupBeforeOverwrite();

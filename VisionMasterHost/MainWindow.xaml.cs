@@ -26,20 +26,20 @@ public partial class MainWindow : Window
 {
     private const string FixedSolutionFileName = "新纳方案.sol";
     private const string FallbackSolutionFileName = "标定方案.sol";
-    private const string InspectionProcedureName = "找芯片流程";
-    private const string NozzlePointProcedureName = "粗定位示教流程";
-    private const string CalibrationProcedureName = "标定流程";
-    private const string LowerCameraCalibrationProcedureName = "下相机标定流程";
+    private const string DefaultInspectionProcedureName = "找芯片流程";
+    private const string DefaultNozzlePointProcedureName = "粗定位示教流程";
+    private const string DefaultCalibrationProcedureName = "标定流程";
+    private const string DefaultLowerCameraCalibrationProcedureName = "下相机标定流程";
     private const string CalibrationImageSourceName = "图像源1";
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
     private const int MaximumInspectionBlobResultCount = 10;
-    private const string RotationPointProcedureName = "获取三点流程";
+    private const string DefaultRotationPointProcedureName = "获取三点流程";
     private const string RotationPointRectangleModuleName = "矩形检测1";
-    private const string RotationCenterProcedureName = "计算旋转中心";
+    private const string DefaultRotationCenterProcedureName = "计算旋转中心";
     private const string RotationCenterCircleModuleName = "圆拟合1";
-    private const string LowerCameraCorrectionProcedureName = "下相机纠偏";
+    private const string DefaultLowerCameraCorrectionProcedureName = "下相机纠偏";
     private const string LowerCameraCorrectionImageSourceName = "图像源1";
     private const string LowerCameraCorrectionLineLineModuleName = "线线测量1";
     private const string LowerCameraCorrectionTransformModuleName = "标定转换1";
@@ -89,17 +89,58 @@ public partial class MainWindow : Window
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
     private bool _showingCalibrationRender;
-    private string _activeCalibrationProcedureName = CalibrationProcedureName;
+    private string _activeCalibrationProcedureName;
+    private readonly string? _configuredSolutionPath;
+    private readonly string _inspectionProcedureName;
+    private readonly string _nozzlePointProcedureName;
+    private readonly string _calibrationProcedureName;
+    private readonly string _lowerCameraCalibrationProcedureName;
+    private readonly string _rotationPointProcedureName;
+    private readonly string _rotationCenterProcedureName;
+    private readonly string _lowerCameraCorrectionProcedureName;
 
     public MainWindow(
         bool embedded,
         string? commandPipeName = null,
-        string? eventPipeName = null)
+        string? eventPipeName = null,
+        string? solutionPath = null,
+        string? inspectionProcedureName = null,
+        string? nozzlePointProcedureName = null,
+        string? calibrationProcedureName = null,
+        string? lowerCameraCalibrationProcedureName = null,
+        string? rotationPointProcedureName = null,
+        string? rotationCenterProcedureName = null,
+        string? lowerCameraCorrectionProcedureName = null)
     {
         InitializeComponent();
         _embedded = embedded;
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
         _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
+        _configuredSolutionPath = string.IsNullOrWhiteSpace(solutionPath)
+            ? null
+            : Path.GetFullPath(solutionPath);
+        _inspectionProcedureName = ResolveProcedureName(
+            inspectionProcedureName,
+            DefaultInspectionProcedureName);
+        _nozzlePointProcedureName = ResolveProcedureName(
+            nozzlePointProcedureName,
+            DefaultNozzlePointProcedureName);
+        _calibrationProcedureName = ResolveProcedureName(
+            calibrationProcedureName,
+            DefaultCalibrationProcedureName);
+        _lowerCameraCalibrationProcedureName = ResolveProcedureName(
+            lowerCameraCalibrationProcedureName,
+            DefaultLowerCameraCalibrationProcedureName);
+        _rotationPointProcedureName = ResolveProcedureName(
+            rotationPointProcedureName,
+            DefaultRotationPointProcedureName);
+        _rotationCenterProcedureName = ResolveProcedureName(
+            rotationCenterProcedureName,
+            DefaultRotationCenterProcedureName);
+        _lowerCameraCorrectionProcedureName = ResolveProcedureName(
+            lowerCameraCorrectionProcedureName,
+            DefaultLowerCameraCorrectionProcedureName);
+        _activeCalibrationProcedureName = _calibrationProcedureName;
         if (embedded)
         {
             WindowStyle = WindowStyle.None;
@@ -290,6 +331,11 @@ public partial class MainWindow : Window
         };
     }
 
+    private static string ResolveProcedureName(string? configuredName, string defaultName)
+    {
+        return string.IsNullOrWhiteSpace(configuredName) ? defaultName : configuredName!.Trim();
+    }
+
     private async Task<string> ActivateCalibrationViewAsync()
     {
         ApplyCalibrationShellLayout();
@@ -313,8 +359,8 @@ public partial class MainWindow : Window
 
         var procedureName = parts[1] switch
         {
-            "Lower" => LowerCameraCalibrationProcedureName,
-            "Standard" => CalibrationProcedureName,
+            "Lower" => _lowerCameraCalibrationProcedureName,
+            "Standard" => _calibrationProcedureName,
             _ => throw new InvalidDataException("标定流程只能选择 Standard 或 Lower。")
         };
         await ActivateCalibrationProcedureAsync(procedureName);
@@ -371,7 +417,7 @@ public partial class MainWindow : Window
         StopAllContinuousExecutionNoThrow();
         await WaitForFixedSolutionAsync();
 
-        _inspectionProcedure ??= GetRequiredProcedure(InspectionProcedureName);
+        _inspectionProcedure ??= GetRequiredProcedure(_inspectionProcedureName);
         _calibrationViewActive = false;
         _clickMoveEnabled = false;
         _clickCenterPixelReady = false;
@@ -405,7 +451,7 @@ public partial class MainWindow : Window
     /// </summary>
     private string RunRectangleBlobInspection(IReadOnlyList<string> parts)
     {
-        return RunTwoPointInspection(parts, InspectionProcedureName, ref _inspectionProcedure);
+        return RunTwoPointInspection(parts, _inspectionProcedureName, ref _inspectionProcedure);
     }
 
     /// <summary>
@@ -414,7 +460,7 @@ public partial class MainWindow : Window
     /// </summary>
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
     {
-        return RunTwoPointInspection(parts, NozzlePointProcedureName, ref _nozzlePointProcedure);
+        return RunTwoPointInspection(parts, _nozzlePointProcedureName, ref _nozzlePointProcedure);
     }
 
     private string RunRotationCenterCapture(IReadOnlyList<string> parts)
@@ -425,25 +471,25 @@ public partial class MainWindow : Window
         }
 
         EnsureRotationCenterCommandReady();
-        var procedure = GetRequiredProcedure(RotationPointProcedureName);
+        var procedure = GetRequiredProcedure(_rotationPointProcedureName);
         var rectangleModule = ResolveNamedModule<IMVSRectFindModuTool>(
-            RotationPointProcedureName,
+            _rotationPointProcedureName,
             RotationPointRectangleModuleName);
         StopAllContinuousExecutionNoThrow();
         BindInspectionResultModule(rectangleModule);
         procedure.Run(true);
-        EnsureProcedureRunSucceeded(procedure, RotationPointProcedureName);
+        EnsureProcedureRunSucceeded(procedure, _rotationPointProcedureName);
 
         var result = rectangleModule.ModuResult;
         if (result is null || result.ModuStatus != 1 || result.DetectStatus != 1)
         {
             throw new InvalidOperationException(
-                $"{RotationPointProcedureName}.{RotationPointRectangleModuleName}返回NG，请检查吸嘴图像和矩形检测参数。");
+                $"{_rotationPointProcedureName}.{RotationPointRectangleModuleName}返回NG，请检查吸嘴图像和矩形检测参数。");
         }
 
         var center = result.RectBox?.CenterPoint
             ?? throw new InvalidOperationException(
-                $"{RotationPointProcedureName}.{RotationPointRectangleModuleName}未返回矩形中心点。");
+                $"{_rotationPointProcedureName}.{RotationPointRectangleModuleName}未返回矩形中心点。");
         if (float.IsNaN(center.X) || float.IsInfinity(center.X) ||
             float.IsNaN(center.Y) || float.IsInfinity(center.Y))
         {
@@ -488,24 +534,24 @@ public partial class MainWindow : Window
         globalVariables.SetVarFloat("X3", [values[4]]);
         globalVariables.SetVarFloat("Y3", [values[5]]);
 
-        var procedure = GetRequiredProcedure(RotationCenterProcedureName);
+        var procedure = GetRequiredProcedure(_rotationCenterProcedureName);
         var circleModule = ResolveNamedModule<IMVSCircleFitModuTool>(
-            RotationCenterProcedureName,
+            _rotationCenterProcedureName,
             RotationCenterCircleModuleName);
         BindInspectionResultModule(circleModule);
         procedure.Run(true);
-        EnsureProcedureRunSucceeded(procedure, RotationCenterProcedureName);
+        EnsureProcedureRunSucceeded(procedure, _rotationCenterProcedureName);
 
         var result = circleModule.ModuResult;
         if (result is null || result.ModuStatus != 1 || result.FitStatus != 1)
         {
             throw new InvalidOperationException(
-                $"{RotationCenterProcedureName}.{RotationCenterCircleModuleName}返回NG，请检查三个采集点。");
+                $"{_rotationCenterProcedureName}.{RotationCenterCircleModuleName}返回NG，请检查三个采集点。");
         }
 
         var center = result.OutputCircle?.CenterPoint
             ?? throw new InvalidOperationException(
-                $"{RotationCenterProcedureName}.{RotationCenterCircleModuleName}未返回圆心。");
+                $"{_rotationCenterProcedureName}.{RotationCenterCircleModuleName}未返回圆心。");
         if (float.IsNaN(center.X) || float.IsInfinity(center.X) ||
             float.IsNaN(center.Y) || float.IsInfinity(center.Y))
         {
@@ -560,18 +606,18 @@ public partial class MainWindow : Window
         var rotationCenterX = (float)centerX;
         var rotationCenterY = (float)centerY;
         var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[3]);
-        var procedure = GetRequiredProcedure(LowerCameraCorrectionProcedureName);
+        var procedure = GetRequiredProcedure(_lowerCameraCorrectionProcedureName);
         var imageSourceModule = ResolveNamedModule<VmModule>(
-            LowerCameraCorrectionProcedureName,
+            _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionImageSourceName);
         var lineLineModule = ResolveNamedModule<IMVSL2LMeasureModuTool>(
-            LowerCameraCorrectionProcedureName,
+            _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionLineLineModuleName);
         var transformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
-            LowerCameraCorrectionProcedureName,
+            _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionTransformModuleName);
         var centerTransformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
-            LowerCameraCorrectionProcedureName,
+            _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionCenterTransformModuleName);
 
         StopAllContinuousExecutionNoThrow();
@@ -588,7 +634,7 @@ public partial class MainWindow : Window
         // 拍照位1/2各自触发的本次原始相机图，而不是下游转换模块的叠加结果。
         BindInspectionResultModule(imageSourceModule);
         procedure.Run(true);
-        EnsureProcedureRunSucceeded(procedure, LowerCameraCorrectionProcedureName);
+        EnsureProcedureRunSucceeded(procedure, _lowerCameraCorrectionProcedureName);
         RefreshInspectionDisplayNoThrow();
 
         var lineLineResult = lineLineModule.ModuResult;
@@ -596,7 +642,7 @@ public partial class MainWindow : Window
             float.IsNaN(lineLineResult.L2LAngle) || float.IsInfinity(lineLineResult.L2LAngle))
         {
             throw new InvalidOperationException(
-                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionLineLineModuleName}未返回有效夹角。");
+                $"{_lowerCameraCorrectionProcedureName}.{LowerCameraCorrectionLineLineModuleName}未返回有效夹角。");
         }
 
         var transformResult = transformModule.ModuResult;
@@ -604,7 +650,7 @@ public partial class MainWindow : Window
             transformResult.TransPoint is null || transformResult.TransPoint.Count < 1)
         {
             throw new InvalidOperationException(
-                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionTransformModuleName}未返回转换坐标。");
+                $"{_lowerCameraCorrectionProcedureName}.{LowerCameraCorrectionTransformModuleName}未返回转换坐标。");
         }
 
         var transformed = transformResult.TransPoint[0];
@@ -621,7 +667,7 @@ public partial class MainWindow : Window
             centerTransformResult.TransPoint is null || centerTransformResult.TransPoint.Count < 1)
         {
             throw new InvalidOperationException(
-                $"{LowerCameraCorrectionProcedureName}.{LowerCameraCorrectionCenterTransformModuleName}未返回旋转中心转换坐标。");
+                $"{_lowerCameraCorrectionProcedureName}.{LowerCameraCorrectionCenterTransformModuleName}未返回旋转中心转换坐标。");
         }
 
         var transformedCenter = centerTransformResult.TransPoint[0];
@@ -774,7 +820,7 @@ public partial class MainWindow : Window
         var procedure = cachedProcedure;
         var isNozzlePointProcedure = string.Equals(
             procedureName,
-            NozzlePointProcedureName,
+            _nozzlePointProcedureName,
             StringComparison.Ordinal);
         var blobModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
         var resultModule = (VmModule)blobModule;
@@ -1627,8 +1673,8 @@ public partial class MainWindow : Window
             _ => throw new InvalidDataException("相机位置参数只能是 Keep 或 Lower。")
         };
         var expectedProcedureName = lowerCamera
-            ? LowerCameraCalibrationProcedureName
-            : CalibrationProcedureName;
+            ? _lowerCameraCalibrationProcedureName
+            : _calibrationProcedureName;
         if (!string.Equals(_activeCalibrationProcedureName, expectedProcedureName, StringComparison.Ordinal))
         {
             await ActivateCalibrationProcedureAsync(expectedProcedureName);
@@ -2520,7 +2566,7 @@ public partial class MainWindow : Window
     {
         _fullscreenRenderTarget = null;
         WorkspaceSidebarColumn.Width = new GridLength(320);
-        WorkspaceGapColumn.Width = new GridLength(10);
+        WorkspaceGapColumn.Width = new GridLength(6);
         CalibrationSidebar.Visibility = Visibility.Visible;
         LiveRenderPanel.Visibility = Visibility.Visible;
         CalibrationRenderPanel.Visibility = Visibility.Visible;
@@ -2541,7 +2587,7 @@ public partial class MainWindow : Window
         CommandBar.Visibility = Visibility.Visible;
         StatusBar.Visibility = Visibility.Visible;
         WorkspaceGrid.Margin = new Thickness(0, 0, 8, 8);
-        LiveRenderHeaderRow.Height = new GridLength(48);
+        LiveRenderHeaderRow.Height = new GridLength(40);
         LiveRenderHeader.Visibility = Visibility.Visible;
         ImagePlaceholderText.Text = "等待实时图像";
     }
@@ -2582,7 +2628,7 @@ public partial class MainWindow : Window
         _showingCalibrationRender = !showLive;
         _fullscreenRenderTarget = null;
         WorkspaceSidebarColumn.Width = new GridLength(320);
-        WorkspaceGapColumn.Width = new GridLength(10);
+        WorkspaceGapColumn.Width = new GridLength(6);
         CalibrationSidebar.Visibility = Visibility.Visible;
         LiveRenderPanel.Visibility = showLive ? Visibility.Visible : Visibility.Collapsed;
         CalibrationRenderPanel.Visibility = showLive ? Visibility.Collapsed : Visibility.Visible;
@@ -2726,9 +2772,9 @@ public partial class MainWindow : Window
             _solutionLoaded = true;
 
             var procedureNames = GetProcedureNames();
-            _calibrationProcedure = GetRequiredProcedure(CalibrationProcedureName);
+            _calibrationProcedure = GetRequiredProcedure(_calibrationProcedureName);
             _previewProcedure = _calibrationProcedure;
-            _inspectionProcedure = GetRequiredProcedure(InspectionProcedureName);
+            _inspectionProcedure = GetRequiredProcedure(_inspectionProcedureName);
             _nozzlePointProcedure = null;
             _calibrationViewActive = false;
 
@@ -2738,14 +2784,14 @@ public partial class MainWindow : Window
             // 保留隐藏控件仅供现有渲染/标定逻辑读取；用户不能再切换方案或流程。
             PreviewProcedureComboBox.ItemsSource = procedureNames;
             CalibrationProcedureComboBox.ItemsSource = procedureNames;
-            PreviewProcedureComboBox.SelectedItem = CalibrationProcedureName;
-            CalibrationProcedureComboBox.SelectedItem = CalibrationProcedureName;
+            PreviewProcedureComboBox.SelectedItem = _calibrationProcedureName;
+            CalibrationProcedureComboBox.SelectedItem = _calibrationProcedureName;
 
             _settings.SolutionPath = _loadedSolutionPath;
-            _settings.PreviewProcedureName = CalibrationProcedureName;
-            _settings.CalibrationProcedureName = CalibrationProcedureName;
+            _settings.PreviewProcedureName = _calibrationProcedureName;
+            _settings.CalibrationProcedureName = _calibrationProcedureName;
             SolutionPathTextBox.Text = _loadedSolutionPath;
-            PopulateImageSteps(CalibrationProcedureName, _previewProcedure);
+            PopulateImageSteps(_calibrationProcedureName, _previewProcedure);
             SaveSettingsNoThrow();
             _fixedSolutionLoadError = "";
 
@@ -2789,8 +2835,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string GetFixedSolutionPath()
+    private string GetFixedSolutionPath()
     {
+        if (!string.IsNullOrWhiteSpace(_configuredSolutionPath))
+        {
+            return _configuredSolutionPath!;
+        }
+
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var preferredPath = Path.Combine(desktop, FixedSolutionFileName);
         if (File.Exists(preferredPath))

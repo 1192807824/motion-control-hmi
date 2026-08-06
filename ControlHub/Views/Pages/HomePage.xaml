@@ -1750,7 +1750,7 @@
                                 <RowDefinition Height="24" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="生产轴运动参数"
+                            <TextBlock Text="生产轴运动曲线"
                                        Foreground="#EAF2F7"
                                        FontSize="12"
                                        FontWeight="Bold"
@@ -1777,7 +1777,7 @@
                                                FontSize="12"
                                                FontWeight="Bold"
                                                VerticalAlignment="Center" />
-                                    <UniformGrid Grid.Row="1" Rows="4" Columns="4">
+                                    <UniformGrid Grid.Row="1" Rows="6" Columns="4">
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="上料 · 吸嘴1 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="FirstSetNozzle1PickupZPositionTextBox"
@@ -1936,6 +1936,78 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel />
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="测试站01 · 下压位" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="TestStation1PressPositionTextBox"
+                                             Height="25"
+                                             Text="250000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="5号测试工位（轴13）的下压绝对位置，pulse"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="测试站01 · 等待位" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="TestStation1WaitPositionTextBox"
+                                             Height="25"
+                                             Text="200000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="5号测试工位（轴13）的等待绝对位置，pulse"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="测试站02 · 下压位" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="TestStation2PressPositionTextBox"
+                                             Height="25"
+                                             Text="250000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="6号测试工位（轴14）的下压绝对位置，pulse"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="测试站02 · 等待位" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="TestStation2WaitPositionTextBox"
+                                             Height="25"
+                                             Text="200000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="6号测试工位（轴14）的等待绝对位置，pulse"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="测试站03 · 下压位" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="TestStation3PressPositionTextBox"
+                                             Height="25"
+                                             Text="250000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="7号测试工位（轴15）的下压绝对位置，pulse"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,8,2">
+                                    <TextBlock Text="测试站03 · 等待位" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="TestStation3WaitPositionTextBox"
+                                             Height="25"
+                                             Text="200000"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="7号测试工位（轴15）的等待绝对位置，pulse"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                </StackPanel>
                                     </UniformGrid>
                                 </Grid>
                             </Border>

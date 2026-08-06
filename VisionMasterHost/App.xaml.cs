@@ -29,7 +29,19 @@ public partial class App : Application
             var parentProcessId = ParseParentProcessId(e.Args);
             var pipeName = ParseArgumentValue(e.Args, "--pipe-name");
             var eventPipeName = ParseArgumentValue(e.Args, "--event-pipe-name");
-            var window = new MainWindow(embedded, pipeName, eventPipeName);
+            var solutionPath = ParseArgumentValue(e.Args, "--solution-path");
+            var window = new MainWindow(
+                embedded,
+                pipeName,
+                eventPipeName,
+                solutionPath,
+                ParseArgumentValue(e.Args, "--inspection-procedure"),
+                ParseArgumentValue(e.Args, "--nozzle-teaching-procedure"),
+                ParseArgumentValue(e.Args, "--calibration-procedure"),
+                ParseArgumentValue(e.Args, "--lower-calibration-procedure"),
+                ParseArgumentValue(e.Args, "--rotation-point-procedure"),
+                ParseArgumentValue(e.Args, "--rotation-center-procedure"),
+                ParseArgumentValue(e.Args, "--lower-correction-procedure"));
             MainWindow = window;
             window.Show();
 
