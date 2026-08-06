@@ -4088,7 +4088,7 @@ public partial class MotionControlPage : UserControl
                     33,
                     OneKeyResetDdHomeVelocity,
                     OneKeyResetDdHomeVelocity,
-                    OffsetPosition: 600)
+                    OffsetPosition: 0)
             ])
         ];
     }
