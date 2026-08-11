@@ -298,7 +298,9 @@
 
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
-                                <TextBlock Text="1　记录中心" Style="{StaticResource SectionTitle}" />
+                                <TextBlock x:Name="CenterSectionTitleText"
+                                           Text="1　移动中心"
+                                           Style="{StaticResource SectionTitle}" />
                                 <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -309,7 +311,7 @@
                                         <TextBlock Text="轴1 X（pulse）" Style="{StaticResource PanelLabel}" />
                                         <Border Height="27" Background="#243E52" CornerRadius="2">
                                             <TextBlock x:Name="CenterXPulseText"
-                                                       Text="未记录"
+                                                       Text="未配置"
                                                        Foreground="#F4F8FB"
                                                        TextAlignment="Center"
                                                        VerticalAlignment="Center" />
@@ -319,7 +321,7 @@
                                         <TextBlock Text="轴2 Y（pulse）" Style="{StaticResource PanelLabel}" />
                                         <Border Height="27" Background="#243E52" CornerRadius="2">
                                             <TextBlock x:Name="CenterYPulseText"
-                                                       Text="未记录"
+                                                       Text="未配置"
                                                        Foreground="#F4F8FB"
                                                        TextAlignment="Center"
                                                        VerticalAlignment="Center" />
@@ -334,9 +336,9 @@
                                            FontWeight="SemiBold"
                                            TextAlignment="Center" />
                                 <Button x:Name="RecordCenterButton"
-                                        Content="记录当前中心"
+                                        Content="移动中心"
                                         Style="{StaticResource PanelButton}"
-                                        Click="RecordCenter_Click" />
+                                        Click="MoveTeachingCenter_Click" />
                             </StackPanel>
                         </Border>
 
@@ -419,7 +421,7 @@
                                            Margin="0,4,0,4"
                                            MinHeight="20"
                                            MaxHeight="30"
-                                           Text="请先记录中心坐标"
+                                           Text="请先在参数配置中设置中心位，然后点击移动中心"
                                            Foreground="#D8E4EC"
                                            FontSize="11"
                                            TextAlignment="Center"
@@ -473,12 +475,12 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <Button x:Name="RecordNozzleDotPositionButton"
-                                            Content="记录下压XY"
+                                            Content="移动下压位置"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             FontSize="11"
-                                            Click="RecordNozzleDotPosition_Click" />
+                                            Click="MoveTeachingPressPosition_Click" />
                                     <Button Grid.Column="2"
                                             x:Name="ReturnToPhotoPositionButton"
                                             Content="回拍照位"
@@ -523,7 +525,7 @@
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
                                            Margin="0,4,0,0"
                                            MaxHeight="30"
-                                           Text="两个吸嘴同时打点时，先记录一次公共XY"
+                                           Text="从参数配置读取示教下压位，移动后让两个吸嘴同时打点"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
                                            TextAlignment="Center"

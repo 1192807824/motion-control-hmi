@@ -375,6 +375,7 @@ public partial class HomePage : UserControl
 
     public HomePageSettings CaptureRecipeSettings()
     {
+        SaveFirstSetTeachingPositionsFromInputs();
         SavePresetPositionsFromInputs();
         SaveLowerCameraPhotoPositionsFromInputs();
         SaveProductionAxisParametersFromInputs();
@@ -383,6 +384,28 @@ public partial class HomePage : UserControl
         SaveSecondSetXyPositionsFromInputs();
         SaveBinPositionsFromInputs();
         return ProductRecipeStore.Clone(_homeSettings);
+    }
+
+    public HomePageSettings GetCurrentParameterSettings()
+    {
+        var settings = ProductRecipeStore.Clone(_homeSettings);
+        settings.FirstSetTeachingCenterX =
+            TryParseCoordinate(FirstSetTeachingCenterXTextBox.Text, out var centerX)
+                ? centerX
+                : null;
+        settings.FirstSetTeachingCenterY =
+            TryParseCoordinate(FirstSetTeachingCenterYTextBox.Text, out var centerY)
+                ? centerY
+                : null;
+        settings.FirstSetTeachingPressPositionX =
+            TryParseCoordinate(FirstSetTeachingPressPositionXTextBox.Text, out var pressPositionX)
+                ? pressPositionX
+                : null;
+        settings.FirstSetTeachingPressPositionY =
+            TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out var pressPositionY)
+                ? pressPositionY
+                : null;
+        return settings;
     }
 
     public void ApplyRecipeSettings(HomePageSettings settings)
@@ -3389,6 +3412,152 @@ public partial class HomePage : UserControl
             velocityOverride: velocity);
     }
 
+    private void RecordFirstSetTeachingCenter_Click(object sender, RoutedEventArgs e)
+    {
+        RecordFirstSetTeachingPosition(
+            "中心位",
+            FirstSetTeachingCenterXTextBox,
+            FirstSetTeachingCenterYTextBox,
+            isCenter: true);
+    }
+
+    private async void MoveFirstSetTeachingCenter_Click(object sender, RoutedEventArgs e)
+    {
+        await MoveFirstSetTeachingPositionAsync(
+            "中心位",
+            FirstSetTeachingCenterXTextBox,
+            FirstSetTeachingCenterYTextBox,
+            MoveFirstSetTeachingCenterButton);
+    }
+
+    private void RecordFirstSetTeachingPressPosition_Click(object sender, RoutedEventArgs e)
+    {
+        RecordFirstSetTeachingPosition(
+            "示教下压位",
+            FirstSetTeachingPressPositionXTextBox,
+            FirstSetTeachingPressPositionYTextBox,
+            isCenter: false);
+    }
+
+    private async void MoveFirstSetTeachingPressPosition_Click(object sender, RoutedEventArgs e)
+    {
+        await MoveFirstSetTeachingPositionAsync(
+            "示教下压位",
+            FirstSetTeachingPressPositionXTextBox,
+            FirstSetTeachingPressPositionYTextBox,
+            MoveFirstSetTeachingPressPositionButton);
+    }
+
+    private void RecordFirstSetTeachingPosition(
+        string positionName,
+        TextBox xInput,
+        TextBox yInput,
+        bool isCenter)
+    {
+        try
+        {
+            var existingX = 0d;
+            var existingY = 0d;
+            var positionAlreadyConfigured =
+                TryParseCoordinate(xInput.Text, out existingX) &&
+                TryParseCoordinate(yInput.Text, out existingY);
+            if (positionAlreadyConfigured &&
+                MessageBox.Show(
+                    Window.GetWindow(this),
+                    $"{positionName}当前为 X={existingX:0.###}、Y={existingY:0.###} pulse。\n\n" +
+                    "确定用第一套 XY 的当前反馈位置覆盖吗？",
+                    $"确认覆盖{positionName}",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                SetFirstSetTeachingPositionStatus($"已取消覆盖{positionName}。", true);
+                return;
+            }
+
+            var motionController = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            var current = motionController.CaptureCalibrationFeedback(
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
+
+            _loadingPresetPositions = true;
+            xInput.Text = current.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
+            yInput.Text = current.ActualY.ToString("0.###", CultureInfo.CurrentCulture);
+            _loadingPresetPositions = false;
+            if (isCenter)
+            {
+                _homeSettings.FirstSetTeachingCenterX = current.ActualX;
+                _homeSettings.FirstSetTeachingCenterY = current.ActualY;
+            }
+            else
+            {
+                _homeSettings.FirstSetTeachingPressPositionX = current.ActualX;
+                _homeSettings.FirstSetTeachingPressPositionY = current.ActualY;
+            }
+
+            _homeSettingsStore.Save(_homeSettings);
+            SetFirstSetTeachingPositionStatus(
+                $"{positionName}已记录并保存：X={current.ActualX:0.###}、Y={current.ActualY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            _loadingPresetPositions = false;
+            SetFirstSetTeachingPositionStatus($"记录{positionName}失败：{exception.Message}", false);
+        }
+        finally
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
+    private async Task MoveFirstSetTeachingPositionAsync(
+        string positionName,
+        TextBox xInput,
+        TextBox yInput,
+        Button moveButton)
+    {
+        if (_presetPositionMoveRunning ||
+            _oneKeyResetRunning ||
+            _startSequenceRunning ||
+            _assignedNozzleMoveRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
+            var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
+            _ = ReadProductionAxisMotionSettings();
+            _presetPositionMoveRunning = true;
+            UpdateHomeCommandState();
+            moveButton.Content = "移动中";
+            SetFirstSetTeachingPositionStatus(
+                $"正在移动到{positionName}：X={targetX:0.###}、Y={targetY:0.###} pulse…",
+                true);
+            await MovePresetPositionCoreAsync(
+                positionName,
+                targetX,
+                targetY,
+                CancellationToken.None);
+            SetFirstSetTeachingPositionStatus(
+                $"已移动到{positionName}：X={targetX:0.###}、Y={targetY:0.###} pulse。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetTeachingPositionStatus($"移动{positionName}失败：{exception.Message}", false);
+        }
+        finally
+        {
+            _presetPositionMoveRunning = false;
+            moveButton.Content = "移动";
+            UpdateHomeCommandState();
+        }
+    }
+
     private async void MoveLowerCameraPhotoPosition1_Click(object sender, RoutedEventArgs e)
     {
         await MoveLowerCameraPhotoPositionAsync(
@@ -3814,6 +3983,15 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void FirstSetTeachingPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SaveFirstSetTeachingPositionsFromInputs();
+        if (!_loadingPresetPositions)
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
     private void ProductionAxisParameterTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_loadingPresetPositions)
@@ -3869,6 +4047,14 @@ public partial class HomePage : UserControl
     {
         _homeSettings = _homeSettingsStore.Load();
         _loadingPresetPositions = true;
+        FirstSetTeachingCenterXTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetTeachingCenterX);
+        FirstSetTeachingCenterYTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetTeachingCenterY);
+        FirstSetTeachingPressPositionXTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetTeachingPressPositionX);
+        FirstSetTeachingPressPositionYTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.FirstSetTeachingPressPositionY);
         PresetPosition1XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1X);
         PresetPosition1YTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition1Y);
         PresetPosition2XTextBox.Text = FormatPresetCoordinate(_homeSettings.PresetPosition2X);
@@ -4475,6 +4661,43 @@ public partial class HomePage : UserControl
         }
     }
 
+    private void SaveFirstSetTeachingPositionsFromInputs()
+    {
+        if (_loadingPresetPositions ||
+            FirstSetTeachingCenterXTextBox is null ||
+            FirstSetTeachingCenterYTextBox is null ||
+            FirstSetTeachingPressPositionXTextBox is null ||
+            FirstSetTeachingPressPositionYTextBox is null ||
+            !TryParseOptionalCoordinate(
+                FirstSetTeachingCenterXTextBox.Text,
+                out var centerX) ||
+            !TryParseOptionalCoordinate(
+                FirstSetTeachingCenterYTextBox.Text,
+                out var centerY) ||
+            !TryParseOptionalCoordinate(
+                FirstSetTeachingPressPositionXTextBox.Text,
+                out var pressPositionX) ||
+            !TryParseOptionalCoordinate(
+                FirstSetTeachingPressPositionYTextBox.Text,
+                out var pressPositionY))
+        {
+            return;
+        }
+
+        _homeSettings.FirstSetTeachingCenterX = centerX;
+        _homeSettings.FirstSetTeachingCenterY = centerY;
+        _homeSettings.FirstSetTeachingPressPositionX = pressPositionX;
+        _homeSettings.FirstSetTeachingPressPositionY = pressPositionY;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetTeachingPositionStatus($"保存第一套XY示教位置失败：{exception.Message}", false);
+        }
+    }
+
     private void HomeEmergencyStop_Click(object sender, RoutedEventArgs e)
     {
         var motionController = _motionController;
@@ -4576,6 +4799,14 @@ public partial class HomePage : UserControl
             OneKeyResetButton is null ||
             OneKeyResetHintText is null ||
             MoveAssignedNozzleButton is null ||
+            FirstSetTeachingCenterXTextBox is null ||
+            FirstSetTeachingCenterYTextBox is null ||
+            FirstSetTeachingPressPositionXTextBox is null ||
+            FirstSetTeachingPressPositionYTextBox is null ||
+            RecordFirstSetTeachingCenterButton is null ||
+            MoveFirstSetTeachingCenterButton is null ||
+            RecordFirstSetTeachingPressPositionButton is null ||
+            MoveFirstSetTeachingPressPositionButton is null ||
             PresetPosition1XTextBox is null ||
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
@@ -4702,7 +4933,27 @@ public partial class HomePage : UserControl
             commandsIdle &&
             allProductionAxisParametersValid &&
             ((_nextAssignedNozzleMoveStep == 1 && _blob1Nozzle1Target is not null) ||
-             (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
+              (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
+        FirstSetTeachingCenterXTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingCenterYTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingPressPositionXTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingPressPositionYTextBox.IsEnabled = commandsIdle;
+        RecordFirstSetTeachingCenterButton.IsEnabled =
+            _motionController is not null && commandsIdle;
+        RecordFirstSetTeachingPressPositionButton.IsEnabled =
+            _motionController is not null && commandsIdle;
+        MoveFirstSetTeachingCenterButton.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            allProductionAxisParametersValid &&
+            TryParseCoordinate(FirstSetTeachingCenterXTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetTeachingCenterYTextBox.Text, out _);
+        MoveFirstSetTeachingPressPositionButton.IsEnabled =
+            _motionController is not null &&
+            commandsIdle &&
+            allProductionAxisParametersValid &&
+            TryParseCoordinate(FirstSetTeachingPressPositionXTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out _);
         PresetPosition1XTextBox.IsEnabled = commandsIdle;
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
@@ -5197,6 +5448,14 @@ public partial class HomePage : UserControl
     {
         PresetPositionStatusText.Text = message;
         PresetPositionStatusText.Foreground = new SolidColorBrush(success
+            ? Color.FromRgb(73, 209, 125)
+            : Color.FromRgb(242, 181, 68));
+    }
+
+    private void SetFirstSetTeachingPositionStatus(string message, bool success)
+    {
+        FirstSetTeachingPositionStatusText.Text = message;
+        FirstSetTeachingPositionStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)
             : Color.FromRgb(242, 181, 68));
     }

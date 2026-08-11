@@ -80,9 +80,9 @@ public partial class MainWindow : Window
     private int _clickImagePixelWidth;
     private int _clickImagePixelHeight;
     private int _clickCenterInitializationQueued;
+    private int _livePreviewFailureResetQueued;
     private int _liveRenderGeneration;
     private bool _livePreviewRenderReady;
-    private TaskCompletionSource<int>? _livePreviewFirstFrameSource;
     private TaskCompletionSource<bool> _fixedSolutionLoadSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private string _fixedSolutionLoadError = "固定视觉方案尚未开始加载。";
@@ -292,6 +292,7 @@ public partial class MainWindow : Window
                 "ACTIVATE_INSPECTION_VIEW" => await ActivateInspectionViewAsync(),
                 "DEACTIVATE_CALIBRATION_VIEW" => await DeactivateCalibrationViewAsync(),
                 "START_LIVE_PREVIEW" => await StartLivePreviewFromCommandAsync(),
+                "SET_CLICK_MODE" => await SetClickMoveModeAsync(command.Split('\t')),
                 "PREPARE" => await PrepareNinePointCalibrationAsync(command.Split('\t')),
                 "COMPLETE" => await CompleteNinePointCalibrationAsync(),
                 "ABORT" => await AbortNinePointCalibrationAsync(),
@@ -315,7 +316,7 @@ public partial class MainWindow : Window
             "CAPTURE" => CaptureNinePointCalibration(parts),
             "COMPLETE" => throw new InvalidOperationException("COMPLETE must be executed asynchronously."),
             "ABORT" => throw new InvalidOperationException("ABORT must be executed asynchronously."),
-            "SET_CLICK_MODE" => SetClickMoveMode(parts),
+            "SET_CLICK_MODE" => throw new InvalidOperationException("SET_CLICK_MODE must be executed asynchronously."),
             "IMPORT_CALIBRATION_FILE" => ImportCalibrationFile(parts),
             "SET_CALIBRATION_TOOLBAR_STATE" => SetCalibrationToolbarState(parts),
             "SET_CALIBRATION_SAVE_FEEDBACK" => SetCalibrationSaveFeedback(parts),
@@ -347,7 +348,7 @@ public partial class MainWindow : Window
         await WaitForFixedSolutionAsync();
 
         await ActivateCalibrationProcedureAsync(_activeCalibrationProcedureName);
-        return $"标定界面已开启：{_activeCalibrationProcedureName}。";
+        return "视觉标定界面已开启。";
     }
 
     private async Task<string> SetCalibrationProcedureAsync(IReadOnlyList<string> parts)
@@ -364,7 +365,7 @@ public partial class MainWindow : Window
             _ => throw new InvalidDataException("标定流程只能选择 Standard 或 Lower。")
         };
         await ActivateCalibrationProcedureAsync(procedureName);
-        return $"已切换到 VisionMaster“{procedureName}”";
+        return "标定模式已切换。";
     }
 
     private async Task ActivateCalibrationProcedureAsync(string procedureName)
@@ -390,10 +391,10 @@ public partial class MainWindow : Window
         ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
-        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
+        _ = ResolveNPointCalibrationModule(procedureName);
         await RefreshRenderLayoutAsync();
         UpdateCommandState();
-        SetStatus($"已启用{procedureName}，点击一键九点标定后开始取像。", StatusKind.Success);
+        SetStatus("视觉标定已就绪，点击一键九点标定后开始取像。", StatusKind.Success);
     }
 
     private async Task<string> DeactivateCalibrationViewAsync()
@@ -476,7 +477,7 @@ public partial class MainWindow : Window
             _rotationPointProcedureName,
             RotationPointRectangleModuleName);
         StopAllContinuousExecutionNoThrow();
-        BindInspectionResultModule(rectangleModule);
+        PrepareLiveRendererForCameraAcquisition();
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, _rotationPointProcedureName);
 
@@ -496,6 +497,8 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("矩形检测返回的中心点X/Y无效。");
         }
 
+        BindInspectionResultModule(rectangleModule);
+        RefreshInspectionDisplayNoThrow();
         SetStatus(
             $"获取旋转中心采集点完成：X={center.X:0.###}，Y={center.Y:0.###}",
             StatusKind.Success);
@@ -538,7 +541,6 @@ public partial class MainWindow : Window
         var circleModule = ResolveNamedModule<IMVSCircleFitModuTool>(
             _rotationCenterProcedureName,
             RotationCenterCircleModuleName);
-        BindInspectionResultModule(circleModule);
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, _rotationCenterProcedureName);
 
@@ -558,6 +560,8 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("圆拟合返回的圆心X/Y无效。");
         }
 
+        BindInspectionResultModule(circleModule);
+        RefreshInspectionDisplayNoThrow();
         SetStatus(
             $"旋转中心计算完成：X={center.X:0.###}，Y={center.Y:0.###}",
             StatusKind.Success);
@@ -632,9 +636,10 @@ public partial class MainWindow : Window
 
         // 主页复用原 Blob 承载区域显示纠偏画面；绑定图像源可直接看到
         // 拍照位1/2各自触发的本次原始相机图，而不是下游转换模块的叠加结果。
-        BindInspectionResultModule(imageSourceModule);
+        PrepareLiveRendererForCameraAcquisition();
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, _lowerCameraCorrectionProcedureName);
+        BindInspectionResultModule(imageSourceModule);
         RefreshInspectionDisplayNoThrow();
 
         var lineLineResult = lineLineModule.ModuResult;
@@ -836,7 +841,9 @@ public partial class MainWindow : Window
             RefreshRenderLayout();
         }
 
-        BindInspectionResultModule(displayModule);
+        // 厂商渲染控件在相机被其他海康程序占用时会针对每次空结果弹出
+        // “无图片数据”。拍照前先解绑，只有流程成功后才把有效结果交给控件。
+        PrepareLiveRendererForCameraAcquisition();
 
         InspectionImageFile? inspectionImage = null;
         try
@@ -856,6 +863,7 @@ public partial class MainWindow : Window
                         ? $"固定方案中的{procedureName}执行异常。"
                         : $"固定方案中的{procedureName}执行异常：{details}");
             }
+            BindInspectionResultModule(displayModule);
             RefreshInspectionDisplayNoThrow();
 
             var blobResult = blobModule.ModuResult;
@@ -1143,6 +1151,8 @@ public partial class MainWindow : Window
             SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
             var simplifiedMode = parts[31] == "1";
             var lowerCameraNozzleName = Decode(parts[32]);
+            SidebarCenterTitleText.Text = simplifiedMode ? "记录中心" : "移动中心";
+            SidebarRecordCenterButton.Content = simplifiedMode ? "记录当前中心" : "移动中心";
             var rotationCenterRunning = parts[34] == "1";
             SidebarNozzleTeachSection.Visibility = simplifiedMode
                 ? Visibility.Collapsed
@@ -1211,6 +1221,25 @@ public partial class MainWindow : Window
         VisionRenderControl.ModuleSource = resultModule;
     }
 
+    private void PrepareLiveRendererForCameraAcquisition()
+    {
+        DetachCrosshairModule();
+        _displayedModule = null;
+        _livePreviewRenderReady = false;
+        Interlocked.Increment(ref _liveRenderGeneration);
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        try
+        {
+            VisionRenderControl.ModuleSource = null;
+            VisionRenderControl.ClearDisplayView();
+        }
+        catch
+        {
+            // 清理显示失败不影响相机流程；关键是不能再主动刷新空结果。
+        }
+    }
+
     private void RefreshInspectionDisplayNoThrow()
     {
         try
@@ -1230,6 +1259,13 @@ public partial class MainWindow : Window
     /// </summary>
     private InspectionImageFile SaveInspectionImage()
     {
+        // SDK 的 SaveOriginalImage 在当前渲染图为空时不会抛异常，
+        // 而是直接弹出“无图片数据”。先检查可避免厂商弹窗。
+        if (!HasCurrentVisionRenderImage())
+        {
+            throw new InvalidOperationException("当前没有可保存的检测图像。");
+        }
+
         var directory = Path.Combine(Path.GetTempPath(), "ControlHubVision");
         Directory.CreateDirectory(directory);
         var imagePath = Path.Combine(directory, $"blob-{Guid.NewGuid():N}.bmp");
@@ -1543,7 +1579,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private string SetClickMoveMode(IReadOnlyList<string> parts)
+    private async Task<string> SetClickMoveModeAsync(IReadOnlyList<string> parts)
     {
         if (parts.Count != 3 || (parts[1] != "0" && parts[1] != "1"))
         {
@@ -1578,11 +1614,7 @@ public partial class MainWindow : Window
         var fullPath = ValidateCalibrationFilePath(calibrationPath);
         var transformModule = GetCalibrationTransformModule();
         transformModule.ModuParams.LoadCalibPath = fullPath;
-        ApplyLiveRenderLayout();
-        if (!TryStartLivePreview(out var previewError))
-        {
-            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
-        }
+        await StartLivePreviewFromCommandAsync();
 
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
@@ -1612,7 +1644,6 @@ public partial class MainWindow : Window
         StopAllContinuousExecutionNoThrow();
         ApplyCalibrationRenderLayout();
         ClearCalibrationRenderer();
-        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
         RefreshRenderLayout();
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
@@ -1733,7 +1764,6 @@ public partial class MainWindow : Window
 
             _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath, backupPath);
             ClearCalibrationRenderer();
-            BindCalibrationModule(nPointModule);
             SetBusy(true);
             SetStatus(
                 $"九点标定已准备：基准({centerX:0.####}, {centerY:0.####})，" +
@@ -1773,10 +1803,10 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("当前 VisionMaster 流程已失效。");
         }
 
+        ClearCalibrationRenderer();
         var stopwatch = Stopwatch.StartNew();
         RunCalibrationProcedureOnce();
         stopwatch.Stop();
-        CalibrationRenderControl.UpdateVMResultShow();
 
         var result = session.Module.ModuResult;
         if (result.ModuStatus != 1)
@@ -1785,6 +1815,10 @@ public partial class MainWindow : Window
                 $"第 {pointNumber} 点 N点标定模块返回 NG，请检查相机取像和圆查找结果。");
         }
 
+        // 只有本次取像和标定模块均成功后才绑定海康渲染控件。
+        // 否则控件会监听失败回调并反复弹出“无图片数据”。
+        BindCalibrationModule(session.Module);
+        CalibrationRenderControl.UpdateVMResultShow();
         CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
         session.NextPointNumber++;
         SetStatus(
@@ -2248,35 +2282,24 @@ public partial class MainWindow : Window
             return (_clickCenterPixelX, _clickCenterPixelY);
         }
 
-        var temporaryImagePath = Path.Combine(
-            Path.GetTempPath(),
-            $"ControlHub-click-center-{Guid.NewGuid():N}.bmp");
         try
         {
-            VisionRenderControl.SaveOriginalImage(temporaryImagePath);
-            using var stream = new FileStream(
-                temporaryImagePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite);
-            using var reader = new BinaryReader(stream);
-            if (stream.Length < 26 || reader.ReadUInt16() != 0x4D42)
+            // 只需要宽高即可计算中心，不再每帧调用 SaveOriginalImage。
+            // 原实现在渲染尚未出图时会触发 SDK 的“无图片数据”弹窗，
+            // 捕获失败后又会在下一帧重试，因而造成无限弹窗。
+            var image = VisionRenderControl.ImageSource;
+            if (image is null || image.Width <= 0 || image.Height <= 0)
             {
-                throw new InvalidDataException("VisionMaster 保存的原图不是有效 BMP 图像。");
+                throw new InvalidOperationException("当前渲染画面尚未出图。");
             }
 
-            stream.Position = 18;
-            var pixelWidth = Math.Abs((long)reader.ReadInt32());
-            var pixelHeight = Math.Abs((long)reader.ReadInt32());
-            if (pixelWidth <= 0 || pixelHeight <= 0)
-            {
-                throw new InvalidDataException("当前图像尺寸无效。");
-            }
+            var pixelWidth = image.Width;
+            var pixelHeight = image.Height;
 
             _clickCenterPixelX = (float)((pixelWidth - 1) / 2d);
             _clickCenterPixelY = (float)((pixelHeight - 1) / 2d);
-            _clickImagePixelWidth = checked((int)pixelWidth);
-            _clickImagePixelHeight = checked((int)pixelHeight);
+            _clickImagePixelWidth = pixelWidth;
+            _clickImagePixelHeight = pixelHeight;
             _clickCenterPixelReady = true;
             return (_clickCenterPixelX, _clickCenterPixelY);
         }
@@ -2284,15 +2307,18 @@ public partial class MainWindow : Window
         {
             throw new InvalidOperationException("无法读取当前图像中心，请确认实时画面已经正常出图。", exception);
         }
-        finally
+    }
+
+    private bool HasCurrentVisionRenderImage()
+    {
+        try
         {
-            try
-            {
-                File.Delete(temporaryImagePath);
-            }
-            catch
-            {
-            }
+            var image = VisionRenderControl.ImageSource;
+            return image is not null && image.Width > 0 && image.Height > 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -2409,11 +2435,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        _livePreviewFirstFrameSource?.TrySetResult(renderGeneration);
+        // 相机被另一个海康进程独占时，图像源仍可能产生“执行失败”回调。
+        // 这种回调不能当作首帧，否则绑定渲染控件后会无限弹“无图片数据”。
+        if (!HasValidImageResult(module))
+        {
+            QueueLivePreviewFailureReset(module, renderGeneration);
+            return;
+        }
+
         _ = Dispatcher.BeginInvoke(
             () =>
             {
-                if (renderGeneration == Volatile.Read(ref _liveRenderGeneration))
+                if (_livePreviewRenderReady &&
+                    renderGeneration == Volatile.Read(ref _liveRenderGeneration))
                 {
                     ImagePlaceholder.Visibility = Visibility.Collapsed;
                 }
@@ -2431,6 +2465,97 @@ public partial class MainWindow : Window
         else
         {
             QueueClickCenterInitialization();
+        }
+    }
+
+    private void QueueLivePreviewFailureReset(VmModule module, int renderGeneration)
+    {
+        // 首帧等待阶段由 10 秒超时统一收尾。这里只处理已经正常显示后相机被
+        // 拔掉或被另一个程序重新占用的情况，并保证连续失败只排队一次。
+        if (!_livePreviewRenderReady ||
+            Interlocked.Exchange(ref _livePreviewFailureResetQueued, 1) != 0)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            () =>
+            {
+                if (renderGeneration != Volatile.Read(ref _liveRenderGeneration))
+                {
+                    return;
+                }
+
+                if (HasValidImageResult(module))
+                {
+                    Interlocked.Exchange(ref _livePreviewFailureResetQueued, 0);
+                    return;
+                }
+
+                ResetLivePreviewAfterFailure("相机图像已中断：可能被其他海康程序占用");
+            },
+            DispatcherPriority.Send);
+    }
+
+    private static bool HasValidImageResult(VmModule module)
+    {
+        try
+        {
+            var result = module.GetType().GetProperty("ModuResult")?.GetValue(module);
+            if (result is null)
+            {
+                return false;
+            }
+
+            var errorCodeProperty = result.GetType().GetProperty("ErrorCode");
+            if (errorCodeProperty is not null &&
+                Convert.ToUInt64(
+                    errorCodeProperty.GetValue(result) ?? 0,
+                    CultureInfo.InvariantCulture) != 0)
+            {
+                return false;
+            }
+
+            // VisionMaster 4.x 的图像源和图像采集模块分别使用 ImageData / OutImage0。
+            // 通过公共结果属性判断可同时兼容两种模块，无需把显示控件当作探针。
+            foreach (var propertyName in new[] { "ImageData", "OutImage0" })
+            {
+                var imageData = result.GetType().GetProperty(propertyName)?.GetValue(result);
+                if (HasPositiveImageDimensions(imageData))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // SDK 失败结果的属性读取也可能抛异常；按无有效图像处理。
+        }
+
+        return false;
+    }
+
+    private static bool HasPositiveImageDimensions(object? imageData)
+    {
+        if (imageData is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var imageType = imageData.GetType();
+            var width = Convert.ToInt64(
+                imageType.GetProperty("Width")?.GetValue(imageData) ?? 0,
+                CultureInfo.InvariantCulture);
+            var height = Convert.ToInt64(
+                imageType.GetProperty("Height")?.GetValue(imageData) ?? 0,
+                CultureInfo.InvariantCulture);
+            return width > 0 && height > 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -2582,7 +2707,7 @@ public partial class MainWindow : Window
     {
         MinWidth = 1024;
         MinHeight = 640;
-        CommandBarRow.Height = new GridLength(64);
+        CommandBarRow.Height = new GridLength(52);
         StatusBarRow.Height = new GridLength(34);
         CommandBar.Visibility = Visibility.Visible;
         StatusBar.Visibility = Visibility.Visible;
@@ -2764,12 +2889,16 @@ public partial class MainWindow : Window
                 return;
             }
 
-            SetStatus("正在加载固定视觉方案…", StatusKind.Busy);
+            SetStatus("正在初始化视觉组件…", StatusKind.Busy);
             CloseCurrentSolution();
             previousSolutionClosed = true;
             _loadedSolutionPath = Path.GetFullPath(solutionPath);
             VmSolution.Load(_loadedSolutionPath, "");
             _solutionLoaded = true;
+
+            // 加载完成后立即关闭 .sol 中可能保存的所有连续运行状态，
+            // 避免在页面对象尚未就绪时就循环抢占相机。
+            StopAllContinuousExecutionNoThrow();
 
             var procedureNames = GetProcedureNames();
             _calibrationProcedure = GetRequiredProcedure(_calibrationProcedureName);
@@ -2777,9 +2906,6 @@ public partial class MainWindow : Window
             _inspectionProcedure = GetRequiredProcedure(_inspectionProcedureName);
             _nozzlePointProcedure = null;
             _calibrationViewActive = false;
-
-            // 方案可能保存了“连续运行”状态。主页阶段只保留找芯片流程，标定页打开后再取标定对象。
-            StopAllContinuousExecutionNoThrow();
 
             // 保留隐藏控件仅供现有渲染/标定逻辑读取；用户不能再切换方案或流程。
             PreviewProcedureComboBox.ItemsSource = procedureNames;
@@ -2796,9 +2922,7 @@ public partial class MainWindow : Window
             _fixedSolutionLoadError = "";
 
             UpdateCommandState();
-            SetStatus(
-                $"已加载固定方案：{Path.GetFileName(solutionPath)}；找芯片流程待命，标定流程尚未开启",
-                StatusKind.Success);
+            SetStatus("视觉组件已就绪", StatusKind.Success);
         }
         catch (Exception exception)
         {
@@ -2860,7 +2984,7 @@ public partial class MainWindow : Window
                 $"固定方案中未找到必需流程“{procedureName}”。");
     }
 
-    private void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_initializingFixedSolution ||
             !_solutionLoaded ||
@@ -2877,14 +3001,8 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = procedureName;
             PopulateImageSteps(procedureName, _previewProcedure);
             SaveSettingsNoThrow();
-            if (TryStartLivePreview(out var previewError))
-            {
-                SetStatus($"{procedureName} 已单次采集到画面1", StatusKind.Success);
-            }
-            else
-            {
-                SetStatus($"流程已加载，但画面1采集失败：{previewError}", StatusKind.Error);
-            }
+            await StartLivePreviewFromCommandAsync();
+            SetStatus($"{procedureName} 实时画面已就绪", StatusKind.Success);
         }
         catch (Exception exception)
         {
@@ -2910,9 +3028,8 @@ public partial class MainWindow : Window
             _calibrationProcedure = VmSolution.Instance[procedureName] as VmProcedure
                 ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
             _settings.CalibrationProcedureName = procedureName;
-            var nPointModule = ResolveNPointCalibrationModule(procedureName);
+            _ = ResolveNPointCalibrationModule(procedureName);
             ClearCalibrationRenderer();
-            BindCalibrationModule(nPointModule);
             SaveSettingsNoThrow();
             UpdateCommandState();
             SetStatus($"标定流程已选择：{procedureName}", StatusKind.Ready);
@@ -3053,7 +3170,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ContinuousRun_Click(object sender, RoutedEventArgs e)
+    private async void ContinuousRun_Click(object sender, RoutedEventArgs e)
     {
         if (!EnsureProcedureReady())
         {
@@ -3062,14 +3179,7 @@ public partial class MainWindow : Window
 
         try
         {
-            if (TryStartLivePreview(out var previewError))
-            {
-                SetStatus("画面1采集完成", StatusKind.Success);
-            }
-            else
-            {
-                SetStatus($"画面1采集失败：{previewError}", StatusKind.Error);
-            }
+            await StartLivePreviewFromCommandAsync();
         }
         catch (Exception exception)
         {
@@ -3077,77 +3187,72 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<string> StartLivePreviewFromCommandAsync()
+    private Task<string> StartLivePreviewFromCommandAsync()
     {
         if (!EnsureProcedureReady())
         {
             throw new InvalidOperationException("固定视觉方案或实时相机流程尚未就绪。");
         }
 
-        // ContinuousRunEnable returns before the camera has produced its first frame.
-        // 先解绑空结果的渲染源，只监听模块结果；如果此时就显示渲染控件，
-        // VisionMaster 会在相机首帧到达前弹出一次“无画面”。
+        // 绝对不在首帧之前开启 ContinuousRunEnable。相机被其他海康程序占用时，
+        // 连续运行会让采集模块不断产生“无图片数据”，关掉弹窗后又立即弹出。
+        // 先在渲染控件解绑状态下单次探测，有效首帧到达后才进入连续运行。
         var imageOption = ImageStepComboBox.SelectedItem as VisionModuleOption
             ?? throw new InvalidOperationException("当前实时画面模块尚未选择。");
         PrepareImageStepForFirstFrame(imageOption);
         ImagePlaceholderText.Text = "正在连接相机，等待首帧…";
         ImagePlaceholder.Visibility = Visibility.Visible;
-        var firstFrameSource = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _livePreviewFirstFrameSource = firstFrameSource;
-        if (!TryStartLivePreview(out var previewError, bindSelectedImageStep: false))
-        {
-            _livePreviewFirstFrameSource = null;
-            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
-        }
-
-        var expectedGeneration = _liveRenderGeneration;
-        var firstFrameWait = Stopwatch.StartNew();
         try
         {
-            while (true)
+            StopAllContinuousExecutionNoThrow();
+            _previewProcedure!.Run(true);
+            EnsureProcedureRunSucceeded(
+                _previewProcedure,
+                PreviewProcedureComboBox.SelectedItem as string ?? _activeCalibrationProcedureName);
+            if (imageOption.Module is not VmModule imageModule || !HasValidImageResult(imageModule))
             {
-                var remaining = TimeSpan.FromSeconds(10) - firstFrameWait.Elapsed;
-                if (remaining <= TimeSpan.Zero)
-                {
-                    ImagePlaceholderText.Text = "等待首帧超时，请检查相机连接";
-                    throw new TimeoutException("实时相机在 10 秒内未返回图像数据。");
-                }
-
-                var completedTask = await Task.WhenAny(firstFrameSource.Task, Task.Delay(remaining));
-                if (!ReferenceEquals(completedTask, firstFrameSource.Task))
-                {
-                    ImagePlaceholderText.Text = "等待首帧超时，请检查相机连接";
-                    throw new TimeoutException("实时相机在 10 秒内未返回图像数据。");
-                }
-
-                var receivedGeneration = await firstFrameSource.Task;
-                if (receivedGeneration == expectedGeneration)
-                {
-                    break;
-                }
-
-                firstFrameSource = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _livePreviewFirstFrameSource = firstFrameSource;
+                throw new InvalidOperationException(
+                    "相机未返回有效图像；相机可能已被其他海康程序占用。");
             }
         }
-        finally
+        catch (Exception exception)
         {
-            if (ReferenceEquals(_livePreviewFirstFrameSource, firstFrameSource))
-            {
-                _livePreviewFirstFrameSource = null;
-            }
+            ResetLivePreviewAfterFailure("相机无图像：可能已被其他海康程序占用");
+            throw new InvalidOperationException(
+                $"实时画面启动失败：{FormatException(exception)}",
+                exception);
         }
 
         // 模块已经有有效结果后再绑定并显示，避免厂商渲染控件读取空结果。
-        VisionRenderControl.ModuleSource = imageOption.Module;
-        ApplyLiveRenderLayout();
-        RefreshRenderLayout();
-        VisionRenderControl.UpdateVMResultShow();
-        _livePreviewRenderReady = true;
-        ImagePlaceholder.Visibility = Visibility.Collapsed;
-        QueueClickCenterInitialization();
-        SetStatus("实时画面已就绪。", StatusKind.Success);
-        return "实时画面已就绪。";
+        try
+        {
+            VisionRenderControl.ModuleSource = imageOption.Module;
+            ApplyLiveRenderLayout();
+            RefreshRenderLayout();
+            VisionRenderControl.UpdateVMResultShow();
+            _livePreviewRenderReady = true;
+            ImagePlaceholder.Visibility = Visibility.Collapsed;
+            QueueClickCenterInitialization();
+            _previewProcedure!.ContinuousRunEnable = true;
+            UpdateCommandState();
+            SetStatus("实时画面已就绪。", StatusKind.Success);
+            return Task.FromResult("实时画面已就绪。");
+        }
+        catch
+        {
+            ResetLivePreviewAfterFailure("实时相机启动失败，请检查相机连接或占用状态");
+            throw;
+        }
+    }
+
+    private void ResetLivePreviewAfterFailure(string placeholderMessage)
+    {
+        StopAllContinuousExecutionNoThrow();
+        PrepareLiveRendererForCameraAcquisition();
+        ImagePlaceholderText.Text = placeholderMessage;
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        UpdateCommandState();
+        SetStatus(placeholderMessage, StatusKind.Error);
     }
 
     private void StopRun_Click(object sender, RoutedEventArgs e)
@@ -3343,6 +3448,7 @@ public partial class MainWindow : Window
         // The camera belongs exclusively to the calibration flow until all nine points finish.
         StopAllContinuousExecutionNoThrow();
         _calibrationProcedure.Run(true);
+        EnsureProcedureRunSucceeded(_calibrationProcedure, _activeCalibrationProcedureName);
     }
 
     private void CapturePreviewFrame()
@@ -3352,56 +3458,32 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("实时相机流程尚未加载。");
         }
 
+        var imageOption = ImageStepComboBox.SelectedItem as VisionModuleOption
+            ?? throw new InvalidOperationException("当前实时画面模块尚未选择。");
+        PrepareImageStepForFirstFrame(imageOption);
         StopAllContinuousExecutionNoThrow();
         _previewProcedure.Run(true);
+        EnsureProcedureRunSucceeded(
+            _previewProcedure,
+            PreviewProcedureComboBox.SelectedItem as string ?? _activeCalibrationProcedureName);
+        if (imageOption.Module is not VmModule imageModule || !HasValidImageResult(imageModule))
+        {
+            throw new InvalidOperationException(
+                "相机未返回有效图像；相机可能已被其他海康程序占用。");
+        }
+
+        BindImageStep(imageOption, persistSelection: false);
         VisionRenderControl.UpdateVMResultShow();
-    }
-
-    private bool TryStartLivePreview(
-        out string errorMessage,
-        bool bindSelectedImageStep = true)
-    {
-        if (!_solutionLoaded || _previewProcedure is null)
-        {
-            errorMessage = "视觉方案或流程尚未加载";
-            return false;
-        }
-
-        if (_calibrationSession is not null)
-        {
-            errorMessage = "九点标定正在执行";
-            return false;
-        }
-
-        var stage = "绑定实时画面";
-        try
-        {
-            if (bindSelectedImageStep &&
-                ImageStepComboBox.SelectedItem is VisionModuleOption option)
-            {
-                BindImageStep(option, persistSelection: false);
-            }
-
-            stage = "启动实时相机流程";
-            StopAllContinuousExecutionNoThrow();
-            _previewProcedure.ContinuousRunEnable = true;
-            UpdateCommandState();
-            errorMessage = "";
-            return true;
-        }
-        catch (Exception exception)
-        {
-            UpdateCommandState();
-            errorMessage = $"{stage}失败：{FormatException(exception)}";
-            return false;
-        }
     }
 
     private void BindImageStep(VisionModuleOption option, bool persistSelection)
     {
         PrepareImageStepForFirstFrame(option);
-        VisionRenderControl.ModuleSource = option.Module;
-        _livePreviewRenderReady = true;
+        if (option.Module is VmModule module && HasValidImageResult(module))
+        {
+            VisionRenderControl.ModuleSource = option.Module;
+            _livePreviewRenderReady = true;
+        }
 
         if (!persistSelection)
         {
@@ -3415,6 +3497,7 @@ public partial class MainWindow : Window
     private void PrepareImageStepForFirstFrame(VisionModuleOption option)
     {
         DetachCrosshairModule();
+        Interlocked.Exchange(ref _livePreviewFailureResetQueued, 0);
         _livePreviewRenderReady = false;
         _clickCenterPixelReady = false;
         _clickImagePixelWidth = 0;
@@ -3480,13 +3563,38 @@ public partial class MainWindow : Window
         {
         }
 
+        var procedures = new List<VmProcedure>();
         foreach (var procedure in new[] { _previewProcedure, _inspectionProcedure, _nozzlePointProcedure, _calibrationProcedure })
         {
-            if (procedure is null)
+            if (procedure is not null && !procedures.Contains(procedure))
             {
-                continue;
+                procedures.Add(procedure);
             }
+        }
 
+        // 不能只停止当前页面记住的几个流程。.sol 可能保存了其他流程的
+        // 连续运行状态，它们同样会反复触发相机错误弹窗。
+        try
+        {
+            var solution = VmSolution.Instance;
+            if (solution is not null)
+            {
+                foreach (var procedureName in GetProcedureNames())
+                {
+                    if (solution[procedureName] is VmProcedure procedure &&
+                        !procedures.Contains(procedure))
+                    {
+                        procedures.Add(procedure);
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        foreach (var procedure in procedures)
+        {
             try
             {
                 procedure.ContinuousRunEnable = false;

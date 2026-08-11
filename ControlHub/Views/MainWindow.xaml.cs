@@ -21,6 +21,7 @@ public partial class MainWindow : Window
 
         VisualCalibrationContent.AttachMotionController(MotionPage);
         HomeContent.AttachMotionController(MotionPage);
+        VisualCalibrationContent.AttachHomeSettingsProvider(HomeContent.GetCurrentParameterSettings);
         UsbMicroscopeContent.AttachHomeController(HomeContent);
         HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
         HomeContent.AttachConnectionConfigController(ConnectionConfigContent);
@@ -99,6 +100,7 @@ public partial class MainWindow : Window
     {
         await HomeContent.DeactivateProductionAsync();
         await UsbMicroscopeContent.DeactivateAsync();
+        VisualCalibrationContent.RefreshTeachingPositions();
         ShowVisualCalibrationPage();
         try
         {

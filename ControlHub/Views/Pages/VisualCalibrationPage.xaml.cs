@@ -77,6 +77,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _suppressClickMoveModeEvent;
     private bool _suppressLowerCameraNozzleEvent;
     private MotionControlPage? _motionController;
+    private Func<HomePageSettings>? _homeSettingsProvider;
     private CalibrationCenterPosition? _recordedCenter;
     private CalibrationCenterPosition? _nozzleDotPosition;
     private VisionRectangleBlobResult? _pendingNozzlePointResult;
@@ -134,6 +135,27 @@ public partial class VisualCalibrationPage : UserControl
     public void AttachMotionController(MotionControlPage motionController)
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
+        UpdateCommandState();
+    }
+
+    public void AttachHomeSettingsProvider(Func<HomePageSettings> homeSettingsProvider)
+    {
+        _homeSettingsProvider = homeSettingsProvider
+            ?? throw new ArgumentNullException(nameof(homeSettingsProvider));
+        RefreshTeachingPositions();
+    }
+
+    public void RefreshTeachingPositions()
+    {
+        if (_centerSyncRunning || _calibrationRunning || _clickMoveRunning)
+        {
+            return;
+        }
+
+        _recordedCenter = null;
+        _nozzleDotPosition = null;
+        RefreshTeachingPositionDisplay();
+        UpdateNozzleTeachUi();
         UpdateCommandState();
     }
 
@@ -895,6 +917,9 @@ public partial class VisualCalibrationPage : UserControl
             _visionCalibration.Settings.ActiveCalibrationMode,
             _visionCalibration.ActiveAxisSet);
         LoadCalibrationSettings();
+        _recordedCenter = null;
+        _nozzleDotPosition = null;
+        RefreshTeachingPositionDisplay();
         _settingsLoaded = true;
         UpdateVisionOffsetPreview();
         UpdateCommandState();
@@ -1050,64 +1075,106 @@ public partial class VisualCalibrationPage : UserControl
         VisionHost.Shutdown();
     }
 
-    private async void RecordCenter_Click(object sender, RoutedEventArgs e)
+    private async void MoveTeachingCenter_Click(object sender, RoutedEventArgs e)
     {
         if (_centerSyncRunning)
         {
             return;
         }
 
+        _centerSyncRunning = true;
+        UpdateCommandState();
         try
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
-            _recordedCenter = motionController.CaptureCalibrationCenter(
-                ActiveAxisPair.XHardwareAxisNo,
-                ActiveAxisPair.YHardwareAxisNo);
+            var movedToConfiguredCenter = !IsLowerCameraMode;
+            if (movedToConfiguredCenter)
+            {
+                var (targetX, targetY) = GetConfiguredTeachingPosition(center: true);
+                var velocity = ParsePositiveDouble(VelocityTextBox.Text, "移动中心速度");
+                var settleMilliseconds = ParseNonNegativeInt(
+                    SettleMillisecondsTextBox.Text,
+                    "到位稳定等待");
+                var current = motionController.CaptureCalibrationCenter(
+                    ActiveAxisPair.XHardwareAxisNo,
+                    ActiveAxisPair.YHardwareAxisNo);
+                SetWorkflowStatus(
+                    $"正在移动到参数配置中心位：X={targetX:0.###}、Y={targetY:0.###} pulse…",
+                    WorkflowStatus.Running);
+                _ = await motionController.MoveCalibrationAxesToAsync(
+                    ActiveAxisPair.XHardwareAxisNo,
+                    ActiveAxisPair.YHardwareAxisNo,
+                    targetX,
+                    targetY,
+                    velocity,
+                    DefaultPositionTolerancePulses,
+                    CalculateDirectMoveTimeout(
+                        targetX - current.ActualX,
+                        targetY - current.ActualY,
+                        velocity),
+                    CancellationToken.None);
+                if (settleMilliseconds > 0)
+                {
+                    await Task.Delay(settleMilliseconds);
+                }
+
+                // 后续九点标定及偏移计算以参数配置的绝对坐标为基准，
+                // 不再把实时反馈重新写成一套临时的“记录位置”。
+                _recordedCenter = new CalibrationCenterPosition(
+                    ActiveAxisPair.XHardwareAxisNo,
+                    ActiveAxisPair.YHardwareAxisNo,
+                    targetX,
+                    targetY);
+            }
+            else
+            {
+                // 下相机标定仍需以当前吸嘴到位点为中心，不属于第一套 XY 示教位置流程。
+                _recordedCenter = motionController.CaptureCalibrationCenter(
+                    ActiveAxisPair.XHardwareAxisNo,
+                    ActiveAxisPair.YHardwareAxisNo);
+            }
+
             CenterXPulseText.Text = _recordedCenter.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
             CenterYPulseText.Text = _recordedCenter.ActualY.ToString("0.###", CultureInfo.CurrentCulture);
             CenterVmText.Text =
                 $"基准点 X：{_recordedCenter.ActualX / PulsesPerVisionUnit:0.####}　" +
                 $"Y：{_recordedCenter.ActualY / PulsesPerVisionUnit:0.####}";
             CalibrationProgressBar.Value = 0;
+            var completionPrefix = movedToConfiguredCenter
+                ? "已移动到参数配置中心位"
+                : "下相机标定中心已记录";
+            if (!_hostReady)
+            {
+                SetWorkflowStatus(
+                    $"{completionPrefix}：X={_recordedCenter.ActualX:0.###}、" +
+                    $"Y={_recordedCenter.ActualY:0.###} pulse；视觉组件未就绪，启动标定时会再次写入。",
+                    WorkflowStatus.Ready);
+                return;
+            }
+
+            SetWorkflowStatus($"{completionPrefix}，正在写入标定流程.N点标定1…", WorkflowStatus.Running);
+            try
+            {
+                var message = await VisionHost.SetCalibrationCenterAsync(
+                    _recordedCenter.ActualX / PulsesPerVisionUnit,
+                    _recordedCenter.ActualY / PulsesPerVisionUnit,
+                    CancellationToken.None);
+                SetWorkflowStatus($"{completionPrefix}；{message}", WorkflowStatus.Success);
+            }
+            catch (Exception exception)
+            {
+                SetWorkflowStatus(
+                    $"{completionPrefix}，但写入N点标定1失败：{exception.Message}；" +
+                    "启动标定时会再次写入。",
+                    WorkflowStatus.Error);
+            }
         }
         catch (Exception exception)
         {
             _recordedCenter = null;
-            CenterXPulseText.Text = "未记录";
-            CenterYPulseText.Text = "未记录";
-            CenterVmText.Text = "基准点 X：--　Y：--";
-            SetWorkflowStatus(exception.Message, WorkflowStatus.Error);
-            UpdateCommandState();
-            return;
-        }
-
-        if (!_hostReady)
-        {
-            SetWorkflowStatus(
-                $"中心已记录：轴1 X={_recordedCenter.ActualX:0.###} pulse，" +
-                $"轴2 Y={_recordedCenter.ActualY:0.###} pulse；视觉组件未就绪，启动标定时会再次写入。",
-                WorkflowStatus.Ready);
-            UpdateCommandState();
-            return;
-        }
-
-        _centerSyncRunning = true;
-        UpdateCommandState();
-        SetWorkflowStatus("中心已记录，正在写入标定流程.N点标定1…", WorkflowStatus.Running);
-        try
-        {
-            var message = await VisionHost.SetCalibrationCenterAsync(
-                _recordedCenter.ActualX / PulsesPerVisionUnit,
-                _recordedCenter.ActualY / PulsesPerVisionUnit,
-                CancellationToken.None);
-            SetWorkflowStatus(message, WorkflowStatus.Success);
-        }
-        catch (Exception exception)
-        {
-            SetWorkflowStatus(
-                $"中心坐标已记录，但写入N点标定1失败：{exception.Message}；启动标定时会再次写入。",
-                WorkflowStatus.Error);
+            RefreshTeachingPositionDisplay();
+            SetWorkflowStatus($"中心处理失败：{exception.Message}", WorkflowStatus.Error);
         }
         finally
         {
@@ -1116,32 +1183,78 @@ public partial class VisualCalibrationPage : UserControl
         }
     }
 
-    private void RecordNozzleDotPosition_Click(object sender, RoutedEventArgs e)
+    private async void MoveTeachingPressPosition_Click(object sender, RoutedEventArgs e)
     {
+        if (_clickMoveRunning || _calibrationRunning || _centerSyncRunning)
+        {
+            return;
+        }
+
         try
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
-            _nozzleDotPosition = motionController.CaptureCalibrationCenter(
+            var (targetX, targetY) = GetConfiguredTeachingPosition(center: false);
+            var velocity = ParsePositiveDouble(VelocityTextBox.Text, "移动示教下压位速度");
+            var settleMilliseconds = ParseNonNegativeInt(
+                SettleMillisecondsTextBox.Text,
+                "到位稳定等待");
+            var current = motionController.CaptureCalibrationCenter(
                 ActiveAxisPair.XHardwareAxisNo,
                 ActiveAxisPair.YHardwareAxisNo);
+            _clickMoveCancellation = new CancellationTokenSource();
+            _clickMoveRunning = true;
+            UpdateCommandState();
+            SetNozzleCalibrationStatus(
+                $"正在移动到参数配置的示教下压位：X={targetX:0.###}、Y={targetY:0.###} pulse…",
+                WorkflowStatus.Running);
+            _ = await motionController.MoveCalibrationAxesToAsync(
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo,
+                targetX,
+                targetY,
+                velocity,
+                DefaultPositionTolerancePulses,
+                CalculateDirectMoveTimeout(
+                    targetX - current.ActualX,
+                    targetY - current.ActualY,
+                    velocity),
+                _clickMoveCancellation.Token);
+            if (settleMilliseconds > 0)
+            {
+                await Task.Delay(settleMilliseconds, _clickMoveCancellation.Token);
+            }
+
+            _nozzleDotPosition = new CalibrationCenterPosition(
+                ActiveAxisPair.XHardwareAxisNo,
+                ActiveAxisPair.YHardwareAxisNo,
+                targetX,
+                targetY);
             _pendingNozzlePointResult = null;
             ResetActiveNozzleCalibration();
             _nozzle1ClickVerified = false;
             _nozzle2ClickVerified = false;
             SaveCalibrationSettingsNoThrow();
             SetNozzleCalibrationStatus(
-                $"双吸嘴公共下压位置已记录：X={_nozzleDotPosition.ActualX:0.###}、" +
-                $"Y={_nozzleDotPosition.ActualY:0.###} pulse。打点完成后请回拍照位。",
+                $"已移动到示教下压位：X={targetX:0.###}、Y={targetY:0.###} pulse。" +
+                "请让两个吸嘴同时打点，完成后点击“回拍照位”。",
                 WorkflowStatus.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            _nozzleDotPosition = null;
+            SetNozzleCalibrationStatus("移动示教下压位已停止。", WorkflowStatus.Error);
         }
         catch (Exception exception)
         {
             _nozzleDotPosition = null;
-            SetNozzleCalibrationStatus($"记录双吸嘴下压XY失败：{exception.Message}", WorkflowStatus.Error);
+            SetNozzleCalibrationStatus($"移动示教下压位失败：{exception.Message}", WorkflowStatus.Error);
         }
         finally
         {
+            _clickMoveCancellation?.Dispose();
+            _clickMoveCancellation = null;
+            _clickMoveRunning = false;
             UpdateCommandState();
         }
     }
@@ -1167,9 +1280,9 @@ public partial class VisualCalibrationPage : UserControl
             }
 
             var photoPosition = _recordedCenter
-                ?? throw new InvalidOperationException("请先记录拍照位并完成九点标定。");
+                ?? throw new InvalidOperationException("请先移动到参数配置中心位并完成九点标定。");
             _ = _nozzleDotPosition
-                ?? throw new InvalidOperationException("请先在两个吸嘴同时下压的位置记录一次XY坐标。");
+                ?? throw new InvalidOperationException("请先点击“移动下压位置”到达参数配置的示教下压位。");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             var current = motionController.CaptureCalibrationCenter(
@@ -1240,9 +1353,9 @@ public partial class VisualCalibrationPage : UserControl
             var result = _pendingNozzlePointResult
                 ?? throw new InvalidOperationException("请先手动点击“执行粗定位示教”。");
             var photoPosition = _recordedCenter
-                ?? throw new InvalidOperationException("拍照位XY尚未记录。");
+                ?? throw new InvalidOperationException("尚未移动到参数配置中心位。");
             var nozzleDotPosition = _nozzleDotPosition
-                ?? throw new InvalidOperationException("双吸嘴公共下压XY尚未记录。");
+                ?? throw new InvalidOperationException("尚未移动到参数配置的示教下压位。");
             var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
             if (!File.Exists(calibrationFilePath))
             {
@@ -1319,7 +1432,10 @@ public partial class VisualCalibrationPage : UserControl
         try
         {
             var center = _recordedCenter
-                ?? throw new InvalidOperationException("请先记录标定中心坐标。");
+                ?? throw new InvalidOperationException(
+                    IsLowerCameraMode
+                        ? "请先记录下相机标定中心坐标。"
+                        : "请先点击“移动中心”到达参数配置中心位。");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             if (IsLowerCameraMode &&
@@ -1405,7 +1521,7 @@ public partial class VisualCalibrationPage : UserControl
             SetWorkflowStatus(
                 IsLowerCameraMode
                     ? completionMessage + $"；下相机{ActiveLowerCameraNozzleName}九点标定完成。"
-                    : completionMessage + "；XY已回到拍照位。请移动到双吸嘴下压位置，同时打点并记录一次公共XY。",
+                    : completionMessage + "；XY已回到中心位。请点击“移动下压位置”，到位后让两个吸嘴同时打点。",
                 WorkflowStatus.Success);
         }
         catch (OperationCanceledException)
@@ -1461,7 +1577,7 @@ public partial class VisualCalibrationPage : UserControl
             UpdateNozzleCalibrationDisplay();
             SetClickMoveCheckedNoEvent(false);
             SetNozzleCalibrationStatus(
-                "已回到拍照位。请移动到双吸嘴下压位置，让两个吸嘴同时打点并记录一次公共XY。",
+                "已回到中心位。请点击“移动下压位置”，到达参数配置的示教下压位后让两个吸嘴同时打点。",
                 WorkflowStatus.Ready);
         }
     }
@@ -1706,7 +1822,7 @@ public partial class VisualCalibrationPage : UserControl
         switch (e.Action)
         {
             case "RecordCenter":
-                RecordCenter_Click(this, new RoutedEventArgs());
+                MoveTeachingCenter_Click(this, new RoutedEventArgs());
                 break;
             case "StartLivePreview":
                 StartLivePreview_Click(this, new RoutedEventArgs());
@@ -1718,7 +1834,7 @@ public partial class VisualCalibrationPage : UserControl
                 StopCalibration_Click(this, new RoutedEventArgs());
                 break;
             case "RecordNozzleDotPosition":
-                RecordNozzleDotPosition_Click(this, new RoutedEventArgs());
+                MoveTeachingPressPosition_Click(this, new RoutedEventArgs());
                 break;
             case "FindNozzlePoints":
                 FindNozzlePoints_Click(this, new RoutedEventArgs());
@@ -1909,7 +2025,10 @@ public partial class VisualCalibrationPage : UserControl
         try
         {
             var center = _recordedCenter
-                ?? throw new InvalidOperationException("请先在第一步记录标定中心点。");
+                ?? throw new InvalidOperationException(
+                    IsLowerCameraMode
+                        ? "请先在第一步记录下相机标定中心点。"
+                        : "请先在第一步移动到参数配置中心位。");
             var motionController = _motionController
                 ?? throw new InvalidOperationException("运动控制组件尚未连接。");
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "相机回中速度");
@@ -2614,6 +2733,92 @@ public partial class VisualCalibrationPage : UserControl
         OffsetVmText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
     }
 
+    private (double X, double Y) GetConfiguredTeachingPosition(bool center)
+    {
+        if (TryGetConfiguredTeachingPosition(center, out var x, out var y))
+        {
+            return (x, y);
+        }
+
+        var positionName = center ? "中心位" : "示教下压位";
+        throw new InvalidOperationException(
+            $"请先在参数配置中设置第一套 XY 的{positionName} X/Y 坐标。");
+    }
+
+    private bool TryGetConfiguredTeachingPosition(bool center, out double x, out double y)
+    {
+        x = 0d;
+        y = 0d;
+        HomePageSettings? settings;
+        try
+        {
+            settings = _homeSettingsProvider?.Invoke();
+        }
+        catch
+        {
+            return false;
+        }
+
+        var configuredX = center
+            ? settings?.FirstSetTeachingCenterX
+            : settings?.FirstSetTeachingPressPositionX;
+        var configuredY = center
+            ? settings?.FirstSetTeachingCenterY
+            : settings?.FirstSetTeachingPressPositionY;
+        if (configuredX is not { } positionX ||
+            configuredY is not { } positionY ||
+            !double.IsFinite(positionX) ||
+            !double.IsFinite(positionY))
+        {
+            return false;
+        }
+
+        x = positionX;
+        y = positionY;
+        return true;
+    }
+
+    private void RefreshTeachingPositionDisplay()
+    {
+        if (CenterSectionTitleText is null ||
+            RecordCenterButton is null ||
+            CenterXPulseText is null ||
+            CenterYPulseText is null ||
+            CenterVmText is null)
+        {
+            return;
+        }
+
+        if (IsLowerCameraMode)
+        {
+            CenterSectionTitleText.Text = "1　记录中心";
+            RecordCenterButton.Content = "记录当前中心";
+            if (_recordedCenter is null)
+            {
+                CenterXPulseText.Text = "未记录";
+                CenterYPulseText.Text = "未记录";
+                CenterVmText.Text = "基准点 X：--　Y：--";
+            }
+            return;
+        }
+
+        CenterSectionTitleText.Text = "1　移动中心";
+        RecordCenterButton.Content = "移动中心";
+        if (TryGetConfiguredTeachingPosition(center: true, out var centerX, out var centerY))
+        {
+            CenterXPulseText.Text = centerX.ToString("0.###", CultureInfo.CurrentCulture);
+            CenterYPulseText.Text = centerY.ToString("0.###", CultureInfo.CurrentCulture);
+            CenterVmText.Text =
+                $"参数中心 X：{centerX / PulsesPerVisionUnit:0.####}　" +
+                $"Y：{centerY / PulsesPerVisionUnit:0.####}";
+            return;
+        }
+
+        CenterXPulseText.Text = "未配置";
+        CenterYPulseText.Text = "未配置";
+        CenterVmText.Text = "请在参数配置中设置中心位";
+    }
+
     private void LoadCalibrationSettings()
     {
         _uiSettings = _visionCalibration.Settings;
@@ -2678,6 +2883,7 @@ public partial class VisualCalibrationPage : UserControl
         RefreshRotationCenterStatus();
         RefreshLowerCameraCorrectionTestStatus();
         LoadManualJogSettings();
+        RefreshTeachingPositionDisplay();
     }
 
     private void LoadManualJogSettings()
@@ -2753,8 +2959,8 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         NozzleTeachStepText.Text = _nozzleDotPosition is null
-            ? "等待记录下压XY"
-            : "下压XY已记录";
+            ? "等待移动下压位"
+            : "已到示教下压位";
     }
 
     private static string GetToolDisplayName(VisionTargetTool tool)
@@ -3188,7 +3394,8 @@ public partial class VisualCalibrationPage : UserControl
             !_rotationCenterRunning &&
             !_lowerCameraCorrectionTestRunning &&
             EnableClickMoveCheckBox.IsChecked != true &&
-            _motionController is not null;
+            _motionController is not null &&
+            (IsLowerCameraMode || TryGetConfiguredTeachingPosition(center: true, out _, out _));
         StartLivePreviewButton.IsEnabled =
             !_calibrationProcedureSwitchRunning &&
             !_calibrationRunning &&
@@ -3212,6 +3419,7 @@ public partial class VisualCalibrationPage : UserControl
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null &&
             _hostReady &&
+            _recordedCenter is not null &&
             calibrationPathValid;
         StopCalibrationButton.IsEnabled = _calibrationRunning;
         AxisSetComboBox.IsEnabled =
@@ -3342,6 +3550,7 @@ public partial class VisualCalibrationPage : UserControl
             EnableClickMoveCheckBox.IsChecked != true &&
             _motionController is not null &&
             _recordedCenter is not null &&
+            TryGetConfiguredTeachingPosition(center: false, out _, out _) &&
             calibrationPathValid &&
             File.Exists(calibrationFilePath);
         ReturnToPhotoPositionButton.IsEnabled =

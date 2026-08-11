@@ -55,6 +55,14 @@ public sealed class HomePageSettingsStore
 
 public sealed class HomePageSettings
 {
+    public double? FirstSetTeachingCenterX { get; set; }
+
+    public double? FirstSetTeachingCenterY { get; set; }
+
+    public double? FirstSetTeachingPressPositionX { get; set; }
+
+    public double? FirstSetTeachingPressPositionY { get; set; }
+
     public double? PresetPosition1X { get; set; }
 
     public double? PresetPosition1Y { get; set; }

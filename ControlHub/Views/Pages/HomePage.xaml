@@ -1139,6 +1139,174 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Grid>
+                                <TextBlock Text="第一套 XY 示教位置（pulse）"
+                                           Foreground="#EAF2F7"
+                                           FontSize="12"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="视觉标定流程直接读取"
+                                           Foreground="#49D17D"
+                                           FontSize="10"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Grid.Row="1" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="78" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="中心位"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="FirstSetTeachingCenterXTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="第一套 XY 标定中心的 X 轴绝对脉冲"
+                                             TextChanged="FirstSetTeachingPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="FirstSetTeachingCenterYTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="第一套 XY 标定中心的 Y 轴绝对脉冲"
+                                             TextChanged="FirstSetTeachingPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <Grid Grid.Column="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="RecordFirstSetTeachingCenterButton"
+                                            Height="25"
+                                            Content="记录"
+                                            Foreground="White"
+                                            Background="#166A52"
+                                            BorderBrush="#49D17D"
+                                            Cursor="Hand"
+                                            IsEnabled="False"
+                                            Click="RecordFirstSetTeachingCenter_Click" />
+                                    <Button Grid.Column="2"
+                                            x:Name="MoveFirstSetTeachingCenterButton"
+                                            Height="25"
+                                            Content="移动"
+                                            Foreground="White"
+                                            Background="#1674D1"
+                                            BorderBrush="#62B5FF"
+                                            Cursor="Hand"
+                                            IsEnabled="False"
+                                            Click="MoveFirstSetTeachingCenter_Click" />
+                                </Grid>
+                            </Grid>
+                            <Grid Grid.Row="2" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="78" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="示教下压位"
+                                           Foreground="#62B5FF"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="FirstSetTeachingPressPositionXTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="第一套 XY 示教下压位的 X 轴绝对脉冲"
+                                             TextChanged="FirstSetTeachingPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pulse）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="FirstSetTeachingPressPositionYTextBox"
+                                             Height="25"
+                                             Text=""
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="第一套 XY 示教下压位的 Y 轴绝对脉冲"
+                                             TextChanged="FirstSetTeachingPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <Grid Grid.Column="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="RecordFirstSetTeachingPressPositionButton"
+                                            Height="25"
+                                            Content="记录"
+                                            Foreground="White"
+                                            Background="#166A52"
+                                            BorderBrush="#49D17D"
+                                            Cursor="Hand"
+                                            IsEnabled="False"
+                                            Click="RecordFirstSetTeachingPressPosition_Click" />
+                                    <Button Grid.Column="2"
+                                            x:Name="MoveFirstSetTeachingPressPositionButton"
+                                            Height="25"
+                                            Content="移动"
+                                            Foreground="White"
+                                            Background="#1674D1"
+                                            BorderBrush="#62B5FF"
+                                            Cursor="Hand"
+                                            IsEnabled="False"
+                                            Click="MoveFirstSetTeachingPressPosition_Click" />
+                                </Grid>
+                            </Grid>
+                            <TextBlock Grid.Row="3"
+                                       x:Name="FirstSetTeachingPositionStatusText"
+                                       Text="标定页的“移动中心”和“移动下压位置”直接使用这里的绝对坐标。"
+                                       Foreground="#9FB1BF"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
+                        </Grid>
+                    </Border>
+
+                    <Border Margin="0,8,0,8"
+                            Padding="9,7"
+                            Background="#12283A"
+                            BorderBrush="#2D4A61"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="24" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
                                 <TextBlock Text="下相机拍照位（第一套 XY pulse）" Foreground="#EAF2F7"
                                            FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                                 <TextBlock Text="吸嘴1 / 吸嘴2纠偏" Foreground="#49D17D" FontSize="10"
