@@ -1266,7 +1266,6 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        var saveFixedNozzleMapping = false;
         try
         {
             var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
@@ -1317,9 +1316,8 @@ public partial class VisualCalibrationPage : UserControl
             var point2 = _pendingNozzlePointResult.Rectangle2;
             SetNozzleCalibrationStatus(
                 $"吸嘴1（圆查找1）：({point1.X:0.###}, {point1.Y:0.###})　" +
-                $"吸嘴2（圆查找2）：({point2.X:0.###}, {point2.Y:0.###})\n正在换算并保存配置…",
-                WorkflowStatus.Running);
-            saveFixedNozzleMapping = true;
+                $"吸嘴2（圆查找2）：({point2.X:0.###}, {point2.Y:0.###})\n请确认后点击“保存双吸嘴结果”。",
+                WorkflowStatus.Success);
         }
         catch (Exception exception)
         {
@@ -1332,23 +1330,19 @@ public partial class VisualCalibrationPage : UserControl
             UpdateCommandState();
         }
 
-        if (saveFixedNozzleMapping)
-        {
-            await AssignNozzlePointsAsync(firstPointIsNozzle1: true);
-        }
     }
 
     private async void AssignPoint1ToNozzle1_Click(object sender, RoutedEventArgs e)
     {
-        await AssignNozzlePointsAsync(firstPointIsNozzle1: true);
+        await AssignNozzlePointsAsync();
     }
 
     private async void AssignPoint1ToNozzle2_Click(object sender, RoutedEventArgs e)
     {
-        await AssignNozzlePointsAsync(firstPointIsNozzle1: false);
+        await AssignNozzlePointsAsync();
     }
 
-    private async Task AssignNozzlePointsAsync(bool firstPointIsNozzle1)
+    private async Task AssignNozzlePointsAsync()
     {
         if (_nozzlePointFinding || _nozzlePointSaving)
         {
@@ -1397,8 +1391,8 @@ public partial class VisualCalibrationPage : UserControl
 
             var firstOffset = CalculateOffset(first);
             var secondOffset = CalculateOffset(second);
-            var nozzle1Offset = firstPointIsNozzle1 ? firstOffset : secondOffset;
-            var nozzle2Offset = firstPointIsNozzle1 ? secondOffset : firstOffset;
+            var nozzle1Offset = firstOffset;
+            var nozzle2Offset = secondOffset;
             if (!double.IsFinite(nozzle1Offset.X) ||
                 !double.IsFinite(nozzle1Offset.Y) ||
                 !double.IsFinite(nozzle2Offset.X) ||
@@ -1413,9 +1407,7 @@ public partial class VisualCalibrationPage : UserControl
             var profilePath = SaveCurrentCalibrationProfile();
             _pendingNozzlePointResult = null;
             SetNozzleCalibrationStatus(
-                firstPointIsNozzle1
-                    ? $"吸嘴1（圆查找1）、吸嘴2（圆查找2）配置已自动保存：\n{profilePath}"
-                    : $"点1已分配给吸嘴2，双吸嘴配置已保存：\n{profilePath}",
+                $"吸嘴1（圆查找1）、吸嘴2（圆查找2）配置已保存：\n{profilePath}",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)
@@ -2957,7 +2949,7 @@ public partial class VisualCalibrationPage : UserControl
 
         if (_pendingNozzlePointResult is not null)
         {
-            NozzleTeachStepText.Text = "等待保存";
+            NozzleTeachStepText.Text = "等待确认";
             return;
         }
 
@@ -3720,7 +3712,7 @@ public partial class VisualCalibrationPage : UserControl
                     VelocityTextBox.Text,
                     SettleMillisecondsTextBox.Text,
                     NozzleTeachStepText.Text,
-                    "点1 = 吸嘴1",
+                    "保存双吸嘴结果",
                     NozzleCalibrationStatusText.Text,
                     clickTarget,
                     EnableClickMoveCheckBox.IsChecked == true,

@@ -843,7 +843,9 @@ public partial class MainWindow : Window
             nozzle2CircleModule = ResolveNamedModule<IMVSCircleFindModuTool>(
                 procedureName,
                 Nozzle2CircleModuleName);
-            displayModule = nozzle1CircleModule;
+            // 保持原来的结果渲染绑定不变；仅将坐标来源改为两个圆查找模块。
+            // 避免切换渲染模块影响后续实时画面的相机释放与重新连接。
+            displayModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
         }
         else
         {

@@ -498,15 +498,15 @@
                                         BorderBrush="#45647A"
                                         FontSize="11"
                                         Click="FindNozzlePoints_Click" />
-                                <Grid Margin="0,5,0,0"
-                                      Visibility="Collapsed">
+                                <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="7" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <Button x:Name="AssignPoint1ToNozzle1Button"
-                                            Content="点1 = 吸嘴1"
+                                            Grid.ColumnSpan="3"
+                                            Content="保存双吸嘴结果"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
@@ -521,6 +521,7 @@
                                             BorderBrush="#45647A"
                                             FontSize="11"
                                             IsEnabled="False"
+                                            Visibility="Collapsed"
                                             Click="AssignPoint1ToNozzle2_Click" />
                                 </Grid>
                                 <TextBlock x:Name="NozzleCalibrationStatusText"

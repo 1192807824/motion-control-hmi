@@ -593,12 +593,13 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="SidebarRecordNozzleButton" Tag="AssignPoint1Nozzle1"
-                                        Content="点1 = 吸嘴1" Style="{StaticResource SidebarButton}"
+                                        Grid.ColumnSpan="3" Content="保存双吸嘴结果" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
                                 <Button Grid.Column="2" x:Name="SidebarAssignPoint1Nozzle2Button" Tag="AssignPoint1Nozzle2"
                                         Content="点1 = 吸嘴2" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
+                                        Visibility="Collapsed"
                                         Click="CalibrationSidebarButton_Click" />
                             </Grid>
                             <TextBlock x:Name="SidebarNozzleStatusText"
