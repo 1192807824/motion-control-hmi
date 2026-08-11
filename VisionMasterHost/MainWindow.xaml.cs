@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using GlobalVariableModuleCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
+using IMVSCircleFindModuCs;
 using IMVSCircleFitModuCs;
 using IMVSLineFindModuCs;
 using IMVSL2LMeasureModuCs;
@@ -34,6 +35,8 @@ public partial class MainWindow : Window
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
+    private const string Nozzle1CircleModuleName = "圆查找1";
+    private const string Nozzle2CircleModuleName = "圆查找2";
     private const int MaximumInspectionBlobResultCount = 10;
     private const string DefaultRotationPointProcedureName = "获取三点流程";
     private const string RotationPointRectangleModuleName = "矩形检测1";
@@ -456,7 +459,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 单次执行“粗定位示教流程”，读取“Blob分析1”结果表前两行的质心 X/Y。
+    /// 单次执行“粗定位示教流程”：吸嘴1读取“圆查找1”的中心 X/Y，
+    /// 吸嘴2读取“圆查找2”的中心 X/Y。
     /// 流程只负责找点，不驱动运动轴或吸嘴动作。
     /// </summary>
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
@@ -827,11 +831,25 @@ public partial class MainWindow : Window
             procedureName,
             _nozzlePointProcedureName,
             StringComparison.Ordinal);
-        var blobModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
-        var resultModule = (VmModule)blobModule;
-        var displayModule = isNozzlePointProcedure
-            ? resultModule
-            : ResolveNamedModule<VmModule>(procedureName, CalibrationImageSourceName);
+        IMVSBlobFindModuTool? blobModule = null;
+        IMVSCircleFindModuTool? nozzle1CircleModule = null;
+        IMVSCircleFindModuTool? nozzle2CircleModule = null;
+        VmModule displayModule;
+        if (isNozzlePointProcedure)
+        {
+            nozzle1CircleModule = ResolveNamedModule<IMVSCircleFindModuTool>(
+                procedureName,
+                Nozzle1CircleModuleName);
+            nozzle2CircleModule = ResolveNamedModule<IMVSCircleFindModuTool>(
+                procedureName,
+                Nozzle2CircleModuleName);
+            displayModule = nozzle1CircleModule;
+        }
+        else
+        {
+            blobModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
+            displayModule = ResolveNamedModule<VmModule>(procedureName, CalibrationImageSourceName);
+        }
         // 同一相机不能被两个流程同时占用。找点前明确停止方案内的连续执行。
         StopAllContinuousExecutionNoThrow();
 
@@ -866,38 +884,32 @@ public partial class MainWindow : Window
             BindInspectionResultModule(displayModule);
             RefreshInspectionDisplayNoThrow();
 
-            var blobResult = blobModule.ModuResult;
-            var resultCount = Math.Max(
-                0,
-                Math.Min(
-                    MaximumInspectionBlobResultCount,
-                    Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0)));
-            if (blobResult.ModuStatus != 1 && (isNozzlePointProcedure || resultCount > 0))
-            {
-                throw new InvalidOperationException(
-                    $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
-            }
-
-            // 生产找芯片时，Blob模块的“未找到目标”会以NG且0个结果返回。
-            // 这是正常的缺料判定，交给主页执行震动、重拍和排空收尾，不能在视觉进程内报错。
             List<RectangleBlobCandidate> candidates;
             if (isNozzlePointProcedure)
             {
-                if (resultCount < 2)
-                {
-                    throw new InvalidOperationException(
-                        $"{procedureName}.{InspectionBlobModuleName}只返回 {resultCount} 个结果，必须找到两个质心点。");
-                }
-
-                // 与截图中的结果表一致：直接取第0、1行“质心X / 质心Y”。
+                // 两个圆查找模块与吸嘴固定一一对应，不再依赖 Blob 结果行顺序。
                 candidates =
                 [
-                    ReadBlobResultRow(blobResult, 0),
-                    ReadBlobResultRow(blobResult, 1)
+                    ReadCircleCenter(nozzle1CircleModule!, procedureName, Nozzle1CircleModuleName),
+                    ReadCircleCenter(nozzle2CircleModule!, procedureName, Nozzle2CircleModuleName)
                 ];
             }
             else
             {
+                var blobResult = blobModule!.ModuResult;
+                var resultCount = Math.Max(
+                    0,
+                    Math.Min(
+                        MaximumInspectionBlobResultCount,
+                        Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0)));
+                if (blobResult.ModuStatus != 1 && resultCount > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
+                }
+
+                // 生产找芯片时，Blob模块的“未找到目标”会以NG且0个结果返回。
+                // 这是正常的缺料判定，交给主页执行震动、重拍和排空收尾，不能在视觉进程内报错。
                 // 与 VisionMaster 的“当前结果”表严格一致：按原顺序返回全部结果，不筛选也不重排。
                 candidates = Enumerable.Range(0, resultCount)
                     .Select(index => ReadBlobResultRow(blobResult, index))
@@ -1507,6 +1519,39 @@ public partial class MainWindow : Window
             blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y),
             Math.Max(1, blobRect?.RectWidth ?? 1),
             Math.Max(1, blobRect?.RectHeight ?? 1));
+    }
+
+    private static RectangleBlobCandidate ReadCircleCenter(
+        IMVSCircleFindModuTool module,
+        string procedureName,
+        string moduleName)
+    {
+        var result = module.ModuResult;
+        if (result is null || result.ModuStatus != 1)
+        {
+            throw new InvalidOperationException(
+                $"{procedureName}.{moduleName}返回NG，请检查吸嘴图像和圆查找参数。");
+        }
+
+        var center = result.OutputCircle?.CenterPoint
+            ?? throw new InvalidOperationException(
+                $"{procedureName}.{moduleName}未返回圆心。");
+        if (float.IsNaN(center.X) || float.IsInfinity(center.X) || center.X < 0 ||
+            float.IsNaN(center.Y) || float.IsInfinity(center.Y) || center.Y < 0)
+        {
+            throw new InvalidOperationException(
+                $"{procedureName}.{moduleName}返回的中心X/Y无效。");
+        }
+
+        return new RectangleBlobCandidate(
+            center.X,
+            center.Y,
+            0f,
+            0f,
+            (int)Math.Round(center.X),
+            (int)Math.Round(center.Y),
+            1,
+            1);
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)

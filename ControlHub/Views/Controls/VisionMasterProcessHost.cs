@@ -604,7 +604,8 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
-    /// 手动触发固定方案中的“粗定位示教流程”，返回“Blob分析1”结果表前两行的质心 X/Y。
+    /// 手动触发固定方案中的“粗定位示教流程”，依次返回“圆查找1”和“圆查找2”的中心 X/Y。
+    /// 第一个结果固定对应吸嘴1，第二个结果固定对应吸嘴2。
     /// </summary>
     public Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
         CancellationToken cancellationToken)

@@ -1266,6 +1266,7 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
+        var saveFixedNozzleMapping = false;
         try
         {
             var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
@@ -1308,16 +1309,17 @@ public partial class VisualCalibrationPage : UserControl
             UpdateNozzleTeachUi();
             UpdateCommandState();
             SetNozzleCalibrationStatus(
-                "正在执行“粗定位示教流程”，读取 Blob分析1 的两个质心点…",
+                "正在执行“粗定位示教流程”：吸嘴1读取圆查找1，吸嘴2读取圆查找2…",
                 WorkflowStatus.Running);
 
             _pendingNozzlePointResult = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
             var point1 = _pendingNozzlePointResult.Rectangle1;
             var point2 = _pendingNozzlePointResult.Rectangle2;
             SetNozzleCalibrationStatus(
-                $"点1：({point1.X:0.###}, {point1.Y:0.###})　点2：({point2.X:0.###}, {point2.Y:0.###})\n" +
-                "请选择点1对应哪个吸嘴。",
-                WorkflowStatus.Success);
+                $"吸嘴1（圆查找1）：({point1.X:0.###}, {point1.Y:0.###})　" +
+                $"吸嘴2（圆查找2）：({point2.X:0.###}, {point2.Y:0.###})\n正在换算并保存配置…",
+                WorkflowStatus.Running);
+            saveFixedNozzleMapping = true;
         }
         catch (Exception exception)
         {
@@ -1328,6 +1330,11 @@ public partial class VisualCalibrationPage : UserControl
         {
             _nozzlePointFinding = false;
             UpdateCommandState();
+        }
+
+        if (saveFixedNozzleMapping)
+        {
+            await AssignNozzlePointsAsync(firstPointIsNozzle1: true);
         }
     }
 
@@ -1406,7 +1413,9 @@ public partial class VisualCalibrationPage : UserControl
             var profilePath = SaveCurrentCalibrationProfile();
             _pendingNozzlePointResult = null;
             SetNozzleCalibrationStatus(
-                $"点1已分配给{(firstPointIsNozzle1 ? "吸嘴1" : "吸嘴2")}，双吸嘴配置已自动保存：\n{profilePath}",
+                firstPointIsNozzle1
+                    ? $"吸嘴1（圆查找1）、吸嘴2（圆查找2）配置已自动保存：\n{profilePath}"
+                    : $"点1已分配给吸嘴2，双吸嘴配置已保存：\n{profilePath}",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)
@@ -2948,7 +2957,7 @@ public partial class VisualCalibrationPage : UserControl
 
         if (_pendingNozzlePointResult is not null)
         {
-            NozzleTeachStepText.Text = "等待分配";
+            NozzleTeachStepText.Text = "等待保存";
             return;
         }
 
