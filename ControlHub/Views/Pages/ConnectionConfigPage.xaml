@@ -205,6 +205,16 @@
             <Setter Property="BorderBrush" Value="#45647A" />
         </Style>
 
+        <Style x:Key="DirectionButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="Padding" Value="5,0" />
+            <Setter Property="Background" Value="#294A64" />
+            <Setter Property="BorderBrush" Value="#45647A" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+
         <Style x:Key="ConnectionItem" TargetType="Border">
             <Setter Property="Height" Value="74" />
             <Setter Property="Margin" Value="0,0,0,8" />
@@ -604,16 +614,18 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="220" />
-                            <RowDefinition Height="10" />
-                            <RowDefinition Height="156" />
-                            <RowDefinition Height="10" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
+                    <ScrollViewer Grid.Column="0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <Grid Margin="0,0,4,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Style="{StaticResource Panel}">
+                    <Border Grid.Row="1" Style="{StaticResource Panel}" Margin="0,0,0,10">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
@@ -663,7 +675,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="2" Style="{StaticResource Panel}">
+                    <Border Grid.Row="2" Style="{StaticResource Panel}" Height="156" Margin="0,0,0,10">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
@@ -760,7 +772,109 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="4" Style="{StaticResource Panel}">
+                    <Border Grid.Row="0" Style="{StaticResource Panel}" Margin="0,0,0,10">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="58" />
+                                <RowDefinition Height="144" />
+                                <RowDefinition Height="54" />
+                                <RowDefinition Height="34" />
+                            </Grid.RowDefinitions>
+
+                            <Border Background="{StaticResource PanelHeader}"
+                                    BorderBrush="{StaticResource PanelBorder}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="6,6,0,0"
+                                    Padding="14,0">
+                                <TextBlock Text="&#x65B9;&#x5411;&#x9707;&#x52A8;&#x63A7;&#x5236;" Style="{StaticResource PanelTitle}" />
+                            </Border>
+
+                            <Grid Grid.Row="1" Margin="14,8,14,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="&#x9891;&#x7387;" Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="1"
+                                         Style="{StaticResource ConfigInput}"
+                                         HorizontalContentAlignment="Center"
+                                         ToolTip="1 - 999"
+                                         Text="{Binding FeederSettings.DirectionalVibrationFrequency, UpdateSourceTrigger=LostFocus}" />
+                                <TextBlock Grid.Column="3" Text="&#x632F;&#x5E45;" Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="4"
+                                         Style="{StaticResource ConfigInput}"
+                                         HorizontalContentAlignment="Center"
+                                         ToolTip="0 - 100%"
+                                         Text="{Binding FeederSettings.DirectionalVibrationAmplitude, UpdateSourceTrigger=LostFocus}" />
+                                <TextBlock Grid.Column="6" Text="&#x65F6;&#x95F4;ms" Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="7"
+                                         Style="{StaticResource ConfigInput}"
+                                         HorizontalContentAlignment="Center"
+                                         ToolTip="100 - 30000 ms"
+                                         Text="{Binding FeederSettings.DirectionalVibrationDurationMilliseconds, UpdateSourceTrigger=LostFocus}" />
+                            </Grid>
+
+                            <Grid Grid.Row="2" Margin="11,0,11,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="2*" />
+                                </Grid.ColumnDefinitions>
+
+                                <UniformGrid Grid.Column="0" Rows="3" Columns="3">
+                                    <Button Content="&#x2196; &#x5DE6;&#x4E0A;" Tag="00" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x2191; &#x5411;&#x4E0A;" Tag="01" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x2197; &#x53F3;&#x4E0A;" Tag="02" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x2190; &#x5411;&#x5DE6;" Tag="03" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x9707;&#x6563;" Tag="04" Style="{StaticResource DirectionButton}"
+                                            Background="#8C5FD3" BorderBrush="#A67EE8" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x5411;&#x53F3; &#x2192;" Tag="07" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x2199; &#x5DE6;&#x4E0B;" Tag="08" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x2193; &#x5411;&#x4E0B;" Tag="09" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Content="&#x53F3;&#x4E0B; &#x2198;" Tag="10" Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                </UniformGrid>
+
+                                <Grid Grid.Column="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Button Grid.Row="0" Content="&#x2194; &#x5DE6;&#x53F3;&#x805A;&#x62E2;" Tag="05"
+                                            Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Grid.Row="1" Content="&#x2195; &#x4E0A;&#x4E0B;&#x805A;&#x62E2;" Tag="06"
+                                            Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
+                                    <Button Grid.Row="2" Content="&#x505C;&#x6B62;&#x9707;&#x52A8;"
+                                            Style="{StaticResource DirectionButton}"
+                                            Background="{StaticResource AccentRed}" BorderBrush="#A90A12"
+                                            Click="StopVibration_Click" />
+                                </Grid>
+                            </Grid>
+
+                            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,8,8,4">
+                                <Button Content="&#x4E00;&#x952E;&#x9707;&#x52A8;&#xFF08;&#x539F;&#x805A;&#x62E2;&#xFF09;"
+                                        Style="{StaticResource SecondaryButton}"
+                                        ToolTip="&#x6309;&#x539F;&#x6765;&#x7684;&#x5DE6;&#x53F3;&#x805A;&#x62E2;&#x3001;&#x4E0A;&#x4E0B;&#x805A;&#x62E2;&#x987A;&#x5E8F;&#x6267;&#x884C;"
+                                        Click="OneKeyVibration_Click" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="4"
+                                       Margin="14,0,14,8"
+                                       Text="&#x6BCF;&#x70B9;&#x4E00;&#x6B21;&#x6309;&#x8BBE;&#x5B9A;&#x65F6;&#x95F4;&#x9707;&#x52A8;&#x5E76;&#x81EA;&#x52A8;&#x505C;&#x6B62;&#xFF1B;&#x53C2;&#x6570;&#x4F1A;&#x81EA;&#x52A8;&#x4FDD;&#x5B58;&#x3002;"
+                                       Foreground="{StaticResource MutedText}"
+                                       FontSize="12"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="3" Style="{StaticResource Panel}" MinHeight="220">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
@@ -806,23 +920,14 @@
                                         Background="{StaticResource AccentGreen}"
                                         BorderBrush="#16723F"
                                         Click="SendManualMessage_Click" />
-                                <Button Content="&#x4E00;&#x952E;&#x9707;&#x52A8;"
-                                        Style="{StaticResource PrimaryButton}"
-                                        Background="{StaticResource AccentBlue}"
-                                        BorderBrush="#0B5CC2"
-                                        Click="OneKeyVibration_Click" />
-                                <Button Content="&#x505C;&#x6B62;&#x9707;&#x52A8;"
-                                        Style="{StaticResource PrimaryButton}"
-                                        Background="{StaticResource AccentRed}"
-                                        BorderBrush="#A90A12"
-                                        Click="StopVibration_Click" />
                                 <Button Content="&#x6E05;&#x7A7A;&#x65E5;&#x5FD7;"
                                         Style="{StaticResource SecondaryButton}"
                                         Click="ClearLog_Click" />
                             </StackPanel>
                         </Grid>
                     </Border>
-                    </Grid>
+                        </Grid>
+                    </ScrollViewer>
 
                 <Border Grid.Column="2" Style="{StaticResource Panel}">
                     <Grid>

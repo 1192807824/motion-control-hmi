@@ -35,6 +35,21 @@ public partial class ConnectionConfigPage : UserControl
     private const string LeftRightGatherStartCommand = "&03,05$";
     private const string UpDownGatherParameterCommand = "&02,044,060,1,044,060,1,044,060,1,044,060,1,06$";
     private const string UpDownGatherStartCommand = "&03,06$";
+    private static readonly IReadOnlyDictionary<string, string> VibrationDirectionNames =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["00"] = "左上移动",
+            ["01"] = "向上移动",
+            ["02"] = "右上移动",
+            ["03"] = "向左移动",
+            ["04"] = "震散",
+            ["05"] = "左右聚拢",
+            ["06"] = "上下聚拢",
+            ["07"] = "向右移动",
+            ["08"] = "左下移动",
+            ["09"] = "向下移动",
+            ["10"] = "右下移动"
+        };
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly TcpConnectionSettingsStore _tcpSettingsStore = new();
@@ -52,6 +67,7 @@ public partial class ConnectionConfigPage : UserControl
     private bool _serialMeterOperationRunning;
     private bool _loaded;
     private bool _vibrationSequenceRunning;
+    private CancellationTokenSource? _vibrationOperationCancellation;
     private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
 
     public ConnectionConfigPage()
@@ -90,6 +106,7 @@ public partial class ConnectionConfigPage : UserControl
         SaveSettings(writeLog: false);
         SaveTcpSettings(writeLog: false);
         SaveSerialSettings(writeLog: false);
+        _vibrationOperationCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
         _tcpClient.DataReceived -= TcpClient_DataReceived;
         _tcpClient.ConnectionClosed -= TcpClient_ConnectionClosed;
@@ -770,17 +787,84 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
+        _vibrationOperationCancellation?.Cancel();
+        await SendAsciiProtocolCommandAsync(StopVibrationCommand, "手动停止震动");
+    }
+
+    private async void DirectionalVibration_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string mode } ||
+            !VibrationDirectionNames.TryGetValue(mode, out var directionName))
+        {
+            AddLog("方向震动失败：未知的方向模式");
+            return;
+        }
+
+        await RunDirectionalVibrationAsync(mode, directionName, _lifetimeCancellation.Token);
+    }
+
+    private async Task<bool> RunDirectionalVibrationAsync(
+        string mode,
+        string directionName,
+        CancellationToken cancellationToken)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog($"{directionName}失败：请先建立 TCP 连接");
+            return false;
+        }
+
+        if (_vibrationSequenceRunning)
+        {
+            AddLog($"{directionName}未执行：当前震动尚未结束，可先点“停止震动”");
+            return false;
+        }
+
+        if (Settings is not { } settings)
+        {
+            return false;
+        }
+
+        CommitInputBindings(this);
+        _settingsStore.Save(settings);
+
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+
         try
         {
-            var payload = Encoding.ASCII.GetBytes(StopVibrationCommand);
-            await _tcpClient.WriteAsync(payload);
-            AddLog($"TX [ASCII]  {StopVibrationCommand}  \u505c\u6b62\u9707\u52a8");
-        }
-        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
-        {
-            SetFeederStatus("\u901a\u8baf\u5f02\u5e38");
+            AddLog(
+                $"方向震动：{directionName}，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，持续 {settings.DirectionalVibrationDurationMilliseconds} ms");
 
-            AddLog($"\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a{ex.Message}");
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "切换正常模式"))
+            {
+                return false;
+            }
+
+            return await RunVibrationPulseAsync(
+                BuildDirectionalVibrationParameterCommand(settings, mode),
+                $"&03,{mode}$",
+                settings.DirectionalVibrationDurationMilliseconds,
+                directionName,
+                operationCancellation.Token);
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            AddLog($"{directionName}已停止");
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+
+            _vibrationSequenceRunning = false;
         }
     }
 
@@ -803,6 +887,10 @@ public partial class ConnectionConfigPage : UserControl
             return false;
         }
 
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
         _vibrationSequenceRunning = true;
         try
         {
@@ -823,13 +911,13 @@ public partial class ConnectionConfigPage : UserControl
                         LeftRightGatherStartCommand,
                         LeftRightGatherPulseDurationMs,
                         $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2",
-                        cancellationToken) ||
+                        operationCancellation.Token) ||
                     !await RunVibrationPulseAsync(
                         UpDownGatherParameterCommand,
                         UpDownGatherStartCommand,
                         UpDownGatherPulseDurationMs,
                         $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2",
-                        cancellationToken))
+                        operationCancellation.Token))
                 {
                     return false;
                 }
@@ -840,14 +928,29 @@ public partial class ConnectionConfigPage : UserControl
         }
         catch (OperationCanceledException) when (
             _closed ||
-            cancellationToken.IsCancellationRequested)
+            operationCancellation.IsCancellationRequested)
         {
             return false;
         }
         finally
         {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+
             _vibrationSequenceRunning = false;
         }
+    }
+
+    private static string BuildDirectionalVibrationParameterCommand(
+        VibrationFeederSettings settings,
+        string mode)
+    {
+        var frequency = Math.Clamp(settings.DirectionalVibrationFrequency, 1, 999);
+        var amplitude = Math.Clamp(settings.DirectionalVibrationAmplitude, 0, 100);
+        var channel = $"{frequency:000},{amplitude:000},1";
+        return $"&02,{channel},{channel},{channel},{channel},{mode}$";
     }
 
     private async void LightOn_Click(object sender, RoutedEventArgs e)

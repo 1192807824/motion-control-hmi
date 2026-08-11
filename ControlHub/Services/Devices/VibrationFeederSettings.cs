@@ -11,6 +11,9 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     private string _manualSendText = "";
     private bool _appendNewLine = true;
     private int _lightOnBrightness = 99;
+    private int _directionalVibrationFrequency = 44;
+    private int _directionalVibrationAmplitude = 50;
+    private int _directionalVibrationDurationMilliseconds = 1500;
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -49,6 +52,24 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     {
         get => _lightOnBrightness;
         set => SetField(ref _lightOnBrightness, Math.Clamp(value, 0, 99));
+    }
+
+    public int DirectionalVibrationFrequency
+    {
+        get => _directionalVibrationFrequency;
+        set => SetField(ref _directionalVibrationFrequency, Math.Clamp(value, 1, 999));
+    }
+
+    public int DirectionalVibrationAmplitude
+    {
+        get => _directionalVibrationAmplitude;
+        set => SetField(ref _directionalVibrationAmplitude, Math.Clamp(value, 0, 100));
+    }
+
+    public int DirectionalVibrationDurationMilliseconds
+    {
+        get => _directionalVibrationDurationMilliseconds;
+        set => SetField(ref _directionalVibrationDurationMilliseconds, Math.Clamp(value, 100, 30000));
     }
 
     public string? LastSuccessfulConnectionSignature
