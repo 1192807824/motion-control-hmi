@@ -1471,7 +1471,6 @@ public partial class VisualCalibrationPage : UserControl
             UpdateCommandState();
             SetWorkflowStatus("正在把基准点、偏移和点序写入 VisionMaster…", WorkflowStatus.Running);
 
-            visionPrepared = true;
             _ = await VisionHost.PrepareNinePointCalibrationAsync(
                 center.ActualX / PulsesPerVisionUnit,
                 center.ActualY / PulsesPerVisionUnit,
@@ -1481,6 +1480,7 @@ public partial class VisualCalibrationPage : UserControl
                 IsLowerCameraMode,
                 calibrationFilePath,
                 cancellationToken);
+            visionPrepared = true;
 
             var request = new NinePointMotionRequest(
                 ActiveAxisPair.XHardwareAxisNo,

@@ -394,7 +394,7 @@ public partial class MainWindow : Window
         ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
-        _ = ResolveNPointCalibrationModule(procedureName);
+        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
         await RefreshRenderLayoutAsync();
         UpdateCommandState();
         SetStatus("视觉标定已就绪，点击一键九点标定后开始取像。", StatusKind.Success);
@@ -1626,7 +1626,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<string> SetClickMoveModeAsync(IReadOnlyList<string> parts)
+    private Task<string> SetClickMoveModeAsync(IReadOnlyList<string> parts)
     {
         if (parts.Count != 3 || (parts[1] != "0" && parts[1] != "1"))
         {
@@ -1645,7 +1645,7 @@ public partial class MainWindow : Window
             DetachCrosshairModule();
             UpdateCommandState();
             SetStatus("点击视觉移动已关闭。", StatusKind.Ready);
-            return "点击视觉移动已关闭。";
+            return Task.FromResult("点击视觉移动已关闭。");
         }
 
         if (_eventPipeName is null)
@@ -1661,7 +1661,11 @@ public partial class MainWindow : Window
         var fullPath = ValidateCalibrationFilePath(calibrationPath);
         var transformModule = GetCalibrationTransformModule();
         transformModule.ModuParams.LoadCalibPath = fullPath;
-        await StartLivePreviewFromCommandAsync();
+        ApplyLiveRenderLayout();
+        if (!TryStartLivePreview(out var previewError))
+        {
+            throw new InvalidOperationException($"实时画面启动失败：{previewError}");
+        }
 
         _clickCalibrationPath = fullPath;
         _clickCenterPixelReady = false;
@@ -1671,7 +1675,7 @@ public partial class MainWindow : Window
         AttachCrosshairModule();
         UpdateCommandState();
         SetStatus($"点击移动已启用：{Path.GetFileName(fullPath)}", StatusKind.Success);
-        return $"已引用标定文件：{fullPath}。点击图像后将把该点移到绿色十字中心。";
+        return Task.FromResult($"已引用标定文件：{fullPath}。点击图像后将把该点移到绿色十字中心。");
     }
 
     private string SetCalibrationCenter(IReadOnlyList<string> parts)
@@ -1855,7 +1859,6 @@ public partial class MainWindow : Window
         var stopwatch = Stopwatch.StartNew();
         RunCalibrationProcedureOnce();
         stopwatch.Stop();
-        CalibrationRenderControl.UpdateVMResultShow();
 
         var result = session.Module.ModuResult;
         if (result.ModuStatus != 1)
@@ -1864,10 +1867,21 @@ public partial class MainWindow : Window
                 $"第 {pointNumber} 点 N点标定模块返回 NG，请检查相机取像和圆查找结果。");
         }
 
-        CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
         session.NextPointNumber++;
+        var displayWarning = "";
+        try
+        {
+            CalibrationRenderControl.UpdateVMResultShow();
+            CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception exception)
+        {
+            // N点结果已经成功写入后，显示控件刷新失败不能取消整轮标定或清空有效点。
+            displayWarning = $"；标定结果画面刷新失败：{FormatException(exception)}";
+        }
+
         SetStatus(
-            $"第 {pointNumber}/9 点已采集，流程用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms",
+            $"第 {pointNumber}/9 点已采集，流程用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms{displayWarning}",
             StatusKind.Busy);
         return $"第 {pointNumber}/9 点 VisionMaster 流程执行完成。";
     }
@@ -2842,16 +2856,16 @@ public partial class MainWindow : Window
             VmSolution.Load(_loadedSolutionPath, "");
             _solutionLoaded = true;
 
-            // 加载完成后立即关闭 .sol 中可能保存的所有连续运行状态，
-            // 避免在页面对象尚未就绪时就循环抢占相机。
-            StopAllContinuousExecutionNoThrow();
-
             var procedureNames = GetProcedureNames();
             _calibrationProcedure = GetRequiredProcedure(_calibrationProcedureName);
             _previewProcedure = _calibrationProcedure;
             _inspectionProcedure = GetRequiredProcedure(_inspectionProcedureName);
             _nozzlePointProcedure = null;
             _calibrationViewActive = false;
+
+            // 方案可能保存了连续运行状态；先缓存本方案流程，再统一停止，
+            // 确保不会遗漏当前标定和实时画面流程。
+            StopAllContinuousExecutionNoThrow();
 
             // 保留隐藏控件仅供现有渲染/标定逻辑读取；用户不能再切换方案或流程。
             PreviewProcedureComboBox.ItemsSource = procedureNames;
@@ -2930,7 +2944,7 @@ public partial class MainWindow : Window
                 $"固定方案中未找到必需流程“{procedureName}”。");
     }
 
-    private async void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void PreviewProcedureComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_initializingFixedSolution ||
             !_solutionLoaded ||
@@ -2947,8 +2961,14 @@ public partial class MainWindow : Window
             _settings.PreviewProcedureName = procedureName;
             PopulateImageSteps(procedureName, _previewProcedure);
             SaveSettingsNoThrow();
-            await StartLivePreviewFromCommandAsync();
-            SetStatus($"{procedureName} 实时画面已就绪", StatusKind.Success);
+            if (TryStartLivePreview(out var previewError))
+            {
+                SetStatus($"{procedureName} 已单次采集到画面1", StatusKind.Success);
+            }
+            else
+            {
+                SetStatus($"流程已加载，但画面1采集失败：{previewError}", StatusKind.Error);
+            }
         }
         catch (Exception exception)
         {
@@ -2974,8 +2994,9 @@ public partial class MainWindow : Window
             _calibrationProcedure = VmSolution.Instance[procedureName] as VmProcedure
                 ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
             _settings.CalibrationProcedureName = procedureName;
-            _ = ResolveNPointCalibrationModule(procedureName);
+            var nPointModule = ResolveNPointCalibrationModule(procedureName);
             ClearCalibrationRenderer();
+            BindCalibrationModule(nPointModule);
             SaveSettingsNoThrow();
             UpdateCommandState();
             SetStatus($"标定流程已选择：{procedureName}", StatusKind.Ready);
@@ -3116,7 +3137,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ContinuousRun_Click(object sender, RoutedEventArgs e)
+    private void ContinuousRun_Click(object sender, RoutedEventArgs e)
     {
         if (!EnsureProcedureReady())
         {
@@ -3125,7 +3146,14 @@ public partial class MainWindow : Window
 
         try
         {
-            await StartLivePreviewFromCommandAsync();
+            if (TryStartLivePreview(out var previewError))
+            {
+                SetStatus("画面1采集完成", StatusKind.Success);
+            }
+            else
+            {
+                SetStatus($"画面1采集失败：{previewError}", StatusKind.Error);
+            }
         }
         catch (Exception exception)
         {
@@ -3534,38 +3562,13 @@ public partial class MainWindow : Window
         {
         }
 
-        var procedures = new List<VmProcedure>();
         foreach (var procedure in new[] { _previewProcedure, _inspectionProcedure, _nozzlePointProcedure, _calibrationProcedure })
         {
-            if (procedure is not null && !procedures.Contains(procedure))
+            if (procedure is null)
             {
-                procedures.Add(procedure);
+                continue;
             }
-        }
 
-        // 不能只停止当前页面记住的几个流程。.sol 可能保存了其他流程的
-        // 连续运行状态，它们同样会反复触发相机错误弹窗。
-        try
-        {
-            var solution = VmSolution.Instance;
-            if (solution is not null)
-            {
-                foreach (var procedureName in GetProcedureNames())
-                {
-                    if (solution[procedureName] is VmProcedure procedure &&
-                        !procedures.Contains(procedure))
-                    {
-                        procedures.Add(procedure);
-                    }
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        foreach (var procedure in procedures)
-        {
             try
             {
                 procedure.ContinuousRunEnable = false;
