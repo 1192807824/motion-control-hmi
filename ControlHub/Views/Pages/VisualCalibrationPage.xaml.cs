@@ -152,8 +152,8 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        _recordedCenter = null;
-        _nozzleDotPosition = null;
+        // 页面切换回来时只刷新参数配置中的示教位置显示，保留当前标定流程进度。
+        // 轴组、吸嘴或配方真正发生切换时，会由各自的切换逻辑主动清理相关状态。
         RefreshTeachingPositionDisplay();
         UpdateNozzleTeachUi();
         UpdateCommandState();
