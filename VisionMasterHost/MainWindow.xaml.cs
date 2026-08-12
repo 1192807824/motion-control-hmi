@@ -459,8 +459,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 单次执行“粗定位示教流程”：吸嘴1读取“圆查找1”的中心 X/Y，
-    /// 吸嘴2读取“圆查找2”的中心 X/Y。
+    /// 单次执行“粗定位示教流程”：吸嘴1读取“圆查找2”的中心 X/Y，
+    /// 吸嘴2读取“圆查找1”的中心 X/Y。
     /// 流程只负责找点，不驱动运动轴或吸嘴动作。
     /// </summary>
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
@@ -889,11 +889,12 @@ public partial class MainWindow : Window
             List<RectangleBlobCandidate> candidates;
             if (isNozzlePointProcedure)
             {
-                // 两个圆查找模块与吸嘴固定一一对应，不再依赖 Blob 结果行顺序。
+                // 现场安装方向中圆查找2对应吸嘴1、圆查找1对应吸嘴2，
+                // 按吸嘴顺序返回，避免上层显示和保存时再次交换。
                 candidates =
                 [
-                    ReadCircleCenter(nozzle1CircleModule!, procedureName, Nozzle1CircleModuleName),
-                    ReadCircleCenter(nozzle2CircleModule!, procedureName, Nozzle2CircleModuleName)
+                    ReadCircleCenter(nozzle2CircleModule!, procedureName, Nozzle2CircleModuleName),
+                    ReadCircleCenter(nozzle1CircleModule!, procedureName, Nozzle1CircleModuleName)
                 ];
             }
             else

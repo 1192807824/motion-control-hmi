@@ -526,10 +526,11 @@
                                 </Grid>
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
                                            Margin="0,4,0,0"
-                                           MaxHeight="30"
+                                           MinHeight="30"
                                            Text="从参数配置读取示教下压位，移动后让两个吸嘴同时打点"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
+                                           LineHeight="16"
                                            TextAlignment="Center"
                                            TextWrapping="Wrap" />
                             </StackPanel>

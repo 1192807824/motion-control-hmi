@@ -604,7 +604,8 @@
                             </Grid>
                             <TextBlock x:Name="SidebarNozzleStatusText"
                                        Margin="26,0,0,0" Text="移动到示教下压位后，让两个吸嘴同时打点"
-                                       Foreground="#AFC0CD" FontSize="11" LineHeight="22" />
+                                       Foreground="#AFC0CD" FontSize="11" LineHeight="19"
+                                       TextAlignment="Center" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
 

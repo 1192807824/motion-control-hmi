@@ -1308,15 +1308,16 @@ public partial class VisualCalibrationPage : UserControl
             UpdateNozzleTeachUi();
             UpdateCommandState();
             SetNozzleCalibrationStatus(
-                "正在执行“粗定位示教流程”：吸嘴1读取圆查找1，吸嘴2读取圆查找2…",
+                "正在执行“粗定位示教流程”：吸嘴1读取圆查找2，吸嘴2读取圆查找1…",
                 WorkflowStatus.Running);
 
             _pendingNozzlePointResult = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
             var point1 = _pendingNozzlePointResult.Rectangle1;
             var point2 = _pendingNozzlePointResult.Rectangle2;
             SetNozzleCalibrationStatus(
-                $"吸嘴1（圆查找1）：({point1.X:0.###}, {point1.Y:0.###})　" +
-                $"吸嘴2（圆查找2）：({point2.X:0.###}, {point2.Y:0.###})\n请确认后点击“保存双吸嘴结果”。",
+                $"吸嘴1（圆查找2）：({point1.X:0.###}, {point1.Y:0.###})\n" +
+                $"吸嘴2（圆查找1）：({point2.X:0.###}, {point2.Y:0.###})\n" +
+                "请确认后点击“保存双吸嘴结果”。",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)
@@ -1407,7 +1408,7 @@ public partial class VisualCalibrationPage : UserControl
             var profilePath = SaveCurrentCalibrationProfile();
             _pendingNozzlePointResult = null;
             SetNozzleCalibrationStatus(
-                $"吸嘴1（圆查找1）、吸嘴2（圆查找2）配置已保存：\n{profilePath}",
+                $"吸嘴1（圆查找2）、吸嘴2（圆查找1）配置已保存：\n{profilePath}",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)
