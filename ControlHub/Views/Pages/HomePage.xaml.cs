@@ -822,6 +822,66 @@ public partial class HomePage : UserControl
             true);
     }
 
+    private async Task MoveCorrectedPlacementAxesAsync(
+        int nozzleNumber,
+        string positionName,
+        LowerCameraPlacementTarget target,
+        CancellationToken cancellationToken)
+    {
+        if (nozzleNumber is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(nozzleNumber),
+                "纠偏放料的吸嘴编号只能是 1 或 2。");
+        }
+
+        if (!double.IsFinite(target.X) ||
+            !double.IsFinite(target.Y) ||
+            !double.IsFinite(target.R) ||
+            !double.IsFinite(target.RCorrectionPulses))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(target),
+                $"{positionName}的纠偏 X/Y/R 目标必须是有效数字。");
+        }
+
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+
+        var xHardwareAxisNo = VisionCalibrationService.FirstSetXHardwareAxisNo;
+        var yHardwareAxisNo = VisionCalibrationService.FirstSetYHardwareAxisNo;
+        var rHardwareAxisNo = GetNozzleRHardwareAxisNo(
+            VisionCalibrationAxisSet.First,
+            nozzleNumber);
+        var targets = new Dictionary<int, double>
+        {
+            [xHardwareAxisNo] = target.X,
+            [yHardwareAxisNo] = target.Y,
+            [rHardwareAxisNo] = target.R
+        };
+
+        SetFirstSetPositionStatus(
+            $"正在同步移动{positionName}纠偏目标：X={target.X:0.###}，Y={target.Y:0.###}，" +
+            $"R{nozzleNumber}={target.R:0.###} pulse" +
+            $"（本次角度纠偏 {target.RCorrectionPulses:0.###} pulse）…",
+            true);
+        var actual = await motionController.MoveAxesAbsoluteAsync(
+            targets,
+            cancellationToken,
+            allowedMovingAxisNos: GetProductionPeerAxisNos(VisionCalibrationAxisSet.First),
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverrides: GetProductionAxisVelocities(targets.Keys));
+        var actualByAxis = actual.ToDictionary(item => item.HardwareAxisNo);
+
+        SetFirstSetPositionStatus(
+            $"{positionName}纠偏目标已同步到位：" +
+            $"X={actualByAxis[xHardwareAxisNo].FeedbackPosition:0.###}，" +
+            $"Y={actualByAxis[yHardwareAxisNo].FeedbackPosition:0.###}，" +
+            $"R{nozzleNumber}={actualByAxis[rHardwareAxisNo].FeedbackPosition:0.###} pulse。",
+            true);
+    }
+
     private async Task EnsureActiveSetNozzlesAtSafeZAsync(CancellationToken cancellationToken)
     {
         var motionController = _motionController
@@ -1831,20 +1891,21 @@ public partial class HomePage : UserControl
 
                 if (nozzle1OriginalR.HasValue)
                 {
-                    await MoveNozzleRToAsync(
-                        VisionCalibrationAxisSet.First,
+                    // 纠偏放料时将 X/Y/R1 一次下发，三轴同时运动并共同等待到位。
+                    await MoveCorrectedPlacementAxesAsync(
                         1,
-                        position1Target.R,
-                        $"纠偏位（角度换算 {position1Target.RCorrectionPulses:0.###} pulse）",
+                        "位置 1",
+                        position1Target,
                         _productionCancellation.Token);
                 }
-
-                // 执行位置1的绝对移动。
-                await MovePresetPositionCoreAsync(
-                    "位置 1",
-                    position1Target.X,
-                    position1Target.Y,
-                    _productionCancellation.Token);
+                else
+                {
+                    await MovePresetPositionCoreAsync(
+                        "位置 1",
+                        position1Target.X,
+                        position1Target.Y,
+                        _productionCancellation.Token);
+                }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 // 到达位置1后，Z1 下降到配置放料高度，破真空后回到配置安全高度。
@@ -1874,19 +1935,21 @@ public partial class HomePage : UserControl
 
                     if (nozzle2OriginalR.HasValue)
                     {
-                        await MoveNozzleRToAsync(
-                            VisionCalibrationAxisSet.First,
+                        // 纠偏放料时将 X/Y/R2 一次下发，三轴同时运动并共同等待到位。
+                        await MoveCorrectedPlacementAxesAsync(
                             2,
-                            position2Target.R,
-                            $"纠偏位（角度换算 {position2Target.RCorrectionPulses:0.###} pulse）",
+                            "位置 2",
+                            position2Target,
                             _productionCancellation.Token);
                     }
-
-                    await MovePresetPositionCoreAsync(
-                        "位置 2",
-                        position2Target.X,
-                        position2Target.Y,
-                        _productionCancellation.Token);
+                    else
+                    {
+                        await MovePresetPositionCoreAsync(
+                            "位置 2",
+                            position2Target.X,
+                            position2Target.Y,
+                            _productionCancellation.Token);
+                    }
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                     SetStartProductionStatus(
