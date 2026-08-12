@@ -77,6 +77,8 @@ public partial class MainWindow : Window
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _applyingCalibrationSidebarState;
+    private bool _selectingCalibrationResultImage;
+    private bool _calibrationResultImageSelectionQueued;
     private bool _clickCenterPixelReady;
     private float _clickCenterPixelX;
     private float _clickCenterPixelY;
@@ -116,6 +118,8 @@ public partial class MainWindow : Window
         string? lowerCameraCorrectionProcedureName = null)
     {
         InitializeComponent();
+        CalibrationRenderControl.OnSelectedImageChanged +=
+            CalibrationRenderControl_OnSelectedImageChanged;
         _embedded = embedded;
         _commandPipeName = string.IsNullOrWhiteSpace(commandPipeName) ? null : commandPipeName;
         _eventPipeName = string.IsNullOrWhiteSpace(eventPipeName) ? null : eventPipeName;
@@ -1869,11 +1873,14 @@ public partial class MainWindow : Window
         }
 
         session.NextPointNumber++;
+        var displayDetails = "";
         var displayWarning = "";
         try
         {
             CalibrationRenderControl.UpdateVMResultShow();
+            var selectedImageName = SelectCalibrationResultImage();
             CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
+            displayDetails = $"，显示图层 {selectedImageName}";
         }
         catch (Exception exception)
         {
@@ -1882,7 +1889,8 @@ public partial class MainWindow : Window
         }
 
         SetStatus(
-            $"第 {pointNumber}/9 点已采集，流程用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms{displayWarning}",
+            $"第 {pointNumber}/9 点已采集，流程用时 {stopwatch.Elapsed.TotalMilliseconds:0.0} ms" +
+            $"{displayDetails}{displayWarning}",
             StatusKind.Busy);
         return $"第 {pointNumber}/9 点 VisionMaster 流程执行完成。";
     }
@@ -3373,6 +3381,108 @@ public partial class MainWindow : Window
     {
         CalibrationImagePlaceholder.Visibility = Visibility.Visible;
         CalibrationRenderControl.ModuleSource = module;
+        QueueCalibrationResultImageSelection();
+    }
+
+    private void CalibrationRenderControl_OnSelectedImageChanged(
+        object sender,
+        NameChangedEventArgs args)
+    {
+        if (_calibrationSession is null || _selectingCalibrationResultImage || _closed)
+        {
+            return;
+        }
+
+        // VisionMaster refreshes the image list asynchronously and may restore a previously
+        // checked upstream image. Re-apply the N-point result layer after that refresh settles.
+        QueueCalibrationResultImageSelection();
+    }
+
+    private void QueueCalibrationResultImageSelection()
+    {
+        if (_calibrationSession is null || _calibrationResultImageSelectionQueued || _closed)
+        {
+            return;
+        }
+
+        _calibrationResultImageSelectionQueued = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                _calibrationResultImageSelectionQueued = false;
+                if (_calibrationSession is null || _closed)
+                {
+                    return;
+                }
+
+                try
+                {
+                    SelectCalibrationResultImage();
+                }
+                catch
+                {
+                    // The synchronous capture path reports display errors. This queued retry
+                    // only guards against a later SDK image-list refresh.
+                }
+            }));
+    }
+
+    private string SelectCalibrationResultImage()
+    {
+        var displayableImages = CalibrationRenderControl.GetDisplayableImageNameList();
+        var currentImage = CalibrationRenderControl.GetSelectedImageDisplayName();
+        var targetImage = IsNPointCalibrationImage(currentImage) &&
+                          displayableImages.Any(imageName =>
+                              string.Equals(imageName, currentImage, StringComparison.Ordinal))
+            ? currentImage
+            : displayableImages.FirstOrDefault(IsNPointCalibrationImage);
+
+        if (string.IsNullOrWhiteSpace(targetImage))
+        {
+            var availableImages = displayableImages.Count == 0
+                ? "无"
+                : string.Join("、", displayableImages);
+            throw new InvalidOperationException(
+                $"标定渲染控件中未找到 {NPointCalibrationModuleName} 图层；可显示图层：{availableImages}。");
+        }
+
+        if (!string.Equals(currentImage, targetImage, StringComparison.Ordinal))
+        {
+            _selectingCalibrationResultImage = true;
+            try
+            {
+                CalibrationRenderControl.SetSelectedImage(targetImage);
+            }
+            finally
+            {
+                _selectingCalibrationResultImage = false;
+            }
+        }
+
+        var selectedImage = CalibrationRenderControl.GetSelectedImageDisplayName();
+        if (!IsNPointCalibrationImage(selectedImage))
+        {
+            throw new InvalidOperationException(
+                $"标定结果图层未锁定到 {NPointCalibrationModuleName}，当前图层：{selectedImage}。");
+        }
+
+        return selectedImage!;
+    }
+
+    private static bool IsNPointCalibrationImage(string? displayImageName)
+    {
+        if (displayImageName is null || displayImageName.Length == 0)
+        {
+            return false;
+        }
+
+        return string.Equals(displayImageName, NPointCalibrationModuleName, StringComparison.Ordinal) ||
+               displayImageName.StartsWith(NPointCalibrationModuleName + ".", StringComparison.Ordinal) ||
+               displayImageName.IndexOf(
+                   "." + NPointCalibrationModuleName + ".",
+                   StringComparison.Ordinal) >= 0 ||
+               displayImageName.EndsWith("." + NPointCalibrationModuleName, StringComparison.Ordinal);
     }
 
     private void StopPreviewProcedureNoThrow()
@@ -3677,6 +3787,8 @@ public partial class MainWindow : Window
 
         try
         {
+            CalibrationRenderControl.OnSelectedImageChanged -=
+                CalibrationRenderControl_OnSelectedImageChanged;
             CalibrationRenderControl.Dispose();
         }
         catch
