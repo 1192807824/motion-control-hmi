@@ -4071,14 +4071,19 @@ public partial class HomePage : UserControl
         ApplyCurrentProductionAxisMotionSettings(motionController);
 
         var relativeMoves = new Dictionary<int, double>();
-        var nozzle1RPulses = ConvertVisionAngleToRelativeRPulses(
-            pickupBatch.Nozzle1.RotationDegrees);
+        var nozzle1RPulses = ConvertVisionAngleToSquareCorrectionPulses(
+            pickupBatch.Nozzle1.RotationDegrees,
+            out var nozzle1CorrectionDegrees);
         AddRelativeMoveIfNeeded(relativeMoves, FirstSetNozzle1RHardwareAxisNo, nozzle1RPulses);
 
         double? nozzle2RPulses = null;
+        double? nozzle2CorrectionDegrees = null;
         if (pickupBatch.Nozzle2 is { } nozzle2Target)
         {
-            nozzle2RPulses = ConvertVisionAngleToRelativeRPulses(nozzle2Target.RotationDegrees);
+            nozzle2RPulses = ConvertVisionAngleToSquareCorrectionPulses(
+                nozzle2Target.RotationDegrees,
+                out var correctionDegrees);
+            nozzle2CorrectionDegrees = correctionDegrees;
             AddRelativeMoveIfNeeded(
                 relativeMoves,
                 FirstSetNozzle2RHardwareAxisNo,
@@ -4086,11 +4091,13 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus(
-            $"正在同步移动{positionName}并按脚本R相对转动：X={targetX:0.###}，Y={targetY:0.###}，" +
-            $"吸嘴1 R={pickupBatch.Nozzle1.RotationDegrees:0.###}°→相对{nozzle1RPulses:0.###} pulse" +
+            $"正在同步移动{positionName}并按正方形角度纠正：X={targetX:0.###}，Y={targetY:0.###}，" +
+            $"吸嘴1 R={pickupBatch.Nozzle1.RotationDegrees:0.###}°→校正{nozzle1CorrectionDegrees:0.###}°" +
+            $"（{nozzle1RPulses:0.###} pulse）" +
             (nozzle2RPulses.HasValue
                 ? $"，吸嘴2 R={pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°" +
-                  $"→相对{nozzle2RPulses.Value:0.###} pulse"
+                  $"→校正{nozzle2CorrectionDegrees!.Value:0.###}°" +
+                  $"（{nozzle2RPulses.Value:0.###} pulse）"
                 : string.Empty) +
             "…",
             true);
@@ -4114,11 +4121,11 @@ public partial class HomePage : UserControl
             VisionCalibrationService.FirstSetYHardwareAxisNo,
             AllowedProductionPeerAxisNos);
         SetFirstSetPositionStatus(
-            $"{positionName}与脚本R相对转动已同步完成：" +
+            $"{positionName}与正方形角度纠正已同步完成：" +
             $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}，" +
-            $"R1相对{nozzle1RPulses:0.###} pulse" +
+            $"R1校正{nozzle1CorrectionDegrees:0.###}°/{nozzle1RPulses:0.###} pulse" +
             (nozzle2RPulses.HasValue
-                ? $"，R2相对{nozzle2RPulses.Value:0.###} pulse。"
+                ? $"，R2校正{nozzle2CorrectionDegrees!.Value:0.###}°/{nozzle2RPulses.Value:0.###} pulse。"
                 : "。"),
             true);
     }
@@ -4134,14 +4141,28 @@ public partial class HomePage : UserControl
         }
     }
 
-    private static double ConvertVisionAngleToRelativeRPulses(double angleDegrees)
+    private static double ConvertVisionAngleToSquareCorrectionPulses(
+        double angleDegrees,
+        out double correctionDegrees)
     {
         if (!double.IsFinite(angleDegrees))
         {
             throw new ArgumentOutOfRangeException(nameof(angleDegrees), "脚本1返回的R角度必须是有效数字。");
         }
 
-        return angleDegrees / DegreesPerRevolution * NozzleRPulsesPerRevolution;
+        // 正方形每转90°外观方向等价：先取最短的[-45°, 45°]等效姿态，再反向旋转到水平/垂直。
+        var normalizedDegrees = angleDegrees % 90d;
+        if (normalizedDegrees > 45d)
+        {
+            normalizedDegrees -= 90d;
+        }
+        else if (normalizedDegrees < -45d)
+        {
+            normalizedDegrees += 90d;
+        }
+
+        correctionDegrees = -normalizedDegrees;
+        return correctionDegrees / DegreesPerRevolution * NozzleRPulsesPerRevolution;
     }
 
     private void PresetPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
