@@ -52,7 +52,9 @@ public partial class HomePage : UserControl
     private const double StartupNozzleRHomeOffset = 0d;
     private const double LowerCameraLinearPulsePerMillimeter = 10_000d;
     private const double NozzleRPulsesPerRevolution = 131_072d;
-    private const double ChipLineOrientationPeriodDegrees = 180d;
+    // 产品为正方形，任意相差90°的边都是同一摆放方向。
+    // 用90°周期可避免两次检测分别选中相邻边时，两个吸嘴最终相差90°。
+    private const double SquareOrientationPeriodDegrees = 90d;
     private const double UnifiedChipTargetAngleDegrees = 0d;
     // 上相机按“目标角 - 测量角”纠正；下相机为对向观察，默认使用相反方向。
     // 每个吸嘴均可通过主页配置单独改为 -1/1，避免把电机安装方向写死。
@@ -4136,8 +4138,9 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
 
-        // 找芯片脚本返回的是芯片直线相对水平线的当前姿态，不是电机相对量。
-        // 直线方向每180°等价：先求到统一水平0°的最短校正角，再从本批取料R基准构造绝对目标。
+        // 找芯片脚本返回的是正方形某条边相对水平线的当前姿态，不是电机相对量。
+        // 正方形边方向每90°等价：先求到统一水平/垂直方向的最短校正角，
+        // 再从本批取料R基准构造绝对目标。
         var nozzle1RPulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
             pickupBatch.Nozzle1.RotationDegrees,
             GetUpperCameraRotationSign(1),
@@ -4209,7 +4212,7 @@ public partial class HomePage : UserControl
             NozzleRotationMath.CalculateShortestCorrectionDegrees(
             measuredAngle,
             UnifiedChipTargetAngleDegrees,
-            ChipLineOrientationPeriodDegrees);
+            SquareOrientationPeriodDegrees);
         return NozzleRotationMath.ConvertDegreesToPulses(
             correctionDegrees,
             NozzleRPulsesPerRevolution);
@@ -4224,7 +4227,7 @@ public partial class HomePage : UserControl
             NozzleRotationMath.CalculateShortestCorrectionDegrees(
             measuredAngle,
             UnifiedChipTargetAngleDegrees,
-            ChipLineOrientationPeriodDegrees);
+            SquareOrientationPeriodDegrees);
         return NozzleRotationMath.ConvertDegreesToPulses(
             correctionDegrees,
             NozzleRPulsesPerRevolution);
