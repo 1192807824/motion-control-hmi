@@ -4069,33 +4069,30 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
 
-        // 与下相机纠偏保持完全相同的R规则：
-        // 以吸嘴当前反馈位置为基准，直接叠加视觉测得角度对应的脉冲，不取余、不取反。
-        var originalRPositions = motionController.CaptureCalibrationFeedback(
-            FirstSetNozzle1RHardwareAxisNo,
-            FirstSetNozzle2RHardwareAxisNo,
-            AllowedProductionPeerAxisNos);
+        // 找芯片脚本返回的R就是吸取后的相对旋转量：直接换算成脉冲下发，
+        // 不读取当前吸嘴角度、不构造R绝对目标，也不取余或取反。
         var nozzle1RPulses = ConvertMeasuredAngleToRCorrectionPulses(
             pickupBatch.Nozzle1.RotationDegrees);
-        var nozzle1TargetR = originalRPositions.ActualX + nozzle1RPulses;
+        var relativeMoves = new Dictionary<int, double>
+        {
+            [FirstSetNozzle1RHardwareAxisNo] = nozzle1RPulses
+        };
 
         double? nozzle2RPulses = null;
-        double? nozzle2TargetR = null;
         if (pickupBatch.Nozzle2 is { } nozzle2Target)
         {
             nozzle2RPulses = ConvertMeasuredAngleToRCorrectionPulses(
                 nozzle2Target.RotationDegrees);
-            nozzle2TargetR = originalRPositions.ActualY + nozzle2RPulses.Value;
+            relativeMoves[FirstSetNozzle2RHardwareAxisNo] = nozzle2RPulses.Value;
         }
 
         SetFirstSetPositionStatus(
-            $"正在同步移动{positionName}并按下相机同规则纠正：X={targetX:0.###}，Y={targetY:0.###}，" +
+            $"正在同步移动{positionName}并执行脚本R相对转动：X={targetX:0.###}，Y={targetY:0.###}，" +
             $"吸嘴1 R={pickupBatch.Nozzle1.RotationDegrees:0.###}°" +
-            $"（基准{originalRPositions.ActualX:0.###} + {nozzle1RPulses:0.###} = {nozzle1TargetR:0.###} pulse）" +
+            $"（相对{nozzle1RPulses:0.###} pulse）" +
             (nozzle2RPulses.HasValue
                 ? $"，吸嘴2 R={pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°" +
-                  $"（基准{originalRPositions.ActualY:0.###} + {nozzle2RPulses.Value:0.###}" +
-                  $" = {nozzle2TargetR!.Value:0.###} pulse）"
+                  $"（相对{nozzle2RPulses.Value:0.###} pulse）"
                 : string.Empty) +
             "…",
             true);
@@ -4103,18 +4100,12 @@ public partial class HomePage : UserControl
         var absoluteTargets = new Dictionary<int, double>
         {
             [VisionCalibrationService.FirstSetXHardwareAxisNo] = targetX,
-            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY,
-            [FirstSetNozzle1RHardwareAxisNo] = nozzle1TargetR
+            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY
         };
-        if (nozzle2TargetR.HasValue)
-        {
-            absoluteTargets[FirstSetNozzle2RHardwareAxisNo] = nozzle2TargetR.Value;
-        }
-
-        var movingAxisNos = absoluteTargets.Keys.ToArray();
+        var movingAxisNos = absoluteTargets.Keys.Concat(relativeMoves.Keys).ToArray();
         await motionController.MoveAxesSynchronizedAsync(
             absoluteTargets,
-            new Dictionary<int, double>(),
+            relativeMoves,
             cancellationToken,
             allowedMovingAxisNos: AllowedProductionPeerAxisNos,
             minimumCompletionTolerance: HomePageCompletionTolerance,
@@ -4124,18 +4115,13 @@ public partial class HomePage : UserControl
             VisionCalibrationService.FirstSetXHardwareAxisNo,
             VisionCalibrationService.FirstSetYHardwareAxisNo,
             AllowedProductionPeerAxisNos);
-        var actualR = motionController.CaptureCalibrationFeedback(
-            FirstSetNozzle1RHardwareAxisNo,
-            FirstSetNozzle2RHardwareAxisNo,
-            AllowedProductionPeerAxisNos);
         SetFirstSetPositionStatus(
             $"{positionName}与R角度纠正已同步完成：" +
             $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}，" +
-            $"R1={actualR.ActualX:0.###}（视觉{pickupBatch.Nozzle1.RotationDegrees:0.###}°/" +
-            $"{nozzle1RPulses:0.###} pulse）" +
+            $"R1相对转动{pickupBatch.Nozzle1.RotationDegrees:0.###}°/{nozzle1RPulses:0.###} pulse" +
             (nozzle2RPulses.HasValue
-                ? $"，R2={actualR.ActualY:0.###}（视觉{pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°/" +
-                  $"{nozzle2RPulses.Value:0.###} pulse）。"
+                ? $"，R2相对转动{pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°/" +
+                  $"{nozzle2RPulses.Value:0.###} pulse。"
                 : "。"),
             true);
     }
