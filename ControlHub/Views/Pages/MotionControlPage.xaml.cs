@@ -1129,6 +1129,278 @@ public partial class MotionControlPage : UserControl
     }
 
     /// <summary>
+    /// 将绝对目标换算为当前指令位置的相对量，并与各轴的相对脉冲一起同步下发。
+    /// </summary>
+    public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesSynchronizedAsync(
+        IReadOnlyDictionary<int, double> absoluteTargetPositions,
+        IReadOnlyDictionary<int, double> relativePulseDistances,
+        CancellationToken cancellationToken,
+        int minimumTimeoutMilliseconds = 10_000,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? minimumCompletionTolerance = null,
+        IReadOnlyDictionary<int, double>? velocityOverrides = null)
+    {
+        ArgumentNullException.ThrowIfNull(absoluteTargetPositions);
+        ArgumentNullException.ThrowIfNull(relativePulseDistances);
+
+        var absoluteTargets = absoluteTargetPositions
+            .GroupBy(pair => pair.Key)
+            .Select(group => new KeyValuePair<int, double>(group.Key, group.Last().Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var relativeDistances = relativePulseDistances
+            .GroupBy(pair => pair.Key)
+            .Select(group => new KeyValuePair<int, double>(group.Key, group.Last().Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var axisNumbers = absoluteTargets.Keys
+            .Concat(relativeDistances.Keys)
+            .Distinct()
+            .OrderBy(axisNo => axisNo)
+            .ToArray();
+        if (axisNumbers.Length == 0 || axisNumbers.Any(axisNo => axisNo < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(absoluteTargetPositions));
+        }
+
+        if (absoluteTargets.Keys.Intersect(relativeDistances.Keys).Any())
+        {
+            throw new ArgumentException("同一根轴不能同时指定绝对目标和相对位移。");
+        }
+
+        if (absoluteTargets.Any(pair => !double.IsFinite(pair.Value)))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(absoluteTargetPositions),
+                "绝对位置目标必须是有限数值。");
+        }
+
+        if (relativeDistances.Any(pair => !double.IsFinite(pair.Value) || pair.Value == 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(relativePulseDistances),
+                "逐轴相对移动脉冲必须是非零有限数值。");
+        }
+
+        if (minimumCompletionTolerance is { } requestedCompletionTolerance &&
+            (!double.IsFinite(requestedCompletionTolerance) || requestedCompletionTolerance <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minimumCompletionTolerance),
+                "最小完成容差必须是大于 0 的有效数值。");
+        }
+
+        if (velocityOverrides is not null &&
+            velocityOverrides.Any(pair =>
+                pair.Key < 0 ||
+                !double.IsFinite(pair.Value) ||
+                pair.Value <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(velocityOverrides),
+                "逐轴运行速度必须使用有效轴号和大于 0 的有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                axisNumbers))
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行轴组同步移动。");
+        }
+
+        if (axisNumbers.Any(axisNo => axisNo >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"同步移动包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var moves = new List<(
+            AxisStatus Axis,
+            double Distance,
+            double Target,
+            double Tolerance,
+            double Velocity,
+            bool IsRelative)>();
+        var maximumTimeoutMilliseconds = Math.Clamp(
+            (double)minimumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        foreach (var hardwareAxisNo in axisNumbers)
+        {
+            var axis = Axes?.FirstOrDefault(item =>
+                           item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+            var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
+            profile.Validate();
+            var velocity = velocityOverrides?.GetValueOrDefault(hardwareAxisNo) ?? axis.JogSpeed;
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+
+            var beforeMove = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, beforeMove);
+            var isRelative = relativeDistances.TryGetValue(hardwareAxisNo, out var relativeDistance);
+            var target = isRelative
+                ? beforeMove.CommandPosition + relativeDistance
+                : absoluteTargets[hardwareAxisNo];
+            var distance = target - beforeMove.CommandPosition;
+            EnsureRelativeAxisReady(axis, beforeMove, distance);
+            if (!double.IsFinite(target))
+            {
+                throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 的相对脉冲目标无效。");
+            }
+
+            var estimatedTimeoutMilliseconds = Math.Ceiling(
+                Math.Abs(distance) / velocity * 1000d + 5000d);
+            maximumTimeoutMilliseconds = Math.Max(
+                maximumTimeoutMilliseconds,
+                Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
+            var completionTolerance = minimumCompletionTolerance is { } requestedTolerance
+                ? Math.Max(profile.CompletionTolerance, requestedTolerance)
+                : profile.CompletionTolerance;
+            moves.Add((axis, distance, target, completionTolerance, velocity, isRelative));
+        }
+
+        var moveTimeoutMilliseconds = (int)Math.Clamp(
+            maximumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var commandedAxes = new List<AxisStatus>();
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            var activeMoves = moves.Where(move => move.Distance != 0).ToArray();
+            if (activeMoves.Length > 0)
+            {
+                _motionCard.MoveRelativeSynchronized(
+                    activeMoves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                    activeMoves.Select(move => move.Distance).ToArray(),
+                    activeMoves.Select(move => move.Velocity).ToArray());
+            }
+
+            foreach (var move in moves)
+            {
+                move.Axis.Target = move.Target;
+                if (move.Distance == 0)
+                {
+                    continue;
+                }
+
+                commandedAxes.Add(move.Axis);
+                move.Axis.IsMoving = true;
+                move.Axis.State = move.IsRelative
+                    ? $"同步相对位置命令已发送：{move.Distance:0.###} {move.Axis.Unit}"
+                    : $"同步绝对目标已发送：{move.Target:0.###} {move.Axis.Unit}";
+            }
+
+            _commandStopwatch = Stopwatch.StartNew();
+            SetCommandStage(CommandStage.Issued, "轴组同步位置命令已下发");
+            var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
+            while (true)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var snapshots = new List<MotionAxisSnapshot>(moves.Count);
+                var allAtTarget = true;
+                foreach (var move in moves)
+                {
+                    var snapshot = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                    ApplySnapshot(move.Axis, snapshot);
+                    if (snapshot.Alarm || snapshot.EmergencyInput)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 轴组同步移动时发生报警或急停信号：{snapshot.StateText}。");
+                    }
+
+                    if ((move.Distance > 0 && snapshot.PositiveLimit) ||
+                        (move.Distance < 0 && snapshot.NegativeLimit))
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 轴组同步移动时触发了当前运动方向的限位。",
+                            "轴组同步位置安全检查");
+                    }
+
+                    if (snapshot.StopReason != 0)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 轴组同步移动未正常到位，停止原因 {snapshot.StopReason}。",
+                            "轴组同步位置完成检查");
+                    }
+
+                    snapshots.Add(snapshot);
+                    if (snapshot.IsMoving ||
+                        Math.Abs(snapshot.FeedbackPosition - move.Target) > move.Tolerance)
+                    {
+                        allAtTarget = false;
+                    }
+                }
+
+                if (allAtTarget)
+                {
+                    SetCommandStage(CommandStage.Stopped, "轴组同步位置运动完成");
+                    return snapshots;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        $"轴组同步位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。");
+                }
+
+                SetCommandStage(CommandStage.Running, "轴组同步运动中");
+                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+            }
+        }
+        catch (Exception exception)
+        {
+            foreach (var axis in commandedAxes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-RELATIVE",
+                    "轴组同步位置移动异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisNumbers.Select(axisNo => axisNo.ToString("00")))}-EXTERNAL-RELATIVE",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
+    /// <summary>
     /// 向多根硬件轴下发绝对位置命令，并等待全部轴到位。
     /// </summary>
     public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesAbsoluteAsync(
