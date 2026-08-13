@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -17,6 +18,7 @@ using IMVSLineFindModuCs;
 using IMVSL2LMeasureModuCs;
 using IMVSNPointCalibModuCs;
 using IMVSRectFindModuCs;
+using ShellModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
 using VMControls.Interface;
@@ -35,9 +37,9 @@ public partial class MainWindow : Window
     private const string NPointCalibrationModuleName = "N点标定1";
     private const string CalibrationTransformModuleName = "标定转换1";
     private const string InspectionBlobModuleName = "Blob分析1";
+    private const string InspectionScriptModuleName = "脚本1";
     private const string Nozzle1CircleModuleName = "圆查找1";
     private const string Nozzle2CircleModuleName = "圆查找2";
-    private const int MaximumInspectionBlobResultCount = 10;
     private const string DefaultRotationPointProcedureName = "获取三点流程";
     private const string RotationPointRectangleModuleName = "矩形检测1";
     private const string DefaultRotationCenterProcedureName = "计算旋转中心";
@@ -835,7 +837,7 @@ public partial class MainWindow : Window
             procedureName,
             _nozzlePointProcedureName,
             StringComparison.Ordinal);
-        IMVSBlobFindModuTool? blobModule = null;
+        ShellModuleTool? scriptModule = null;
         IMVSCircleFindModuTool? nozzle1CircleModule = null;
         IMVSCircleFindModuTool? nozzle2CircleModule = null;
         VmModule displayModule;
@@ -853,7 +855,9 @@ public partial class MainWindow : Window
         }
         else
         {
-            blobModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
+            scriptModule = ResolveNamedModule<ShellModuleTool>(
+                procedureName,
+                InspectionScriptModuleName);
             displayModule = ResolveNamedModule<VmModule>(procedureName, CalibrationImageSourceName);
         }
         // 同一相机不能被两个流程同时占用。找点前明确停止方案内的连续执行。
@@ -903,24 +907,17 @@ public partial class MainWindow : Window
             }
             else
             {
-                var blobResult = blobModule!.ModuResult;
-                var resultCount = Math.Max(
-                    0,
-                    Math.Min(
-                        MaximumInspectionBlobResultCount,
-                        Math.Min(blobResult.BlobNum, blobResult.CentroidPoint?.Count ?? 0)));
-                if (blobResult.ModuStatus != 1 && resultCount > 0)
+                var scriptResult = scriptModule!.ModuResult;
+                candidates = ReadAllScriptResults(scriptResult);
+                if (scriptResult.ModuStatus != 1 && candidates.Count > 0)
                 {
                     throw new InvalidOperationException(
-                        $"{procedureName}.{InspectionBlobModuleName}返回NG，请检查相机图和模块参数。");
+                        $"{procedureName}.{InspectionScriptModuleName}返回NG，请检查脚本和上游模块参数。");
                 }
 
-                // 生产找芯片时，Blob模块的“未找到目标”会以NG且0个结果返回。
+                // 生产找芯片时，脚本的“未找到目标”可能会以NG且0个结果返回。
                 // 这是正常的缺料判定，交给主页执行震动、重拍和排空收尾，不能在视觉进程内报错。
-                // 与 VisionMaster 的“当前结果”表严格一致：按原顺序返回全部结果，不筛选也不重排。
-                candidates = Enumerable.Range(0, resultCount)
-                    .Select(index => ReadBlobResultRow(blobResult, index))
-                    .ToList();
+                // 与 VisionMaster 的“当前结果”表严格一致：按脚本1原顺序返回全部X/Y/R，不截断、不筛选也不重排。
             }
 
             var imageWarning = "";
@@ -947,6 +944,10 @@ public partial class MainWindow : Window
             {
                 responseParts.Add(candidate.PixelX.ToString("R", CultureInfo.InvariantCulture));
                 responseParts.Add(candidate.PixelY.ToString("R", CultureInfo.InvariantCulture));
+                if (!isNozzlePointProcedure)
+                {
+                    responseParts.Add(candidate.RotationDegrees.ToString("R", CultureInfo.InvariantCulture));
+                }
                 responseParts.Add(candidate.Left.ToString(CultureInfo.InvariantCulture));
                 responseParts.Add(candidate.Top.ToString(CultureInfo.InvariantCulture));
                 responseParts.Add(candidate.Width.ToString(CultureInfo.InvariantCulture));
@@ -1492,40 +1493,138 @@ public partial class MainWindow : Window
         return candidates;
     }
 
-    private static RectangleBlobCandidate ReadBlobResultRow(BlobFindResult result, int index)
+    private static List<RectangleBlobCandidate> ReadAllScriptResults(ShellResult result)
     {
-        var points = result.CentroidPoint;
-        var resultCount = Math.Min(result.BlobNum, points?.Count ?? 0);
-        if (points is null || index < 0 || index >= resultCount)
+        Exception? outputException = null;
+        try
         {
-            throw new InvalidOperationException($"Blob分析1未返回第 {index + 1} 行结果。");
+            var outputX = result.GetOutputFloat("X");
+            var outputY = result.GetOutputFloat("Y");
+            var outputR = result.GetOutputFloat("R");
+            var resultCount = GetMatchingScriptResultCount(outputX, outputY, outputR);
+            if (resultCount > 0)
+            {
+                return Enumerable.Range(0, resultCount)
+                    .Select(index => ReadScriptResultRow(outputX, outputY, outputR, index))
+                    .ToList();
+            }
+        }
+        catch (Exception exception)
+        {
+            outputException = exception;
         }
 
-        var point = points[index];
-        if (float.IsNaN(point.X) || float.IsInfinity(point.X) || point.X < 0 ||
-            float.IsNaN(point.Y) || float.IsInfinity(point.Y) || point.Y < 0)
+        // 部分脚本把多行结果直接写入模块数据显示，而不是声明X/Y/R三个浮点数组输出。
+        // 同时兼容截图所示的“X:...,Y:...,R:...”格式，仍按文本出现顺序返回全部结果。
+#pragma warning disable CS0618 // VisionMaster 4.4仅通过此兼容属性公开脚本模块的自定义显示行。
+        var displayedResults = ReadScriptResultShowRows(result.ResultShow);
+#pragma warning restore CS0618
+        if (displayedResults.Count > 0 || outputException is null || result.ModuStatus != 1)
         {
-            throw new InvalidOperationException($"Blob分析1第 {index + 1} 行的质心 X/Y 无效。");
+            return displayedResults;
         }
 
-        var rectangularity = result.Rectangularity is not null && index < result.Rectangularity.Count
-            ? result.Rectangularity[index]
-            : 0f;
-        var area = result.Area is not null && index < result.Area.Count
-            ? result.Area[index]
-            : 0f;
-        var blobRect = result.BlobRect is not null && index < result.BlobRect.Count
-            ? result.BlobRect[index]
-            : null;
+        throw new InvalidOperationException(
+            "找芯片流程.脚本1无法读取X/Y/R输出。请检查脚本输出名或模块数据格式。",
+            outputException);
+    }
+
+    private static List<RectangleBlobCandidate> ReadScriptResultShowRows(string? resultShow)
+    {
+        var candidates = new List<RectangleBlobCandidate>();
+        if (string.IsNullOrWhiteSpace(resultShow))
+        {
+            return candidates;
+        }
+
+        const string numberPattern = @"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?";
+        var matches = Regex.Matches(
+            resultShow,
+            $@"X\s*[:：]\s*(?<x>{numberPattern})\s*[,，]\s*Y\s*[:：]\s*(?<y>{numberPattern})\s*[,，]\s*R\s*[:：]\s*(?<r>{numberPattern})",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        foreach (Match match in matches)
+        {
+            if (!float.TryParse(match.Groups["x"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pixelX) ||
+                !float.TryParse(match.Groups["y"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var pixelY) ||
+                !float.TryParse(match.Groups["r"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rotationDegrees) ||
+                float.IsNaN(pixelX) || float.IsInfinity(pixelX) || pixelX < 0 ||
+                float.IsNaN(pixelY) || float.IsInfinity(pixelY) || pixelY < 0 ||
+                float.IsNaN(rotationDegrees) || float.IsInfinity(rotationDegrees))
+            {
+                throw new InvalidOperationException("找芯片流程.脚本1的模块数据包含无效X/Y/R。");
+            }
+
+            candidates.Add(new RectangleBlobCandidate(
+                pixelX,
+                pixelY,
+                0f,
+                0f,
+                (int)Math.Round(pixelX),
+                (int)Math.Round(pixelY),
+                1,
+                1,
+                rotationDegrees));
+        }
+
+        return candidates;
+    }
+
+    private static int GetMatchingScriptResultCount(
+        FloatDataArray outputX,
+        FloatDataArray outputY,
+        FloatDataArray outputR)
+    {
+        var xCount = GetScriptOutputCount(outputX, "X");
+        var yCount = GetScriptOutputCount(outputY, "Y");
+        var rCount = GetScriptOutputCount(outputR, "R");
+        if (xCount != yCount || xCount != rCount)
+        {
+            throw new InvalidOperationException(
+                $"找芯片流程.脚本1返回的X/Y/R数量不一致：X={xCount}，Y={yCount}，R={rCount}。");
+        }
+
+        return xCount;
+    }
+
+    private static int GetScriptOutputCount(FloatDataArray output, string outputName)
+    {
+        var arrayLength = output.pFloatVal?.Length ?? 0;
+        if (output.nValueNum < 0 || output.nValueNum > arrayLength)
+        {
+            throw new InvalidOperationException(
+                $"找芯片流程.脚本1的{outputName}输出数量无效：声明{output.nValueNum}，实际{arrayLength}。");
+        }
+
+        return output.nValueNum;
+    }
+
+    private static RectangleBlobCandidate ReadScriptResultRow(
+        FloatDataArray outputX,
+        FloatDataArray outputY,
+        FloatDataArray outputR,
+        int index)
+    {
+        var pixelX = outputX.pFloatVal[index];
+        var pixelY = outputY.pFloatVal[index];
+        var rotationDegrees = outputR.pFloatVal[index];
+        if (float.IsNaN(pixelX) || float.IsInfinity(pixelX) || pixelX < 0 ||
+            float.IsNaN(pixelY) || float.IsInfinity(pixelY) || pixelY < 0 ||
+            float.IsNaN(rotationDegrees) || float.IsInfinity(rotationDegrees))
+        {
+            throw new InvalidOperationException(
+                $"找芯片流程.脚本1第 {index + 1} 行的X/Y/R无效。");
+        }
+
         return new RectangleBlobCandidate(
-            point.X,
-            point.Y,
-            float.IsNaN(rectangularity) || float.IsInfinity(rectangularity) ? 0f : rectangularity,
-            float.IsNaN(area) || float.IsInfinity(area) ? 0f : area,
-            blobRect?.RectPoint.X ?? (int)Math.Round(point.X),
-            blobRect?.RectPoint.Y ?? (int)Math.Round(point.Y),
-            Math.Max(1, blobRect?.RectWidth ?? 1),
-            Math.Max(1, blobRect?.RectHeight ?? 1));
+            pixelX,
+            pixelY,
+            0f,
+            0f,
+            (int)Math.Round(pixelX),
+            (int)Math.Round(pixelY),
+            1,
+            1,
+            rotationDegrees);
     }
 
     private static RectangleBlobCandidate ReadCircleCenter(
@@ -3866,7 +3965,8 @@ public partial class MainWindow : Window
             int left,
             int top,
             int width,
-            int height)
+            int height,
+            float rotationDegrees = 0f)
         {
             PixelX = pixelX;
             PixelY = pixelY;
@@ -3876,11 +3976,14 @@ public partial class MainWindow : Window
             Top = top;
             Width = Math.Max(1, width);
             Height = Math.Max(1, height);
+            RotationDegrees = rotationDegrees;
         }
 
         public float PixelX { get; }
 
         public float PixelY { get; }
+
+        public float RotationDegrees { get; }
 
         public float Rectangularity { get; }
 

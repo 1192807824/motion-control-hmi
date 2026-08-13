@@ -23,7 +23,8 @@ public readonly record struct VisionCalibrationAxisPair(
 public readonly record struct VisionMotionTarget(
     double X,
     double Y,
-    VisionTargetTool Tool);
+    VisionTargetTool Tool,
+    double RotationDegrees = 0d);
 
 public readonly record struct DualNozzleMechanicalTargets(
     VisionMotionTarget Nozzle1,

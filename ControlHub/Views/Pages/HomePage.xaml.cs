@@ -20,7 +20,7 @@ namespace ControlHub.Views.Pages;
 public partial class HomePage : UserControl
 {
     private const string ChipInspectionProcedureName = "找芯片流程";
-    private const string ChipInspectionBlobModuleName = "Blob分析1";
+    private const string ChipInspectionResultModuleName = "脚本1";
     private const int FirstSetZ1VacuumOutputBit = 15;
     private const int FirstSetZ1BreakVacuumOutputBit = 14;
     private const int FirstSetZ2VacuumOutputBit = 17;
@@ -973,7 +973,7 @@ public partial class HomePage : UserControl
         VisualCalibrationPage visualCalibrationController,
         LowerCameraCorrectionProfile nozzle1Profile,
         LowerCameraCorrectionProfile nozzle2Profile,
-        bool nozzle2Required,
+        NozzlePickupBatch pickupBatch,
         CancellationToken cancellationToken)
     {
         if (VisionCalibration.XHardwareAxisNo != VisionCalibrationService.FirstSetXHardwareAxisNo ||
@@ -982,6 +982,7 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException("下相机纠偏只允许使用第一套XY（轴1/2）。");
         }
 
+        var nozzle2Required = pickupBatch.Nozzle2.HasValue;
         var positions = GetLowerCameraPhotoPositions();
         LowerCameraCorrectionResultText.Text = "下相机纠偏：吸嘴1正在移动到拍照位1…";
         LowerCameraCorrectionResultText.Foreground =
@@ -990,10 +991,11 @@ public partial class HomePage : UserControl
             $"{(nozzle2Required ? "两个吸嘴已取料" : "仅吸嘴1已取料")}，" +
             $"XY正在前往拍照位1({positions.Position1X:0.###}, {positions.Position1Y:0.###})…",
             Color.FromRgb(242, 181, 68));
-        await MovePresetPositionCoreAsync(
+        await MoveToFirstLowerCameraPositionWithPickupAnglesAsync(
             "下相机拍照位1",
             positions.Position1X,
             positions.Position1Y,
+            pickupBatch,
             cancellationToken);
         var lightMayBeOn = true;
         try
@@ -1680,10 +1682,10 @@ public partial class HomePage : UserControl
 
                 if (pendingPickupBatches.Count == 0)
                 {
-                    // 只有缓存已经取空时才重新执行找芯片流程；一次最多接收 VisionMaster 返回的10个结果。
+                    // 只有缓存已经取空时才重新执行找芯片流程；一次接收脚本1返回的全部X/Y/R结果。
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
-                        $"缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionBlobModuleName}…",
+                        $"缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}…",
                         Color.FromRgb(242, 181, 68));
                     await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
                     var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
@@ -1804,7 +1806,7 @@ public partial class HomePage : UserControl
                         visualCalibrationController,
                         lowerCameraNozzle1Profile,
                         lowerCameraNozzle2Profile,
-                        nozzle2HasPart,
+                        assignedTargets,
                         _productionCancellation.Token);
                     if (correctionResults.HasFailure)
                     {
@@ -3199,7 +3201,10 @@ public partial class HomePage : UserControl
                 (centerWorld.X - blobWorld.X) * VisionCalibrationService.PulsesPerVisionUnit;
             var cameraTargetY = captureY +
                 (centerWorld.Y - blobWorld.Y) * VisionCalibrationService.PulsesPerVisionUnit;
-            return CalculateVisionTarget(cameraTargetX, cameraTargetY, tool);
+            return CalculateVisionTarget(cameraTargetX, cameraTargetY, tool) with
+            {
+                RotationDegrees = blob.RotationDegrees
+            };
         }
 
         var batches = new List<NozzlePickupBatch>();
@@ -3225,6 +3230,7 @@ public partial class HomePage : UserControl
     {
         if (!double.IsFinite(blob.X) ||
             !double.IsFinite(blob.Y) ||
+            !double.IsFinite(blob.RotationDegrees) ||
             blob.X < 0 ||
             blob.Y < 0 ||
             blob.X >= imageWidth ||
@@ -4038,6 +4044,72 @@ public partial class HomePage : UserControl
         SetFirstSetPositionStatus(
             $"{positionName}已到位：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
             true);
+    }
+
+    private async Task MoveToFirstLowerCameraPositionWithPickupAnglesAsync(
+        string positionName,
+        double targetX,
+        double targetY,
+        NozzlePickupBatch pickupBatch,
+        CancellationToken cancellationToken)
+    {
+        if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetX), $"{positionName}的XY目标必须是有效数字。");
+        }
+
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+
+        var nozzle1RPulses = ConvertVisionAngleToRPulses(pickupBatch.Nozzle1.RotationDegrees);
+        var targets = new Dictionary<int, double>
+        {
+            [VisionCalibrationService.FirstSetXHardwareAxisNo] = targetX,
+            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY,
+            [FirstSetNozzle1RHardwareAxisNo] = nozzle1RPulses
+        };
+        if (pickupBatch.Nozzle2 is { } nozzle2Target)
+        {
+            targets[FirstSetNozzle2RHardwareAxisNo] =
+                ConvertVisionAngleToRPulses(nozzle2Target.RotationDegrees);
+        }
+
+        SetFirstSetPositionStatus(
+            $"正在同步移动{positionName}并转正芯片：X={targetX:0.###}，Y={targetY:0.###}，" +
+            $"R1={nozzle1RPulses:0.###} pulse" +
+            (pickupBatch.Nozzle2 is { }
+                ? $"，R2={targets[FirstSetNozzle2RHardwareAxisNo]:0.###} pulse"
+                : string.Empty) +
+            "…",
+            true);
+
+        var actual = await motionController.MoveAxesAbsoluteAsync(
+            targets,
+            cancellationToken,
+            allowedMovingAxisNos: AllowedProductionPeerAxisNos,
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverrides: GetProductionAxisVelocities(targets.Keys));
+        var actualByAxis = actual.ToDictionary(item => item.HardwareAxisNo);
+        SetFirstSetPositionStatus(
+            $"{positionName}与芯片角度已同步到位：" +
+            $"X={actualByAxis[VisionCalibrationService.FirstSetXHardwareAxisNo].FeedbackPosition:0.###}，" +
+            $"Y={actualByAxis[VisionCalibrationService.FirstSetYHardwareAxisNo].FeedbackPosition:0.###}，" +
+            $"R1={actualByAxis[FirstSetNozzle1RHardwareAxisNo].FeedbackPosition:0.###} pulse" +
+            (pickupBatch.Nozzle2 is { }
+                ? $"，R2={actualByAxis[FirstSetNozzle2RHardwareAxisNo].FeedbackPosition:0.###} pulse。"
+                : "。"),
+            true);
+    }
+
+    private static double ConvertVisionAngleToRPulses(double angleDegrees)
+    {
+        if (!double.IsFinite(angleDegrees))
+        {
+            throw new ArgumentOutOfRangeException(nameof(angleDegrees), "脚本1返回的R角度必须是有效数字。");
+        }
+
+        return angleDegrees / DegreesPerRevolution * NozzleRPulsesPerRevolution;
     }
 
     private void PresetPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -5460,7 +5532,7 @@ public partial class HomePage : UserControl
             Padding = new Thickness(5d, 2d, 5d, 2d),
             Child = new TextBlock
             {
-                Text = $"矩形{number}  X={blob.X:0.0}  Y={blob.Y:0.0}",
+                Text = $"结果{number}  X={blob.X:0.0}  Y={blob.Y:0.0}  R={blob.RotationDegrees:0.00}°",
                 Foreground = brush,
                 FontSize = Math.Max(12d, Math.Min(imageWidth, imageHeight) / 55d),
                 FontWeight = FontWeights.Bold

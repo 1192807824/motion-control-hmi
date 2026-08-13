@@ -28,7 +28,6 @@ public sealed class VisionMasterProcessHost : HwndHost
     private const int WsThickFrame = 0x00040000;
     private const int WsPopup = unchecked((int)0x80000000);
     private const int WsExControlParent = 0x00010000;
-    private const int MaximumInspectionBlobResultCount = 10;
 
     private readonly object _syncRoot = new();
     private readonly object _eventPipeSync = new();
@@ -621,11 +620,15 @@ public sealed class VisionMasterProcessHost : HwndHost
             command,
             cancellationToken);
         var parts = response.Split('\t');
+        var includesRotation = string.Equals(
+            command,
+            "RUN_RECTANGLE_BLOB",
+            StringComparison.Ordinal);
+        var fieldsPerResult = includesRotation ? 7 : 6;
         if (parts.Length < 4 ||
             !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var resultCount) ||
             resultCount < 0 ||
-            resultCount > MaximumInspectionBlobResultCount ||
-            parts.Length != 1 + resultCount * 6 + 3)
+            parts.Length != 1L + (long)resultCount * fieldsPerResult + 3L)
         {
             throw new InvalidDataException("VisionMaster 返回的Blob检测图或矩形结果无效。");
         }
@@ -633,13 +636,18 @@ public sealed class VisionMasterProcessHost : HwndHost
         var rectangles = new List<VisionBlobRectangle>(resultCount);
         for (var resultIndex = 0; resultIndex < resultCount; resultIndex++)
         {
-            var offset = 1 + resultIndex * 6;
+            var offset = 1 + resultIndex * fieldsPerResult;
+            var rotationOffset = includesRotation ? 1 : 0;
+            var rotationDegrees = 0d;
             if (!double.TryParse(parts[offset], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
                 !double.TryParse(parts[offset + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
-                !double.TryParse(parts[offset + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out var left) ||
-                !double.TryParse(parts[offset + 3], NumberStyles.Float, CultureInfo.InvariantCulture, out var top) ||
-                !double.TryParse(parts[offset + 4], NumberStyles.Float, CultureInfo.InvariantCulture, out var width) ||
-                !double.TryParse(parts[offset + 5], NumberStyles.Float, CultureInfo.InvariantCulture, out var height) ||
+                (includesRotation &&
+                 (!double.TryParse(parts[offset + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out rotationDegrees) ||
+                  !double.IsFinite(rotationDegrees))) ||
+                !double.TryParse(parts[offset + 2 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var left) ||
+                !double.TryParse(parts[offset + 3 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var top) ||
+                !double.TryParse(parts[offset + 4 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var width) ||
+                !double.TryParse(parts[offset + 5 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var height) ||
                 !double.IsFinite(x) ||
                 !double.IsFinite(y) ||
                 !double.IsFinite(left) ||
@@ -655,10 +663,17 @@ public sealed class VisionMasterProcessHost : HwndHost
                     $"VisionMaster 返回的第{resultIndex + 1}个Blob矩形结果无效。");
             }
 
-            rectangles.Add(new VisionBlobRectangle(x, y, left, top, width, height));
+            rectangles.Add(new VisionBlobRectangle(
+                x,
+                y,
+                rotationDegrees,
+                left,
+                top,
+                width,
+                height));
         }
 
-        var imageOffset = 1 + resultCount * 6;
+        var imageOffset = 1 + resultCount * fieldsPerResult;
         if (!int.TryParse(
                 parts[imageOffset],
                 NumberStyles.Integer,
@@ -1570,6 +1585,7 @@ public sealed record VisionPixelTransformResult(
 public sealed record VisionBlobRectangle(
     double X,
     double Y,
+    double RotationDegrees,
     double Left,
     double Top,
     double Width,
