@@ -3422,13 +3422,24 @@ public partial class HomePage : UserControl
         }
 
         Nozzle1RawVisionResultText.Text = _blob1Nozzle1Target is { } nozzle1
-            ? $"吸嘴1：X={nozzle1.X:0.###}  Y={nozzle1.Y:0.###}  原始R={nozzle1.RotationDegrees:0.#####}°"
+            ? FormatAssignedNozzleVisionText(1, nozzle1)
             : "吸嘴1：等待分配";
         Nozzle2RawVisionResultText.Text = _blob2Nozzle2Target is { } nozzle2
-            ? $"吸嘴2：X={nozzle2.X:0.###}  Y={nozzle2.Y:0.###}  原始R={nozzle2.RotationDegrees:0.#####}°"
+            ? FormatAssignedNozzleVisionText(2, nozzle2)
             : _nextAssignedNozzleMoveStep == 0
                 ? "吸嘴2：等待分配"
                 : "吸嘴2：本批无产品";
+    }
+
+    private static string FormatAssignedNozzleVisionText(
+        int nozzleNumber,
+        VisionMotionTarget target)
+    {
+        var normalizedRotation = NozzleRotationMath.NormalizePeriodicAngleDegrees(
+            target.RotationDegrees,
+            SquareOrientationPeriodDegrees);
+        return $"吸嘴{nozzleNumber}：X={target.X:0.###}  Y={target.Y:0.###}  " +
+               $"原始R={target.RotationDegrees:0.#####}°  归一化R={normalizedRotation:0.#####}°";
     }
 
     /// <summary>
