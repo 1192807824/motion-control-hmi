@@ -56,9 +56,10 @@ public partial class HomePage : UserControl
     // 用90°周期可避免两次检测分别选中相邻边时，两个吸嘴最终相差90°。
     private const double SquareOrientationPeriodDegrees = 90d;
     private const double UnifiedChipTargetAngleDegrees = 0d;
-    // 上相机按“目标角 - 测量角”纠正；下相机为对向观察，默认使用相反方向。
+    // 现场R1/R2的电机指令方向都与上相机角度正方向相反。
+    // 下相机为对向观察，同样默认使用反向系数。
     // 每个吸嘴均可通过主页配置单独改为 -1/1，避免把电机安装方向写死。
-    private const double DefaultUpperCameraNozzleRotationSign = 1d;
+    private const double DefaultUpperCameraNozzleRotationSign = -1d;
     private const double DefaultLowerCameraNozzleRotationSign = -1d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
