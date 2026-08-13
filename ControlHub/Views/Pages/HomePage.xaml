@@ -447,6 +447,7 @@
                             <RowDefinition Height="36" />
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <Grid>
@@ -533,6 +534,34 @@
                             </Grid>
                         </Border>
                         <Border Grid.Row="2"
+                                Margin="0,6,0,0"
+                                Padding="9,6"
+                                Background="#10283A"
+                                BorderBrush="#29465C"
+                                BorderThickness="1"
+                                CornerRadius="3">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="Nozzle1RawVisionResultText"
+                                           Text="吸嘴1：等待分配"
+                                           Foreground="#62B5FF"
+                                           FontSize="11"
+                                           FontFamily="Consolas"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Grid.Column="2"
+                                           x:Name="Nozzle2RawVisionResultText"
+                                           Text="吸嘴2：等待分配"
+                                           Foreground="#49D17D"
+                                           FontSize="11"
+                                           FontFamily="Consolas"
+                                           TextWrapping="Wrap" />
+                            </Grid>
+                        </Border>
+                        <Border Grid.Row="3"
                                 Margin="0,6,0,0"
                                 Padding="9,4"
                                 Background="#10283A"

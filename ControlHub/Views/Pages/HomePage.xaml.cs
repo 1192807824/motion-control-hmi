@@ -3392,6 +3392,7 @@ public partial class HomePage : UserControl
         _blob1Nozzle1Target = targets.Nozzle1;
         _blob2Nozzle2Target = targets.Nozzle2;
         _nextAssignedNozzleMoveStep = 1;
+        UpdateAssignedNozzleVisionText();
         SetFirstSetPositionStatus(
             targets.Nozzle2.HasValue
                 ? $"本批按脚本顺序分配2颗：本批第1条→吸嘴1(R={targets.Nozzle1.RotationDegrees:0.###}°)，" +
@@ -3408,8 +3409,26 @@ public partial class HomePage : UserControl
         _blob1Nozzle1Target = null;
         _blob2Nozzle2Target = null;
         _nextAssignedNozzleMoveStep = 0;
+        UpdateAssignedNozzleVisionText();
         UpdateAssignedNozzleButtonText();
         UpdateHomeCommandState();
+    }
+
+    private void UpdateAssignedNozzleVisionText()
+    {
+        if (Nozzle1RawVisionResultText is null || Nozzle2RawVisionResultText is null)
+        {
+            return;
+        }
+
+        Nozzle1RawVisionResultText.Text = _blob1Nozzle1Target is { } nozzle1
+            ? $"吸嘴1：X={nozzle1.X:0.###}  Y={nozzle1.Y:0.###}  原始R={nozzle1.RotationDegrees:0.#####}°"
+            : "吸嘴1：等待分配";
+        Nozzle2RawVisionResultText.Text = _blob2Nozzle2Target is { } nozzle2
+            ? $"吸嘴2：X={nozzle2.X:0.###}  Y={nozzle2.Y:0.###}  原始R={nozzle2.RotationDegrees:0.#####}°"
+            : _nextAssignedNozzleMoveStep == 0
+                ? "吸嘴2：等待分配"
+                : "吸嘴2：本批无产品";
     }
 
     /// <summary>
