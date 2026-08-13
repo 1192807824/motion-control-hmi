@@ -1161,8 +1161,7 @@ public partial class HomePage : UserControl
                          correction.CorrectionX * LowerCameraLinearPulsePerMillimeter;
         var correctedY = configuredY -
                          correction.CorrectionY * LowerCameraLinearPulsePerMillimeter;
-        var rCorrectionPulses =
-            correction.MeasuredAngle / DegreesPerRevolution * NozzleRPulsesPerRevolution;
+        var rCorrectionPulses = ConvertMeasuredAngleToRCorrectionPulses(correction.MeasuredAngle);
         var correctedR = originalR + rCorrectionPulses;
         if (!double.IsFinite(correctedX) ||
             !double.IsFinite(correctedY) ||
@@ -4070,34 +4069,33 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
 
-        var relativeMoves = new Dictionary<int, double>();
-        var nozzle1RPulses = ConvertVisionAngleToSquareCorrectionPulses(
-            pickupBatch.Nozzle1.RotationDegrees,
-            out var nozzle1CorrectionDegrees);
-        AddRelativeMoveIfNeeded(relativeMoves, FirstSetNozzle1RHardwareAxisNo, nozzle1RPulses);
+        // 与下相机纠偏保持完全相同的R规则：
+        // 以吸嘴当前反馈位置为基准，直接叠加视觉测得角度对应的脉冲，不取余、不取反。
+        var originalRPositions = motionController.CaptureCalibrationFeedback(
+            FirstSetNozzle1RHardwareAxisNo,
+            FirstSetNozzle2RHardwareAxisNo,
+            AllowedProductionPeerAxisNos);
+        var nozzle1RPulses = ConvertMeasuredAngleToRCorrectionPulses(
+            pickupBatch.Nozzle1.RotationDegrees);
+        var nozzle1TargetR = originalRPositions.ActualX + nozzle1RPulses;
 
         double? nozzle2RPulses = null;
-        double? nozzle2CorrectionDegrees = null;
+        double? nozzle2TargetR = null;
         if (pickupBatch.Nozzle2 is { } nozzle2Target)
         {
-            nozzle2RPulses = ConvertVisionAngleToSquareCorrectionPulses(
-                nozzle2Target.RotationDegrees,
-                out var correctionDegrees);
-            nozzle2CorrectionDegrees = correctionDegrees;
-            AddRelativeMoveIfNeeded(
-                relativeMoves,
-                FirstSetNozzle2RHardwareAxisNo,
-                nozzle2RPulses.Value);
+            nozzle2RPulses = ConvertMeasuredAngleToRCorrectionPulses(
+                nozzle2Target.RotationDegrees);
+            nozzle2TargetR = originalRPositions.ActualY + nozzle2RPulses.Value;
         }
 
         SetFirstSetPositionStatus(
-            $"正在同步移动{positionName}并按正方形角度纠正：X={targetX:0.###}，Y={targetY:0.###}，" +
-            $"吸嘴1 R={pickupBatch.Nozzle1.RotationDegrees:0.###}°→校正{nozzle1CorrectionDegrees:0.###}°" +
-            $"（{nozzle1RPulses:0.###} pulse）" +
+            $"正在同步移动{positionName}并按下相机同规则纠正：X={targetX:0.###}，Y={targetY:0.###}，" +
+            $"吸嘴1 R={pickupBatch.Nozzle1.RotationDegrees:0.###}°" +
+            $"（基准{originalRPositions.ActualX:0.###} + {nozzle1RPulses:0.###} = {nozzle1TargetR:0.###} pulse）" +
             (nozzle2RPulses.HasValue
                 ? $"，吸嘴2 R={pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°" +
-                  $"→校正{nozzle2CorrectionDegrees!.Value:0.###}°" +
-                  $"（{nozzle2RPulses.Value:0.###} pulse）"
+                  $"（基准{originalRPositions.ActualY:0.###} + {nozzle2RPulses.Value:0.###}" +
+                  $" = {nozzle2TargetR!.Value:0.###} pulse）"
                 : string.Empty) +
             "…",
             true);
@@ -4105,12 +4103,18 @@ public partial class HomePage : UserControl
         var absoluteTargets = new Dictionary<int, double>
         {
             [VisionCalibrationService.FirstSetXHardwareAxisNo] = targetX,
-            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY
+            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY,
+            [FirstSetNozzle1RHardwareAxisNo] = nozzle1TargetR
         };
-        var movingAxisNos = absoluteTargets.Keys.Concat(relativeMoves.Keys).ToArray();
+        if (nozzle2TargetR.HasValue)
+        {
+            absoluteTargets[FirstSetNozzle2RHardwareAxisNo] = nozzle2TargetR.Value;
+        }
+
+        var movingAxisNos = absoluteTargets.Keys.ToArray();
         await motionController.MoveAxesSynchronizedAsync(
             absoluteTargets,
-            relativeMoves,
+            new Dictionary<int, double>(),
             cancellationToken,
             allowedMovingAxisNos: AllowedProductionPeerAxisNos,
             minimumCompletionTolerance: HomePageCompletionTolerance,
@@ -4120,49 +4124,30 @@ public partial class HomePage : UserControl
             VisionCalibrationService.FirstSetXHardwareAxisNo,
             VisionCalibrationService.FirstSetYHardwareAxisNo,
             AllowedProductionPeerAxisNos);
+        var actualR = motionController.CaptureCalibrationFeedback(
+            FirstSetNozzle1RHardwareAxisNo,
+            FirstSetNozzle2RHardwareAxisNo,
+            AllowedProductionPeerAxisNos);
         SetFirstSetPositionStatus(
-            $"{positionName}与正方形角度纠正已同步完成：" +
+            $"{positionName}与R角度纠正已同步完成：" +
             $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}，" +
-            $"R1校正{nozzle1CorrectionDegrees:0.###}°/{nozzle1RPulses:0.###} pulse" +
+            $"R1={actualR.ActualX:0.###}（视觉{pickupBatch.Nozzle1.RotationDegrees:0.###}°/" +
+            $"{nozzle1RPulses:0.###} pulse）" +
             (nozzle2RPulses.HasValue
-                ? $"，R2校正{nozzle2CorrectionDegrees!.Value:0.###}°/{nozzle2RPulses.Value:0.###} pulse。"
+                ? $"，R2={actualR.ActualY:0.###}（视觉{pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°/" +
+                  $"{nozzle2RPulses.Value:0.###} pulse）。"
                 : "。"),
             true);
     }
 
-    private static void AddRelativeMoveIfNeeded(
-        IDictionary<int, double> relativeMoves,
-        int hardwareAxisNo,
-        double pulseDistance)
+    private static double ConvertMeasuredAngleToRCorrectionPulses(double measuredAngle)
     {
-        if (pulseDistance != 0)
+        if (!double.IsFinite(measuredAngle))
         {
-            relativeMoves[hardwareAxisNo] = pulseDistance;
-        }
-    }
-
-    private static double ConvertVisionAngleToSquareCorrectionPulses(
-        double angleDegrees,
-        out double correctionDegrees)
-    {
-        if (!double.IsFinite(angleDegrees))
-        {
-            throw new ArgumentOutOfRangeException(nameof(angleDegrees), "脚本1返回的R角度必须是有效数字。");
+            throw new ArgumentOutOfRangeException(nameof(measuredAngle), "视觉测得的R角度必须是有效数字。");
         }
 
-        // 正方形每转90°外观方向等价：先取最短的[-45°, 45°]等效姿态，再反向旋转到水平/垂直。
-        var normalizedDegrees = angleDegrees % 90d;
-        if (normalizedDegrees > 45d)
-        {
-            normalizedDegrees -= 90d;
-        }
-        else if (normalizedDegrees < -45d)
-        {
-            normalizedDegrees += 90d;
-        }
-
-        correctionDegrees = -normalizedDegrees;
-        return correctionDegrees / DegreesPerRevolution * NozzleRPulsesPerRevolution;
+        return measuredAngle / DegreesPerRevolution * NozzleRPulsesPerRevolution;
     }
 
     private void PresetPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
