@@ -147,6 +147,15 @@ public sealed class HomePageSettings
 
     public double? Bin3PositionY { get; set; }
 
+    // 视觉角度到R轴命令方向的可标定系数，只允许1或-1；空值使用设备默认值。
+    public double? UpperCameraNozzle1RotationSign { get; set; }
+
+    public double? UpperCameraNozzle2RotationSign { get; set; }
+
+    public double? LowerCameraNozzle1RotationSign { get; set; }
+
+    public double? LowerCameraNozzle2RotationSign { get; set; }
+
     public Dictionary<int, ProductionAxisMotionSettings> ProductionAxisMotionSettings { get; set; } = [];
 
     public Dictionary<int, TestStationSettings> TestStationSettings { get; set; } = [];
