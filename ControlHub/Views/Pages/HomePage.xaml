@@ -2054,15 +2054,15 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="破真空停留（ms）" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBlock Text="破真空脉冲（ms）" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="VacuumBreakPulseTextBox"
                                              Height="25"
-                                             Text="150"
+                                             Text="30"
                                              TextAlignment="Center"
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
-                                             ToolTip="Z轴到放料位并开启破真空后的保持时间"
+                                             ToolTip="先关闭真空吸，等待20ms后短促破真空；实际最长30ms"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,8,2">

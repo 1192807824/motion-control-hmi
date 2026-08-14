@@ -32,7 +32,8 @@ public partial class HomePage : UserControl
     private const int Station13BreakVacuumOutputBit = 22;
     private const int Station14BreakVacuumOutputBit = 23;
     private const int LowerCameraLightOutputBit = 10;
-    private const int DefaultVacuumBreakPulseMilliseconds = 150;
+    private const int DefaultVacuumBreakPulseMilliseconds = 30;
+    private const int VacuumValveSwitchDelayMilliseconds = 20;
     private const int DefaultVacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
     private const int FirstSetNozzle1RHardwareAxisNo = 6;
@@ -535,6 +536,11 @@ public partial class HomePage : UserControl
             return true;
         }
 
+        if (vacuumEnabled && breakVacuumEnabled)
+        {
+            throw new ArgumentException("同一个吸嘴不能同时开启真空吸和真空破。");
+        }
+
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
@@ -605,11 +611,6 @@ public partial class HomePage : UserControl
         bool vacuumEnabled,
         bool breakVacuumEnabled)
     {
-        if (vacuumEnabled && breakVacuumEnabled)
-        {
-            throw new ArgumentException("同一个吸嘴不能同时开启真空吸和真空破。");
-        }
-
         var outputSet = false;
         Exception? firstFailure = null;
         try
@@ -1256,18 +1257,36 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var breakPulseMilliseconds = GetProductionZDwellTimes().BreakVacuumMilliseconds;
+        var breakPulseMilliseconds = Math.Min(
+            GetProductionZDwellTimes().BreakVacuumMilliseconds,
+            DefaultVacuumBreakPulseMilliseconds);
+
+        // 放料必须先完全停止真空吸，再给破真空阀一个短脉冲；两阀禁止重叠开启。
         if (!SetNozzleVacuumOutputs(
                 axisSet,
                 nozzleNumber,
                 vacuumEnabled: false,
-                breakVacuumEnabled: true))
+                breakVacuumEnabled: false))
         {
-            throw new InvalidOperationException($"Z{nozzleNumber}真空破开启失败。");
+            throw new InvalidOperationException($"Z{nozzleNumber}停止真空吸失败。");
         }
+
+        SetFirstSetPositionStatus(
+            $"Z{nozzleNumber}真空吸已关闭，等待阀切换 {VacuumValveSwitchDelayMilliseconds} ms…",
+            true);
+        await Task.Delay(VacuumValveSwitchDelayMilliseconds, cancellationToken);
 
         try
         {
+            if (!SetNozzleVacuumOutputs(
+                    axisSet,
+                    nozzleNumber,
+                    vacuumEnabled: false,
+                    breakVacuumEnabled: true))
+            {
+                throw new InvalidOperationException($"Z{nozzleNumber}真空破开启失败。");
+            }
+
             await Task.Delay(breakPulseMilliseconds, cancellationToken);
         }
         finally
@@ -1283,7 +1302,7 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus(
-            $"Z{nozzleNumber}真空破已脉冲 {breakPulseMilliseconds} ms，真空破和真空吸均已关闭。",
+            $"Z{nozzleNumber}已先关闭真空吸，再破真空 {breakPulseMilliseconds} ms；两阀均已关闭。",
             true);
     }
 
@@ -4443,9 +4462,12 @@ public partial class HomePage : UserControl
         VacuumPickupDwellTextBox.Text = (
             _homeSettings.VacuumPickupDwellMilliseconds
             ?? DefaultVacuumPickupDwellMilliseconds).ToString(CultureInfo.CurrentCulture);
-        VacuumBreakPulseTextBox.Text = (
+        var vacuumBreakPulseMilliseconds = Math.Min(
             _homeSettings.VacuumBreakPulseMilliseconds
-            ?? DefaultVacuumBreakPulseMilliseconds).ToString(CultureInfo.CurrentCulture);
+            ?? DefaultVacuumBreakPulseMilliseconds,
+            DefaultVacuumBreakPulseMilliseconds);
+        _homeSettings.VacuumBreakPulseMilliseconds = vacuumBreakPulseMilliseconds;
+        VacuumBreakPulseTextBox.Text = vacuumBreakPulseMilliseconds.ToString(CultureInfo.CurrentCulture);
         SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetPickupPosition1X ?? DefaultSecondSetPickupPosition1X);
         SecondSetPosition1YTextBox.Text = FormatPresetCoordinate(
