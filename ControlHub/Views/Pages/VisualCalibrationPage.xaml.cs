@@ -58,6 +58,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _shutdown;
     private bool _hostReady;
     private bool _hostCanRestart;
+    private bool _closingVisionProcesses;
     private bool _calibrationViewRequested;
     private bool _calibrationRunning;
     private bool _centerSyncRunning;
@@ -2638,7 +2639,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private async void RestartHost_Click(object sender, RoutedEventArgs e)
     {
-        if (_calibrationRunning)
+        if (_calibrationRunning || _closingVisionProcesses)
         {
             return;
         }
@@ -2660,6 +2661,47 @@ public partial class VisualCalibrationPage : UserControl
             {
                 SetHostStatus($"标定流程开启失败：{exception.Message}", HostStatus.Error);
             }
+        }
+    }
+
+    private async void CloseVision_Click(object sender, RoutedEventArgs e)
+    {
+        if (_calibrationRunning || _closingVisionProcesses)
+        {
+            return;
+        }
+
+        _closingVisionProcesses = true;
+        _hostReady = false;
+        _hostCanRestart = false;
+        _calibrationCancellation?.Cancel();
+        _clickMoveCancellation?.Cancel();
+        _rotationCenterCancellation?.Cancel();
+        _lowerCameraCorrectionTestCancellation?.Cancel();
+        SetClickMoveCheckedNoEvent(false);
+        HostPlaceholder.Visibility = Visibility.Visible;
+        SetHostStatus("正在关闭所有视觉程序…", HostStatus.Starting);
+        UpdateCommandState();
+
+        try
+        {
+            var closedProcessCount = await VisionHost.CloseAllVisionProcessesAsync();
+            _hostCanRestart = true;
+            SetHostStatus(
+                closedProcessCount > 0
+                    ? $"视觉程序已全部关闭，共清理 {closedProcessCount} 个进程；现在可打开 VisionMaster。"
+                    : "视觉程序已关闭；现在可打开 VisionMaster。",
+                HostStatus.Ready);
+        }
+        catch (Exception exception)
+        {
+            _hostCanRestart = true;
+            SetHostStatus($"关闭视觉程序失败：{exception.Message}", HostStatus.Error);
+        }
+        finally
+        {
+            _closingVisionProcesses = false;
+            UpdateCommandState();
         }
     }
 
@@ -3370,6 +3412,7 @@ public partial class VisualCalibrationPage : UserControl
             MoveToArrivalPosition1Button is null ||
             MoveToArrivalPosition2Button is null ||
             CalibrationEmergencyStopButton is null ||
+            CloseVisionButton is null ||
             ClickTargetToolComboBox is null)
         {
             return;
@@ -3487,12 +3530,20 @@ public partial class VisualCalibrationPage : UserControl
         SetManualJogEditorsEnabled(manualJogAvailable && _manualJogAxisNo is null);
         ManualJogStopButton.IsEnabled = _manualJogAxisNo is not null;
         RestartHostButton.IsEnabled =
+            !_closingVisionProcesses &&
             !_calibrationRunning &&
             !_clickMoveRunning &&
             !_clickMoveConfigurationRunning &&
             !_rotationCenterRunning &&
             !_lowerCameraCorrectionTestRunning &&
             _hostCanRestart;
+        CloseVisionButton.IsEnabled =
+            !_closingVisionProcesses &&
+            !_calibrationRunning &&
+            !_clickMoveRunning &&
+            !_clickMoveConfigurationRunning &&
+            !_rotationCenterRunning &&
+            !_lowerCameraCorrectionTestRunning;
         StepXPulsesTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
         StepYPulsesTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
         VelocityTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;

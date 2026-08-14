@@ -244,12 +244,23 @@
                             Content="重启视觉"
                             Height="38"
                             Padding="14,0"
+                            Margin="0,0,8,0"
                             Foreground="White"
                             Background="#0B2235"
                             BorderBrush="#45647A"
                             Cursor="Hand"
                             IsEnabled="False"
                             Click="RestartHost_Click" />
+                    <Button x:Name="CloseVisionButton"
+                            Content="关闭视觉"
+                            Height="38"
+                            Padding="14,0"
+                            Foreground="White"
+                            Background="#6E252A"
+                            BorderBrush="#B84B52"
+                            Cursor="Hand"
+                            Click="CloseVision_Click"
+                            ToolTip="关闭 VisionMasterHost 和所有 VisionMaster 相关进程，释放相机及视觉资源" />
                 </StackPanel>
             </Grid>
         </Border>

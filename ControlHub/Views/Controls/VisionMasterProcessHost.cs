@@ -13,6 +13,15 @@ namespace ControlHub.Views.Controls;
 
 public sealed class VisionMasterProcessHost : HwndHost
 {
+    private static readonly HashSet<string> VisionProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "VisionMasterHost",
+        "VisionMaster",
+        "VisionMasterServer",
+        "VisionMasterServerApp",
+        "vServerApp"
+    };
+
     private const int GwlStyle = -16;
     private const int SwShow = 5;
     private const int WmClose = 0x0010;
@@ -250,6 +259,33 @@ public sealed class VisionMasterProcessHost : HwndHost
 
             StopProcess();
             await StartCoreAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task<int> CloseAllVisionProcessesAsync()
+    {
+        // Do not wait for a currently hung startup timeout before honoring an operator stop.
+        lock (_syncRoot)
+        {
+            _startCancellation?.Cancel();
+        }
+
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_disposed)
+            {
+                return 0;
+            }
+
+            var ownedProcessWasRunning = HasRunningOwnedProcess();
+            StopProcess();
+            var remainingProcessCount = await Task.Run(StopRemainingVisionProcesses);
+            return remainingProcessCount + (ownedProcessWasRunning ? 1 : 0);
         }
         finally
         {
@@ -1297,6 +1333,98 @@ public sealed class VisionMasterProcessHost : HwndHost
         {
             process.Dispose();
         }
+    }
+
+    private bool HasRunningOwnedProcess()
+    {
+        lock (_syncRoot)
+        {
+            return IsProcessRunning(_process);
+        }
+    }
+
+    private static int StopRemainingVisionProcesses()
+    {
+        var stoppedProcessCount = 0;
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.Id == Environment.ProcessId || !IsVisionProcess(process))
+                    {
+                        continue;
+                    }
+
+                    if (process.HasExited)
+                    {
+                        continue;
+                    }
+
+                    stoppedProcessCount++;
+                    var closeRequested = process.MainWindowHandle != IntPtr.Zero && process.CloseMainWindow();
+                    if (!closeRequested || !process.WaitForExit(2_000))
+                    {
+                        process.Kill(entireProcessTree: true);
+                        _ = process.WaitForExit(2_000);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The process exited between enumeration and shutdown.
+                }
+                catch (Win32Exception exception)
+                {
+                    throw new InvalidOperationException(
+                        $"无法关闭视觉进程 {process.ProcessName}（PID {process.Id}）：{exception.Message}",
+                        exception);
+                }
+            }
+        }
+
+        return stoppedProcessCount;
+    }
+
+    private static bool IsVisionProcess(Process process)
+    {
+        if (VisionProcessNames.Contains(process.ProcessName))
+        {
+            return true;
+        }
+
+        string? executablePath;
+        try
+        {
+            executablePath = process.MainModule?.FileName;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(executablePath);
+        while (!string.IsNullOrWhiteSpace(directory))
+        {
+            var directoryName = Path.GetFileName(directory);
+            if (directoryName.StartsWith("VisionMaster", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return false;
     }
 
     private void VisionProcess_Exited(object? sender, EventArgs e)
