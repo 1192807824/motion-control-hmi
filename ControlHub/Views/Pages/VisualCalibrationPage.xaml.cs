@@ -2278,7 +2278,7 @@ public partial class VisualCalibrationPage : UserControl
             for (var pointIndex = 0; pointIndex < 3; pointIndex++)
             {
                 SetRotationCenterStatus(
-                    $"正在执行“获取三点流程”并读取第{pointIndex + 1}个矩形中心…",
+                    $"正在执行“获取三点流程”并读取第{pointIndex + 1}个Blob质心…",
                     WorkflowStatus.Running);
                 var point = await VisionHost.CaptureRotationCenterPointAsync(cancellationToken);
                 points.Add(point);

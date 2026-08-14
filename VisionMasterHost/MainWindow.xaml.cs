@@ -17,7 +17,6 @@ using IMVSCircleFitModuCs;
 using IMVSLineFindModuCs;
 using IMVSL2LMeasureModuCs;
 using IMVSNPointCalibModuCs;
-using IMVSRectFindModuCs;
 using ShellModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
@@ -41,7 +40,6 @@ public partial class MainWindow : Window
     private const string Nozzle1CircleModuleName = "圆查找1";
     private const string Nozzle2CircleModuleName = "圆查找2";
     private const string DefaultRotationPointProcedureName = "获取三点流程";
-    private const string RotationPointRectangleModuleName = "矩形检测1";
     private const string DefaultRotationCenterProcedureName = "计算旋转中心";
     private const string RotationCenterCircleModuleName = "圆拟合1";
     private const string DefaultLowerCameraCorrectionProcedureName = "下相机纠偏";
@@ -481,39 +479,45 @@ public partial class MainWindow : Window
 
         EnsureRotationCenterCommandReady();
         var procedure = GetRequiredProcedure(_rotationPointProcedureName);
-        var rectangleModule = ResolveNamedModule<IMVSRectFindModuTool>(
+        var blobModule = ResolveNamedBlobFindModule(
             _rotationPointProcedureName,
-            RotationPointRectangleModuleName);
+            InspectionBlobModuleName);
         StopAllContinuousExecutionNoThrow();
         PrepareLiveRendererForCameraAcquisition();
         procedure.Run(true);
         EnsureProcedureRunSucceeded(procedure, _rotationPointProcedureName);
 
-        var result = rectangleModule.ModuResult;
-        if (result is null || result.ModuStatus != 1 || result.DetectStatus != 1)
+        var result = blobModule.ModuResult;
+        if (result is null || result.ModuStatus != 1)
         {
             throw new InvalidOperationException(
-                $"{_rotationPointProcedureName}.{RotationPointRectangleModuleName}返回NG，请检查吸嘴图像和矩形检测参数。");
+                $"{_rotationPointProcedureName}.{InspectionBlobModuleName}返回NG，请检查吸嘴图像和Blob分析参数。");
         }
 
-        var center = result.RectBox?.CenterPoint
-            ?? throw new InvalidOperationException(
-                $"{_rotationPointProcedureName}.{RotationPointRectangleModuleName}未返回矩形中心点。");
-        if (float.IsNaN(center.X) || float.IsInfinity(center.X) ||
-            float.IsNaN(center.Y) || float.IsInfinity(center.Y))
+        var centroids = result.CentroidPoint;
+        if (result.BlobNum < 1 || centroids is null || centroids.Count < 1)
         {
-            throw new InvalidOperationException("矩形检测返回的中心点X/Y无效。");
+            throw new InvalidOperationException(
+                $"{_rotationPointProcedureName}.{InspectionBlobModuleName}未返回Blob质心。");
         }
 
-        BindInspectionResultModule(rectangleModule);
+        // 与 VisionMaster 当前结果表一致，读取第 0 行“质心X / 质心Y”。
+        var centroid = centroids[0];
+        if (float.IsNaN(centroid.X) || float.IsInfinity(centroid.X) ||
+            float.IsNaN(centroid.Y) || float.IsInfinity(centroid.Y))
+        {
+            throw new InvalidOperationException("Blob分析返回的质心X/Y无效。");
+        }
+
+        BindInspectionResultModule(blobModule);
         RefreshInspectionDisplayNoThrow();
         SetStatus(
-            $"获取旋转中心采集点完成：X={center.X:0.###}，Y={center.Y:0.###}",
+            $"获取旋转中心Blob质心完成：X={centroid.X:0.###}，Y={centroid.Y:0.###}",
             StatusKind.Success);
         return string.Join(
             "\t",
-            center.X.ToString("R", CultureInfo.InvariantCulture),
-            center.Y.ToString("R", CultureInfo.InvariantCulture));
+            centroid.X.ToString("R", CultureInfo.InvariantCulture),
+            centroid.Y.ToString("R", CultureInfo.InvariantCulture));
     }
 
     private string CalculateRotationCenter(IReadOnlyList<string> parts)

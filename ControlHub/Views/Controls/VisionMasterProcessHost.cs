@@ -468,7 +468,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             !double.IsFinite(x) ||
             !double.IsFinite(y))
         {
-            throw new InvalidDataException("VisionMaster 返回的矩形中心点无效。");
+            throw new InvalidDataException("VisionMaster 返回的Blob质心点无效。");
         }
 
         return new VisionRotationPoint(x, y);
