@@ -400,7 +400,8 @@ public partial class MainWindow : Window
         ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
-        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
+        _ = ResolveNPointCalibrationModule(procedureName);
+        BindCalibrationProcedure(procedure);
         await RefreshRenderLayoutAsync();
         UpdateCommandState();
         SetStatus("视觉标定已就绪，点击一键九点标定后开始取像。", StatusKind.Success);
@@ -1799,7 +1800,8 @@ public partial class MainWindow : Window
         StopAllContinuousExecutionNoThrow();
         ApplyCalibrationRenderLayout();
         ClearCalibrationRenderer();
-        BindCalibrationModule(ResolveNPointCalibrationModule(procedureName));
+        _ = ResolveNPointCalibrationModule(procedureName);
+        BindCalibrationProcedure(_calibrationProcedure);
         RefreshRenderLayout();
 
         var centerX = ParseFiniteDouble(parts[1], "基准点X");
@@ -1867,6 +1869,8 @@ public partial class MainWindow : Window
             await ActivateCalibrationProcedureAsync(expectedProcedureName);
         }
         var procedureName = _activeCalibrationProcedureName;
+        var calibrationProcedure = _calibrationProcedure
+            ?? throw new InvalidOperationException("当前 VisionMaster 标定流程已失效。");
         string calibrationPath;
         try
         {
@@ -1920,7 +1924,7 @@ public partial class MainWindow : Window
 
             _calibrationSession = new VisionCalibrationSession(nPointModule, calibrationPath, backupPath);
             ClearCalibrationRenderer();
-            BindCalibrationModule(nPointModule);
+            BindCalibrationProcedure(calibrationProcedure);
             SetBusy(true);
             SetStatus(
                 $"九点标定已准备：基准({centerX:0.####}, {centerY:0.####})，" +
@@ -3102,9 +3106,9 @@ public partial class MainWindow : Window
             _calibrationProcedure = VmSolution.Instance[procedureName] as VmProcedure
                 ?? throw new InvalidOperationException($"方案中未找到流程“{procedureName}”。");
             _settings.CalibrationProcedureName = procedureName;
-            var nPointModule = ResolveNPointCalibrationModule(procedureName);
+            _ = ResolveNPointCalibrationModule(procedureName);
             ClearCalibrationRenderer();
-            BindCalibrationModule(nPointModule);
+            BindCalibrationProcedure(_calibrationProcedure);
             SaveSettingsNoThrow();
             UpdateCommandState();
             SetStatus($"标定流程已选择：{procedureName}", StatusKind.Ready);
@@ -3476,10 +3480,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BindCalibrationModule(IMVSNPointCalibModuTool module)
+    private void BindCalibrationProcedure(VmProcedure procedure)
     {
         CalibrationImagePlaceholder.Visibility = Visibility.Visible;
-        CalibrationRenderControl.ModuleSource = module;
+        // A calibration procedure contains the camera image plus every downstream result
+        // layer. Binding only the N-point tool leaves VmRenderControl without a usable
+        // module image in solutions where that tool exposes overlays but no base image.
+        CalibrationRenderControl.ModuleSource = procedure;
         QueueCalibrationResultImageSelection();
     }
 
@@ -3518,6 +3525,7 @@ public partial class MainWindow : Window
                 try
                 {
                     SelectCalibrationResultImage();
+                    CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
                 }
                 catch
                 {
@@ -3539,11 +3547,17 @@ public partial class MainWindow : Window
 
         if (string.IsNullOrWhiteSpace(targetImage))
         {
-            var availableImages = displayableImages.Count == 0
-                ? "无"
-                : string.Join("、", displayableImages);
-            throw new InvalidOperationException(
-                $"标定渲染控件中未找到 {NPointCalibrationModuleName} 图层；可显示图层：{availableImages}。");
+            // Some VisionMaster solutions publish a usable procedure image without naming
+            // the layer after the N-point module. Keep that image visible instead of turning
+            // a successful calibration capture into a blank-screen warning.
+            targetImage = displayableImages.FirstOrDefault(imageName =>
+                              string.Equals(imageName, currentImage, StringComparison.Ordinal))
+                          ?? displayableImages.LastOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(targetImage))
+        {
+            throw new InvalidOperationException("标定流程执行成功，但尚未发布可显示的图像。");
         }
 
         if (!string.Equals(currentImage, targetImage, StringComparison.Ordinal))
@@ -3560,10 +3574,9 @@ public partial class MainWindow : Window
         }
 
         var selectedImage = CalibrationRenderControl.GetSelectedImageDisplayName();
-        if (!IsNPointCalibrationImage(selectedImage))
+        if (string.IsNullOrWhiteSpace(selectedImage))
         {
-            throw new InvalidOperationException(
-                $"标定结果图层未锁定到 {NPointCalibrationModuleName}，当前图层：{selectedImage}。");
+            throw new InvalidOperationException("标定图像已经绑定，但渲染控件未返回当前图层名称。");
         }
 
         return selectedImage!;
