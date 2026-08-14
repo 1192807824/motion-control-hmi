@@ -76,6 +76,7 @@ public partial class MainWindow : Window
     private bool _busy;
     private bool _initializingFixedSolution;
     private bool _calibrationViewActive;
+    private int _calibrationRenderGeneration;
     private bool _clickMoveEnabled;
     private bool _clickTransformBusy;
     private bool _applyingCalibrationSidebarState;
@@ -1972,7 +1973,7 @@ public partial class MainWindow : Window
         var displayWarning = "";
         try
         {
-            await RefreshCalibrationResultDisplayAsync(session.Module);
+            await RefreshCalibrationResultDisplayAsync();
         }
         catch (Exception exception)
         {
@@ -1987,7 +1988,7 @@ public partial class MainWindow : Window
         return $"第 {pointNumber}/9 点 VisionMaster 流程执行完成。";
     }
 
-    private async Task<string> CompleteNinePointCalibrationAsync()
+    private Task<string> CompleteNinePointCalibrationAsync()
     {
         var session = _calibrationSession
             ?? throw new InvalidOperationException("尚未准备九点标定参数。");
@@ -2008,13 +2009,22 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("标定矩阵已生成，但标定误差评估未通过。");
         }
 
+        var pixelPrecision = result.PixelPrecision;
         session.Module.ModuParams.DoSaveFile(session.CalibrationPath);
+
+        // DoSaveFile 是本轮标定的提交边界。文件一旦保存成功，就先结束会话，
+        // 避免客户端等待显示刷新超时后发送的迟到 ABORT 把成功结果清空。
+        _calibrationSession = null;
         StopAllContinuousExecutionNoThrow();
         var displayWarning = "";
+        QueueCalibrationResultRefreshNoThrow(DispatcherPriority.ContextIdle);
         try
         {
-            // 停止流程后重新绑定一次最终结果，避免 SDK 的停止回调清掉第 9 点画面。
-            await RefreshCalibrationResultDisplayAsync(session.Module);
+            ApplyCalibrationRenderLayout();
+            RefreshRenderLayout();
+            // 保持 PREPARE 时建立的同一模块绑定，先同步刷新一次，再异步补刷最终结果；
+            // 不得清屏或重绑。COMPLETE 不等待渲染队列，保存成功后可立即返回。
+            RefreshCalibrationResultDisplay();
         }
         catch (Exception exception)
         {
@@ -2022,36 +2032,84 @@ public partial class MainWindow : Window
             displayWarning = $"；最终标定画面刷新失败：{FormatException(exception)}";
         }
 
-        _calibrationSession = null;
-        ApplyCalibrationRenderLayout();
-        RefreshRenderLayout();
         var message =
-            $"九点标定成功，像素精度 {result.PixelPrecision:0.######}，" +
+            $"九点标定成功，像素精度 {pixelPrecision:0.######}，" +
             $"标定文件：{session.CalibrationPath}" +
             (string.IsNullOrWhiteSpace(session.BackupPath)
                 ? ""
                 : $"；旧文件已备份：{session.BackupPath}") +
             displayWarning;
-        SetBusy(false);
-        SetStatus(message, StatusKind.Success);
-        return message;
+        FinishCalibrationUiNoThrow(message, StatusKind.Success);
+        return Task.FromResult(message);
     }
 
     private Task<string> AbortNinePointCalibrationAsync()
     {
-        if (_calibrationSession is { } session)
+        var session = _calibrationSession;
+        if (session is null)
         {
-            session.Module.ModuParams.DoClearPoint();
-            _calibrationSession = null;
+            // COMPLETE 可能已经保存成功，只是客户端在回包前超时并补发了 ABORT。
+            // 此时必须幂等返回，不能清空最终画面，也不能覆盖成功状态。
+            return Task.FromResult("当前没有正在进行的九点标定，已保留现有结果画面。");
         }
 
-        ClearCalibrationRenderer();
-        StopAllContinuousExecutionNoThrow();
-        ApplyCalibrationRenderLayout();
-        RefreshRenderLayout();
-        var message = "九点标定已取消，本次未完成的标定点已清空。";
-        SetBusy(false);
-        SetStatus(message, StatusKind.Ready);
+        if (session.NextPointNumber == 10)
+        {
+            _calibrationSession = null;
+            StopAllContinuousExecutionNoThrow();
+            QueueCalibrationResultRefreshNoThrow(DispatcherPriority.ContextIdle);
+            // 九个点均已被 N 点模块接受后，即使最终校验、保存、回中心或通信失败，
+            // 也保留最后一帧和模块内采集点，供现场确认真正的失败原因。
+            try
+            {
+                ApplyCalibrationRenderLayout();
+                RefreshRenderLayout();
+                RefreshCalibrationResultDisplay();
+            }
+            catch
+            {
+                // 保留控件中已经存在的最后一帧；显示失败不能再次触发清屏。
+            }
+
+            const string completedPointsMessage =
+                "九个标定点均已采集，完成处理未成功；最后画面和标定点已保留，未执行清空。";
+            FinishCalibrationUiNoThrow(completedPointsMessage, StatusKind.Error);
+            return Task.FromResult(completedPointsMessage);
+        }
+
+        var clearWarning = "";
+        _calibrationRenderGeneration++;
+        try
+        {
+            session.Module.ModuParams.DoClearPoint();
+        }
+        catch (Exception exception)
+        {
+            clearWarning = $"；VisionMaster 清点失败：{FormatException(exception)}";
+        }
+        finally
+        {
+            // 即使厂商 SDK 清点抛异常，也必须释放会话和忙状态，避免宿主永久锁死。
+            _calibrationSession = null;
+            StopAllContinuousExecutionNoThrow();
+            try
+            {
+                ClearCalibrationRenderer();
+                ApplyCalibrationRenderLayout();
+                RefreshRenderLayout();
+            }
+            catch
+            {
+                // 流程状态清理优先于显示控件收尾。
+            }
+        }
+
+        var message = string.IsNullOrWhiteSpace(clearWarning)
+            ? "九点标定已取消，本次未完成的标定点已清空。"
+            : "九点标定已取消，本次未完成的标定点未能全部清空" + clearWarning;
+        FinishCalibrationUiNoThrow(
+            message,
+            string.IsNullOrWhiteSpace(clearWarning) ? StatusKind.Ready : StatusKind.Error);
         return Task.FromResult(message);
     }
 
@@ -3467,6 +3525,7 @@ public partial class MainWindow : Window
 
     private void ClearCalibrationRenderer()
     {
+        _calibrationRenderGeneration++;
         try
         {
             CalibrationRenderControl.ModuleSource = null;
@@ -3484,27 +3543,97 @@ public partial class MainWindow : Window
 
     private void BindCalibrationModule(IMVSNPointCalibModuTool module)
     {
+        _calibrationRenderGeneration++;
         CalibrationImagePlaceholder.Visibility = Visibility.Visible;
         // N 点模块本身没有图像输出字段；VmRenderControl 会沿模块输入关系取上游
         // 图像源作为底图，并把当前标定点、进度和状态作为渲染图形叠加显示。
         CalibrationRenderControl.ModuleSource = module;
     }
 
-    private async Task RefreshCalibrationResultDisplayAsync(IMVSNPointCalibModuTool module)
+    private async Task RefreshCalibrationResultDisplayAsync()
     {
-        // 每个标定点都重新建立模块渲染绑定。否则图像源与 N 点模块的异步回调
-        // 可能以不同顺序到达，后到的底图会覆盖已经绘制的状态、进度和标定点。
-        CalibrationRenderControl.ModuleSource = null;
-        CalibrationRenderControl.ClearDisplayView();
-        CalibrationRenderControl.ModuleSource = module;
+        // PREPARE 已经绑定 N 点模块。九次采集期间必须保持这一绑定，不能清屏或
+        // 重新赋值 ModuleSource，否则底图回调与标定图形回调会竞态，造成叠加时有时无。
+        // 先保证最终补刷已经入队；同步刷新暂时失败也不能短路后续重试。
+        QueueCalibrationResultRefreshNoThrow(DispatcherPriority.ContextIdle);
+        Exception? lastDisplayException = null;
+        var displayed = false;
+        try
+        {
+            RefreshCalibrationResultDisplay();
+            displayed = true;
+        }
+        catch (Exception exception)
+        {
+            lastDisplayException = exception;
+        }
+
+        // 让本次流程排入队列的底图/渲染回调先提交，再在同一绑定上补刷一次叠加。
+        // 这里只等待 Render，不再等待可能长期无法到达的 ContextIdle。
+        try
+        {
+            await Dispatcher.InvokeAsync(
+                () =>
+                {
+                    try
+                    {
+                        RefreshCalibrationResultDisplay();
+                        displayed = true;
+                    }
+                    catch (Exception exception)
+                    {
+                        lastDisplayException = exception;
+                    }
+                },
+                DispatcherPriority.Render);
+        }
+        catch (Exception exception)
+        {
+            lastDisplayException = exception;
+        }
+
+        if (!displayed && lastDisplayException is not null)
+        {
+            throw new InvalidOperationException(
+                "标定流程执行成功，但当前渲染结果尚未发布；已安排延迟补刷。",
+                lastDisplayException);
+        }
+    }
+
+    private void RefreshCalibrationResultDisplay()
+    {
         CalibrationRenderControl.UpdateVMResultShow();
         CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
-        RefreshRenderLayout();
+    }
 
-        // CAPTURE 命令运行在 WPF UI 线程。主动让出一次 Render 优先级，确保本点
-        // 的底图和叠加图形真正提交后再回复主程序、继续移动到下一个点。
-        await Dispatcher.InvokeAsync(RefreshRenderLayout, DispatcherPriority.Render);
-        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+    private void QueueCalibrationResultRefreshNoThrow(DispatcherPriority priority)
+    {
+        var generation = _calibrationRenderGeneration;
+        try
+        {
+            _ = Dispatcher.InvokeAsync(
+                () =>
+                {
+                    if (generation != _calibrationRenderGeneration)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        RefreshCalibrationResultDisplay();
+                    }
+                    catch
+                    {
+                        // 标定数据已经保存/保留；延迟补刷失败不改变流程结果。
+                    }
+                },
+                priority);
+        }
+        catch
+        {
+            // Dispatcher 正在关闭时不再安排显示刷新，标定数据状态不受影响。
+        }
     }
 
     private void StopPreviewProcedureNoThrow()
@@ -3655,6 +3784,27 @@ public partial class MainWindow : Window
     {
         _busy = busy;
         UpdateCommandState();
+    }
+
+    private void FinishCalibrationUiNoThrow(string message, StatusKind statusKind)
+    {
+        // 标定保存或中止的协议结果不能再被纯 UI 收尾异常改写。
+        _busy = false;
+        try
+        {
+            UpdateCommandState();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            SetStatus(message, statusKind);
+        }
+        catch
+        {
+        }
     }
 
     private void UpdateCommandState()
