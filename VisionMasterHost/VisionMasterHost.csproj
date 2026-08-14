@@ -78,6 +78,14 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSL2LMeasureModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSRotateCalculateModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSRotateCalculateModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="CalculatorModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\CalculatorModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="GlobalVariableModuleCs">
       <HintPath>$(VisionMasterAssemblyDirectory)\GlobalVariableModuleCs.dll</HintPath>
       <Private>true</Private>

@@ -9,14 +9,15 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using CalculatorModuleCs;
 using GlobalVariableModuleCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
 using IMVSCircleFindModuCs;
 using IMVSCircleFitModuCs;
 using IMVSLineFindModuCs;
-using IMVSL2LMeasureModuCs;
 using IMVSNPointCalibModuCs;
+using IMVSRotateCalculateModuCs;
 using ShellModuleCs;
 using VM.Core;
 using VM.PlatformSDKCS;
@@ -44,9 +45,10 @@ public partial class MainWindow : Window
     private const string RotationCenterCircleModuleName = "圆拟合1";
     private const string DefaultLowerCameraCorrectionProcedureName = "下相机纠偏";
     private const string LowerCameraCorrectionImageSourceName = "图像源1";
-    private const string LowerCameraCorrectionLineLineModuleName = "线线测量1";
-    private const string LowerCameraCorrectionTransformModuleName = "标定转换1";
-    private const string LowerCameraCorrectionCenterTransformModuleName = "标定转换2";
+    private const string LowerCameraCorrectionRotationModuleName = "旋转计算2";
+    private const string LowerCameraCorrectionTransformModuleName = "标定转换3";
+    private const string LowerCameraCorrectionCenterTransformModuleName = "标定转换4";
+    private const uint LowerCameraCorrectionResultModuleId = 85;
     private const string GlobalVariableModuleName = "全局变量1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
@@ -626,23 +628,28 @@ public partial class MainWindow : Window
         var imageSourceModule = ResolveNamedModule<VmModule>(
             _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionImageSourceName);
-        var lineLineModule = ResolveNamedModule<IMVSL2LMeasureModuTool>(
+        var rotationModule = ResolveNamedModule<IMVSRotateCalculateModuTool>(
             _lowerCameraCorrectionProcedureName,
-            LowerCameraCorrectionLineLineModuleName);
+            LowerCameraCorrectionRotationModuleName);
         var transformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
             _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionTransformModuleName);
         var centerTransformModule = ResolveNamedModule<IMVSCalibTransformModuTool>(
             _lowerCameraCorrectionProcedureName,
             LowerCameraCorrectionCenterTransformModuleName);
+        var resultModule = ResolveModuleById<CalculatorModuleTool>(
+            procedure,
+            _lowerCameraCorrectionProcedureName,
+            LowerCameraCorrectionResultModuleId);
 
         StopAllContinuousExecutionNoThrow();
-        var globalVariables = ResolveGlobalVariableModule();
-        globalVariables.SetVarFloat("旋转中心X", [rotationCenterX]);
-        globalVariables.SetVarFloat("旋转中心Y", [rotationCenterY]);
+        // 每次纠偏都把当前吸嘴对应的已标定圆心直接写入“旋转计算2”。
+        rotationModule.ModuParams.RotateCenter =
+        [
+            new VM.PlatformSDKCS.PointF { X = rotationCenterX, Y = rotationCenterY }
+        ];
 
-        // “旋转计算1”的旋转中心坐标已经连接到这两个全局变量。
-        // 应用程序只写入记录好的圆心X/Y，其余点、角度和差值全部由纠偏流程内部计算。
+        // 新纠偏支路的两个标定转换必须同时使用当前吸嘴自己的九点标定文件。
         transformModule.ModuParams.LoadCalibPath = calibrationPath;
         centerTransformModule.ModuParams.LoadCalibPath = calibrationPath;
 
@@ -654,56 +661,75 @@ public partial class MainWindow : Window
         BindInspectionResultModule(imageSourceModule);
         RefreshInspectionDisplayNoThrow();
 
-        var lineLineResult = lineLineModule.ModuResult;
-        if (lineLineResult is null || lineLineResult.ModuStatus != 1 ||
-            float.IsNaN(lineLineResult.L2LAngle) || float.IsInfinity(lineLineResult.L2LAngle))
+        var result = resultModule.ModuResult;
+        if (result is null || result.ModuStatus != 1)
         {
             throw new InvalidOperationException(
-                $"{_lowerCameraCorrectionProcedureName}.{LowerCameraCorrectionLineLineModuleName}未返回有效夹角。");
+                $"{_lowerCameraCorrectionProcedureName}的85号计算模块返回NG。");
         }
 
-        var transformResult = transformModule.ModuResult;
-        if (transformResult is null || transformResult.ModuStatus != 1 ||
-            transformResult.TransPoint is null || transformResult.TransPoint.Count < 1)
-        {
-            throw new InvalidOperationException(
-                $"{_lowerCameraCorrectionProcedureName}.{LowerCameraCorrectionTransformModuleName}未返回转换坐标。");
-        }
-
-        var transformed = transformResult.TransPoint[0];
-        if (float.IsNaN(transformed.X) || float.IsInfinity(transformed.X) ||
-            float.IsNaN(transformed.Y) || float.IsInfinity(transformed.Y))
-        {
-            throw new InvalidOperationException("下相机纠偏返回的转换坐标X/Y无效。");
-        }
-        var transformedX = transformed.X;
-        var transformedY = transformed.Y;
-
-        var centerTransformResult = centerTransformModule.ModuResult;
-        if (centerTransformResult is null || centerTransformResult.ModuStatus != 1 ||
-            centerTransformResult.TransPoint is null || centerTransformResult.TransPoint.Count < 1)
-        {
-            throw new InvalidOperationException(
-                $"{_lowerCameraCorrectionProcedureName}.{LowerCameraCorrectionCenterTransformModuleName}未返回旋转中心转换坐标。");
-        }
-
-        var transformedCenter = centerTransformResult.TransPoint[0];
-        var correctionX = transformedX - transformedCenter.X;
-        var correctionY = transformedY - transformedCenter.Y;
-        if (float.IsNaN(correctionX) || float.IsInfinity(correctionX) ||
-            float.IsNaN(correctionY) || float.IsInfinity(correctionY))
-        {
-            throw new InvalidOperationException("下相机纠偏计算得到的X/Y偏差无效。");
-        }
+        // 85号计算模块已经汇总标定转换3/4和旋转计算2，应用程序只读取最终 X/Y/R。
+        var correctionX = ReadSingleCalculatorFloat(result, "X", LowerCameraCorrectionResultModuleId);
+        var correctionY = ReadSingleCalculatorFloat(result, "Y", LowerCameraCorrectionResultModuleId);
+        var correctionR = ReadSingleCalculatorFloat(result, "R", LowerCameraCorrectionResultModuleId);
 
         SetStatus(
-            $"下相机纠偏完成：X偏差={correctionX:0.00000}，Y偏差={correctionY:0.00000}，夹角={lineLineResult.L2LAngle:0.00000}°",
+            $"下相机纠偏完成：X偏差={correctionX:0.00000}，Y偏差={correctionY:0.00000}，角度={correctionR:0.00000}°",
             StatusKind.Success);
         return string.Join(
             "\t",
             correctionX.ToString("R", CultureInfo.InvariantCulture),
             correctionY.ToString("R", CultureInfo.InvariantCulture),
-            lineLineResult.L2LAngle.ToString("R", CultureInfo.InvariantCulture));
+            correctionR.ToString("R", CultureInfo.InvariantCulture));
+    }
+
+    private static TModule ResolveModuleById<TModule>(
+        VmProcedure procedure,
+        string procedureName,
+        uint moduleId)
+        where TModule : VmModule
+    {
+        if (procedure.GetModuleByID(moduleId) is TModule module)
+        {
+            return module;
+        }
+
+        throw new InvalidOperationException(
+            $"固定方案的“{procedureName}”中未找到类型正确的{moduleId}号模块。");
+    }
+
+    private static float ReadSingleCalculatorFloat(
+        CalculatorResult result,
+        string outputName,
+        uint moduleId)
+    {
+        FloatDataArray output;
+        try
+        {
+            output = result.GetOutputFloat(outputName);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException(
+                $"{moduleId}号计算模块未发布浮点结果“{outputName}”。",
+                exception);
+        }
+
+        var values = output.pFloatVal;
+        if (output.nValueNum < 1 || values is null || values.Length < 1)
+        {
+            throw new InvalidOperationException(
+                $"{moduleId}号计算模块的“{outputName}”没有返回结果。");
+        }
+
+        var value = values[0];
+        if (float.IsNaN(value) || float.IsInfinity(value))
+        {
+            throw new InvalidOperationException(
+                $"{moduleId}号计算模块的“{outputName}”结果无效。");
+        }
+
+        return value;
     }
 
     private static void EnsureProcedureRunSucceeded(VmProcedure procedure, string procedureName)
