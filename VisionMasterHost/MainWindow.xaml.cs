@@ -299,6 +299,7 @@ public partial class MainWindow : Window
                 "START_LIVE_PREVIEW" => await StartLivePreviewFromCommandAsync(),
                 "SET_CLICK_MODE" => await SetClickMoveModeAsync(command.Split('\t')),
                 "PREPARE" => await PrepareNinePointCalibrationAsync(command.Split('\t')),
+                "CAPTURE" => await CaptureNinePointCalibrationAsync(command.Split('\t')),
                 "COMPLETE" => await CompleteNinePointCalibrationAsync(),
                 "ABORT" => await AbortNinePointCalibrationAsync(),
                 _ => ExecuteCalibrationCommand(command)
@@ -318,7 +319,7 @@ public partial class MainWindow : Window
         {
             "SET_CENTER" => SetCalibrationCenter(parts),
             "PREPARE" => throw new InvalidOperationException("PREPARE must be executed asynchronously."),
-            "CAPTURE" => CaptureNinePointCalibration(parts),
+            "CAPTURE" => throw new InvalidOperationException("CAPTURE must be executed asynchronously."),
             "COMPLETE" => throw new InvalidOperationException("COMPLETE must be executed asynchronously."),
             "ABORT" => throw new InvalidOperationException("ABORT must be executed asynchronously."),
             "SET_CLICK_MODE" => throw new InvalidOperationException("SET_CLICK_MODE must be executed asynchronously."),
@@ -1934,7 +1935,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private string CaptureNinePointCalibration(IReadOnlyList<string> parts)
+    private async Task<string> CaptureNinePointCalibrationAsync(IReadOnlyList<string> parts)
     {
         if (parts.Count != 2 ||
             !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var pointNumber) ||
@@ -1971,8 +1972,7 @@ public partial class MainWindow : Window
         var displayWarning = "";
         try
         {
-            CalibrationRenderControl.UpdateVMResultShow();
-            CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
+            await RefreshCalibrationResultDisplayAsync(session.Module);
         }
         catch (Exception exception)
         {
@@ -1987,7 +1987,7 @@ public partial class MainWindow : Window
         return $"第 {pointNumber}/9 点 VisionMaster 流程执行完成。";
     }
 
-    private Task<string> CompleteNinePointCalibrationAsync()
+    private async Task<string> CompleteNinePointCalibrationAsync()
     {
         var session = _calibrationSession
             ?? throw new InvalidOperationException("尚未准备九点标定参数。");
@@ -2010,6 +2010,18 @@ public partial class MainWindow : Window
 
         session.Module.ModuParams.DoSaveFile(session.CalibrationPath);
         StopAllContinuousExecutionNoThrow();
+        var displayWarning = "";
+        try
+        {
+            // 停止流程后重新绑定一次最终结果，避免 SDK 的停止回调清掉第 9 点画面。
+            await RefreshCalibrationResultDisplayAsync(session.Module);
+        }
+        catch (Exception exception)
+        {
+            // 标定文件已经成功保存，最终画面刷新失败不能把标定结果改判为失败。
+            displayWarning = $"；最终标定画面刷新失败：{FormatException(exception)}";
+        }
+
         _calibrationSession = null;
         ApplyCalibrationRenderLayout();
         RefreshRenderLayout();
@@ -2018,10 +2030,11 @@ public partial class MainWindow : Window
             $"标定文件：{session.CalibrationPath}" +
             (string.IsNullOrWhiteSpace(session.BackupPath)
                 ? ""
-                : $"；旧文件已备份：{session.BackupPath}");
+                : $"；旧文件已备份：{session.BackupPath}") +
+            displayWarning;
         SetBusy(false);
         SetStatus(message, StatusKind.Success);
-        return Task.FromResult(message);
+        return message;
     }
 
     private Task<string> AbortNinePointCalibrationAsync()
@@ -3475,6 +3488,23 @@ public partial class MainWindow : Window
         // N 点模块本身没有图像输出字段；VmRenderControl 会沿模块输入关系取上游
         // 图像源作为底图，并把当前标定点、进度和状态作为渲染图形叠加显示。
         CalibrationRenderControl.ModuleSource = module;
+    }
+
+    private async Task RefreshCalibrationResultDisplayAsync(IMVSNPointCalibModuTool module)
+    {
+        // 每个标定点都重新建立模块渲染绑定。否则图像源与 N 点模块的异步回调
+        // 可能以不同顺序到达，后到的底图会覆盖已经绘制的状态、进度和标定点。
+        CalibrationRenderControl.ModuleSource = null;
+        CalibrationRenderControl.ClearDisplayView();
+        CalibrationRenderControl.ModuleSource = module;
+        CalibrationRenderControl.UpdateVMResultShow();
+        CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
+        RefreshRenderLayout();
+
+        // CAPTURE 命令运行在 WPF UI 线程。主动让出一次 Render 优先级，确保本点
+        // 的底图和叠加图形真正提交后再回复主程序、继续移动到下一个点。
+        await Dispatcher.InvokeAsync(RefreshRenderLayout, DispatcherPriority.Render);
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
     }
 
     private void StopPreviewProcedureNoThrow()
