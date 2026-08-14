@@ -1171,10 +1171,12 @@ public partial class HomePage : UserControl
         VisionLowerCameraCorrectionResult correction,
         double rotationSign)
     {
-        var correctedX = configuredX -
-                         correction.CorrectionX * LowerCameraLinearPulsePerMillimeter;
-        var correctedY = configuredY -
-                         correction.CorrectionY * LowerCameraLinearPulsePerMillimeter;
+        // 下相机返回的是“把产品移回视觉中心所需的运动量”，现场验证其方向
+        // 与 X/Y 轴实际运动方向一致，因此放料时应叠加到示教目标上。
+        var correctedX = configuredX +
+                          correction.CorrectionX * LowerCameraLinearPulsePerMillimeter;
+        var correctedY = configuredY +
+                          correction.CorrectionY * LowerCameraLinearPulsePerMillimeter;
         var rCorrectionPulses = ConvertLowerCameraMeasuredAngleToRCorrectionPulses(
             correction.MeasuredAngle,
             rotationSign,
