@@ -1371,9 +1371,7 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var breakPulseMilliseconds = Math.Min(
-            GetProductionZDwellTimes().BreakVacuumMilliseconds,
-            DefaultVacuumBreakPulseMilliseconds);
+        var breakPulseMilliseconds = GetProductionZDwellTimes().BreakVacuumMilliseconds;
 
         // 放料必须先完全停止真空吸，再给破真空阀一个短脉冲；两阀禁止重叠开启。
         if (!SetNozzleVacuumOutputs(
@@ -4861,10 +4859,9 @@ public partial class HomePage : UserControl
         VacuumPickupDwellTextBox.Text = (
             _homeSettings.VacuumPickupDwellMilliseconds
             ?? DefaultVacuumPickupDwellMilliseconds).ToString(CultureInfo.CurrentCulture);
-        var vacuumBreakPulseMilliseconds = Math.Min(
+        var vacuumBreakPulseMilliseconds =
             _homeSettings.VacuumBreakPulseMilliseconds
-            ?? DefaultVacuumBreakPulseMilliseconds,
-            DefaultVacuumBreakPulseMilliseconds);
+            ?? DefaultVacuumBreakPulseMilliseconds;
         _homeSettings.VacuumBreakPulseMilliseconds = vacuumBreakPulseMilliseconds;
         VacuumBreakPulseTextBox.Text = vacuumBreakPulseMilliseconds.ToString(CultureInfo.CurrentCulture);
         SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(

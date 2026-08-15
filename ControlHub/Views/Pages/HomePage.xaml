@@ -2155,7 +2155,7 @@
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
-                                             ToolTip="先关闭真空吸，等待20ms后短促破真空；实际最长30ms"
+                                             ToolTip="先关闭真空吸，等待20ms后按配置时长开启破真空"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
