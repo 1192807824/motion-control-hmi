@@ -183,4 +183,15 @@ public sealed class TestStationSettings
     public double PressPosition { get; set; }
 
     public double WaitPosition { get; set; }
+
+    public bool? Enabled { get; set; }
+
+    public TestStationInstrument? Instrument { get; set; }
+}
+
+public enum TestStationInstrument
+{
+    None = 0,
+    E4981A = 1,
+    SM7110 = 2
 }

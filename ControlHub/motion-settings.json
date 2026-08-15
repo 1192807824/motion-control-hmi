@@ -1,5 +1,5 @@
 {
-  "ConfigurationVersion": 3,
+  "ConfigurationVersion": 4,
   "SimulationMode": false,
   "CardNo": null,
   "AxisCount": 16,
@@ -58,6 +58,141 @@
       "Mode": 33,
       "LowVelocity": 10000.0,
       "HighVelocity": 40000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "1": {
+      "Enabled": true,
+      "Mode": 1,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "2": {
+      "Enabled": true,
+      "Mode": 1,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "3": {
+      "Enabled": true,
+      "Mode": 1,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "4": {
+      "Enabled": true,
+      "Mode": 1,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "5": {
+      "Enabled": true,
+      "Mode": -1,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "6": {
+      "Enabled": true,
+      "Mode": 33,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "7": {
+      "Enabled": true,
+      "Mode": -1,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "8": {
+      "Enabled": true,
+      "Mode": 33,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "9": {
+      "Enabled": true,
+      "Mode": -1,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "10": {
+      "Enabled": true,
+      "Mode": 33,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "11": {
+      "Enabled": true,
+      "Mode": -1,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "12": {
+      "Enabled": true,
+      "Mode": 33,
+      "LowVelocity": 50000.0,
+      "HighVelocity": 50000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "13": {
+      "Enabled": true,
+      "Mode": 21,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "14": {
+      "Enabled": true,
+      "Mode": 21,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
+      "AccelerationSeconds": 0.1,
+      "DecelerationSeconds": 0.1,
+      "OffsetPosition": 0.0
+    },
+    "15": {
+      "Enabled": true,
+      "Mode": 21,
+      "LowVelocity": 100000.0,
+      "HighVelocity": 100000.0,
       "AccelerationSeconds": 0.1,
       "DecelerationSeconds": 0.1,
       "OffsetPosition": 0.0

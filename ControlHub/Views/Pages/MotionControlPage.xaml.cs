@@ -21,6 +21,7 @@ public partial class MotionControlPage : UserControl
     private const double TestHomeLowSpeedRatio = 0.25;
     private const double OneKeyResetRzHomeVelocity = 50_000;
     private const double OneKeyResetXyHomeVelocity = 100_000;
+    private const double OneKeyResetTestStationHomeVelocity = 100_000;
     private const double OneKeyResetDdHomeVelocity = 50_000;
     private const double OneKeyResetHomePositionTolerance = 100;
     private readonly IMotionCard _motionCard;
@@ -4346,18 +4347,23 @@ public partial class MotionControlPage : UserControl
         return
         [
             new("R/Z同时", [
-                new([6, 8, 10, 12], 33, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity),
-                new([5, 7, 9, 11], -1, OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity)
+                new([6, 8, 10, 12], MotionCardOptions.GetOneKeyResetHomeMode(6), OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity),
+                new([5, 7, 9, 11], MotionCardOptions.GetOneKeyResetHomeMode(5), OneKeyResetRzHomeVelocity, OneKeyResetRzHomeVelocity)
             ]),
-            new("上料X", [new([1], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
-            new("上料Y/下料XY同时", [
-                new([2], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
-                new([3, 4], 1, OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)
+            new("上料X", [new([1], MotionCardOptions.GetOneKeyResetHomeMode(1), OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
+            new("上料Y/下料XY/三个测试站同时", [
+                new([2], MotionCardOptions.GetOneKeyResetHomeMode(2), OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new([3, 4], MotionCardOptions.GetOneKeyResetHomeMode(3), OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new(
+                    [13, 14, 15],
+                    MotionCardOptions.GetOneKeyResetHomeMode(13),
+                    OneKeyResetTestStationHomeVelocity,
+                    OneKeyResetTestStationHomeVelocity)
             ]),
             new("DD马达", [
                 new(
                     [0],
-                    33,
+                    MotionCardOptions.GetOneKeyResetHomeMode(0),
                     OneKeyResetDdHomeVelocity,
                     OneKeyResetDdHomeVelocity,
                     OffsetPosition: 0)

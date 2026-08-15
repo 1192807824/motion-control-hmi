@@ -145,6 +145,17 @@
             <Setter Property="BorderThickness" Value="0,0,0,1" />
         </Style>
 
+        <Style x:Key="StationInstrumentCombo" TargetType="ComboBox">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="112" />
+            <Setter Property="Foreground" Value="#E9F1F6" />
+            <Setter Property="Background" Value="#193B55" />
+            <Setter Property="BorderBrush" Value="#3D6684" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="8,0" />
+        </Style>
+
         <Style x:Key="CarouselStationCard" TargetType="Border">
             <Setter Property="Width" Value="78" />
             <Setter Property="Height" Value="54" />
@@ -205,7 +216,7 @@
                     <Border Width="4" Height="30" Background="{StaticResource PrimaryBlue}" CornerRadius="2" Margin="0,0,12,0" />
                     <StackPanel>
                         <TextBlock Text="生产运行总览" Style="{StaticResource SectionTitle}" FontSize="18" />
-                        <TextBlock Text="三站测试 · 自动摆盘" Style="{StaticResource MutedLabel}" Margin="0,2,0,0" />
+                        <TextBlock x:Name="ProductionModeSummaryText" Text="两站测试 · 自动摆盘" Style="{StaticResource MutedLabel}" Margin="0,2,0,0" />
                     </StackPanel>
                 </StackPanel>
 
@@ -268,8 +279,8 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="测试站概览" Style="{StaticResource SectionTitle}" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse Width="7" Height="7" Fill="{StaticResource SuccessGreen}" Margin="0,0,6,0" />
-                        <TextBlock Text="3 / 3 站已启用" Foreground="{StaticResource SuccessGreen}" FontSize="12" FontWeight="Bold" />
+                        <Ellipse x:Name="EnabledStationSummaryIndicator" Width="7" Height="7" Fill="{StaticResource SuccessGreen}" Margin="0,0,6,0" />
+                        <TextBlock x:Name="EnabledStationSummaryText" Text="2 / 3 站已启用" Foreground="{StaticResource SuccessGreen}" FontSize="12" FontWeight="Bold" />
                     </StackPanel>
                 </Grid>
 
@@ -282,7 +293,7 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0" Style="{StaticResource Panel}" Padding="14,12">
+                    <Border x:Name="Station1Card" Grid.Column="0" Style="{StaticResource Panel}" Padding="14,12">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="38" />
@@ -300,10 +311,10 @@
                                     </Border>
                                     <StackPanel>
                                         <TextBlock Text="测试站 01" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" />
-                                        <TextBlock Text="外观与尺寸" Style="{StaticResource MutedLabel}" FontSize="11" Margin="0,1,0,0" />
+                                        <TextBlock Text="5号工位 · 轴13" Style="{StaticResource MutedLabel}" FontSize="11" Margin="0,1,0,0" />
                                     </StackPanel>
                                 </StackPanel>
-                                <ToggleButton Grid.Column="1" Style="{StaticResource StationToggle}" />
+                                <ToggleButton x:Name="Station1EnabledToggle" Grid.Column="1" Style="{StaticResource StationToggle}" Click="TestStationEnabledToggle_Click" />
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,6,0,0">
                                 <Grid.ColumnDefinitions>
@@ -312,27 +323,35 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="当前状态" Style="{StaticResource MutedLabel}" />
-                                <TextBlock Grid.Column="1" Text="等待来料" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
+                                <TextBlock x:Name="Station1StatusText" Grid.Column="1" Text="等待来料" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
                                 <Border Grid.Column="2" Background="#153B35" BorderBrush="#28725C" BorderThickness="1" CornerRadius="3" Padding="9,3" VerticalAlignment="Center">
-                                    <TextBlock Text="待机" Foreground="{StaticResource SuccessGreen}" FontSize="11" FontWeight="Bold" />
+                                    <TextBlock x:Name="Station1StateBadgeText" Text="待机" Foreground="{StaticResource SuccessGreen}" FontSize="11" FontWeight="Bold" />
                                 </Border>
                             </Grid>
-                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="10,0">
+                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="10,4">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="80" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="当前产品" Style="{StaticResource MutedLabel}" />
-                                    <TextBlock Grid.Column="1" Text="—" Foreground="#D6E0E7" FontFamily="Consolas" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="无报警" Foreground="#8FB5A2" FontSize="11" VerticalAlignment="Center" />
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="26" />
+                                        <RowDefinition Height="26" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="分配仪表" Style="{StaticResource MutedLabel}" />
+                                    <ComboBox x:Name="Station1InstrumentComboBox" Grid.Column="1" Height="24" Style="{StaticResource StationInstrumentCombo}" SelectionChanged="TestStationInstrumentComboBox_SelectionChanged">
+                                        <ComboBoxItem Content="未分配" />
+                                        <ComboBoxItem Content="E4981A（TCP）" />
+                                        <ComboBoxItem Content="SM7110（串口）" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="测试数据" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock x:Name="Station1ResultText" Grid.Row="1" Grid.Column="1" Text="暂无结果" Foreground="#9FB1BF" FontFamily="Consolas" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                                 </Grid>
                             </Border>
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="14,12">
+                    <Border x:Name="Station2Card" Grid.Column="2" Style="{StaticResource Panel}" Padding="14,12">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="38" />
@@ -350,10 +369,10 @@
                                     </Border>
                                     <StackPanel>
                                         <TextBlock Text="测试站 02" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" />
-                                        <TextBlock Text="电性能测试" Style="{StaticResource MutedLabel}" FontSize="11" Margin="0,1,0,0" />
+                                        <TextBlock Text="6号工位 · 轴14" Style="{StaticResource MutedLabel}" FontSize="11" Margin="0,1,0,0" />
                                     </StackPanel>
                                 </StackPanel>
-                                <ToggleButton Grid.Column="1" Style="{StaticResource StationToggle}" />
+                                <ToggleButton x:Name="Station2EnabledToggle" Grid.Column="1" Style="{StaticResource StationToggle}" Click="TestStationEnabledToggle_Click" />
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,6,0,0">
                                 <Grid.ColumnDefinitions>
@@ -362,27 +381,35 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="当前状态" Style="{StaticResource MutedLabel}" />
-                                <TextBlock Grid.Column="1" Text="参数采集中" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
+                                <TextBlock x:Name="Station2StatusText" Grid.Column="1" Text="等待来料" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
                                 <Border Grid.Column="2" Background="#173852" BorderBrush="#316C95" BorderThickness="1" CornerRadius="3" Padding="9,3" VerticalAlignment="Center">
-                                    <TextBlock Text="运行中" Foreground="{StaticResource PrimaryBlueLight}" FontSize="11" FontWeight="Bold" />
+                                    <TextBlock x:Name="Station2StateBadgeText" Text="待机" Foreground="{StaticResource SuccessGreen}" FontSize="11" FontWeight="Bold" />
                                 </Border>
                             </Grid>
-                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="10,0">
+                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="10,4">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="80" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="当前产品" Style="{StaticResource MutedLabel}" />
-                                    <TextBlock Grid.Column="1" Text="SN-0000728" Foreground="#D6E0E7" FontFamily="Consolas" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="无报警" Foreground="#8FB5A2" FontSize="11" VerticalAlignment="Center" />
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="26" />
+                                        <RowDefinition Height="26" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="分配仪表" Style="{StaticResource MutedLabel}" />
+                                    <ComboBox x:Name="Station2InstrumentComboBox" Grid.Column="1" Height="24" Style="{StaticResource StationInstrumentCombo}" SelectionChanged="TestStationInstrumentComboBox_SelectionChanged">
+                                        <ComboBoxItem Content="未分配" />
+                                        <ComboBoxItem Content="E4981A（TCP）" />
+                                        <ComboBoxItem Content="SM7110（串口）" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="测试数据" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock x:Name="Station2ResultText" Grid.Row="1" Grid.Column="1" Text="暂无结果" Foreground="#9FB1BF" FontFamily="Consolas" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                                 </Grid>
                             </Border>
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="4" Style="{StaticResource Panel}" Padding="14,12">
+                    <Border x:Name="Station3Card" Grid.Column="4" Style="{StaticResource Panel}" Padding="14,12">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="38" />
@@ -400,10 +427,10 @@
                                     </Border>
                                     <StackPanel>
                                         <TextBlock Text="测试站 03" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" />
-                                        <TextBlock Text="复检与分选" Style="{StaticResource MutedLabel}" FontSize="11" Margin="0,1,0,0" />
+                                        <TextBlock Text="7号工位 · 轴15" Style="{StaticResource MutedLabel}" FontSize="11" Margin="0,1,0,0" />
                                     </StackPanel>
                                 </StackPanel>
-                                <ToggleButton Grid.Column="1" Style="{StaticResource StationToggle}" />
+                                <ToggleButton x:Name="Station3EnabledToggle" Grid.Column="1" Style="{StaticResource StationToggle}" Click="TestStationEnabledToggle_Click" />
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,6,0,0">
                                 <Grid.ColumnDefinitions>
@@ -412,21 +439,29 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="当前状态" Style="{StaticResource MutedLabel}" />
-                                <TextBlock Grid.Column="1" Text="等待上游" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
+                                <TextBlock x:Name="Station3StatusText" Grid.Column="1" Text="已关闭" Foreground="{StaticResource TextSecondary}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
                                 <Border Grid.Column="2" Background="#393322" BorderBrush="#78652F" BorderThickness="1" CornerRadius="3" Padding="9,3" VerticalAlignment="Center">
-                                    <TextBlock Text="等待" Foreground="{StaticResource WarningAmber}" FontSize="11" FontWeight="Bold" />
+                                    <TextBlock x:Name="Station3StateBadgeText" Text="停用" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="Bold" />
                                 </Border>
                             </Grid>
-                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="10,0">
+                            <Border Grid.Row="2" Background="#12283A" BorderBrush="#29465C" BorderThickness="1" CornerRadius="3" Padding="10,4">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="80" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="当前产品" Style="{StaticResource MutedLabel}" />
-                                    <TextBlock Grid.Column="1" Text="—" Foreground="#D6E0E7" FontFamily="Consolas" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="无报警" Foreground="#8FB5A2" FontSize="11" VerticalAlignment="Center" />
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="26" />
+                                        <RowDefinition Height="26" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="分配仪表" Style="{StaticResource MutedLabel}" />
+                                    <ComboBox x:Name="Station3InstrumentComboBox" Grid.Column="1" Height="24" Style="{StaticResource StationInstrumentCombo}" SelectionChanged="TestStationInstrumentComboBox_SelectionChanged">
+                                        <ComboBoxItem Content="未分配" />
+                                        <ComboBoxItem Content="E4981A（TCP）" />
+                                        <ComboBoxItem Content="SM7110（串口）" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="测试数据" Style="{StaticResource MutedLabel}" />
+                                    <TextBlock x:Name="Station3ResultText" Grid.Row="1" Grid.Column="1" Text="暂无结果" Foreground="#9FB1BF" FontFamily="Consolas" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                                 </Grid>
                             </Border>
                         </Grid>
@@ -1012,7 +1047,7 @@
                             BorderBrush="#F59E0B"
                             IsEnabled="False"
                             Click="OneKeyReset_Click"
-                            ToolTip="R/Z同时回原 → 上料X → 上料Y、下料XY同时 → DD马达；测试站轴13/14/15不参与">
+                            ToolTip="R/Z同时回原 → 上料X → 上料Y、下料XY、三个测试站同时 → DD马达">
                         <Grid Margin="14,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="42" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="29" Height="29" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
@@ -1022,7 +1057,7 @@
                                            FontSize="18"
                                            FontWeight="Bold" />
                                 <TextBlock x:Name="OneKeyResetHintText"
-                                           Text="R/Z → 上料X → Y/下料XY同时 → DD（测试站不参与）"
+                                           Text="R/Z → 上料X → Y/下料XY/测试站同时 → DD"
                                            Foreground="#FFF1D6"
                                            FontSize="10"
                                            Margin="0,3,0,0"

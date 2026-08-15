@@ -63,6 +63,7 @@ public partial class ConnectionConfigPage : UserControl
     private bool _connecting;
     private bool _tcpConnecting;
     private bool _meterOperationRunning;
+    private bool _e4981ASettingsApplied;
     private bool _serialConnecting;
     private bool _serialMeterOperationRunning;
     private bool _loaded;
@@ -92,6 +93,100 @@ public partial class ConnectionConfigPage : UserControl
     private TcpConnectionSettings? TcpSettings => ViewModel?.TcpConnectionSettings;
 
     private SerialConnectionSettings? SerialSettings => ViewModel?.SerialConnectionSettings;
+
+    public bool IsE4981AConnected => _generalTcpClient.IsConnected;
+
+    public bool IsSM7110Connected => _serialClient.IsConnected;
+
+    public async Task<E4981AMeasurementResult> MeasureE4981AAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_closed)
+        {
+            throw new ObjectDisposedException(nameof(ConnectionConfigPage));
+        }
+        if (!_generalTcpClient.IsConnected)
+        {
+            throw new InvalidOperationException("E4981A未连接，请先在连接配置页连接仪表。");
+        }
+        if (_meterOperationRunning)
+        {
+            throw new InvalidOperationException("E4981A正在处理上一条命令。");
+        }
+
+        _meterOperationRunning = true;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await EnsureE4981ASettingsAppliedAsync(cancellationToken);
+            var response = await QueryMeterAsync("*TRG", cancellationToken);
+            var result = E4981AProtocol.ParseMeasurement(response);
+            UpdateMeterResult(result);
+            return result;
+        }
+        finally
+        {
+            _meterOperationRunning = false;
+        }
+    }
+
+    public async Task<SM7110MeasurementResult> MeasureSM7110Async(
+        CancellationToken cancellationToken)
+    {
+        if (_closed)
+        {
+            throw new ObjectDisposedException(nameof(ConnectionConfigPage));
+        }
+        if (!_serialClient.IsConnected)
+        {
+            throw new InvalidOperationException("SM7110未连接，请先在连接配置页连接仪表。");
+        }
+        if (_serialMeterOperationRunning)
+        {
+            throw new InvalidOperationException("SM7110正在处理上一条命令。");
+        }
+
+        var settings = SerialSettings
+            ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        _serialMeterOperationRunning = true;
+        try
+        {
+            foreach (var command in SM7110Protocol.BuildSetupCommands(settings))
+            {
+                await SendSerialMeterCommandAsync(command, cancellationToken);
+            }
+
+            await SendSerialMeterCommandAsync(":STARt", cancellationToken);
+            try
+            {
+                var response = await QuerySerialMeterAsync(
+                    "*TRG;*WAI;:MEASure:RESult? 3",
+                    cancellationToken);
+                var result = SM7110Protocol.ParseMeasurementResult(
+                    response,
+                    settings.MeasurementMode);
+                UpdateSerialMeterResult(result);
+                return result;
+            }
+            finally
+            {
+                try
+                {
+                    await SendSerialMeterCommandAsync(":STOP", CancellationToken.None);
+                    AddSerialLog("自动测试结束，已停止输出并进入放电状态");
+                }
+                catch (Exception ex) when (ex is IOException or TimeoutException or
+                                           InvalidOperationException or ObjectDisposedException)
+                {
+                    AddSerialLog($"警告：自动测试结束后停止放电命令发送失败：{ex.Message}");
+                }
+            }
+        }
+        finally
+        {
+            _serialMeterOperationRunning = false;
+        }
+    }
 
     public void Shutdown()
     {
@@ -289,6 +384,7 @@ public partial class ConnectionConfigPage : UserControl
                 throw new InvalidDataException($"已连接的设备不是E4981A：{identity}");
             }
             UpdateMeterIdentity(identity);
+            _e4981ASettingsApplied = false;
             settings.LastSuccessfulConnectionSignature = CreateTcpConnectionSignature(settings.Host, settings.Port);
             _tcpSettingsStore.Save(settings);
             SetTcpStatus($"E4981A已连接：{settings.Host}:{settings.Port}");
@@ -316,6 +412,7 @@ public partial class ConnectionConfigPage : UserControl
     private void DisconnectTcp_Click(object sender, RoutedEventArgs e)
     {
         _generalTcpClient.Close();
+        _e4981ASettingsApplied = false;
         SetTcpStatus("未连接");
         AddTcpLog("已断开E4981A连接");
     }
@@ -381,19 +478,8 @@ public partial class ConnectionConfigPage : UserControl
         SaveTcpSettings(writeLog: false);
         await RunMeterOperationAsync("下发测试参数", async () =>
         {
-            var commands = E4981AProtocol.BuildSetupCommands(settings);
-            foreach (var command in commands)
-            {
-                await SendMeterCommandAsync(command);
-            }
-
-            var instrumentError = await QueryMeterAsync("SYST:ERR?");
-            if (!instrumentError.StartsWith("0", StringComparison.OrdinalIgnoreCase) &&
-                !instrumentError.StartsWith("+0", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException($"仪表参数错误：{instrumentError}");
-            }
-            AddTcpLog($"E4981A测试参数下发完成，共{commands.Count}条命令");
+            _e4981ASettingsApplied = false;
+            await EnsureE4981ASettingsAppliedAsync(CancellationToken.None);
         });
     }
 
@@ -1080,6 +1166,7 @@ public partial class ConnectionConfigPage : UserControl
 
         CommitInputBindings(this);
         _tcpSettingsStore.Save(settings);
+        _e4981ASettingsApplied = false;
         if (writeLog)
         {
             AddTcpLog("E4981A连接与测试参数已保存");
@@ -1288,6 +1375,32 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    private async Task EnsureE4981ASettingsAppliedAsync(CancellationToken cancellationToken)
+    {
+        if (_e4981ASettingsApplied)
+        {
+            return;
+        }
+
+        var settings = TcpSettings
+            ?? throw new InvalidOperationException("E4981A连接参数未加载。");
+        var commands = E4981AProtocol.BuildSetupCommands(settings);
+        foreach (var command in commands)
+        {
+            await SendMeterCommandAsync(command, cancellationToken);
+        }
+
+        var instrumentError = await QueryMeterAsync("SYST:ERR?", cancellationToken);
+        if (!instrumentError.StartsWith("0", StringComparison.OrdinalIgnoreCase) &&
+            !instrumentError.StartsWith("+0", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"仪表参数错误：{instrumentError}");
+        }
+
+        _e4981ASettingsApplied = true;
+        AddTcpLog($"E4981A测试参数下发完成，共{commands.Count}条命令");
+    }
+
     private async Task RunSerialMeterOperationAsync(string actionName, Func<Task> operation)
     {
         if (_serialMeterOperationRunning)
@@ -1324,28 +1437,38 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private async Task SendSerialMeterCommandAsync(string command)
+    private async Task SendSerialMeterCommandAsync(
+        string command,
+        CancellationToken cancellationToken = default)
     {
         var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
         var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
         AddSerialLog($"TX [SCPI]  {command}");
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
         await _serialClient.SendCommandAsync(
             command,
             terminator,
             settings.CommandTimeoutMilliseconds,
-            _lifetimeCancellation.Token);
+            linkedCancellation.Token);
     }
 
-    private async Task<string> QuerySerialMeterAsync(string command)
+    private async Task<string> QuerySerialMeterAsync(
+        string command,
+        CancellationToken cancellationToken = default)
     {
         var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
         var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
         AddSerialLog($"TX [SCPI]  {command}");
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
         return await _serialClient.QueryAsync(
             command,
             terminator,
             settings.CommandTimeoutMilliseconds,
-            _lifetimeCancellation.Token);
+            linkedCancellation.Token);
     }
 
     private void UpdateSerialMeterIdentity(string identity)
@@ -1366,18 +1489,28 @@ public partial class ConnectionConfigPage : UserControl
         AddSerialLog($"测试结果：{result.StatusDescription}，数值={result.Value:G9} {result.Unit}");
     }
 
-    private async Task SendMeterCommandAsync(string command)
+    private async Task SendMeterCommandAsync(
+        string command,
+        CancellationToken cancellationToken = default)
     {
         var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
         AddTcpLog($"TX [SCPI]  {command}");
-        await _generalTcpClient.SendCommandAsync(command, timeout, _lifetimeCancellation.Token);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
+        await _generalTcpClient.SendCommandAsync(command, timeout, linkedCancellation.Token);
     }
 
-    private async Task<string> QueryMeterAsync(string command)
+    private async Task<string> QueryMeterAsync(
+        string command,
+        CancellationToken cancellationToken = default)
     {
         var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
         AddTcpLog($"TX [SCPI]  {command}");
-        var response = await _generalTcpClient.QueryAsync(command, timeout, _lifetimeCancellation.Token);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
+        var response = await _generalTcpClient.QueryAsync(command, timeout, linkedCancellation.Token);
         AddTcpLog($"RX [SCPI]  {response}");
         return response;
     }
@@ -1432,6 +1565,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            _e4981ASettingsApplied = false;
             SetTcpStatus("未连接");
             AddTcpLog(exception is null
                 ? "E4981A连接已由仪表关闭"

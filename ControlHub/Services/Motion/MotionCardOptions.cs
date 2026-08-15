@@ -55,54 +55,109 @@ public sealed class MotionCardOptions
 
     public void ApplyMigrations()
     {
-        if (ConfigurationVersion >= 3)
+        if (ConfigurationVersion >= 4)
         {
             return;
         }
 
-        if (ConfigurationVersion < 2)
+        if (ConfigurationVersion < 3)
         {
-            var previousMoveProfiles = AxisMoveProfiles.ToArray();
-            AxisMoveProfiles.Clear();
-            foreach (var item in previousMoveProfiles)
+            if (ConfigurationVersion < 2)
             {
-                AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+                var previousMoveProfiles = AxisMoveProfiles.ToArray();
+                AxisMoveProfiles.Clear();
+                foreach (var item in previousMoveProfiles)
+                {
+                    AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+                }
+
+                var previousHomeProfiles = AxisHomeProfiles.ToArray();
+                AxisHomeProfiles.Clear();
+                foreach (var item in previousHomeProfiles)
+                {
+                    AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+                }
+
+                HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
             }
 
-            var previousHomeProfiles = AxisHomeProfiles.ToArray();
-            AxisHomeProfiles.Clear();
-            foreach (var item in previousHomeProfiles)
+            AxisMoveProfiles[0] = new MotionMoveProfile
             {
-                AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
-            }
-
-            HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
+                StartVelocity = 0,
+                StopVelocity = 0,
+                AccelerationSeconds = 0.1,
+                DecelerationSeconds = 0.1,
+                STimeSeconds = 0,
+                DecelerationStopSeconds = 0.001,
+                WaitForCompletion = true,
+                CompletionTimeoutMilliseconds = 5000,
+                CompletionTolerance = 0.01,
+                AbsolutePositionMode = false
+            };
+            AxisHomeProfiles[0] = new MotionHomeProfile
+            {
+                Enabled = true,
+                Mode = 33,
+                LowVelocity = 10000,
+                HighVelocity = 40000,
+                AccelerationSeconds = 0.1,
+                DecelerationSeconds = 0.1,
+                OffsetPosition = 0
+            };
         }
 
-        AxisMoveProfiles[0] = new MotionMoveProfile
+        ApplyOneKeyResetHomeModes();
+        ConfigurationVersion = 4;
+    }
+
+    private void ApplyOneKeyResetHomeModes()
+    {
+        foreach (var axisNo in Enumerable.Range(0, Math.Min(AxisCount, 16)))
         {
-            StartVelocity = 0,
-            StopVelocity = 0,
-            AccelerationSeconds = 0.1,
-            DecelerationSeconds = 0.1,
-            STimeSeconds = 0,
-            DecelerationStopSeconds = 0.001,
-            WaitForCompletion = true,
-            CompletionTimeoutMilliseconds = 5000,
-            CompletionTolerance = 0.01,
-            AbsolutePositionMode = false
-        };
-        AxisHomeProfiles[0] = new MotionHomeProfile
+            var existing = AxisHomeProfiles.GetValueOrDefault(axisNo);
+            var defaultVelocity = GetOneKeyResetHomeVelocity(axisNo);
+            AxisHomeProfiles[axisNo] = new MotionHomeProfile
+            {
+                Enabled = existing?.Enabled ?? true,
+                Mode = GetOneKeyResetHomeMode(axisNo),
+                LowVelocity = existing?.LowVelocity ?? defaultVelocity,
+                HighVelocity = existing?.HighVelocity ?? defaultVelocity,
+                AccelerationSeconds = existing?.AccelerationSeconds ?? 0.1,
+                DecelerationSeconds = existing?.DecelerationSeconds ?? 0.1,
+                OffsetPosition = existing?.OffsetPosition ?? 0
+            };
+        }
+    }
+
+    public static int GetOneKeyResetHomeMode(int hardwareAxisNo)
+    {
+        return hardwareAxisNo switch
         {
-            Enabled = true,
-            Mode = 33,
-            LowVelocity = 10000,
-            HighVelocity = 40000,
-            AccelerationSeconds = 0.1,
-            DecelerationSeconds = 0.1,
-            OffsetPosition = 0
+            0 => 33,
+            >= 1 and <= 4 => 1,
+            5 or 7 or 9 or 11 => -1,
+            6 or 8 or 10 or 12 => 33,
+            >= 13 and <= 15 => 21,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(hardwareAxisNo),
+                hardwareAxisNo,
+                "一键复位只配置硬件轴0到15。")
         };
-        ConfigurationVersion = 3;
+    }
+
+    public static double GetOneKeyResetHomeVelocity(int hardwareAxisNo)
+    {
+        return hardwareAxisNo switch
+        {
+            0 => 50_000d,
+            >= 1 and <= 4 => 100_000d,
+            >= 5 and <= 12 => 50_000d,
+            >= 13 and <= 15 => 100_000d,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(hardwareAxisNo),
+                hardwareAxisNo,
+                "一键复位只配置硬件轴0到15。")
+        };
     }
 
     public MotionHomeProfile GetHomeProfile(int hardwareAxisNo)

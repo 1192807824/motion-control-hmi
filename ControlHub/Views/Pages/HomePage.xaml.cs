@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -81,14 +82,11 @@ public partial class HomePage : UserControl
     private const int CarouselStationCount = 16;
     private const int DefaultTestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
-    private static readonly bool AutomaticTestStationActionsEnabled = false;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
     private const string CarouselStatusReturning = "回待机位";
-    // 自动生产暂时停用全部测试站动作；恢复时仍需避开故障中的14轴。
-    private static readonly int[] MoveOutAxisNos =
-        AutomaticTestStationActionsEnabled ? [13, 15] : [];
+    private static readonly int[] MoveOutAxisNos = [13, 14, 15];
     private static readonly int[] FirstSetAxisNos =
         [VisionCalibrationService.FirstSetXHardwareAxisNo, VisionCalibrationService.FirstSetYHardwareAxisNo];
     private static readonly int[] SecondSetAxisNos =
@@ -165,12 +163,6 @@ public partial class HomePage : UserControl
         new(6, 14, "测试站 02"),
         new(7, 15, "测试站 03")
     ];
-    private static readonly IReadOnlyDictionary<int, int> EnabledTestStationAxisByStation =
-        AutomaticTestStationActionsEnabled
-            ? TestStationAxisByStation
-                .Where(pair => pair.Value != 14)
-                .ToDictionary(pair => pair.Key, pair => pair.Value)
-            : new Dictionary<int, int>();
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
     private HomePageSettings _homeSettings = new();
@@ -205,6 +197,7 @@ public partial class HomePage : UserControl
     private int _nextAssignedNozzleMoveStep;
     private int _carouselVisualStepOffset;
     private bool _loadingPresetPositions = true;
+    private bool _updatingTestStationConfiguration;
 
     public HomePage()
     {
@@ -1548,6 +1541,7 @@ public partial class HomePage : UserControl
                 motionController,
                 _productionAxisMotionSettings);
             _testStationSettings = ReadTestStationSettings();
+            EnsureAssignedTestInstrumentsConnected();
             var velocity = GetProductionAxisMotionSettings(
                 VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
             var firstSetYVelocity = GetProductionAxisMotionSettings(
@@ -1907,7 +1901,7 @@ public partial class HomePage : UserControl
                     if (!activeCarouselAdvanceTask.IsCompleted)
                     {
                         SetStartProductionStatus(
-                            $"第{cycleNumber}轮：本批{assignedTargets.Count}颗已吸取，正在等待DD完成两次转动；测试站动作已停用…",
+                            $"第{cycleNumber}轮：本批{assignedTargets.Count}颗已吸取，正在等待DD完成两次转动及已启用测试站动作…",
                             Color.FromRgb(242, 181, 68));
                     }
 
@@ -1917,7 +1911,7 @@ public partial class HomePage : UserControl
                     activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
                     activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，测试站动作已停用，立即开始上下料…",
+                        $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，测试任务已启动，立即开始上下料…",
                         Color.FromRgb(73, 209, 125));
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
@@ -2048,7 +2042,7 @@ public partial class HomePage : UserControl
                     _productionCancellation.Token);
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD在第二套取料完成后固定转动两次；测试站动作已停用，XY立即准备第{cycleNumber + 1}轮拍照吸料…",
+                    $"第{cycleNumber}轮放料完成，DD在第二套取料完成后固定转动两次；已启用测试站同步执行，XY立即准备第{cycleNumber + 1}轮拍照吸料…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -2427,11 +2421,11 @@ public partial class HomePage : UserControl
         if (!requiredFinalTestTask.IsCompleted || !requiredSecondSetPickupTask.IsCompleted)
         {
             SetStartProductionStatus(
-                "XY正在回中心准备下一轮拍照；测试站动作已停用，下一次DD只等待第二套完成本批取料。",
+                "XY正在回中心准备下一轮拍照；已启用测试站将随DD节拍执行，下一次DD同时等待测试轴和第二套取料安全条件。",
                 Color.FromRgb(242, 181, 68));
         }
 
-        // 测试站动作停用时其任务会立即完成；DD只需等待第二套取料和XY离开放料点0.5秒。
+        // DD必须等待已启用测试站回到等待位、第二套完成取料，并确认XY已离开放料点0.5秒。
         // 第二套后续移动到两个收料位置并放料，不再阻塞DD。
         await Task.WhenAll(
             requiredFinalTestTask,
@@ -2713,6 +2707,7 @@ public partial class HomePage : UserControl
         }
 
         Task<int> finalTestTask = Task.FromResult(0);
+        var enabledTestStations = GetEnabledTestStationAxisByStation();
         const int maximumTurnsBeforeReload = 2;
         for (var turn = 1; turn <= maximumTurnsBeforeReload; turn++)
         {
@@ -2720,9 +2715,7 @@ public partial class HomePage : UserControl
             cancellationToken.ThrowIfCancellationRequested();
             var loadedTestStationCount = CountLoadedTestStations(carouselStations);
             SetStartProductionStatus(
-                !AutomaticTestStationActionsEnabled
-                    ? $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse；测试站动作已全部停用…"
-                    : loadedTestStationCount > 0
+                loadedTestStationCount > 0
                     ? $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse，测试站已有料，转后执行测试…"
                     : $"DD马达正在第 {turn}/{maximumTurnsBeforeReload} 次转动 {axis0PulseDistance:0.###} pulse，有料工位未进测试站则继续补转…",
                 Color.FromRgb(242, 181, 68));
@@ -2734,20 +2727,17 @@ public partial class HomePage : UserControl
             AdvanceCarouselOccupancy(carouselStations);
             UpdateCarouselStationDisplay(carouselStations);
             SetStartProductionStatus(
-                AutomaticTestStationActionsEnabled
-                    ? $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成，正在检查 5/6/7 测试站…"
-                    : $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成；测试站动作已停用，正在更新工位状态…",
+                $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成，正在检查" +
+                $" {string.Join("/", enabledTestStations.Keys)} 号测试工位…",
                 Color.FromRgb(242, 181, 68));
             if (turn < maximumTurnsBeforeReload)
             {
-                // 测试动作启用时必须完成并回原；停用时仅生成后续下料所需的模拟分BIN结果。
                 _ = await RunOccupiedTestStationsAsync(
                     carouselStations,
                     cancellationToken);
             }
             else
             {
-                // 第二次转动后DD已经停稳；停用时此任务会立即完成且不会向测试轴下发指令。
                 finalTestTask = RunOccupiedTestStationsAsync(
                     carouselStations,
                     cancellationToken);
@@ -2756,9 +2746,7 @@ public partial class HomePage : UserControl
         }
 
         SetStartProductionStatus(
-            AutomaticTestStationActionsEnabled
-                ? $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；最后一轮测试并行执行，XY可直接上下料。"
-                : $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；测试站动作已全部停用，XY可直接上下料。",
+            $"DD已固定转动 {maximumTurnsBeforeReload} 次并停稳；最后一轮测试并行执行，XY可直接上下料。",
             Color.FromRgb(73, 209, 125));
         return new CarouselAdvanceResult(
             maximumTurnsBeforeReload,
@@ -2769,8 +2757,21 @@ public partial class HomePage : UserControl
 
     private int CountLoadedTestStations(IReadOnlyList<CarouselStationState> carouselStations)
     {
-        return EnabledTestStationAxisByStation.Keys.Count(station =>
+        return GetEnabledTestStationAxisByStation().Keys.Count(station =>
             station < carouselStations.Count && carouselStations[station].Occupied);
+    }
+
+    private IReadOnlyDictionary<int, int> GetEnabledTestStationAxisByStation()
+    {
+        var settings = _testStationSettings ?? ReadTestStationSettings();
+        return TestStationAxisByStation
+            .Where(pair =>
+            {
+                var stationSettings = settings.GetValueOrDefault(pair.Key);
+                return stationSettings?.Enabled == true &&
+                       stationSettings.Instrument is not null and not TestStationInstrument.None;
+            })
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
     }
 
     private async Task<int> RunOccupiedTestStationsAsync(
@@ -2778,30 +2779,8 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         await WaitIfProductionPausedAsync(cancellationToken);
-        if (!AutomaticTestStationActionsEnabled)
-        {
-            var bypassedStations = TestStationAxisByStation.Keys
-                .Where(station =>
-                    carouselStations[station].Occupied &&
-                    !carouselStations[station].Tested)
-                .ToArray();
-            foreach (var station in bypassedStations)
-            {
-                // 测试轴不动作时继续沿用联调阶段的模拟分BIN，
-                // 保证物料到达13/14工位后第二套仍能正常执行下料。
-                carouselStations[station].SetTested($"BIN{Random.Shared.Next(1, 4)}");
-            }
-
-            UpdateCarouselStationDisplay(carouselStations);
-            SetStartProductionStatus(
-                bypassedStations.Length > 0
-                    ? $"测试站动作已全部停用；{string.Join("、", bypassedStations)}号工位跳过下压，仅生成模拟分BIN结果。"
-                    : "测试站动作已全部停用，本轮转盘不执行测试轴动作。",
-                Color.FromRgb(159, 177, 191));
-            return 0;
-        }
-
-        var activeStationParameters = EnabledTestStationAxisByStation
+        var enabledTestStations = GetEnabledTestStationAxisByStation();
+        var activeStationParameters = enabledTestStations
             .Where(pair => carouselStations[pair.Key].Occupied)
             .ToDictionary(
                 pair => pair.Value,
@@ -2812,15 +2791,29 @@ public partial class HomePage : UserControl
         if (axisTargets.Count == 0)
         {
             SetStartProductionStatus(
-                "5/7号可用测试工位当前无料（14轴已停用），跳过本次下压。",
+                "已启用测试站当前无料，跳过本次下压。",
                 Color.FromRgb(159, 177, 191));
             return 0;
         }
 
-        var stations = EnabledTestStationAxisByStation
+        var activeStationNumbers = enabledTestStations
+            .Where(pair => carouselStations[pair.Key].Occupied)
+            .Select(pair => pair.Key)
+            .ToArray();
+        var stations = enabledTestStations
             .Where(pair => carouselStations[pair.Key].Occupied)
             .Select(pair => $"{pair.Key}号→轴{pair.Value}")
             .ToArray();
+
+        foreach (var stationNumber in activeStationNumbers)
+        {
+            SetTestStationRuntimeDisplay(
+                stationNumber,
+                "正在下压",
+                "下压",
+                "等待下压到位…",
+                Color.FromRgb(242, 181, 68));
+        }
 
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusPressing);
         SetStartProductionStatus(
@@ -2838,9 +2831,68 @@ public partial class HomePage : UserControl
             velocityOverrides: pressVelocities);
         UpdateCarouselStationDisplay(carouselStations, axisTargets.Keys, CarouselStatusDwelling);
         SetStartProductionStatus(
-            $"{string.Join("，", stations)} 下压到位，停留 {DefaultTestStationDwellMilliseconds} ms…",
+            $"{string.Join("，", stations)} 下压到位，等待接触稳定后触发已分配仪表…",
             Color.FromRgb(242, 181, 68));
+        foreach (var stationNumber in activeStationNumbers)
+        {
+            SetTestStationRuntimeDisplay(
+                stationNumber,
+                "下压到位",
+                "准备测试",
+                "接触稳定中…",
+                Color.FromRgb(98, 181, 255));
+        }
         await Task.Delay(DefaultTestStationDwellMilliseconds, cancellationToken);
+
+        var measurementTasks = enabledTestStations.Keys
+            .Where(station => carouselStations[station].Occupied)
+            .ToDictionary(
+                station => station,
+                station => MeasureTestStationAsync(
+                    station,
+                    carouselStations[station],
+                    cancellationToken));
+        var measurementResults = new Dictionary<int, TestStationMeasurementResult>();
+        Exception? measurementFailure = null;
+        try
+        {
+            await Task.WhenAll(measurementTasks.Values);
+            foreach (var measurement in measurementTasks)
+            {
+                measurementResults[measurement.Key] = measurement.Value.Result;
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // 仪表异常时仍先让测试轴安全回到等待位，再把错误交给主生产流程停机显示。
+            measurementFailure = exception;
+        }
+
+        foreach (var stationNumber in activeStationNumbers)
+        {
+            var controls = GetTestStationConfigurationControls(stationNumber);
+            if (measurementFailure is not null)
+            {
+                SetTestStationRuntimeDisplay(
+                    stationNumber,
+                    "测试异常，安全上抬",
+                    "上抬",
+                    controls.ResultText.Text,
+                    Color.FromRgb(242, 122, 128));
+            }
+            else
+            {
+                var measurement = measurementResults[stationNumber];
+                SetTestStationRuntimeDisplay(
+                    stationNumber,
+                    "已收到结果，正在上抬",
+                    "上抬",
+                    measurement.DisplayText,
+                    measurement.Passed
+                        ? Color.FromRgb(73, 209, 125)
+                        : Color.FromRgb(242, 122, 128));
+            }
+        }
 
         var returningAxes = axisTargets.Keys.ToArray();
         var returnTargets = activeStationParameters.ToDictionary(
@@ -2861,19 +2913,119 @@ public partial class HomePage : UserControl
             HomePageCompletionTolerance,
             velocityOverrides: pressVelocities);
 
-        SetStartProductionStatus(
-            $"{string.Join("，", stations)} 已返回各自等待位，DD可继续下一步。",
-            Color.FromRgb(73, 209, 125));
-        foreach (var station in EnabledTestStationAxisByStation.Keys
-                     .Where(station => carouselStations[station].Occupied))
+        if (measurementFailure is not null)
         {
-            // 当前联调阶段只模拟 BIN1-BIN3，暂不生成 BIN0。
-            carouselStations[station].SetTested($"BIN{Random.Shared.Next(1, 4)}");
+            SetStartProductionStatus(
+                $"{string.Join("，", stations)} 仪表测试异常，测试轴已安全上抬；流程停止，禁止DD继续。",
+                Color.FromRgb(242, 122, 128));
+            foreach (var stationNumber in activeStationNumbers)
+            {
+                var controls = GetTestStationConfigurationControls(stationNumber);
+                SetTestStationRuntimeDisplay(
+                    stationNumber,
+                    "仪表异常，流程停止",
+                    "异常",
+                    controls.ResultText.Text,
+                    Color.FromRgb(242, 122, 128));
+            }
+            throw measurementFailure;
+        }
+
+        SetStartProductionStatus(
+            $"{string.Join("，", stations)} 已收到有效返回并上抬到等待位，DD可继续下一步。",
+            Color.FromRgb(73, 209, 125));
+
+        foreach (var measurementResult in measurementResults)
+        {
+            carouselStations[measurementResult.Key].SetTested(measurementResult.Value.Bin);
+            SetTestStationRuntimeDisplay(
+                measurementResult.Key,
+                $"测试完成 · {measurementResult.Value.StatusDescription}",
+                measurementResult.Value.Bin,
+                measurementResult.Value.DisplayText,
+                measurementResult.Value.Passed
+                    ? Color.FromRgb(73, 209, 125)
+                    : Color.FromRgb(242, 122, 128));
         }
 
         UpdateCarouselStationDisplay(carouselStations);
         await WaitIfProductionPausedAsync(cancellationToken);
         return axisTargets.Count;
+    }
+
+    private async Task<TestStationMeasurementResult> MeasureTestStationAsync(
+        int stationNumber,
+        CarouselStationState stationState,
+        CancellationToken cancellationToken)
+    {
+        var settings = GetTestStationSettings(stationNumber);
+        var connectionController = _connectionConfigController
+            ?? throw new InvalidOperationException("主页尚未连接仪表控制组件。");
+        try
+        {
+            var instrumentName = FormatTestStationInstrument(
+                settings.Instrument ?? TestStationInstrument.None);
+            SetTestStationRuntimeDisplay(
+                stationNumber,
+                $"等待 {instrumentName} 返回",
+                "测试中",
+                "等待仪表返回…",
+                Color.FromRgb(98, 181, 255));
+            switch (settings.Instrument)
+            {
+                case TestStationInstrument.E4981A:
+                {
+                    var result = await connectionController.MeasureE4981AAsync(cancellationToken);
+                    if (result.Bin is null)
+                    {
+                        throw new InvalidOperationException(
+                            "E4981A未返回比较器BIN，请在连接配置页启用仪表比较器并配置BIN范围。");
+                    }
+
+                    var bin = !result.IsSuccessful
+                        ? "BIN0"
+                        : result.Bin is >= 0 and <= 3
+                            ? $"BIN{result.Bin}"
+                            : "BIN0";
+                    return new TestStationMeasurementResult(
+                        bin,
+                        $"C={result.CapacitancePf:0.######}pF · D={result.DissipationFactor:G6} · {bin}",
+                        result.StatusDescription,
+                        result.IsSuccessful &&
+                        !string.Equals(bin, "BIN0", StringComparison.OrdinalIgnoreCase));
+                }
+                case TestStationInstrument.SM7110:
+                {
+                    var result = await connectionController.MeasureSM7110Async(cancellationToken);
+                    var bin = stationState.Bin;
+                    if (string.IsNullOrWhiteSpace(bin))
+                    {
+                        throw new InvalidOperationException(
+                            "产品尚无E4981A分BIN结果，SM7110不能生成或替代分BIN结果。");
+                    }
+
+                    return new TestStationMeasurementResult(
+                        bin,
+                        $"{result.MeasurementMode}={result.Value:G9}{result.Unit} · E4981A:{bin}",
+                        result.StatusDescription,
+                        result.IsSuccessful);
+                }
+                default:
+                    throw new InvalidOperationException($"{stationNumber}号工位未分配仪表。");
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            SetTestStationRuntimeDisplay(
+                stationNumber,
+                "仪表通讯异常",
+                "异常",
+                exception.Message,
+                Color.FromRgb(242, 122, 128));
+            throw new InvalidOperationException(
+                $"{stationNumber}号工位的{FormatTestStationInstrument(settings.Instrument ?? TestStationInstrument.None)}测试失败：{exception.Message}",
+                exception);
+        }
     }
 
     private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
@@ -4513,18 +4665,267 @@ public partial class HomePage : UserControl
     private void LoadTestStationPositionEditors()
     {
         _homeSettings.TestStationSettings ??= [];
+        _updatingTestStationConfiguration = true;
+        try
+        {
+            foreach (var definition in TestStationDefinitions)
+            {
+                var settings = _homeSettings.TestStationSettings.GetValueOrDefault(
+                                   definition.StationNumber)
+                               ?? CreateDefaultTestStationSettings(definition.StationNumber);
+                var editors = GetTestStationPositionEditors(definition.StationNumber);
+                editors.PressPosition.Text = FormatPresetCoordinate(settings.PressPosition);
+                editors.WaitPosition.Text = FormatPresetCoordinate(settings.WaitPosition);
+
+                var controls = GetTestStationConfigurationControls(definition.StationNumber);
+                var enabled = settings.Enabled ?? definition.StationNumber != 7;
+                var instrument = settings.Instrument
+                                 ?? GetDefaultTestStationInstrument(definition.StationNumber);
+                controls.EnabledToggle.IsChecked = enabled;
+                controls.InstrumentComboBox.SelectedIndex = (int)instrument;
+            }
+        }
+        finally
+        {
+            _updatingTestStationConfiguration = false;
+        }
+
+        UpdateTestStationConfigurationDisplay();
+    }
+
+    private static TestStationSettings CreateDefaultTestStationSettings(int stationNumber)
+    {
+        return new TestStationSettings
+        {
+            PressPosition = DefaultTestStationPressPosition,
+            WaitPosition = DefaultTestStationWaitPosition,
+            Enabled = stationNumber != 7,
+            Instrument = GetDefaultTestStationInstrument(stationNumber)
+        };
+    }
+
+    private static TestStationInstrument GetDefaultTestStationInstrument(int stationNumber)
+    {
+        return stationNumber switch
+        {
+            5 => TestStationInstrument.E4981A,
+            6 => TestStationInstrument.SM7110,
+            _ => TestStationInstrument.None
+        };
+    }
+
+    private (ToggleButton EnabledToggle, ComboBox InstrumentComboBox, Border Card,
+        TextBlock StatusText, TextBlock BadgeText, TextBlock ResultText)
+        GetTestStationConfigurationControls(
+        int stationNumber)
+    {
+        return stationNumber switch
+        {
+            5 => (Station1EnabledToggle, Station1InstrumentComboBox, Station1Card,
+                Station1StatusText, Station1StateBadgeText, Station1ResultText),
+            6 => (Station2EnabledToggle, Station2InstrumentComboBox, Station2Card,
+                Station2StatusText, Station2StateBadgeText, Station2ResultText),
+            7 => (Station3EnabledToggle, Station3InstrumentComboBox, Station3Card,
+                Station3StatusText, Station3StateBadgeText, Station3ResultText),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(stationNumber),
+                stationNumber,
+                "测试站编号必须为5、6或7。")
+        };
+    }
+
+    private int GetStationNumber(DependencyObject control)
+    {
+        if (ReferenceEquals(control, Station1EnabledToggle) ||
+            ReferenceEquals(control, Station1InstrumentComboBox))
+        {
+            return 5;
+        }
+        if (ReferenceEquals(control, Station2EnabledToggle) ||
+            ReferenceEquals(control, Station2InstrumentComboBox))
+        {
+            return 6;
+        }
+        if (ReferenceEquals(control, Station3EnabledToggle) ||
+            ReferenceEquals(control, Station3InstrumentComboBox))
+        {
+            return 7;
+        }
+
+        throw new ArgumentException("无法识别测试站配置控件。", nameof(control));
+    }
+
+    private static TestStationInstrument GetSelectedTestStationInstrument(ComboBox comboBox)
+    {
+        return Enum.IsDefined(typeof(TestStationInstrument), comboBox.SelectedIndex)
+            ? (TestStationInstrument)comboBox.SelectedIndex
+            : TestStationInstrument.None;
+    }
+
+    private void TestStationEnabledToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loadingPresetPositions || _updatingTestStationConfiguration ||
+            sender is not ToggleButton toggle)
+        {
+            return;
+        }
+
+        var stationNumber = GetStationNumber(toggle);
+        var controls = GetTestStationConfigurationControls(stationNumber);
+        _updatingTestStationConfiguration = true;
+        try
+        {
+            if (toggle.IsChecked == true &&
+                GetSelectedTestStationInstrument(controls.InstrumentComboBox) ==
+                TestStationInstrument.None)
+            {
+                var availableInstrument = FindAvailableTestStationInstrument(stationNumber);
+                if (availableInstrument == TestStationInstrument.None)
+                {
+                    toggle.IsChecked = false;
+                    SetStartProductionStatus(
+                        "两个仪表均已分配；请先停用其他测试站或调整仪表分配。",
+                        Color.FromRgb(242, 181, 68));
+                }
+                else
+                {
+                    controls.InstrumentComboBox.SelectedIndex = (int)availableInstrument;
+                }
+            }
+            else if (toggle.IsChecked != true)
+            {
+                controls.InstrumentComboBox.SelectedIndex = (int)TestStationInstrument.None;
+            }
+        }
+        finally
+        {
+            _updatingTestStationConfiguration = false;
+        }
+
+        PersistTestStationConfiguration();
+    }
+
+    private void TestStationInstrumentComboBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_loadingPresetPositions || _updatingTestStationConfiguration ||
+            sender is not ComboBox comboBox)
+        {
+            return;
+        }
+
+        var stationNumber = GetStationNumber(comboBox);
+        var instrument = GetSelectedTestStationInstrument(comboBox);
+        _updatingTestStationConfiguration = true;
+        try
+        {
+            var currentControls = GetTestStationConfigurationControls(stationNumber);
+            currentControls.EnabledToggle.IsChecked = instrument != TestStationInstrument.None;
+            if (instrument != TestStationInstrument.None)
+            {
+                foreach (var otherStation in TestStationDefinitions
+                             .Select(definition => definition.StationNumber)
+                             .Where(number => number != stationNumber))
+                {
+                    var otherControls = GetTestStationConfigurationControls(otherStation);
+                    if (GetSelectedTestStationInstrument(otherControls.InstrumentComboBox) != instrument)
+                    {
+                        continue;
+                    }
+
+                    otherControls.InstrumentComboBox.SelectedIndex =
+                        (int)TestStationInstrument.None;
+                    otherControls.EnabledToggle.IsChecked = false;
+                }
+            }
+        }
+        finally
+        {
+            _updatingTestStationConfiguration = false;
+        }
+
+        PersistTestStationConfiguration();
+    }
+
+    private TestStationInstrument FindAvailableTestStationInstrument(int stationNumber)
+    {
+        var assigned = TestStationDefinitions
+            .Select(definition => definition.StationNumber)
+            .Where(number => number != stationNumber)
+            .Select(number => GetSelectedTestStationInstrument(
+                GetTestStationConfigurationControls(number).InstrumentComboBox))
+            .ToHashSet();
+        return new[] { TestStationInstrument.E4981A, TestStationInstrument.SM7110 }
+            .FirstOrDefault(instrument => !assigned.Contains(instrument));
+    }
+
+    private void PersistTestStationConfiguration()
+    {
+        SaveTestStationParametersFromInputs();
+        UpdateTestStationConfigurationDisplay();
+        UpdateHomeCommandState();
+    }
+
+    private void UpdateTestStationConfigurationDisplay()
+    {
+        var enabledCount = 0;
         foreach (var definition in TestStationDefinitions)
         {
-            var settings = _homeSettings.TestStationSettings.GetValueOrDefault(definition.StationNumber)
-                           ?? new TestStationSettings
-                           {
-                               PressPosition = DefaultTestStationPressPosition,
-                               WaitPosition = DefaultTestStationWaitPosition
-                           };
-            var editors = GetTestStationPositionEditors(definition.StationNumber);
-            editors.PressPosition.Text = FormatPresetCoordinate(settings.PressPosition);
-            editors.WaitPosition.Text = FormatPresetCoordinate(settings.WaitPosition);
+            var controls = GetTestStationConfigurationControls(definition.StationNumber);
+            var enabled = controls.EnabledToggle.IsChecked == true;
+            var instrument = GetSelectedTestStationInstrument(controls.InstrumentComboBox);
+            if (enabled && instrument != TestStationInstrument.None)
+            {
+                enabledCount++;
+            }
+
+            controls.Card.Opacity = enabled ? 1d : 0.58d;
+            controls.StatusText.Text = enabled
+                ? $"已分配 {FormatTestStationInstrument(instrument)}"
+                : "已关闭";
+            controls.StatusText.Foreground = new SolidColorBrush(
+                enabled ? Color.FromRgb(242, 246, 249) : Color.FromRgb(159, 177, 191));
+            controls.BadgeText.Text = enabled ? "待机" : "停用";
+            controls.BadgeText.Foreground = new SolidColorBrush(
+                enabled ? Color.FromRgb(54, 196, 106) : Color.FromRgb(159, 177, 191));
+            controls.ResultText.Text = enabled ? "暂无结果" : "—";
+            controls.ResultText.Foreground = new SolidColorBrush(Color.FromRgb(159, 177, 191));
         }
+
+        EnabledStationSummaryText.Text = $"{enabledCount} / 3 站已启用";
+        ProductionModeSummaryText.Text = $"{enabledCount}站测试 · 自动摆盘";
+        var summaryColor = enabledCount > 0
+            ? Color.FromRgb(54, 196, 106)
+            : Color.FromRgb(242, 181, 68);
+        EnabledStationSummaryText.Foreground = new SolidColorBrush(summaryColor);
+        EnabledStationSummaryIndicator.Fill = new SolidColorBrush(summaryColor);
+    }
+
+    private static string FormatTestStationInstrument(TestStationInstrument instrument)
+    {
+        return instrument switch
+        {
+            TestStationInstrument.E4981A => "E4981A",
+            TestStationInstrument.SM7110 => "SM7110",
+            _ => "未分配"
+        };
+    }
+
+    private void SetTestStationRuntimeDisplay(
+        int stationNumber,
+        string status,
+        string badge,
+        string resultText,
+        Color color)
+    {
+        var controls = GetTestStationConfigurationControls(stationNumber);
+        controls.StatusText.Text = status;
+        controls.StatusText.Foreground = new SolidColorBrush(color);
+        controls.BadgeText.Text = badge;
+        controls.BadgeText.Foreground = new SolidColorBrush(color);
+        controls.ResultText.Text = resultText;
+        controls.ResultText.Foreground = new SolidColorBrush(color);
     }
 
     private (TextBox PressPosition, TextBox WaitPosition) GetTestStationPositionEditors(
@@ -4681,6 +5082,7 @@ public partial class HomePage : UserControl
         foreach (var definition in TestStationDefinitions)
         {
             var editors = GetTestStationPositionEditors(definition.StationNumber);
+            var controls = GetTestStationConfigurationControls(definition.StationNumber);
             settingsByStation[definition.StationNumber] = new TestStationSettings
             {
                 PressPosition = ParseFiniteCoordinate(
@@ -4688,7 +5090,9 @@ public partial class HomePage : UserControl
                     $"{definition.DisplayName}下压位"),
                 WaitPosition = ParseFiniteCoordinate(
                     editors.WaitPosition.Text,
-                    $"{definition.DisplayName}等待位")
+                    $"{definition.DisplayName}等待位"),
+                Enabled = controls.EnabledToggle.IsChecked == true,
+                Instrument = GetSelectedTestStationInstrument(controls.InstrumentComboBox)
             };
         }
 
@@ -4700,6 +5104,69 @@ public partial class HomePage : UserControl
         var current = _testStationSettings ?? ReadTestStationSettings();
         return current.GetValueOrDefault(stationNumber)
                ?? throw new InvalidOperationException($"{stationNumber}号测试站参数不存在。");
+    }
+
+    private void EnsureAssignedTestInstrumentsConnected()
+    {
+        var connectionController = _connectionConfigController
+            ?? throw new InvalidOperationException("主页尚未连接仪表控制组件。");
+        var testStationSettings = _testStationSettings ?? ReadTestStationSettings();
+        ValidateTestStationInstrumentFlow(testStationSettings);
+        var enabledInstruments = testStationSettings
+            .Values
+            .Where(settings => settings.Enabled == true)
+            .Select(settings => settings.Instrument ?? TestStationInstrument.None)
+            .ToHashSet();
+        var disconnected = new List<string>();
+        if (enabledInstruments.Contains(TestStationInstrument.E4981A) &&
+            !connectionController.IsE4981AConnected)
+        {
+            disconnected.Add("E4981A");
+        }
+        if (enabledInstruments.Contains(TestStationInstrument.SM7110) &&
+            !connectionController.IsSM7110Connected)
+        {
+            disconnected.Add("SM7110");
+        }
+
+        if (disconnected.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"已分配仪表尚未连接：{string.Join("、", disconnected)}。请先在连接配置页完成连接。");
+        }
+    }
+
+    private static void ValidateTestStationInstrumentFlow(
+        IReadOnlyDictionary<int, TestStationSettings> settings)
+    {
+        var enabledStations = settings
+            .Where(pair => pair.Value.Enabled == true &&
+                           pair.Value.Instrument is not null and not TestStationInstrument.None)
+            .ToArray();
+        if (enabledStations.Length == 0)
+        {
+            return;
+        }
+
+        var e4981AStation = enabledStations
+            .Where(pair => pair.Value.Instrument == TestStationInstrument.E4981A)
+            .Select(pair => (int?)pair.Key)
+            .SingleOrDefault();
+        if (e4981AStation is null)
+        {
+            throw new InvalidOperationException(
+                "分BIN必须由E4981A完成，请启用并分配E4981A测试站。");
+        }
+
+        var sm7110Station = enabledStations
+            .Where(pair => pair.Value.Instrument == TestStationInstrument.SM7110)
+            .Select(pair => (int?)pair.Key)
+            .SingleOrDefault();
+        if (sm7110Station is not null && sm7110Station <= e4981AStation)
+        {
+            throw new InvalidOperationException(
+                "SM7110必须分配在E4981A之后的下游测试站，确保产品先获得E4981A BIN。");
+        }
     }
 
     private static void ValidateProductionAxisMotionSettings(
@@ -4742,10 +5209,29 @@ public partial class HomePage : UserControl
     {
         try
         {
-            _ = ReadTestStationSettings();
+            var settings = ReadTestStationSettings();
+            var enabledStations = settings.Values
+                .Where(value => value.Enabled == true)
+                .ToArray();
+            if (enabledStations.Any(value =>
+                    value.Instrument is null or TestStationInstrument.None))
+            {
+                return false;
+            }
+
+            var assignedInstruments = enabledStations
+                .Select(value => value.Instrument)
+                .ToArray();
+            if (assignedInstruments.Distinct().Count() != assignedInstruments.Length)
+            {
+                return false;
+            }
+
+            ValidateTestStationInstrumentFlow(settings);
             return true;
         }
-        catch (ArgumentException)
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
         {
             return false;
         }
@@ -5078,7 +5564,7 @@ public partial class HomePage : UserControl
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
             "请确认所有机构都在安全区域，并且本次复位涉及的硬件轴已使能。\n\n" +
-            "复位顺序：R/Z同时 → 上料X → 上料Y、下料XY同时 → DD马达；测试站轴13/14/15不参与。",
+            "复位顺序：R/Z同时 → 上料X → 上料Y、下料XY、三个测试站同时 → DD马达。",
             "一键复位安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -5106,7 +5592,7 @@ public partial class HomePage : UserControl
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
             _oneKeyResetRunning = true;
-            SetOneKeyResetStatus("正在执行：R/Z → 上料X → Y/下料XY同时 → DD；测试站不参与…", Color.FromRgb(242, 181, 68));
+            SetOneKeyResetStatus("正在执行：R/Z → 上料X → Y/下料XY/测试站同时 → DD…", Color.FromRgb(242, 181, 68));
             UpdateHomeCommandState();
             await motionController.RunOneKeyResetAsync(CancellationToken.None);
             SetOneKeyResetStatus("一键复位完成", Color.FromRgb(73, 209, 125));
@@ -5317,6 +5803,9 @@ public partial class HomePage : UserControl
             var editors = GetTestStationPositionEditors(definition.StationNumber);
             editors.PressPosition.IsEnabled = commandsIdle;
             editors.WaitPosition.IsEnabled = commandsIdle;
+            var controls = GetTestStationConfigurationControls(definition.StationNumber);
+            controls.EnabledToggle.IsEnabled = commandsIdle;
+            controls.InstrumentComboBox.IsEnabled = commandsIdle;
         }
 
         FirstSetNozzle1PickupZPositionTextBox.IsEnabled = commandsIdle;
@@ -5983,6 +6472,12 @@ public partial class HomePage : UserControl
     }
 
     private readonly record struct BinDropPosition(double X, double Y);
+
+    private readonly record struct TestStationMeasurementResult(
+        string Bin,
+        string DisplayText,
+        string StatusDescription,
+        bool Passed);
 
     private sealed record BinDropPositions(
         BinDropPosition Bin0,
