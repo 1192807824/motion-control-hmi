@@ -171,6 +171,20 @@ public partial class ParameterSettingsPage : UserControl
         });
     }
 
+    private void EmergencyStopAllAxes_Click(object sender, RoutedEventArgs e)
+    {
+        if (_motionPage is null)
+        {
+            SetRecipeStatus("运动控制未连接，无法下发全轴急停。", success: false);
+            return;
+        }
+
+        var issued = _motionPage.EmergencyStopAllAxes("参数配置页操作员请求全轴急停");
+        SetRecipeStatus(
+            issued ? "全轴急停已下发，正在确认所有轴停止。" : "急停下发失败，请立即按硬件急停。",
+            success: issued);
+    }
+
     private void ShowVisionProcedureNames(VisionProcedureNames? names)
     {
         var enabled = names is not null;
