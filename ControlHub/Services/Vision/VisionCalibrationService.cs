@@ -106,11 +106,6 @@ public sealed class VisionCalibrationService
         Save();
     }
 
-    public string? BackupSettingsBeforeOverwrite()
-    {
-        return _store.BackupBeforeOverwrite();
-    }
-
     public VisionCalibrationSnapshot GetSnapshot()
     {
         var axisSet = ActiveAxisSet;

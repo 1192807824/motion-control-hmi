@@ -385,6 +385,7 @@ public partial class HomePage : UserControl
         SaveFirstSetTeachingPositionsFromInputs();
         SavePresetPositionsFromInputs();
         SaveLowerCameraPhotoPositionsFromInputs();
+        SaveLowerCameraRotationCentersFromInputs();
         SaveProductionAxisParametersFromInputs();
         SaveTestStationParametersFromInputs();
         SaveProductionZPositionsFromInputs();
@@ -412,7 +413,104 @@ public partial class HomePage : UserControl
             TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out var pressPositionY)
                 ? pressPositionY
                 : null;
+        settings.LowerCameraNozzle1RotationCenterX =
+            TryParseCoordinate(LowerCameraNozzle1RotationCenterXTextBox.Text, out var nozzle1CenterX)
+                ? nozzle1CenterX
+                : null;
+        settings.LowerCameraNozzle1RotationCenterY =
+            TryParseCoordinate(LowerCameraNozzle1RotationCenterYTextBox.Text, out var nozzle1CenterY)
+                ? nozzle1CenterY
+                : null;
+        settings.LowerCameraNozzle2RotationCenterX =
+            TryParseCoordinate(LowerCameraNozzle2RotationCenterXTextBox.Text, out var nozzle2CenterX)
+                ? nozzle2CenterX
+                : null;
+        settings.LowerCameraNozzle2RotationCenterY =
+            TryParseCoordinate(LowerCameraNozzle2RotationCenterYTextBox.Text, out var nozzle2CenterY)
+                ? nozzle2CenterY
+                : null;
         return settings;
+    }
+
+    public void SetLowerCameraRotationCenter(int nozzleNumber, double centerX, double centerY)
+    {
+        if (nozzleNumber is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "下相机吸嘴编号必须为1或2。");
+        }
+
+        if (!double.IsFinite(centerX) || !double.IsFinite(centerY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(centerX), "下相机旋转中心必须是有效数字。");
+        }
+
+        _loadingPresetPositions = true;
+        try
+        {
+            var xText = centerX.ToString("0.#####", CultureInfo.CurrentCulture);
+            var yText = centerY.ToString("0.#####", CultureInfo.CurrentCulture);
+            if (nozzleNumber == 1)
+            {
+                LowerCameraNozzle1RotationCenterXTextBox.Text = xText;
+                LowerCameraNozzle1RotationCenterYTextBox.Text = yText;
+                _homeSettings.LowerCameraNozzle1RotationCenterX = centerX;
+                _homeSettings.LowerCameraNozzle1RotationCenterY = centerY;
+            }
+            else
+            {
+                LowerCameraNozzle2RotationCenterXTextBox.Text = xText;
+                LowerCameraNozzle2RotationCenterYTextBox.Text = yText;
+                _homeSettings.LowerCameraNozzle2RotationCenterX = centerX;
+                _homeSettings.LowerCameraNozzle2RotationCenterY = centerY;
+            }
+        }
+        finally
+        {
+            _loadingPresetPositions = false;
+        }
+
+        _homeSettingsStore.Save(_homeSettings);
+        SetLowerCameraPhotoPositionStatus(
+            $"吸嘴{nozzleNumber}旋转中心已自动写入参数设置：X={centerX:0.#####}，Y={centerY:0.#####} pixel。",
+            true);
+        UpdateHomeCommandState();
+    }
+
+    public void ClearLowerCameraRotationCenter(int nozzleNumber)
+    {
+        if (nozzleNumber is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(nameof(nozzleNumber), "下相机吸嘴编号必须为1或2。");
+        }
+
+        _loadingPresetPositions = true;
+        try
+        {
+            if (nozzleNumber == 1)
+            {
+                LowerCameraNozzle1RotationCenterXTextBox.Text = "";
+                LowerCameraNozzle1RotationCenterYTextBox.Text = "";
+                _homeSettings.LowerCameraNozzle1RotationCenterX = null;
+                _homeSettings.LowerCameraNozzle1RotationCenterY = null;
+            }
+            else
+            {
+                LowerCameraNozzle2RotationCenterXTextBox.Text = "";
+                LowerCameraNozzle2RotationCenterYTextBox.Text = "";
+                _homeSettings.LowerCameraNozzle2RotationCenterX = null;
+                _homeSettings.LowerCameraNozzle2RotationCenterY = null;
+            }
+        }
+        finally
+        {
+            _loadingPresetPositions = false;
+        }
+
+        _homeSettingsStore.Save(_homeSettings);
+        SetLowerCameraPhotoPositionStatus(
+            $"吸嘴{nozzleNumber}重新完成九点标定，请重新计算旋转中心。",
+            true);
+        UpdateHomeCommandState();
     }
 
     public void ApplyRecipeSettings(HomePageSettings settings)
@@ -1142,21 +1240,19 @@ public partial class HomePage : UserControl
 
     private LowerCameraCorrectionProfile ReadLowerCameraCorrectionProfile(int nozzleNumber)
     {
-        var rotationCenterCalibrated = nozzleNumber == 2
-            ? _visionCalibration.Settings.LowerCameraNozzle2RotationCenterCalibrated
-            : _visionCalibration.Settings.LowerCameraNozzle1RotationCenterCalibrated;
         var rotationCenterX = nozzleNumber == 2
-            ? _visionCalibration.Settings.LowerCameraNozzle2RotationCenterX
-            : _visionCalibration.Settings.LowerCameraNozzle1RotationCenterX;
+            ? _homeSettings.LowerCameraNozzle2RotationCenterX
+            : _homeSettings.LowerCameraNozzle1RotationCenterX;
         var rotationCenterY = nozzleNumber == 2
-            ? _visionCalibration.Settings.LowerCameraNozzle2RotationCenterY
-            : _visionCalibration.Settings.LowerCameraNozzle1RotationCenterY;
-        if (!rotationCenterCalibrated ||
-            !double.IsFinite(rotationCenterX) ||
-            !double.IsFinite(rotationCenterY))
+            ? _homeSettings.LowerCameraNozzle2RotationCenterY
+            : _homeSettings.LowerCameraNozzle1RotationCenterY;
+        if (rotationCenterX is not { } centerX ||
+            rotationCenterY is not { } centerY ||
+            !double.IsFinite(centerX) ||
+            !double.IsFinite(centerY))
         {
             throw new InvalidOperationException(
-                $"下相机吸嘴{nozzleNumber}旋转中心不存在，请先完成该吸嘴的旋转中心计算。");
+                $"参数设置中的下相机吸嘴{nozzleNumber}旋转中心不完整，请先完成该吸嘴的旋转中心计算。");
         }
 
         var configuredPath = nozzleNumber == 2
@@ -1179,8 +1275,8 @@ public partial class HomePage : UserControl
 
         return new LowerCameraCorrectionProfile(
             calibrationPath,
-            rotationCenterX,
-            rotationCenterY);
+            centerX,
+            centerY);
     }
 
     private static LowerCameraPlacementTarget CalculateLowerCameraPlacementTarget(
@@ -4647,6 +4743,12 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void LowerCameraRotationCenterTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SaveLowerCameraRotationCentersFromInputs();
+        UpdateHomeCommandState();
+    }
+
     private void ProductionZPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SaveProductionZPositionsFromInputs();
@@ -4698,6 +4800,14 @@ public partial class HomePage : UserControl
             _homeSettings.LowerCameraPhotoPosition2X);
         LowerCameraPhotoPosition2YTextBox.Text = FormatPresetCoordinate(
             _homeSettings.LowerCameraPhotoPosition2Y);
+        LowerCameraNozzle1RotationCenterXTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraNozzle1RotationCenterX);
+        LowerCameraNozzle1RotationCenterYTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraNozzle1RotationCenterY);
+        LowerCameraNozzle2RotationCenterXTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraNozzle2RotationCenterX);
+        LowerCameraNozzle2RotationCenterYTextBox.Text = FormatPresetCoordinate(
+            _homeSettings.LowerCameraNozzle2RotationCenterY);
         LoadProductionAxisParameterEditors();
         LoadTestStationPositionEditors();
         FirstSetNozzle1PickupZPositionTextBox.Text = FormatPresetCoordinate(
@@ -5783,6 +5893,10 @@ public partial class HomePage : UserControl
             LowerCameraPhotoPosition1YTextBox is null ||
             LowerCameraPhotoPosition2XTextBox is null ||
             LowerCameraPhotoPosition2YTextBox is null ||
+            LowerCameraNozzle1RotationCenterXTextBox is null ||
+            LowerCameraNozzle1RotationCenterYTextBox is null ||
+            LowerCameraNozzle2RotationCenterXTextBox is null ||
+            LowerCameraNozzle2RotationCenterYTextBox is null ||
             RecordLowerCameraPhotoPosition1Button is null ||
             RecordLowerCameraPhotoPosition2Button is null ||
             MoveLowerCameraPhotoPosition1Button is null ||
@@ -5861,6 +5975,11 @@ public partial class HomePage : UserControl
             TryParseCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out _) &&
             TryParseCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out _);
+        var allLowerCameraRotationCentersValid =
+            TryParseCoordinate(LowerCameraNozzle1RotationCenterXTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraNozzle1RotationCenterYTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraNozzle2RotationCenterXTextBox.Text, out _) &&
+            TryParseCoordinate(LowerCameraNozzle2RotationCenterYTextBox.Text, out _);
         var allBinDropPositionsValid =
             TryParseCoordinate(Bin0PositionXTextBox.Text, out _) &&
             TryParseCoordinate(Bin0PositionYTextBox.Text, out _) &&
@@ -5877,6 +5996,7 @@ public partial class HomePage : UserControl
             allZPositionsValid &&
             allSecondSetXyPositionsValid &&
             allLowerCameraPhotoPositionsValid &&
+            allLowerCameraRotationCentersValid &&
             allBinDropPositionsValid &&
             (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
         StartProductionTitleText.Text = _startSequenceRunning
@@ -5930,6 +6050,10 @@ public partial class HomePage : UserControl
         LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition2YTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle1RotationCenterXTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle1RotationCenterYTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle2RotationCenterXTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle2RotationCenterYTextBox.IsEnabled = commandsIdle;
         foreach (var editors in _productionAxisMotionEditors.Values)
         {
             editors.SetEnabled(commandsIdle);
@@ -6078,6 +6202,48 @@ public partial class HomePage : UserControl
         {
             SetLowerCameraPhotoPositionStatus(
                 $"保存下相机拍照位失败：{exception.Message}",
+                false);
+        }
+    }
+
+    private void SaveLowerCameraRotationCentersFromInputs()
+    {
+        if (_loadingPresetPositions ||
+            LowerCameraNozzle1RotationCenterXTextBox is null ||
+            LowerCameraNozzle1RotationCenterYTextBox is null ||
+            LowerCameraNozzle2RotationCenterXTextBox is null ||
+            LowerCameraNozzle2RotationCenterYTextBox is null ||
+            !TryParseOptionalCoordinate(
+                LowerCameraNozzle1RotationCenterXTextBox.Text,
+                out var nozzle1CenterX) ||
+            !TryParseOptionalCoordinate(
+                LowerCameraNozzle1RotationCenterYTextBox.Text,
+                out var nozzle1CenterY) ||
+            !TryParseOptionalCoordinate(
+                LowerCameraNozzle2RotationCenterXTextBox.Text,
+                out var nozzle2CenterX) ||
+            !TryParseOptionalCoordinate(
+                LowerCameraNozzle2RotationCenterYTextBox.Text,
+                out var nozzle2CenterY))
+        {
+            return;
+        }
+
+        _homeSettings.LowerCameraNozzle1RotationCenterX = nozzle1CenterX;
+        _homeSettings.LowerCameraNozzle1RotationCenterY = nozzle1CenterY;
+        _homeSettings.LowerCameraNozzle2RotationCenterX = nozzle2CenterX;
+        _homeSettings.LowerCameraNozzle2RotationCenterY = nozzle2CenterY;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+            SetLowerCameraPhotoPositionStatus(
+                "下相机旋转中心参数已更新；计算流程会自动回填对应吸嘴的X/Y。",
+                true);
+        }
+        catch (Exception exception)
+        {
+            SetLowerCameraPhotoPositionStatus(
+                $"保存下相机旋转中心参数失败：{exception.Message}",
                 false);
         }
     }

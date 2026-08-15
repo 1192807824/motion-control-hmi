@@ -1368,6 +1368,8 @@
                                 <RowDefinition Height="24" />
                                 <RowDefinition Height="52" />
                                 <RowDefinition Height="52" />
+                                <RowDefinition Height="52" />
+                                <RowDefinition Height="52" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Grid>
@@ -1446,8 +1448,64 @@
                                             Cursor="Hand" IsEnabled="False" Click="MoveLowerCameraPhotoPosition2_Click" />
                                 </Grid>
                             </Grid>
-                            <TextBlock Grid.Row="3" x:Name="LowerCameraPhotoPositionStatusText"
-                                       Text="两个吸嘴取料后依次到拍照位1、拍照位2执行下相机纠偏。"
+                            <Grid Grid.Row="3" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="中心 1" Foreground="#C9A7FF" FontSize="10" FontWeight="Bold"
+                                           VerticalAlignment="Center" TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pixel）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraNozzle1RotationCenterXTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             ToolTip="下相机吸嘴1旋转中心X；计算完成后自动写入"
+                                             TextChanged="LowerCameraRotationCenterTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pixel）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraNozzle1RotationCenterYTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             ToolTip="下相机吸嘴1旋转中心Y；计算完成后自动写入"
+                                             TextChanged="LowerCameraRotationCenterTextBox_TextChanged" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="6" Text="吸嘴1自动写入" Foreground="#49D17D" FontSize="10"
+                                           VerticalAlignment="Center" TextAlignment="Center" />
+                            </Grid>
+                            <Grid Grid.Row="4" Margin="0,2,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="116" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="中心 2" Foreground="#C9A7FF" FontSize="10" FontWeight="Bold"
+                                           VerticalAlignment="Center" TextAlignment="Center" />
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="X（pixel）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraNozzle2RotationCenterXTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             ToolTip="下相机吸嘴2旋转中心X；计算完成后自动写入"
+                                             TextChanged="LowerCameraRotationCenterTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Y（pixel）" Foreground="#9FB1BF" FontSize="9" TextAlignment="Center" />
+                                    <TextBox x:Name="LowerCameraNozzle2RotationCenterYTextBox" Height="25" Text=""
+                                             TextAlignment="Center" VerticalContentAlignment="Center"
+                                             Foreground="#10263A" Background="#F7FAFC"
+                                             ToolTip="下相机吸嘴2旋转中心Y；计算完成后自动写入"
+                                             TextChanged="LowerCameraRotationCenterTextBox_TextChanged" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="6" Text="吸嘴2自动写入" Foreground="#49D17D" FontSize="10"
+                                           VerticalAlignment="Center" TextAlignment="Center" />
+                            </Grid>
+                            <TextBlock Grid.Row="5" x:Name="LowerCameraPhotoPositionStatusText"
+                                       Text="旋转中心计算完成后自动写入这里，不再保存单独的旋转中心文件。"
                                        Foreground="#9FB1BF" FontSize="10" TextWrapping="Wrap" />
                         </Grid>
                     </Border>

@@ -532,7 +532,7 @@
                             <Button x:Name="SidebarRotationCenterButton"
                                     Tag="CalculateRotationCenter"
                                     Margin="26,0,0,6"
-                                    Content="计算并保存旋转中心"
+                                    Content="计算并写入参数设置"
                                     Style="{StaticResource SidebarButton}"
                                     Background="#6B3FD6"
                                     BorderBrush="#8A63E8"

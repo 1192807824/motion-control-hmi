@@ -21,7 +21,10 @@ public partial class MainWindow : Window
 
         VisualCalibrationContent.AttachMotionController(MotionPage);
         HomeContent.AttachMotionController(MotionPage);
-        VisualCalibrationContent.AttachHomeSettingsProvider(HomeContent.GetCurrentParameterSettings);
+        VisualCalibrationContent.AttachHomeSettingsProvider(
+            HomeContent.GetCurrentParameterSettings,
+            HomeContent.SetLowerCameraRotationCenter,
+            HomeContent.ClearLowerCameraRotationCenter);
         UsbMicroscopeContent.AttachHomeController(HomeContent);
         HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
         HomeContent.AttachConnectionConfigController(ConnectionConfigContent);

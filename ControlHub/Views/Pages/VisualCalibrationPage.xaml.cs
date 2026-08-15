@@ -79,6 +79,8 @@ public partial class VisualCalibrationPage : UserControl
     private bool _suppressLowerCameraNozzleEvent;
     private MotionControlPage? _motionController;
     private Func<HomePageSettings>? _homeSettingsProvider;
+    private Action<int, double, double>? _lowerCameraRotationCenterUpdater;
+    private Action<int>? _lowerCameraRotationCenterClearer;
     private CalibrationCenterPosition? _recordedCenter;
     private CalibrationCenterPosition? _nozzleDotPosition;
     private VisionRectangleBlobResult? _pendingNozzlePointResult;
@@ -139,11 +141,20 @@ public partial class VisualCalibrationPage : UserControl
         UpdateCommandState();
     }
 
-    public void AttachHomeSettingsProvider(Func<HomePageSettings> homeSettingsProvider)
+    public void AttachHomeSettingsProvider(
+        Func<HomePageSettings> homeSettingsProvider,
+        Action<int, double, double> lowerCameraRotationCenterUpdater,
+        Action<int> lowerCameraRotationCenterClearer)
     {
         _homeSettingsProvider = homeSettingsProvider
             ?? throw new ArgumentNullException(nameof(homeSettingsProvider));
+        _lowerCameraRotationCenterUpdater = lowerCameraRotationCenterUpdater
+            ?? throw new ArgumentNullException(nameof(lowerCameraRotationCenterUpdater));
+        _lowerCameraRotationCenterClearer = lowerCameraRotationCenterClearer
+            ?? throw new ArgumentNullException(nameof(lowerCameraRotationCenterClearer));
         RefreshTeachingPositions();
+        RefreshRotationCenterStatus();
+        RefreshLowerCameraCorrectionTestStatus();
     }
 
     public void RefreshTeachingPositions()
@@ -2320,12 +2331,10 @@ public partial class VisualCalibrationPage : UserControl
                 "三个中心点已取得，正在写入X1/Y1、X2/Y2、X3/Y3并执行“计算旋转中心”…",
                 WorkflowStatus.Running);
             var result = await VisionHost.CalculateRotationCenterAsync(points, cancellationToken);
-            var rotationSettingsBackupPath = _visionCalibration.BackupSettingsBeforeOverwrite();
-            SaveActiveRotationCenter(result);
-            _visionCalibration.Save();
+            SetActiveRotationCenterParameter(result);
             finalStatus =
-                $"{ActiveLowerCameraNozzleName}旋转中心已保存：X={result.CenterX:0.###}，Y={result.CenterY:0.###}" +
-                FormatBackupNotice(rotationSettingsBackupPath, "旧旋转中心配置");
+                $"{ActiveLowerCameraNozzleName}旋转中心已写入参数设置：" +
+                $"X={result.CenterX:0.#####}，Y={result.CenterY:0.#####}";
             RefreshLowerCameraCorrectionTestStatus();
             finalStatusKind = WorkflowStatus.Success;
         }
@@ -2388,20 +2397,11 @@ public partial class VisualCalibrationPage : UserControl
         _rotationCenterCancellation?.Cancel();
     }
 
-    private void SaveActiveRotationCenter(VisionRotationCenterResult result)
+    private void SetActiveRotationCenterParameter(VisionRotationCenterResult result)
     {
-        if (ActiveLowerCameraNozzle == 2)
-        {
-            _uiSettings.LowerCameraNozzle2RotationCenterCalibrated = true;
-            _uiSettings.LowerCameraNozzle2RotationCenterX = result.CenterX;
-            _uiSettings.LowerCameraNozzle2RotationCenterY = result.CenterY;
-        }
-        else
-        {
-            _uiSettings.LowerCameraNozzle1RotationCenterCalibrated = true;
-            _uiSettings.LowerCameraNozzle1RotationCenterX = result.CenterX;
-            _uiSettings.LowerCameraNozzle1RotationCenterY = result.CenterY;
-        }
+        var updater = _lowerCameraRotationCenterUpdater
+            ?? throw new InvalidOperationException("参数设置尚未连接，无法写入旋转中心。");
+        updater(ActiveLowerCameraNozzle, result.CenterX, result.CenterY);
 
         _lowerCameraCorrectionTestStatus =
             $"{ActiveLowerCameraNozzleName}旋转中心已更新，可以直接执行纠偏测试。";
@@ -2409,18 +2409,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void ResetActiveRotationCenter()
     {
-        if (ActiveLowerCameraNozzle == 2)
-        {
-            _uiSettings.LowerCameraNozzle2RotationCenterCalibrated = false;
-            _uiSettings.LowerCameraNozzle2RotationCenterX = 0;
-            _uiSettings.LowerCameraNozzle2RotationCenterY = 0;
-        }
-        else
-        {
-            _uiSettings.LowerCameraNozzle1RotationCenterCalibrated = false;
-            _uiSettings.LowerCameraNozzle1RotationCenterX = 0;
-            _uiSettings.LowerCameraNozzle1RotationCenterY = 0;
-        }
+        _lowerCameraRotationCenterClearer?.Invoke(ActiveLowerCameraNozzle);
 
         _lowerCameraCorrectionTestStatus =
             $"请先完成{ActiveLowerCameraNozzleName}旋转中心计算。";
@@ -2434,17 +2423,8 @@ public partial class VisualCalibrationPage : UserControl
             return;
         }
 
-        var calibrated = ActiveLowerCameraNozzle == 2
-            ? _uiSettings.LowerCameraNozzle2RotationCenterCalibrated
-            : _uiSettings.LowerCameraNozzle1RotationCenterCalibrated;
-        var centerX = ActiveLowerCameraNozzle == 2
-            ? _uiSettings.LowerCameraNozzle2RotationCenterX
-            : _uiSettings.LowerCameraNozzle1RotationCenterX;
-        var centerY = ActiveLowerCameraNozzle == 2
-            ? _uiSettings.LowerCameraNozzle2RotationCenterY
-            : _uiSettings.LowerCameraNozzle1RotationCenterY;
-        _rotationCenterStatus = calibrated
-            ? $"已保存{ActiveLowerCameraNozzleName}旋转中心：X={centerX:0.###}，Y={centerY:0.###}"
+        _rotationCenterStatus = TryGetActiveRotationCenter(out var centerX, out var centerY)
+            ? $"参数设置中的{ActiveLowerCameraNozzleName}旋转中心：X={centerX:0.#####}，Y={centerY:0.#####}"
             : $"完成{ActiveLowerCameraNozzleName}九点标定后可计算旋转中心。";
     }
 
@@ -2556,16 +2536,19 @@ public partial class VisualCalibrationPage : UserControl
 
     private bool TryGetActiveRotationCenter(out double centerX, out double centerY)
     {
-        var calibrated = ActiveLowerCameraNozzle == 2
-            ? _uiSettings.LowerCameraNozzle2RotationCenterCalibrated
-            : _uiSettings.LowerCameraNozzle1RotationCenterCalibrated;
-        centerX = ActiveLowerCameraNozzle == 2
-            ? _uiSettings.LowerCameraNozzle2RotationCenterX
-            : _uiSettings.LowerCameraNozzle1RotationCenterX;
-        centerY = ActiveLowerCameraNozzle == 2
-            ? _uiSettings.LowerCameraNozzle2RotationCenterY
-            : _uiSettings.LowerCameraNozzle1RotationCenterY;
-        return calibrated && double.IsFinite(centerX) && double.IsFinite(centerY);
+        var settings = _homeSettingsProvider?.Invoke();
+        var configuredCenterX = ActiveLowerCameraNozzle == 2
+            ? settings?.LowerCameraNozzle2RotationCenterX
+            : settings?.LowerCameraNozzle1RotationCenterX;
+        var configuredCenterY = ActiveLowerCameraNozzle == 2
+            ? settings?.LowerCameraNozzle2RotationCenterY
+            : settings?.LowerCameraNozzle1RotationCenterY;
+        centerX = configuredCenterX ?? 0d;
+        centerY = configuredCenterY ?? 0d;
+        return configuredCenterX.HasValue &&
+               configuredCenterY.HasValue &&
+               double.IsFinite(centerX) &&
+               double.IsFinite(centerY);
     }
 
     private bool CanRunLowerCameraCorrectionTest()

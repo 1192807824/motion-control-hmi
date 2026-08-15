@@ -1214,7 +1214,7 @@ public partial class MainWindow : Window
                 : "CalculateRotationCenter";
             SidebarRotationCenterButton.Content = rotationCenterRunning
                 ? "停止旋转中心计算"
-                : $"计算旋转中心并保存 · {lowerCameraNozzleName}";
+                : $"计算并写入参数设置 · {lowerCameraNozzleName}";
             SidebarRotationCenterStatusText.Text = Decode(parts[35]);
             SidebarRotationCenterStatusText.Foreground = rotationCenterRunning
                 ? new SolidColorBrush(Color.FromRgb(255, 183, 77))

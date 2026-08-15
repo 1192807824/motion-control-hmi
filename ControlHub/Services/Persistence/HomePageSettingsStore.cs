@@ -79,6 +79,14 @@ public sealed class HomePageSettings
 
     public double? LowerCameraPhotoPosition2Y { get; set; }
 
+    public double? LowerCameraNozzle1RotationCenterX { get; set; }
+
+    public double? LowerCameraNozzle1RotationCenterY { get; set; }
+
+    public double? LowerCameraNozzle2RotationCenterX { get; set; }
+
+    public double? LowerCameraNozzle2RotationCenterY { get; set; }
+
     public double? Axis0RelativePulse { get; set; }
 
     public double? FirstSetPickupZPosition { get; set; }
