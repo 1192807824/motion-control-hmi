@@ -22,6 +22,8 @@ public partial class HomePage : UserControl
 {
     private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionResultModuleName = "脚本1";
+    private const int MaxCachedChipCount = 10;
+    private const int EmptyTraySingleChipVibrationThreshold = 3;
     private const int FirstSetZ1VacuumOutputBit = 15;
     private const int FirstSetZ1BreakVacuumOutputBit = 14;
     private const int FirstSetZ2VacuumOutputBit = 17;
@@ -988,19 +990,29 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException("下相机纠偏只允许使用第一套XY（轴1/2）。");
         }
 
+        var nozzle1Required = pickupBatch.Nozzle1.HasValue;
         var nozzle2Required = pickupBatch.Nozzle2.HasValue;
+        if (!nozzle1Required && !nozzle2Required)
+        {
+            throw new InvalidOperationException("本批没有需要下相机纠偏的吸嘴。");
+        }
+
         var positions = GetLowerCameraPhotoPositions();
-        LowerCameraCorrectionResultText.Text = "下相机纠偏：吸嘴1正在移动到拍照位1…";
+        var firstNozzleNumber = nozzle1Required ? 1 : 2;
+        var firstPhotoPositionX = nozzle1Required ? positions.Position1X : positions.Position2X;
+        var firstPhotoPositionY = nozzle1Required ? positions.Position1Y : positions.Position2Y;
+        LowerCameraCorrectionResultText.Text =
+            $"下相机纠偏：吸嘴{firstNozzleNumber}正在移动到拍照位{firstNozzleNumber}…";
         LowerCameraCorrectionResultText.Foreground =
             new SolidColorBrush(Color.FromRgb(242, 181, 68));
         SetStartProductionStatus(
-            $"{(nozzle2Required ? "两个吸嘴已取料" : "仅吸嘴1已取料")}，" +
-            $"XY正在前往拍照位1({positions.Position1X:0.###}, {positions.Position1Y:0.###})…",
+            $"{(nozzle1Required && nozzle2Required ? "两个吸嘴已取料" : $"仅吸嘴{firstNozzleNumber}已取料")}，" +
+            $"XY正在前往拍照位{firstNozzleNumber}({firstPhotoPositionX:0.###}, {firstPhotoPositionY:0.###})…",
             Color.FromRgb(242, 181, 68));
         await MoveToFirstLowerCameraPositionWithPickupAnglesAsync(
-            "下相机拍照位1",
-            positions.Position1X,
-            positions.Position1Y,
+            $"下相机拍照位{firstNozzleNumber}",
+            firstPhotoPositionX,
+            firstPhotoPositionY,
             pickupBatch,
             pickupRPositions,
             cancellationToken);
@@ -1009,48 +1021,56 @@ public partial class HomePage : UserControl
         {
             // 只有拍照位1确认到位后才开光，并保持到拍照位2的视觉流程完成。
             SetLowerCameraLight(enabled: true);
-            ShowLowerCameraCorrectionVisionStatus(1);
             VisionLowerCameraCorrectionResult? nozzle1Result = null;
             string? nozzle1Error = null;
-            try
+            if (nozzle1Required)
             {
-                nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
-                    nozzle1Profile.RotationCenterX,
-                    nozzle1Profile.RotationCenterY,
-                    nozzle1Profile.CalibrationFilePath,
-                    cancellationToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                nozzle1Error = exception.Message;
+                ShowLowerCameraCorrectionVisionStatus(1);
+                try
+                {
+                    nozzle1Result = await visualCalibrationController.RunLowerCameraCorrectionAsync(
+                        nozzle1Profile.RotationCenterX,
+                        nozzle1Profile.RotationCenterY,
+                        nozzle1Profile.CalibrationFilePath,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    nozzle1Error = exception.Message;
+                }
+
+                LowerCameraCorrectionResultText.Text = nozzle1Result is not null
+                    ? $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+                      $"夹角={nozzle1Result.MeasuredAngle:0.00000}°" +
+                      (nozzle2Required ? "；吸嘴2正在拍照位2纠偏…" : "；本批吸嘴2无料")
+                    : $"吸嘴1纠偏失败，位置1将使用原设定坐标；" +
+                      (nozzle2Required ? $"继续执行吸嘴2纠偏。{nozzle1Error}" : nozzle1Error);
+                LowerCameraCorrectionResultText.Foreground = new SolidColorBrush(
+                    nozzle1Result is not null
+                        ? Color.FromRgb(242, 181, 68)
+                        : Color.FromRgb(242, 122, 128));
             }
 
-            LowerCameraCorrectionResultText.Text = nozzle1Result is not null
-                ? $"吸嘴1：X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
-                  $"夹角={nozzle1Result.MeasuredAngle:0.00000}°" +
-                  (nozzle2Required ? "；吸嘴2正在拍照位2纠偏…" : "；本批吸嘴2无料")
-                : $"吸嘴1纠偏失败，位置1将使用原设定坐标；" +
-                  (nozzle2Required ? $"继续执行吸嘴2纠偏。{nozzle1Error}" : nozzle1Error);
-            LowerCameraCorrectionResultText.Foreground = new SolidColorBrush(
-                nozzle1Result is not null
-                    ? Color.FromRgb(242, 181, 68)
-                    : Color.FromRgb(242, 122, 128));
             VisionLowerCameraCorrectionResult? nozzle2Result = null;
             string? nozzle2Error = null;
             if (nozzle2Required)
             {
-                SetStartProductionStatus(
-                    nozzle1Result is not null
-                        ? $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…"
-                        : $"吸嘴1纠偏失败，已跳过吸嘴1纠偏；XY仍前往拍照位2执行吸嘴2纠偏…",
-                    nozzle1Result is not null
-                        ? Color.FromRgb(242, 181, 68)
-                        : Color.FromRgb(242, 122, 128));
-                await MovePresetPositionCoreAsync(
-                    "下相机拍照位2",
-                    positions.Position2X,
-                    positions.Position2Y,
-                    cancellationToken);
+                if (nozzle1Required)
+                {
+                    SetStartProductionStatus(
+                        nozzle1Result is not null
+                            ? $"吸嘴1纠偏完成，XY正在前往拍照位2({positions.Position2X:0.###}, {positions.Position2Y:0.###})…"
+                            : $"吸嘴1纠偏失败，XY仍前往拍照位2执行吸嘴2纠偏…",
+                        nozzle1Result is not null
+                            ? Color.FromRgb(242, 181, 68)
+                            : Color.FromRgb(242, 122, 128));
+                    await MovePresetPositionCoreAsync(
+                        "下相机拍照位2",
+                        positions.Position2X,
+                        positions.Position2Y,
+                        cancellationToken);
+                }
+
                 ShowLowerCameraCorrectionVisionStatus(2);
                 try
                 {
@@ -1070,17 +1090,21 @@ public partial class HomePage : UserControl
             SetLowerCameraLight(enabled: false);
             lightMayBeOn = false;
 
-            var nozzle1Summary = nozzle1Result is not null
-                ? $"吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
-                  $"夹角={nozzle1Result.MeasuredAngle:0.00000}°"
-                : $"吸嘴1纠偏失败，位置1使用原设定坐标（{nozzle1Error}）";
+            var nozzle1Summary = !nozzle1Required
+                ? "吸嘴1本批无料，已跳过"
+                : nozzle1Result is not null
+                    ? $"吸嘴1 X偏差={nozzle1Result.CorrectionX:0.00000} Y偏差={nozzle1Result.CorrectionY:0.00000} " +
+                      $"夹角={nozzle1Result.MeasuredAngle:0.00000}°"
+                    : $"吸嘴1纠偏失败，位置1使用原设定坐标（{nozzle1Error}）";
             var nozzle2Summary = !nozzle2Required
                 ? "吸嘴2本批无料，已跳过"
                 : nozzle2Result is not null
                     ? $"吸嘴2 X偏差={nozzle2Result.CorrectionX:0.00000} Y偏差={nozzle2Result.CorrectionY:0.00000} " +
                       $"夹角={nozzle2Result.MeasuredAngle:0.00000}°"
                     : $"吸嘴2纠偏失败，位置2使用原设定坐标（{nozzle2Error}）";
-            var hasFailure = nozzle1Result is null || (nozzle2Required && nozzle2Result is null);
+            var hasFailure =
+                (nozzle1Required && nozzle1Result is null) ||
+                (nozzle2Required && nozzle2Result is null);
             LowerCameraCorrectionResultText.Text =
                 $"下相机纠偏｜{nozzle1Summary}｜{nozzle2Summary}";
             LowerCameraCorrectionResultText.Foreground = new SolidColorBrush(
@@ -1104,6 +1128,7 @@ public partial class HomePage : UserControl
                 nozzle1Error,
                 nozzle2Result,
                 nozzle2Error,
+                nozzle1Required,
                 nozzle2Required);
         }
         finally
@@ -1649,9 +1674,12 @@ public partial class HomePage : UserControl
             var carouselStations = CreateCarouselStationStates();
             _carouselVisualStepOffset = 0;
             UpdateCarouselStationDisplay(carouselStations);
-            var preserveCorrectionFailureDisplay = false;
             var pendingPickupBatches = new Queue<NozzlePickupBatch>();
-            var vibrateWhenPickupCacheDrained = false;
+            var vibrateAfterPickupCachePlaced = false;
+            var singleChipRemainsAfterPickupCache = false;
+            var consecutiveSingleChipVibrations = 0;
+            var stopAfterCurrentBatch = false;
+            ClearBlobInspectionResult();
 
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
@@ -1663,16 +1691,6 @@ public partial class HomePage : UserControl
 
                 // 记录当前正在执行第几轮，便于状态栏提示和现场排查。
                 cycleNumber++;
-
-                // 纠偏失败时保留现场画面，直到下一次视觉流程自然覆盖；正常轮次仍清空旧结果。
-                if (preserveCorrectionFailureDisplay)
-                {
-                    preserveCorrectionFailureDisplay = false;
-                }
-                else if (pendingPickupBatches.Count == 0)
-                {
-                    ClearBlobInspectionResult();
-                }
 
                 // 清空上一轮缓存的吸嘴目标，避免异常重试时使用过期坐标。
                 ClearAssignedNozzleTargets();
@@ -1728,25 +1746,81 @@ public partial class HomePage : UserControl
                     var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
                         _productionCancellation.Token);
                     SetBlobInspectionResult(blobResult);
+                    var selectedChipCount = Math.Min(
+                        blobResult.Rectangles.Count,
+                        MaxCachedChipCount);
 
-                    if (blobResult.Rectangles.Count == 0)
+                    if (selectedChipCount == 0)
                     {
+                        consecutiveSingleChipVibrations = 0;
                         SetStartProductionStatus(
-                            "本次找芯片流程返回0个结果，缓存仍为空，下一轮将重新拍照。",
+                            "本次找芯片流程返回0条，正在震动料盘后重新拍照。",
                             Color.FromRgb(242, 181, 68));
-                        await Task.Yield();
+                        await RunProductionVibrationAsync(
+                            cycleNumber,
+                            "视野内未找到芯片",
+                            _productionCancellation.Token);
                         continue;
                     }
 
                     try
                     {
-                        foreach (var batch in CalculateAssignedNozzleBatches(
-                                     blobResult,
-                                     calibrationFile.FilePath,
-                                     actual.ActualX,
-                                     actual.ActualY))
+                        if (selectedChipCount == 1)
                         {
-                            pendingPickupBatches.Enqueue(batch);
+                            if (consecutiveSingleChipVibrations >=
+                                EmptyTraySingleChipVibrationThreshold)
+                            {
+                                pendingPickupBatches.Enqueue(CalculateFinalSingleChipBatch(
+                                    blobResult,
+                                    calibrationFile.FilePath,
+                                    actual.ActualX,
+                                    actual.ActualY));
+                                stopAfterCurrentBatch = true;
+                                SetStartProductionStatus(
+                                    $"连续震动{consecutiveSingleChipVibrations}次后视野仍只剩1颗，" +
+                                    "判定缺料：改由吸嘴2取料，放到位置2后停机。",
+                                    Color.FromRgb(242, 181, 68));
+                            }
+                            else
+                            {
+                                var vibrationNumber = consecutiveSingleChipVibrations + 1;
+                                SetStartProductionStatus(
+                                    $"视野只剩1颗，暂不抓取；正在执行第{vibrationNumber}/" +
+                                    $"{EmptyTraySingleChipVibrationThreshold}次连续震动后重拍。",
+                                    Color.FromRgb(242, 181, 68));
+                                await RunProductionVibrationAsync(
+                                    cycleNumber,
+                                    $"视野只剩1颗（第{vibrationNumber}次）",
+                                    _productionCancellation.Token);
+                                consecutiveSingleChipVibrations = vibrationNumber;
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            consecutiveSingleChipVibrations = 0;
+                            foreach (var batch in CalculateAssignedNozzleBatches(
+                                         blobResult,
+                                         calibrationFile.FilePath,
+                                         actual.ActualX,
+                                         actual.ActualY))
+                            {
+                                pendingPickupBatches.Enqueue(batch);
+                            }
+
+                            vibrateAfterPickupCachePlaced = true;
+                            singleChipRemainsAfterPickupCache = selectedChipCount % 2 == 1;
+                            var ignoredChipCount = blobResult.Rectangles.Count - selectedChipCount;
+                            SetStartProductionStatus(
+                                $"找芯片返回 {blobResult.Rectangles.Count} 条，本次按原顺序取" +
+                                $" {selectedChipCount} 条" +
+                                (ignoredChipCount > 0
+                                    ? $"（超出上限的 {ignoredChipCount} 条不缓存）"
+                                    : string.Empty) +
+                                (singleChipRemainsAfterPickupCache
+                                    ? "；最后1颗留在料盘，前面成对物料放完后震动。"
+                                    : "；本批全部放完后震动。"),
+                                Color.FromRgb(73, 209, 125));
                         }
                     }
                     catch (Exception exception)
@@ -1768,67 +1842,39 @@ public partial class HomePage : UserControl
                         Color.FromRgb(73, 209, 125));
                 }
 
-                var cachedCountBeforePickup = pendingPickupBatches.Sum(batch => batch.Count);
                 var assignedTargets = pendingPickupBatches.Dequeue();
                 var remainingCachedChipCount = pendingPickupBatches.Sum(batch => batch.Count);
-                if (cachedCountBeforePickup == 1)
-                {
-                    // 最后一颗先按已缓存坐标取走，随后再震动，避免震动使该坐标失效。
-                    vibrateWhenPickupCacheDrained = true;
-                }
 
                 SetAssignedNozzleTargets(assignedTargets, remainingCachedChipCount);
+                var nozzle1HasPart = assignedTargets.Nozzle1.HasValue;
                 var nozzle2HasPart = assignedTargets.Nozzle2.HasValue;
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
-                // 提示第 3 步开始：吸嘴1对位物体1，到位后 Z1 下探取料并安全回缩。
-                SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Blob识别完成，吸嘴1正在对位物体1…",
-                    Color.FromRgb(242, 181, 68));
-
-                // 执行吸嘴1对位动作。
-                await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
-                await WaitIfProductionPausedAsync(_productionCancellation.Token);
-
-                // 吸嘴1到达物体1后，Z1 到取料位、开吸，然后回到安全位。
-                StartUphTracking();
-                await PickWithActiveSetNozzleAsync(1, _productionCancellation.Token);
-                await WaitIfProductionPausedAsync(_productionCancellation.Token);
+                if (nozzle1HasPart)
+                {
+                    // 正常成对取料先用吸嘴1，到位后 Z1 下探取料并安全回缩。
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：Blob识别完成，吸嘴1正在对位本批第1颗…",
+                        Color.FromRgb(242, 181, 68));
+                    await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+                    StartUphTracking();
+                    await PickWithActiveSetNozzleAsync(1, _productionCancellation.Token);
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+                }
 
                 if (nozzle2HasPart)
                 {
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：Z1已取料并回到配置安全位，吸嘴2正在对位本批第2颗…",
+                        nozzle1HasPart
+                            ? $"第{cycleNumber}轮：Z1已取料并回安全位，吸嘴2正在对位本批第2颗…"
+                            : $"第{cycleNumber}轮：缺料收尾，吸嘴2正在对位最后1颗…",
                         Color.FromRgb(242, 181, 68));
                     await MoveAssignedNozzleStepAsync(2, _productionCancellation.Token);
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
+                    StartUphTracking();
                     await PickWithActiveSetNozzleAsync(2, _productionCancellation.Token);
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
-                }
-                else
-                {
-                    SetStartProductionStatus(
-                        $"第{cycleNumber}轮：缓存最后1颗已由吸嘴1取走，吸嘴2跳过取料。",
-                        Color.FromRgb(73, 209, 125));
-                }
-
-                if (vibrateWhenPickupCacheDrained && pendingPickupBatches.Count == 0)
-                {
-                    // 最后1颗已离开振动盘，可以安全震动且不会使本颗缓存坐标失效。
-                    vibrateWhenPickupCacheDrained = false;
-                    SetStartProductionStatus(
-                        $"第{cycleNumber}轮：缓存最后1颗已吸取并回到安全位，正在执行一键震动…",
-                        Color.FromRgb(242, 181, 68));
-                    var vibrationStarted = _connectionConfigController is not null &&
-                                           await _connectionConfigController.RunOneKeyVibrationAsync(
-                                               _productionCancellation.Token);
-                    SetStartProductionStatus(
-                        vibrationStarted
-                            ? $"第{cycleNumber}轮：缓存最后1颗已取走，一键震动完成；继续本颗纠偏和放料。"
-                            : $"第{cycleNumber}轮：缓存最后1颗已取走，但一键震动未执行（请检查振动盘连接）；本颗仍继续纠偏和放料。",
-                        vibrationStarted
-                            ? Color.FromRgb(73, 209, 125)
-                            : Color.FromRgb(242, 181, 68));
                 }
 
                 // 放料 XY 动作的安全门：必须再次确认两根 Z 轴都在本轮配置的安全高度。
@@ -1852,10 +1898,6 @@ public partial class HomePage : UserControl
                     assignedTargets,
                     pickupRPositions,
                     _productionCancellation.Token);
-                if (correctionResults.HasFailure)
-                {
-                    preserveCorrectionFailureDisplay = true;
-                }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 var position1Target = new LowerCameraPlacementTarget(position1X, position1Y, 0d, 0d);
@@ -1916,50 +1958,51 @@ public partial class HomePage : UserControl
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
-                // 提示第 5 步开始：第一套 XY 移动到预设位置1。
-                SetStartProductionStatus(
-                    $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，" +
-                    $"正在按{position1TargetDescription}放料到1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
-                    $"{(nozzle1OriginalR.HasValue ? $", R={position1Target.R:0.###}" : string.Empty)})…",
-                    Color.FromRgb(242, 181, 68));
-
-                if (nozzle1OriginalR.HasValue)
+                if (nozzle1HasPart)
                 {
-                    // 纠偏放料时将 X/Y/R1 一次下发，三轴同时运动并共同等待到位。
-                    await MoveCorrectedPlacementAxesAsync(
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，" +
+                        $"正在按{position1TargetDescription}放料到1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
+                        $"{(nozzle1OriginalR.HasValue ? $", R={position1Target.R:0.###}" : string.Empty)})…",
+                        Color.FromRgb(242, 181, 68));
+
+                    if (nozzle1OriginalR.HasValue)
+                    {
+                        await MoveCorrectedPlacementAxesAsync(
+                            1,
+                            "位置 1",
+                            position1Target,
+                            _productionCancellation.Token);
+                    }
+                    else
+                    {
+                        await MovePresetPositionCoreAsync(
+                            "位置 1",
+                            position1Target.X,
+                            position1Target.Y,
+                            _productionCancellation.Token);
+                    }
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：1工位已到位，Z1正在下降到配置放料位…",
+                        Color.FromRgb(242, 181, 68));
+                    await PlaceWithActiveSetNozzleAsync(1, _productionCancellation.Token);
+                    await MoveNozzleRToAsync(
+                        VisionCalibrationAxisSet.First,
                         1,
-                        "位置 1",
-                        position1Target,
+                        pickupRPositions.ActualX,
+                        "本批取料基准位",
                         _productionCancellation.Token);
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
                 }
-                else
-                {
-                    await MovePresetPositionCoreAsync(
-                        "位置 1",
-                        position1Target.X,
-                        position1Target.Y,
-                        _productionCancellation.Token);
-                }
-                await WaitIfProductionPausedAsync(_productionCancellation.Token);
-
-                // 到达位置1后，Z1 下降到配置放料高度，破真空后回到配置安全高度。
-                SetStartProductionStatus(
-                    $"第{cycleNumber}轮：1工位已到位，Z1正在下降到配置放料位…",
-                    Color.FromRgb(242, 181, 68));
-                await PlaceWithActiveSetNozzleAsync(1, _productionCancellation.Token);
-                // 产品已释放后回到粗校正前基准；下相机成功或失败都不能遗留累计角度。
-                await MoveNozzleRToAsync(
-                    VisionCalibrationAxisSet.First,
-                    1,
-                    pickupRPositions.ActualX,
-                    "本批取料基准位",
-                    _productionCancellation.Token);
-                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 if (nozzle2HasPart)
                 {
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：Z1已放料、R1已回本批取料基准位，" +
+                        (nozzle1HasPart
+                            ? $"第{cycleNumber}轮：Z1已放料、R1已回本批取料基准位，"
+                            : $"第{cycleNumber}轮：缺料收尾，") +
                         $"正在按{position2TargetDescription}放料到2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
                         $"{(nozzle2OriginalR.HasValue ? $", R={position2Target.R:0.###}" : string.Empty)})…",
                         Color.FromRgb(242, 181, 68));
@@ -1997,12 +2040,38 @@ public partial class HomePage : UserControl
                 CloseAllActiveSetNozzleVacuumOutputs();
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
-                carouselStations[1].SetLoaded();
+                if (nozzle1HasPart)
+                {
+                    carouselStations[1].SetLoaded();
+                }
                 if (nozzle2HasPart)
                 {
                     carouselStations[2].SetLoaded();
                 }
                 UpdateCarouselStationDisplay(carouselStations);
+
+                if (stopAfterCurrentBatch)
+                {
+                    SetStartProductionStatus(
+                        $"连续震动{consecutiveSingleChipVibrations}次后仍剩的最后1颗" +
+                        "已由吸嘴2放到位置2，确认料盘缺料，程序已停止。",
+                        Color.FromRgb(73, 209, 125));
+                    return;
+                }
+
+                if (vibrateAfterPickupCachePlaced && pendingPickupBatches.Count == 0)
+                {
+                    var vibrationReason = singleChipRemainsAfterPickupCache
+                        ? "本次缓存成对物料已全部放完，料盘最后还剩1颗"
+                        : "本次最多10条缓存已全部放完";
+                    await RunProductionVibrationAsync(
+                        cycleNumber,
+                        vibrationReason,
+                        _productionCancellation.Token);
+                    consecutiveSingleChipVibrations = singleChipRemainsAfterPickupCache ? 1 : 0;
+                    vibrateAfterPickupCachePlaced = false;
+                    singleChipRemainsAfterPickupCache = false;
+                }
 
                 if (!activeSecondSetPickupTask.IsCompleted)
                 {
@@ -2140,6 +2209,30 @@ public partial class HomePage : UserControl
         SetStartProductionStatus("正在停止循环，请等待当前轴确认停止…", Color.FromRgb(242, 181, 68));
         UpdateHomeCommandState();
         return true;
+    }
+
+    private async Task RunProductionVibrationAsync(
+        int cycleNumber,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var connectionController = _connectionConfigController
+            ?? throw new InvalidOperationException("振动盘控制组件未连接，无法执行自动震动。");
+        SetStartProductionStatus(
+            $"第{cycleNumber}轮：{reason}，正在执行“震散 → 向左”…",
+            Color.FromRgb(242, 181, 68));
+        var vibrationCompleted = await connectionController.RunProductionScatterThenLeftAsync(
+            cancellationToken);
+        if (!vibrationCompleted)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException(
+                "“震散 → 向左”未执行，请检查振动盘连接和方向震动参数。");
+        }
+
+        SetStartProductionStatus(
+            $"第{cycleNumber}轮：{reason}，“震散 → 向左”完成，下一轮重新拍照。",
+            Color.FromRgb(73, 209, 125));
     }
 
     private bool RequestProductionPause()
@@ -3412,8 +3505,9 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 按 VisionMaster 原始结果顺序每两个组成一批：每批第一个给吸嘴1，第二个给吸嘴2。
-    /// 最后一批允许只有吸嘴1一个目标。全部目标都使用同一次拍照时的轴绝对位置换算。
+    /// 按 VisionMaster 原始结果顺序最多取10条，每两个组成一批：
+    /// 每批第一个给吸嘴1，第二个给吸嘴2。奇数最后1条不缓存，留在盘中震动后重拍。
+    /// 全部目标都使用同一次拍照时的轴绝对位置换算。
     /// </summary>
     private IReadOnlyList<NozzlePickupBatch> CalculateAssignedNozzleBatches(
         VisionRectangleBlobResult blobResult,
@@ -3427,7 +3521,8 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException("本次Blob结果没有有效图像尺寸，无法计算吸嘴目标。");
         }
 
-        for (var index = 0; index < blobResult.Rectangles.Count; index++)
+        var selectedCount = Math.Min(blobResult.Rectangles.Count, MaxCachedChipCount);
+        for (var index = 0; index < selectedCount; index++)
         {
             ValidateBlobPixel(
                 blobResult.Rectangles[index],
@@ -3454,19 +3549,43 @@ public partial class HomePage : UserControl
             };
         }
 
-        var batches = new List<NozzlePickupBatch>();
-        for (var index = 0; index < blobResult.Rectangles.Count; index += 2)
+        var pairedCount = selectedCount - selectedCount % 2;
+        var batches = new List<NozzlePickupBatch>(pairedCount / 2);
+        for (var index = 0; index < pairedCount; index += 2)
         {
             var nozzle1Target = CalculateTarget(
                 blobResult.Rectangles[index],
                 VisionTargetTool.Nozzle1);
-            VisionMotionTarget? nozzle2Target = index + 1 < blobResult.Rectangles.Count
-                ? CalculateTarget(blobResult.Rectangles[index + 1], VisionTargetTool.Nozzle2)
-                : null;
+            var nozzle2Target = CalculateTarget(
+                blobResult.Rectangles[index + 1],
+                VisionTargetTool.Nozzle2);
             batches.Add(new NozzlePickupBatch(nozzle1Target, nozzle2Target));
         }
 
         return batches;
+    }
+
+    private NozzlePickupBatch CalculateFinalSingleChipBatch(
+        VisionRectangleBlobResult blobResult,
+        string calibrationFilePath,
+        double captureX,
+        double captureY)
+    {
+        if (blobResult.Rectangles.Count != 1)
+        {
+            throw new InvalidOperationException("只有视野连续剩1颗时才能执行吸嘴2缺料收尾。");
+        }
+
+        var duplicatedSingleResult = blobResult with
+        {
+            Rectangles = [blobResult.Rectangles[0], blobResult.Rectangles[0]]
+        };
+        var batches = CalculateAssignedNozzleBatches(
+            duplicatedSingleResult,
+            calibrationFilePath,
+            captureX,
+            captureY);
+        return new NozzlePickupBatch(null, batches[0].Nozzle2);
     }
 
     private static void ValidateBlobPixel(
@@ -3565,15 +3684,20 @@ public partial class HomePage : UserControl
     {
         _blob1Nozzle1Target = targets.Nozzle1;
         _blob2Nozzle2Target = targets.Nozzle2;
-        _nextAssignedNozzleMoveStep = 1;
+        _nextAssignedNozzleMoveStep = targets.Nozzle1.HasValue ? 1 : 2;
         UpdateAssignedNozzleVisionText();
-        SetFirstSetPositionStatus(
-            targets.Nozzle2.HasValue
-                ? $"本批按脚本顺序分配2颗：本批第1条→吸嘴1(R={targets.Nozzle1.RotationDegrees:0.###}°)，" +
-                  $"本批第2条→吸嘴2(R={targets.Nozzle2.Value.RotationDegrees:0.###}°)；" +
-                  $"本次拍照缓存还剩 {remainingChipCount} 颗。"
-                : $"本批仅剩1颗：本批第1条→吸嘴1(R={targets.Nozzle1.RotationDegrees:0.###}°)，吸嘴2跳过。",
-            true);
+        var assignmentMessage = targets switch
+        {
+            { Nozzle1: { } nozzle1, Nozzle2: { } nozzle2 } =>
+                $"本批按脚本顺序分配2颗：本批第1条→吸嘴1(R={nozzle1.RotationDegrees:0.###}°)，" +
+                $"本批第2条→吸嘴2(R={nozzle2.RotationDegrees:0.###}°)；" +
+                $"本次拍照缓存还剩 {remainingChipCount} 颗。",
+            { Nozzle1: null, Nozzle2: { } nozzle2 } =>
+                $"连续震动{EmptyTraySingleChipVibrationThreshold}次后仍剩1颗：" +
+                $"改由吸嘴2收尾(R={nozzle2.RotationDegrees:0.###}°)，放到位置2后停机。",
+            _ => throw new InvalidOperationException("本批没有可用的吸嘴目标。")
+        };
+        SetFirstSetPositionStatus(assignmentMessage, true);
         UpdateAssignedNozzleButtonText();
         UpdateHomeCommandState();
     }
@@ -4345,17 +4469,25 @@ public partial class HomePage : UserControl
         // 找芯片脚本返回的是正方形某条边相对水平线的当前姿态，不是电机相对量。
         // 正方形边方向每90°等价：先求到统一水平/垂直方向的最短校正角，
         // 再从本批取料R基准构造绝对目标。
-        var nozzle1RPulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
-            pickupBatch.Nozzle1.RotationDegrees,
-            GetUpperCameraRotationSign(1),
-            out var nozzle1CorrectionDegrees);
-        var nozzle1TargetR = pickupRPositions.ActualX + nozzle1RPulses;
         var absoluteTargets = new Dictionary<int, double>
         {
             [VisionCalibrationService.FirstSetXHardwareAxisNo] = targetX,
-            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY,
-            [FirstSetNozzle1RHardwareAxisNo] = nozzle1TargetR
+            [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY
         };
+
+        double? nozzle1RPulses = null;
+        double? nozzle1CorrectionDegrees = null;
+        double? nozzle1TargetR = null;
+        if (pickupBatch.Nozzle1 is { } nozzle1PickupTarget)
+        {
+            nozzle1RPulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
+                nozzle1PickupTarget.RotationDegrees,
+                GetUpperCameraRotationSign(1),
+                out var correctionDegrees);
+            nozzle1CorrectionDegrees = correctionDegrees;
+            nozzle1TargetR = pickupRPositions.ActualX + nozzle1RPulses.Value;
+            absoluteTargets[FirstSetNozzle1RHardwareAxisNo] = nozzle1TargetR.Value;
+        }
 
         double? nozzle2RPulses = null;
         double? nozzle2CorrectionDegrees = null;
@@ -4372,9 +4504,12 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus(
-            $"正在同步移动{positionName}并把两颗芯片校正到0°：X={targetX:0.###}，Y={targetY:0.###}，" +
-            $"吸嘴1 测量{pickupBatch.Nozzle1.RotationDegrees:0.###}°→校正{nozzle1CorrectionDegrees:0.###}°" +
-            $"（R目标{nozzle1TargetR:0.###} pulse）" +
+            $"正在同步移动{positionName}并将已取芯片粗校正到0°：X={targetX:0.###}，Y={targetY:0.###}" +
+            (nozzle1RPulses.HasValue
+                ? $"，吸嘴1 测量{pickupBatch.Nozzle1!.Value.RotationDegrees:0.###}°" +
+                  $"→校正{nozzle1CorrectionDegrees!.Value:0.###}°" +
+                  $"（R目标{nozzle1TargetR!.Value:0.###} pulse）"
+                : string.Empty) +
             (nozzle2RPulses.HasValue
                 ? $"，吸嘴2 测量{pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°" +
                   $"→校正{nozzle2CorrectionDegrees!.Value:0.###}°" +
@@ -4399,7 +4534,9 @@ public partial class HomePage : UserControl
         SetFirstSetPositionStatus(
             $"{positionName}与芯片统一角度粗校正已同步完成：" +
             $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}，" +
-            $"R1校正{nozzle1CorrectionDegrees:0.###}°/{nozzle1RPulses:0.###} pulse" +
+            (nozzle1RPulses.HasValue
+                ? $"R1校正{nozzle1CorrectionDegrees!.Value:0.###}°/{nozzle1RPulses.Value:0.###} pulse"
+                : "R1无料") +
             (nozzle2RPulses.HasValue
                 ? $"，R2校正{nozzle2CorrectionDegrees!.Value:0.###}°/" +
                   $"{nozzle2RPulses.Value:0.###} pulse。"
@@ -6451,9 +6588,12 @@ public partial class HomePage : UserControl
         string? Nozzle1Error,
         VisionLowerCameraCorrectionResult? Nozzle2,
         string? Nozzle2Error,
+        bool Nozzle1Required,
         bool Nozzle2Required)
     {
-        public bool HasFailure => Nozzle1 is null || (Nozzle2Required && Nozzle2 is null);
+        public bool HasFailure =>
+            (Nozzle1Required && Nozzle1 is null) ||
+            (Nozzle2Required && Nozzle2 is null);
 
         public bool HasAnySuccess => Nozzle1 is not null || Nozzle2 is not null;
     }
@@ -6465,10 +6605,10 @@ public partial class HomePage : UserControl
         double RCorrectionPulses);
 
     private readonly record struct NozzlePickupBatch(
-        VisionMotionTarget Nozzle1,
+        VisionMotionTarget? Nozzle1,
         VisionMotionTarget? Nozzle2)
     {
-        public int Count => Nozzle2.HasValue ? 2 : 1;
+        public int Count => (Nozzle1.HasValue ? 1 : 0) + (Nozzle2.HasValue ? 1 : 0);
     }
 
     private readonly record struct BinDropPosition(double X, double Y);

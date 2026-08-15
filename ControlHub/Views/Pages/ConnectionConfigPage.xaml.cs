@@ -1029,6 +1029,84 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 自动生产专用补料序列：先震散，再把物料向左移入拍照视野。
+    /// 两段均使用连接配置页当前的方向震动频率、振幅和持续时间。
+    /// </summary>
+    public async Task<bool> RunProductionScatterThenLeftAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog("生产震动失败：请先建立 TCP 连接");
+            return false;
+        }
+
+        if (_vibrationSequenceRunning)
+        {
+            AddLog("生产震动未执行：当前震动尚未结束");
+            return false;
+        }
+
+        if (Settings is not { } settings)
+        {
+            return false;
+        }
+
+        CommitInputBindings(this);
+        _settingsStore.Save(settings);
+
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+        try
+        {
+            AddLog(
+                $"生产震动开始：震散 -> 向左，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，每段 {settings.DirectionalVibrationDurationMilliseconds} ms");
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "生产震动-切换正常模式"))
+            {
+                return false;
+            }
+
+            if (!await RunVibrationPulseAsync(
+                    BuildDirectionalVibrationParameterCommand(settings, "04"),
+                    "&03,04$",
+                    settings.DirectionalVibrationDurationMilliseconds,
+                    "生产震动-震散",
+                    operationCancellation.Token) ||
+                !await RunVibrationPulseAsync(
+                    BuildDirectionalVibrationParameterCommand(settings, "03"),
+                    "&03,03$",
+                    settings.DirectionalVibrationDurationMilliseconds,
+                    "生产震动-向左",
+                    operationCancellation.Token))
+            {
+                return false;
+            }
+
+            AddLog("生产震动完成：震散 -> 向左");
+            return true;
+        }
+        catch (OperationCanceledException) when (
+            _closed ||
+            operationCancellation.IsCancellationRequested)
+        {
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+
+            _vibrationSequenceRunning = false;
+        }
+    }
+
     private static string BuildDirectionalVibrationParameterCommand(
         VibrationFeederSettings settings,
         string mode)
