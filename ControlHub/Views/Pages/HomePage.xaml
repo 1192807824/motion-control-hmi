@@ -2155,7 +2155,7 @@
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
-                                             ToolTip="先关闭真空吸，等待20ms后按配置时长开启破真空"
+                                             ToolTip="关闭真空吸并等待配置的阀切换间隔后，按此时长开启破真空"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
@@ -2191,7 +2191,18 @@
                                              Background="#F7FAFC"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
-                                <StackPanel />
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="真空阀切换间隔（ms）" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="VacuumValveSwitchDelayTextBox"
+                                             Height="25"
+                                             Text="20"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="关闭真空吸后，等待此时长再开启破真空，避免两个阀重叠"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="下料 · 吸嘴2 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="SecondSetNozzle2PickupZPositionTextBox"

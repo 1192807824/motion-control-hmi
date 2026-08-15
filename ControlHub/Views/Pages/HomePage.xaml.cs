@@ -36,7 +36,7 @@ public partial class HomePage : UserControl
     private const int Station14BreakVacuumOutputBit = 23;
     private const int LowerCameraLightOutputBit = 10;
     private const int DefaultVacuumBreakPulseMilliseconds = 30;
-    private const int VacuumValveSwitchDelayMilliseconds = 20;
+    private const int DefaultVacuumValveSwitchDelayMilliseconds = 20;
     private const int DefaultVacuumPickupDwellMilliseconds = 500;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
     private const int FirstSetNozzle1RHardwareAxisNo = 6;
@@ -1371,7 +1371,9 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var breakPulseMilliseconds = GetProductionZDwellTimes().BreakVacuumMilliseconds;
+        var dwellTimes = GetProductionZDwellTimes();
+        var breakPulseMilliseconds = dwellTimes.BreakVacuumMilliseconds;
+        var valveSwitchDelayMilliseconds = dwellTimes.ValveSwitchDelayMilliseconds;
 
         // 放料必须先完全停止真空吸，再给破真空阀一个短脉冲；两阀禁止重叠开启。
         if (!SetNozzleVacuumOutputs(
@@ -1384,9 +1386,9 @@ public partial class HomePage : UserControl
         }
 
         SetFirstSetPositionStatus(
-            $"Z{nozzleNumber}真空吸已关闭，等待阀切换 {VacuumValveSwitchDelayMilliseconds} ms…",
+            $"Z{nozzleNumber}真空吸已关闭，等待阀切换 {valveSwitchDelayMilliseconds} ms…",
             true);
-        await Task.Delay(VacuumValveSwitchDelayMilliseconds, cancellationToken);
+        await Task.Delay(valveSwitchDelayMilliseconds, cancellationToken);
 
         try
         {
@@ -4864,6 +4866,9 @@ public partial class HomePage : UserControl
             ?? DefaultVacuumBreakPulseMilliseconds;
         _homeSettings.VacuumBreakPulseMilliseconds = vacuumBreakPulseMilliseconds;
         VacuumBreakPulseTextBox.Text = vacuumBreakPulseMilliseconds.ToString(CultureInfo.CurrentCulture);
+        VacuumValveSwitchDelayTextBox.Text = (
+            _homeSettings.VacuumValveSwitchDelayMilliseconds
+            ?? DefaultVacuumValveSwitchDelayMilliseconds).ToString(CultureInfo.CurrentCulture);
         SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetPickupPosition1X ?? DefaultSecondSetPickupPosition1X);
         SecondSetPosition1YTextBox.Text = FormatPresetCoordinate(
@@ -5236,7 +5241,10 @@ public partial class HomePage : UserControl
                 "吸料停留时间"),
             ParseMilliseconds(
                 VacuumBreakPulseTextBox.Text,
-                "破真空停留时间"));
+                "破真空停留时间"),
+            ParseMilliseconds(
+                VacuumValveSwitchDelayTextBox.Text,
+                "真空阀切换间隔"));
     }
 
     private SecondSetXyPositions ReadSecondSetXyPositions()
@@ -5595,6 +5603,7 @@ public partial class HomePage : UserControl
             SecondSetNozzle2SafeZPositionTextBox is null ||
             VacuumPickupDwellTextBox is null ||
             VacuumBreakPulseTextBox is null ||
+            VacuumValveSwitchDelayTextBox is null ||
             !TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out var firstSetNozzle1Pickup) ||
             !TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out var firstSetNozzle1Drop) ||
             !TryParseCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, out var firstSetNozzle1Safe) ||
@@ -5608,7 +5617,8 @@ public partial class HomePage : UserControl
             !TryParseCoordinate(SecondSetNozzle2DropZPositionTextBox.Text, out var secondSetNozzle2Drop) ||
             !TryParseCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, out var secondSetNozzle2Safe) ||
             !TryParseMilliseconds(VacuumPickupDwellTextBox.Text, out var pickupDwell) ||
-            !TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out var breakPulse))
+            !TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out var breakPulse) ||
+            !TryParseMilliseconds(VacuumValveSwitchDelayTextBox.Text, out var valveSwitchDelay))
         {
             return;
         }
@@ -5627,6 +5637,7 @@ public partial class HomePage : UserControl
         _homeSettings.SecondSetNozzle2SafeZPosition = secondSetNozzle2Safe;
         _homeSettings.VacuumPickupDwellMilliseconds = pickupDwell;
         _homeSettings.VacuumBreakPulseMilliseconds = breakPulse;
+        _homeSettings.VacuumValveSwitchDelayMilliseconds = valveSwitchDelay;
         try
         {
             _homeSettingsStore.Save(_homeSettings);
@@ -5912,6 +5923,7 @@ public partial class HomePage : UserControl
             SecondSetNozzle2SafeZPositionTextBox is null ||
              VacuumPickupDwellTextBox is null ||
              VacuumBreakPulseTextBox is null ||
+             VacuumValveSwitchDelayTextBox is null ||
              SecondSetPosition1XTextBox is null ||
              SecondSetPosition1YTextBox is null ||
              SecondSetPosition2XTextBox is null ||
@@ -5961,7 +5973,8 @@ public partial class HomePage : UserControl
             TryParseCoordinate(SecondSetNozzle2DropZPositionTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, out _) &&
             TryParseMilliseconds(VacuumPickupDwellTextBox.Text, out _) &&
-            TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out _);
+            TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out _) &&
+            TryParseMilliseconds(VacuumValveSwitchDelayTextBox.Text, out _);
         var allSecondSetXyPositionsValid =
             TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
@@ -6080,6 +6093,7 @@ public partial class HomePage : UserControl
         SecondSetNozzle2SafeZPositionTextBox.IsEnabled = commandsIdle;
         VacuumPickupDwellTextBox.IsEnabled = commandsIdle;
         VacuumBreakPulseTextBox.IsEnabled = commandsIdle;
+        VacuumValveSwitchDelayTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1XTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1YTextBox.IsEnabled = commandsIdle;
         SecondSetPosition2XTextBox.IsEnabled = commandsIdle;
@@ -6727,7 +6741,8 @@ public partial class HomePage : UserControl
 
     private readonly record struct ProductionZDwellTimes(
         int PickupMilliseconds,
-        int BreakVacuumMilliseconds);
+        int BreakVacuumMilliseconds,
+        int ValveSwitchDelayMilliseconds);
 
     private readonly record struct SecondSetXyPositions(
         double Position1X,

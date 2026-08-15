@@ -131,6 +131,8 @@ public sealed class HomePageSettings
 
     public int? VacuumBreakPulseMilliseconds { get; set; }
 
+    public int? VacuumValveSwitchDelayMilliseconds { get; set; }
+
     public double? SecondSetPickupPosition1X { get; set; }
 
     public double? SecondSetPickupPosition1Y { get; set; }
