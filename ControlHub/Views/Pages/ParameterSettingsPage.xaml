@@ -115,8 +115,6 @@
                     <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="320" />
                     <ColumnDefinition Width="12" />
-                    <ColumnDefinition Width="360" />
-                    <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
@@ -248,42 +246,6 @@
                                  Grid.Column="1"
                                  Style="{StaticResource VisionProcedureNameInput}" />
                     </Grid>
-                </Grid>
-
-                <Grid Grid.Column="6">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="28" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="38" />
-                    </Grid.RowDefinitions>
-                    <Grid>
-                        <TextBlock Text="所选配方完整参数（可编辑 JSON）"
-                                   Foreground="{StaticResource TextPrimary}"
-                                   FontSize="15"
-                                   FontWeight="Bold" />
-                        <TextBlock x:Name="RecipeActiveBadgeText"
-                                   Text=""
-                                   Foreground="#49D17D"
-                                   HorizontalAlignment="Right"
-                                   FontWeight="Bold" />
-                    </Grid>
-                    <TextBox x:Name="RecipeJsonTextBox"
-                             Grid.Row="1"
-                             AcceptsReturn="True"
-                             AcceptsTab="True"
-                             FontFamily="Consolas"
-                             FontSize="11"
-                             VerticalScrollBarVisibility="Auto"
-                             HorizontalScrollBarVisibility="Auto"
-                             TextWrapping="NoWrap"
-                             Background="#091B29"
-                             Foreground="#DCEAF3"
-                             BorderBrush="#345269" />
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
-                        <Button Content="保存参数修改"
-                                Style="{StaticResource RecipeButton}"
-                                Click="SaveRecipeJson_Click" />
-                    </StackPanel>
                 </Grid>
             </Grid>
         </Border>

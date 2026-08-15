@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using ControlHub.Services.Devices;
 using ControlHub.Services.Persistence;
@@ -61,21 +62,12 @@ public partial class ParameterSettingsPage : UserControl
         if (SelectedRecipe is not { } recipe)
         {
             RecipeNameTextBox.Text = "";
-            RecipeJsonTextBox.Text = "";
-            RecipeActiveBadgeText.Text = "";
             ShowVisionProcedureNames(null);
             return;
         }
 
         RecipeNameTextBox.Text = recipe.Name;
-        RecipeJsonTextBox.Text = _recipeStore.Serialize(recipe);
         ShowVisionProcedureNames(recipe.VisionProcedureNames);
-        RecipeActiveBadgeText.Text = string.Equals(
-            _recipeStore.GetActiveRecipeId(),
-            recipe.Id,
-            StringComparison.OrdinalIgnoreCase)
-            ? "● 当前已应用"
-            : "";
         SetRecipeStatus(
             $"已选择“{recipe.Name}”；包含生产参数、{recipe.Axes.Count}根轴、视觉标定、" +
             $"7个视觉流程名称及仪表参数。",
@@ -96,6 +88,7 @@ public partial class ParameterSettingsPage : UserControl
 
     private void SaveCurrentRecipe_Click(object sender, RoutedEventArgs e)
     {
+        CommitPendingInput();
         RunRecipeOperation(() =>
         {
             var recipe = SelectedRecipe;
@@ -158,23 +151,6 @@ public partial class ParameterSettingsPage : UserControl
             RefreshRecipeList();
             RaiseActiveRecipeChanged();
             SetRecipeStatus($"配方“{recipe.Name}”已删除。", success: true);
-        });
-    }
-
-    private void SaveRecipeJson_Click(object sender, RoutedEventArgs e)
-    {
-        RunRecipeOperation(() =>
-        {
-            var selected = SelectedRecipe
-                           ?? throw new InvalidOperationException("请先选择需要修改的配方。");
-            var edited = _recipeStore.DeserializeForExistingRecipe(
-                RecipeJsonTextBox.Text,
-                selected.Id);
-            edited.CreatedAtUtc = selected.CreatedAtUtc;
-            _recipeStore.Save(edited);
-            RefreshRecipeList(edited.Id);
-            RaiseActiveRecipeChanged();
-            SetRecipeStatus("配方参数修改已保存；点击“应用”后写入整机。", success: true);
         });
     }
 
@@ -273,7 +249,6 @@ public partial class ParameterSettingsPage : UserControl
                 recipe.VisionProcedureNames);
 
             _recipeStore.SetActiveRecipeId(recipe.Id);
-            RecipeActiveBadgeText.Text = "● 当前已应用";
             RaiseActiveRecipeChanged();
             SetRecipeStatus($"配方“{recipe.Name}”已应用，视觉流程已重载。", success: true);
         }
@@ -300,6 +275,12 @@ public partial class ParameterSettingsPage : UserControl
         recipe.E4981A = ProductRecipeStore.Clone(_viewModel!.TcpConnectionSettings);
         recipe.SM7110 = ProductRecipeStore.Clone(_viewModel.SerialConnectionSettings);
         recipe.VibrationFeeder = ProductRecipeStore.Clone(_viewModel.FeederSettings);
+    }
+
+    private void CommitPendingInput()
+    {
+        FocusManager.SetFocusedElement(FocusManager.GetFocusScope(this), this);
+        Keyboard.ClearFocus();
     }
 
     private void ApplyDeviceSettings(ProductRecipe recipe)
