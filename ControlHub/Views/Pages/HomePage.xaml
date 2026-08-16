@@ -1033,9 +1033,9 @@
                         <RowDefinition Height="86" />
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
+                        <RowDefinition Height="10" />
+                        <RowDefinition Height="70" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="0" />
-                        <RowDefinition Height="0" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Text="设备操作" Style="{StaticResource SectionTitle}" FontSize="17" />
@@ -1122,6 +1122,34 @@
                     </Grid>
 
                     <Button Grid.Row="5"
+                            x:Name="OneKeyCollectButton"
+                            Style="{StaticResource OperationButton}"
+                            Background="#176B87"
+                            BorderBrush="#38A3C5"
+                            IsEnabled="False"
+                            Click="OneKeyCollect_Click"
+                            ToolTip="第一套XY保持不动；下料XY取13/14工位后，DD转两次，固定循环8次转满一圈">
+                        <Grid Margin="12,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="35" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="OneKeyCollectTitleText"
+                                           Text="一键收料"
+                                           Foreground="White"
+                                           FontSize="17"
+                                           FontWeight="Bold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="OneKeyCollectHintText"
+                                           Text="下料取两个 → DD转两次 × 8节拍"
+                                           Foreground="#D8F3FA"
+                                           FontSize="9"
+                                           Margin="0,2,0,0"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+
+                    <Button Grid.Row="7"
                             x:Name="MoveAssignedNozzleButton"
                             Style="{StaticResource OperationButton}"
                             Background="#315873"
@@ -1148,7 +1176,7 @@
                             </Grid>
                     </Button>
 
-                    <Border Grid.Row="6"
+                    <Border Grid.Row="8"
                             Margin="0,14,0,0"
                             Padding="16"
                             Background="#12283A"
