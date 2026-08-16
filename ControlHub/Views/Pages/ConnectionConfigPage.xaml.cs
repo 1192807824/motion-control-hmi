@@ -1107,6 +1107,61 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 自动生产找芯片拍照专用光源控制。开灯时同步下发当前亮度，
+    /// 任一指令失败都由上层停止本轮拍照，避免在无可靠照明时继续取像。
+    /// </summary>
+    public async Task<bool> SetProductionLightAsync(bool enabled)
+    {
+        if (_closed || !_tcpClient.IsConnected)
+        {
+            AddLog($"生产拍照光源{(enabled ? "打开" : "关闭")}失败：请先建立 TCP 连接");
+            return false;
+        }
+
+        _brightnessSendTimer.Stop();
+        if (!enabled)
+        {
+            return await SendAsciiProtocolCommandAsync(
+                LightOffCommand,
+                "生产拍照光源关闭");
+        }
+
+        var settings = Settings;
+        if (settings is null)
+        {
+            AddLog("生产拍照光源打开失败：振动盘参数未加载");
+            return false;
+        }
+
+        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
+        if (settings.LightOnBrightness != normalizedBrightness)
+        {
+            settings.LightOnBrightness = normalizedBrightness;
+        }
+
+        _settingsStore.Save(settings);
+        if (!await SendAsciiProtocolCommandAsync(
+                LightOnCommand,
+                "生产拍照光源打开"))
+        {
+            return false;
+        }
+
+        if (await SendAsciiProtocolCommandAsync(
+                $"&06,{normalizedBrightness:00},XX$",
+                $"生产拍照光源亮度 {normalizedBrightness:00}%"))
+        {
+            return true;
+        }
+
+        // 光源已打开但亮度指令失败时立即关灯，不允许继续拍照。
+        await SendAsciiProtocolCommandAsync(
+            LightOffCommand,
+            "生产拍照光源失败回退关闭");
+        return false;
+    }
+
     private static string BuildDirectionalVibrationParameterCommand(
         VibrationFeederSettings settings,
         string mode)

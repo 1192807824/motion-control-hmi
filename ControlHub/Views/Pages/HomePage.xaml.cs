@@ -1605,7 +1605,8 @@ public partial class HomePage : UserControl
 
     /// <summary>
     /// 每轮由第一套XY向1/2工位上两个新料；13/14到达收料节拍时，第二套XY并行完成双吸嘴收料。
-    /// XY回中心后立即准备下一轮物料；DD固定推进两个工位，停稳即可上下料，末次测试并行完成。
+    /// 缓存已空时XY回中心拍照，仍有缓存时从放料位直接去吸料；
+    /// DD固定推进两个工位，停稳即可上下料，末次测试并行完成。
     /// </summary>
     private async void StartProduction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -1792,7 +1793,20 @@ public partial class HomePage : UserControl
                 ClearAssignedNozzleTargets();
 
                 CalibrationCenterPosition actual;
-                if (activeFirstSetReturnToCenterTask is not null)
+                if (pendingPickupBatches.Count > 0)
+                {
+                    // 本次复用上次拍照的绝对目标：保留放料后的XY位置，
+                    // 不再绕回拍照中心，下面直接移动到本批第一个吸料目标。
+                    actual = motionController.CaptureCalibrationFeedback(
+                        VisionCalibration.XHardwareAxisNo,
+                        VisionCalibration.YHardwareAxisNo,
+                        AllowedProductionPeerAxisNos);
+                    SetFirstSetPositionStatus(
+                        $"XY保持放料后位置：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse；" +
+                        "本轮无需拍照，将直接去吸料。",
+                        true);
+                }
+                else if (activeFirstSetReturnToCenterTask is not null)
                 {
                     // 上一轮放料后已经启动回中心；只等XY到拍照位，不等待DD完成。
                     actual = await activeFirstSetReturnToCenterTask;
@@ -1839,7 +1853,8 @@ public partial class HomePage : UserControl
                         $"缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}…",
                         Color.FromRgb(242, 181, 68));
                     await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
-                    var blobResult = await visualCalibrationController.RunRectangleBlobInspectionAsync(
+                    var blobResult = await RunChipInspectionWithFeederLightAsync(
+                        visualCalibrationController,
                         _productionCancellation.Token);
                     SetBlobInspectionResult(blobResult);
                     var selectedChipCount = Math.Min(
@@ -2169,24 +2184,39 @@ public partial class HomePage : UserControl
                     singleChipRemainsAfterPickupCache = false;
                 }
 
+                var nextCycleNeedsPhoto = pendingPickupBatches.Count == 0;
                 if (!activeSecondSetPickupTask.IsCompleted)
                 {
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：第一套已放完并立即回中心；DD只等待第二套从13/14工位吸走两个料，不等待第二套放料…",
+                        nextCycleNeedsPhoto
+                            ? $"第{cycleNumber}轮：第一套已放完并立即回中心；DD只等待第二套从13/14工位吸走两个料，不等待第二套放料…"
+                            : $"第{cycleNumber}轮：第一套已放完，下轮复用拍照缓存并直接去吸料；" +
+                              "DD只等待第二套从13/14工位吸走两个料…",
                         Color.FromRgb(242, 181, 68));
                 }
 
-                SetStartProductionStatus(
-                    $"第{cycleNumber}轮第一套放料完成，XY立即回中心准备下一轮拍照；第二套继续独立收料…",
-                    Color.FromRgb(73, 209, 125));
-                activeFirstSetReturnToCenterTask = StartFirstSetReturnToCenterAsync(
-                    motionController,
-                    center,
-                    velocity,
-                    firstSetYVelocity,
-                    _productionCancellation.Token);
+                if (nextCycleNeedsPhoto)
+                {
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮第一套放料完成，XY立即回中心准备下一轮拍照；第二套继续独立收料…",
+                        Color.FromRgb(73, 209, 125));
+                    activeFirstSetReturnToCenterTask = StartFirstSetReturnToCenterAsync(
+                        motionController,
+                        center,
+                        velocity,
+                        firstSetYVelocity,
+                        _productionCancellation.Token);
+                }
+                else
+                {
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮第一套放料完成；下一轮无需拍照，XY不回中心并将直接去吸料；" +
+                        "第二套继续独立收料…",
+                        Color.FromRgb(73, 209, 125));
+                }
 
-                // 第二套本批取料信号移交给DD安全门；主循环直接进入下一轮回中、拍照和吸料。
+                // 第二套本批取料信号移交给DD安全门；主循环直接进入下一轮。
+                // 只有拍照缓存用完时才回中心重拍，否则从当前位置直接去吸料。
                 var requiredFinalTestTask = activeFinalTestTask;
                 activeFinalTestTask = Task.FromResult(0);
                 var requiredSecondSetPickupTask = activeSecondSetPickupTask;
@@ -2207,7 +2237,11 @@ public partial class HomePage : UserControl
                     _productionCancellation.Token);
 
                 SetStartProductionStatus(
-                    $"第{cycleNumber}轮放料完成，DD在第二套取料完成后固定转动两次；已启用测试站同步执行，XY立即准备第{cycleNumber + 1}轮拍照吸料…",
+                    nextCycleNeedsPhoto
+                        ? $"第{cycleNumber}轮放料完成，DD在第二套取料完成后固定转动两次；" +
+                          $"已启用测试站同步执行，XY立即准备第{cycleNumber + 1}轮拍照吸料…"
+                        : $"第{cycleNumber}轮放料完成，DD在第二套取料完成后固定转动两次；" +
+                          $"已启用测试站同步执行，XY第{cycleNumber + 1}轮不拍照、直接去吸料…",
                     Color.FromRgb(73, 209, 125));
 
                 // 主动让出一次 UI 调度机会，避免连续循环把界面刷新挤在一起。
@@ -2329,6 +2363,42 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             $"第{cycleNumber}轮：{reason}，“震散 → 向左”完成，下一轮重新拍照。",
             Color.FromRgb(73, 209, 125));
+    }
+
+    private async Task<VisionRectangleBlobResult> RunChipInspectionWithFeederLightAsync(
+        VisualCalibrationPage visualCalibrationController,
+        CancellationToken cancellationToken)
+    {
+        var connectionController = _connectionConfigController
+            ?? throw new InvalidOperationException("振动盘控制组件未连接，无法控制拍照光源。");
+
+        SetStartProductionStatus(
+            $"{ChipInspectionProcedureName}拍照前正在打开振动盘光源…",
+            Color.FromRgb(242, 181, 68));
+        if (!await connectionController.SetProductionLightAsync(enabled: true))
+        {
+            throw new InvalidOperationException("振动盘拍照光源打开失败，已取消本次拍照。");
+        }
+
+        var inspectionCompleted = false;
+        try
+        {
+            var result = await visualCalibrationController.RunRectangleBlobInspectionAsync(
+                cancellationToken);
+            inspectionCompleted = true;
+            return result;
+        }
+        finally
+        {
+            // 无论拍照成功、视觉异常还是用户停止，都必须尝试关灯。
+            var lightTurnedOff = await connectionController.SetProductionLightAsync(enabled: false);
+            if (!lightTurnedOff &&
+                inspectionCompleted &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                throw new InvalidOperationException("振动盘已拍照，但光源关闭失败，已停止自动生产。");
+            }
+        }
     }
 
     private bool RequestProductionPause()
@@ -2610,7 +2680,8 @@ public partial class HomePage : UserControl
         if (!requiredFinalTestTask.IsCompleted || !requiredSecondSetPickupTask.IsCompleted)
         {
             SetStartProductionStatus(
-                "XY正在回中心准备下一轮拍照；已启用测试站将随DD节拍执行，下一次DD同时等待测试轴和第二套取料安全条件。",
+                "XY正在离开放料点准备下一轮；已启用测试站将随DD节拍执行，" +
+                "下一次DD同时等待测试轴和第二套取料安全条件。",
                 Color.FromRgb(242, 181, 68));
         }
 
