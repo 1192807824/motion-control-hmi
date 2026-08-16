@@ -34,6 +34,11 @@ public partial class HomePage : UserControl
     private const int SecondSetZ2VacuumOutputBit = 21;
     private const int Station13BreakVacuumOutputBit = 22;
     private const int Station14BreakVacuumOutputBit = 23;
+    private const int OneKeyCollectCancelVacuumOutputBit = 26;
+    private const int OneKeyCollectBreakVacuumOutputBit = 25;
+    private const int OneKeyCollectCancelVacuumDelayMilliseconds = 1_000;
+    private const int OneKeyCollectBreakVacuumDelayMilliseconds = 2_000;
+    private const int OneKeyCollectCloseDelayMilliseconds = 1_000;
     private const int LowerCameraLightOutputBit = 10;
     private const int DefaultVacuumBreakPulseMilliseconds = 30;
     private const int DefaultVacuumValveSwitchDelayMilliseconds = 20;
@@ -1783,7 +1788,7 @@ public partial class HomePage : UserControl
             var pendingPickupBatches = new Queue<NozzlePickupBatch>();
             var vibrateAfterPickupCachePlaced = false;
             var singleChipRemainsAfterPickupCache = false;
-            var consecutiveSingleChipVibrations = 0;
+            var consecutiveLowMaterialVibrations = 0;
             var stopAfterCurrentBatch = false;
             ClearBlobInspectionResult();
 
@@ -1872,14 +1877,58 @@ public partial class HomePage : UserControl
 
                     if (selectedChipCount == 0)
                     {
-                        consecutiveSingleChipVibrations = 0;
+                        if (consecutiveLowMaterialVibrations >=
+                            EmptyTraySingleChipVibrationThreshold)
+                        {
+                            SetStartProductionStatus(
+                                $"连续震动{consecutiveLowMaterialVibrations}次后视野仍为0颗，" +
+                                "确认料盘缺料；停止上料，正在排空转盘在制品…",
+                                Color.FromRgb(242, 181, 68));
+
+                            // 上一批的DD任务可能仍在震动期间并行执行。
+                            // 先接管它产生的末次测试和第二套下料任务，再继续排空。
+                            if (activeCarouselAdvanceTask is not null)
+                            {
+                                var carouselAdvanceResult = await activeCarouselAdvanceTask;
+                                activeCarouselAdvanceTask = null;
+                                activeFinalTestTask = carouselAdvanceResult.FinalTestTask;
+                                activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
+                                activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
+                            }
+
+                            var emptyDrainFinalTestTask = activeFinalTestTask;
+                            activeFinalTestTask = Task.FromResult(0);
+                            var emptyDrainSecondSetPickupTask = activeSecondSetPickupTask;
+                            activeSecondSetPickupTask = Task.CompletedTask;
+                            var emptyDrainSecondSetUnloadTask = activeSecondSetUnloadTask;
+                            activeSecondSetUnloadTask = Task.CompletedTask;
+
+                            await DrainCarouselAfterFeederEmptyAsync(
+                                carouselStations,
+                                axis0PulseDistance,
+                                emptyDrainFinalTestTask,
+                                emptyDrainSecondSetPickupTask,
+                                emptyDrainSecondSetUnloadTask,
+                                ProductionHandlingAxisNos,
+                                _productionCancellation.Token);
+
+                            SetStartProductionStatus(
+                                $"连续震动{consecutiveLowMaterialVibrations}次后确认料盘无料；" +
+                                "转盘全部在制品已完成测试和BIN下料，程序正常停止。",
+                                Color.FromRgb(73, 209, 125));
+                            return;
+                        }
+
+                        var vibrationNumber = consecutiveLowMaterialVibrations + 1;
                         SetStartProductionStatus(
-                            "本次找芯片流程返回0条，正在震动料盘后重新拍照。",
+                            $"视野内未找到芯片，正在执行第{vibrationNumber}/" +
+                            $"{EmptyTraySingleChipVibrationThreshold}次连续震动后重拍。",
                             Color.FromRgb(242, 181, 68));
                         await RunProductionVibrationAsync(
                             cycleNumber,
-                            "视野内未找到芯片",
+                            $"视野内未找到芯片（第{vibrationNumber}次）",
                             _productionCancellation.Token);
+                        consecutiveLowMaterialVibrations = vibrationNumber;
                         continue;
                     }
 
@@ -1887,7 +1936,7 @@ public partial class HomePage : UserControl
                     {
                         if (selectedChipCount == 1)
                         {
-                            if (consecutiveSingleChipVibrations >=
+                            if (consecutiveLowMaterialVibrations >=
                                 EmptyTraySingleChipVibrationThreshold)
                             {
                                 pendingPickupBatches.Enqueue(CalculateFinalSingleChipBatch(
@@ -1897,13 +1946,13 @@ public partial class HomePage : UserControl
                                     actual.ActualY));
                                 stopAfterCurrentBatch = true;
                                 SetStartProductionStatus(
-                                    $"连续震动{consecutiveSingleChipVibrations}次后视野仍只剩1颗，" +
+                                    $"连续震动{consecutiveLowMaterialVibrations}次后视野仍只剩1颗，" +
                                     "判定缺料：改由吸嘴2取料，放到位置2后停止上料并排空转盘。",
                                     Color.FromRgb(242, 181, 68));
                             }
                             else
                             {
-                                var vibrationNumber = consecutiveSingleChipVibrations + 1;
+                                var vibrationNumber = consecutiveLowMaterialVibrations + 1;
                                 SetStartProductionStatus(
                                     $"视野只剩1颗，暂不抓取；正在执行第{vibrationNumber}/" +
                                     $"{EmptyTraySingleChipVibrationThreshold}次连续震动后重拍。",
@@ -1912,13 +1961,13 @@ public partial class HomePage : UserControl
                                     cycleNumber,
                                     $"视野只剩1颗（第{vibrationNumber}次）",
                                     _productionCancellation.Token);
-                                consecutiveSingleChipVibrations = vibrationNumber;
+                                consecutiveLowMaterialVibrations = vibrationNumber;
                                 continue;
                             }
                         }
                         else
                         {
-                            consecutiveSingleChipVibrations = 0;
+                            consecutiveLowMaterialVibrations = 0;
                             foreach (var batch in CalculateAssignedNozzleBatches(
                                          blobResult,
                                          calibrationFile.FilePath,
@@ -2173,7 +2222,7 @@ public partial class HomePage : UserControl
                 if (stopAfterCurrentBatch)
                 {
                     SetStartProductionStatus(
-                        $"连续震动{consecutiveSingleChipVibrations}次后仍剩的最后1颗" +
+                        $"连续震动{consecutiveLowMaterialVibrations}次后仍剩的最后1颗" +
                         "已由吸嘴2放到位置2，确认料盘缺料；停止继续上料，正在回中心并排空转盘…",
                         Color.FromRgb(242, 181, 68));
 
@@ -2206,24 +2255,10 @@ public partial class HomePage : UserControl
                         _productionCancellation.Token);
 
                     SetStartProductionStatus(
-                        $"连续震动{consecutiveSingleChipVibrations}次后确认料盘缺料；" +
+                        $"连续震动{consecutiveLowMaterialVibrations}次后确认料盘缺料；" +
                         "最后1颗及转盘全部在制品已完成测试和BIN下料，程序正常停止。",
                         Color.FromRgb(73, 209, 125));
                     return;
-                }
-
-                if (vibrateAfterPickupCachePlaced && pendingPickupBatches.Count == 0)
-                {
-                    var vibrationReason = singleChipRemainsAfterPickupCache
-                        ? "本次缓存成对物料已全部放完，料盘最后还剩1颗"
-                        : "本次最多10条缓存已全部放完";
-                    await RunProductionVibrationAsync(
-                        cycleNumber,
-                        vibrationReason,
-                        _productionCancellation.Token);
-                    consecutiveSingleChipVibrations = singleChipRemainsAfterPickupCache ? 1 : 0;
-                    vibrateAfterPickupCachePlaced = false;
-                    singleChipRemainsAfterPickupCache = false;
                 }
 
                 var nextCycleNeedsPhoto = pendingPickupBatches.Count == 0;
@@ -2277,6 +2312,23 @@ public partial class HomePage : UserControl
                     axis0PulseDistance,
                     ProductionHandlingAxisNos,
                     _productionCancellation.Token);
+
+                // 震动盘与DD、测试站和第二套下料机构不共用运动轴。
+                // 必须先启动上面的转盘并行任务，再在第一套取料分支中等待震动；
+                // 否则整段震动时间内DD、测试和下料都会被错误推迟。
+                if (vibrateAfterPickupCachePlaced && pendingPickupBatches.Count == 0)
+                {
+                    var vibrationReason = singleChipRemainsAfterPickupCache
+                        ? "本次缓存成对物料已全部放完，料盘最后还剩1颗"
+                        : "本次最多10条缓存已全部放完";
+                    await RunProductionVibrationAsync(
+                        cycleNumber,
+                        vibrationReason,
+                        _productionCancellation.Token);
+                    consecutiveLowMaterialVibrations = singleChipRemainsAfterPickupCache ? 1 : 0;
+                    vibrateAfterPickupCachePlaced = false;
+                    singleChipRemainsAfterPickupCache = false;
+                }
 
                 SetStartProductionStatus(
                     nextCycleNeedsPhoto
@@ -5903,9 +5955,10 @@ public partial class HomePage : UserControl
 
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
-            "一键收料将保持第一套XY不动，下料XY先吸取当前13/14工位，" +
-            "再让DD连续转动两个工位；固定执行8个节拍，转满一整圈。\n\n" +
-            "请确认下料XY、Z轴、测试站和DD转盘均在安全区域。",
+            "一键收料不移动任何XY或Z轴，只让DD每次转动一个工位。" +
+            "每次停稳后依次执行Y26=0、Y25=0、Y26=1、Y25=1；" +
+            "共转16次，转满一整圈。\n\n" +
+            "请确认DD转盘在安全区域。",
             "一键收料安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -5915,23 +5968,15 @@ public partial class HomePage : UserControl
             return;
         }
 
-        Task previousSecondSetUnloadTask = Task.CompletedTask;
-        Task currentSecondSetPickupTask = Task.CompletedTask;
-        Task<int> finalTestTask = Task.FromResult(0);
+        var collectIoSequenceActive = false;
         try
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
-            // 只锁定收料所需的DD、第二套XY/Z和测试站参数；第一套XY不会收到任何运动指令。
+            // 一键收料只使用DD轴参数和扩展IO，不读取也不调用XY/Z、测试站或BIN位置。
             _productionAxisMotionSettings = ReadProductionAxisMotionSettings();
             ApplyProductionAxisMotionSettings(motionController, _productionAxisMotionSettings);
-            _testStationSettings = ReadTestStationSettings();
-            EnsureAssignedTestInstrumentsConnected();
-            _productionZPositions = ReadProductionZPositions();
-            _productionZDwellTimes = ReadProductionZDwellTimes();
-            _secondSetXyPositions = ReadSecondSetXyPositions();
-            _binDropPositions = ReadBinDropPositions();
 
             _productionCancellation = new CancellationTokenSource();
             _productionCompletion = new TaskCompletionSource<bool>(
@@ -5943,47 +5988,35 @@ public partial class HomePage : UserControl
             _productionAxisSet = VisionCalibrationAxisSet.First;
             _oneKeyCollectRunning = true;
             _startSequenceRunning = true;
-            ResetUphTracking();
             UpdateHomeCommandState();
 
-            const int turnsPerCollectStep = 2;
-            const int collectStepCount = CarouselStationCount / turnsPerCollectStep;
-            for (var step = 1; step <= collectStepCount; step++)
+            for (var turn = 1; turn <= CarouselStationCount; turn++)
             {
                 var cancellationToken = _productionCancellation.Token;
                 cancellationToken.ThrowIfCancellationRequested();
-
-                // 下一节拍的取料必须等上一批已放入BIN，避免第二套XY争用。
-                await Task.WhenAll(finalTestTask, previousSecondSetUnloadTask);
-                cancellationToken.ThrowIfCancellationRequested();
-
                 SetOneKeyCollectStatus(
-                    $"一键收料 {step}/{collectStepCount}：下料XY正在吸取13/14工位…",
+                    $"一键收料 {turn}/{CarouselStationCount}：DD正在转动一个工位…",
                     Color.FromRgb(242, 181, 68));
-                previousSecondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
-                    _carouselStations,
-                    cancellationToken,
-                    out currentSecondSetPickupTask);
-
-                // 只要产品已离开13/14工位就可以转DD，BIN放料可与DD并行。
-                await currentSecondSetPickupTask;
-                cancellationToken.ThrowIfCancellationRequested();
-                SetOneKeyCollectStatus(
-                    $"一键收料 {step}/{collectStepCount}：取料完成，DD正在转动两次…",
-                    Color.FromRgb(242, 181, 68));
-                var advanceResult = await AdvanceCarouselExactlyTwoStationsAsync(
-                    _carouselStations,
+                _ = await MoveAxis0RelativeCoreAsync(
                     DdMotorPulsePerTurn,
-                    ProductionHandlingAxisNos,
                     cancellationToken);
-                finalTestTask = advanceResult.FinalTestTask;
+                AdvanceCarouselOccupancy(_carouselStations);
+                UpdateCarouselStationDisplay(_carouselStations);
+
+                SetOneKeyCollectStatus(
+                    $"一键收料 {turn}/{CarouselStationCount}：DD已停稳，" +
+                    "正在执行Y26=0 → Y25=0 → Y26=1 → Y25=1…",
+                    Color.FromRgb(242, 181, 68));
+                collectIoSequenceActive = true;
+                await RunOneKeyCollectIoSequenceAsync(
+                    motionController,
+                    cancellationToken);
+                collectIoSequenceActive = false;
             }
 
-            // 一圈结束后仍要等最后一次测试和最后一批BIN放料真正完成。
-            await Task.WhenAll(finalTestTask, previousSecondSetUnloadTask);
             UpdateCarouselStationDisplay(_carouselStations);
             SetOneKeyCollectStatus(
-                "一键收料完成：下料取料→DD转两次已执行8个节拍，转盘已转满一圈。",
+                "一键收料完成：DD已转16次、每次停稳后的Y26/Y25序列均已完成，转盘已转满一圈。",
                 Color.FromRgb(73, 209, 125));
         }
         catch (OperationCanceledException)
@@ -6000,19 +6033,13 @@ public partial class HomePage : UserControl
         {
             _productionCancellation?.Cancel();
             _productionResumeSignal?.TrySetResult(true);
-            await ObserveTaskNoThrowAsync(currentSecondSetPickupTask);
-            await ObserveTaskNoThrowAsync(previousSecondSetUnloadTask);
-            await ObserveTaskNoThrowAsync(finalTestTask);
-            StopUphTracking();
-            CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
+            if (collectIoSequenceActive)
+            {
+                CloseOneKeyCollectOutputsNoThrow();
+            }
 
             _productionAxisSet = null;
-            _productionZPositions = null;
-            _productionZDwellTimes = null;
-            _secondSetXyPositions = null;
-            _binDropPositions = null;
             _productionAxisMotionSettings = null;
-            _testStationSettings = null;
             _productionStopRequested = false;
             _productionPauseRequested = false;
             _productionResumeSignal = null;
@@ -6025,6 +6052,74 @@ public partial class HomePage : UserControl
             _productionCompletion = null;
             UpdateHomeCommandState();
             productionCompletion?.TrySetResult(true);
+        }
+    }
+
+    private async Task RunOneKeyCollectIoSequenceAsync(
+        MotionControlPage motionController,
+        CancellationToken cancellationToken)
+    {
+        // 按现场记录原样下发扩展IO：
+        // nmc_write_outbit_extern(0, 2, 1001, 26/25, value)。
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectCancelVacuumOutputBit,
+            enabled: false,
+            "取消吸 Y26=0");
+        await Task.Delay(OneKeyCollectCancelVacuumDelayMilliseconds, cancellationToken);
+
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectBreakVacuumOutputBit,
+            enabled: false,
+            "破 Y25=0");
+        await Task.Delay(OneKeyCollectBreakVacuumDelayMilliseconds, cancellationToken);
+
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectCancelVacuumOutputBit,
+            enabled: true,
+            "关闭取消吸 Y26=1");
+        await Task.Delay(OneKeyCollectCloseDelayMilliseconds, cancellationToken);
+
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectBreakVacuumOutputBit,
+            enabled: true,
+            "关闭破 Y25=1");
+    }
+
+    private static void SetOneKeyCollectOutput(
+        MotionControlPage motionController,
+        int bitNo,
+        bool enabled,
+        string actionName)
+    {
+        if (!motionController.SetDigitalOutputHardwareBit(bitNo, enabled))
+        {
+            throw new InvalidOperationException($"一键收料IO操作失败：{actionName}。");
+        }
+    }
+
+    private void CloseOneKeyCollectOutputsNoThrow()
+    {
+        if (_preserveIoOnEmergencyStop || _motionController is not { } motionController)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = motionController.SetDigitalOutputHardwareBit(
+                OneKeyCollectCancelVacuumOutputBit,
+                enabled: true);
+            _ = motionController.SetDigitalOutputHardwareBit(
+                OneKeyCollectBreakVacuumOutputBit,
+                enabled: true);
+        }
+        catch
+        {
+            // 收尾不覆盖原始运动或IO异常；错误已由主流程状态显示。
         }
     }
 
@@ -6255,10 +6350,6 @@ public partial class HomePage : UserControl
         OneKeyCollectButton.IsEnabled =
             _motionController is not null &&
             allProductionAxisParametersValid &&
-            allTestStationParametersValid &&
-            allZPositionsValid &&
-            allSecondSetXyPositionsValid &&
-            allBinDropPositionsValid &&
             (_oneKeyCollectRunning ? !_productionStopRequested : commandsIdle);
         OneKeyCollectTitleText.Text = _oneKeyCollectRunning
             ? (_productionStopRequested ? "正在停止" : "停止收料")

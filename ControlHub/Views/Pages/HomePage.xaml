@@ -1128,7 +1128,7 @@
                             BorderBrush="#38A3C5"
                             IsEnabled="False"
                             Click="OneKeyCollect_Click"
-                            ToolTip="第一套XY保持不动；下料XY取13/14工位后，DD转两次，固定循环8次转满一圈">
+                            ToolTip="XY/Z均不动；DD单步转16次，每次停稳后执行Y26/Y25收料IO序列">
                         <Grid Margin="12,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="35" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
@@ -1140,7 +1140,7 @@
                                            FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis" />
                                 <TextBlock x:Name="OneKeyCollectHintText"
-                                           Text="下料取两个 → DD转两次 × 8节拍"
+                                           Text="DD转1工位 → Y26/Y25序列 × 16"
                                            Foreground="#D8F3FA"
                                            FontSize="9"
                                            Margin="0,2,0,0"
