@@ -1283,7 +1283,9 @@ public partial class VisualCalibrationPage : UserControl
             var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
             if (!File.Exists(calibrationFilePath))
             {
-                throw new FileNotFoundException("九点标定文件不存在，请先完成九点标定。", calibrationFilePath);
+                throw new FileNotFoundException(
+                    "九点标定文件不存在，请先完成九点标定或导入已有文件。",
+                    calibrationFilePath);
             }
 
             if (!_hostReady)
@@ -1292,7 +1294,8 @@ public partial class VisualCalibrationPage : UserControl
             }
 
             var photoPosition = _recordedCenter
-                ?? throw new InvalidOperationException("请先移动到参数配置中心位并完成九点标定。");
+                ?? throw new InvalidOperationException(
+                    "请先点击“移动中心”，或导入已有九点标定文件恢复拍照位。");
             _ = _nozzleDotPosition
                 ?? throw new InvalidOperationException("请先点击“移动下压位置”到达参数配置的示教下压位。");
             var motionController = _motionController
@@ -1367,13 +1370,16 @@ public partial class VisualCalibrationPage : UserControl
             var result = _pendingNozzlePointResult
                 ?? throw new InvalidOperationException("请先手动点击“执行粗定位示教”。");
             var photoPosition = _recordedCenter
-                ?? throw new InvalidOperationException("尚未移动到参数配置中心位。");
+                ?? throw new InvalidOperationException(
+                    "尚未移动到参数配置中心位，也未从九点标定文件恢复拍照位。");
             var nozzleDotPosition = _nozzleDotPosition
                 ?? throw new InvalidOperationException("尚未移动到参数配置的示教下压位。");
             var calibrationFilePath = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
             if (!File.Exists(calibrationFilePath))
             {
-                throw new FileNotFoundException("九点标定文件不存在，请先完成九点标定。", calibrationFilePath);
+                throw new FileNotFoundException(
+                    "九点标定文件不存在，请先完成九点标定或导入已有文件。",
+                    calibrationFilePath);
             }
 
             _nozzlePointSaving = true;
@@ -1708,6 +1714,10 @@ public partial class VisualCalibrationPage : UserControl
                 throw new FileNotFoundException("选择的标定文件不存在。", fullPath);
             }
 
+            (double X, double Y)? importedCenter = IsLowerCameraMode
+                ? null
+                : VisionCalibrationFileReader.ReadNinePointCenterPulses(fullPath);
+
             await EnsureStartedAsync();
             if (!_hostReady)
             {
@@ -1717,9 +1727,31 @@ public partial class VisualCalibrationPage : UserControl
             var message = await VisionHost.ImportCalibrationFileAsync(
                 fullPath,
                 CancellationToken.None);
+            if (importedCenter is { } center)
+            {
+                _recordedCenter = new CalibrationCenterPosition(
+                    ActiveAxisPair.XHardwareAxisNo,
+                    ActiveAxisPair.YHardwareAxisNo,
+                    center.X,
+                    center.Y);
+                _nozzleDotPosition = null;
+                _pendingNozzlePointResult = null;
+                _nozzle1ClickVerified = false;
+                _nozzle2ClickVerified = false;
+            }
             CalibrationFilePathTextBox.Text = fullPath;
             SaveCalibrationSettingsNoThrow();
-            SetWorkflowStatus(message + "；主页开始流程将直接使用此文件。", WorkflowStatus.Success);
+            RefreshTeachingPositionDisplay();
+            UpdateNozzleTeachUi();
+            SetWorkflowStatus(
+                IsLowerCameraMode
+                    ? message + "；主页开始流程将直接使用此文件。"
+                    : message +
+                      $"；已从文件恢复拍照中心 X={_recordedCenter!.ActualX:0.###}、" +
+                      $"Y={_recordedCenter.ActualY:0.###} pulse（仅恢复坐标，设备未移动）。" +
+                      "无需重新九点标定，" +
+                      "请直接执行“移动下压位置 → 回拍照位 → 粗定位示教”。",
+                WorkflowStatus.Success);
         }
         catch (Exception exception)
         {
