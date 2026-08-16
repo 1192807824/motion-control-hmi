@@ -95,6 +95,8 @@ public partial class MainWindow : Window
     private string _clickCalibrationPath = "";
     private string? _fullscreenRenderTarget;
     private bool _showingCalibrationRender;
+    private bool _showingSplitRender;
+    private bool _nozzleTeachingResultsDisplayed;
     private string _activeCalibrationProcedureName;
     private readonly string? _configuredSolutionPath;
     private readonly string _inspectionProcedureName;
@@ -868,7 +870,7 @@ public partial class MainWindow : Window
         ShellModuleTool? scriptModule = null;
         IMVSCircleFindModuTool? nozzle1CircleModule = null;
         IMVSCircleFindModuTool? nozzle2CircleModule = null;
-        VmModule displayModule;
+        VmModule? displayModule = null;
         if (isNozzlePointProcedure)
         {
             nozzle1CircleModule = ResolveNamedModule<IMVSCircleFindModuTool>(
@@ -877,9 +879,6 @@ public partial class MainWindow : Window
             nozzle2CircleModule = ResolveNamedModule<IMVSCircleFindModuTool>(
                 procedureName,
                 Nozzle2CircleModuleName);
-            // 保持原来的结果渲染绑定不变；仅将坐标来源改为两个圆查找模块。
-            // 避免切换渲染模块影响后续实时画面的相机释放与重新连接。
-            displayModule = ResolveNamedBlobFindModule(procedureName, InspectionBlobModuleName);
         }
         else
         {
@@ -893,13 +892,20 @@ public partial class MainWindow : Window
 
         if (isNozzlePointProcedure)
         {
-            ApplyLiveRenderLayout();
+            ApplyNozzleTeachingRenderLayout();
             RefreshRenderLayout();
         }
 
         // 厂商渲染控件在相机被其他海康程序占用时会针对每次空结果弹出
         // “无图片数据”。拍照前先解绑，只有流程成功后才把有效结果交给控件。
-        PrepareLiveRendererForCameraAcquisition();
+        if (isNozzlePointProcedure)
+        {
+            PrepareNozzleTeachingRenderersForCameraAcquisition();
+        }
+        else
+        {
+            PrepareLiveRendererForCameraAcquisition();
+        }
 
         InspectionImageFile? inspectionImage = null;
         try
@@ -919,8 +925,18 @@ public partial class MainWindow : Window
                         ? $"固定方案中的{procedureName}执行异常。"
                         : $"固定方案中的{procedureName}执行异常：{details}");
             }
-            BindInspectionResultModule(displayModule);
-            RefreshInspectionDisplayNoThrow();
+            if (isNozzlePointProcedure)
+            {
+                // 现场安装方向中圆查找2对应吸嘴1、圆查找1对应吸嘴2。
+                // 两个结果模块分别绑定左右渲染控件，显示各自的原图和圆查找叠加图形。
+                BindNozzleTeachingResultModules(nozzle2CircleModule!, nozzle1CircleModule!);
+                RefreshNozzleTeachingDisplaysNoThrow();
+            }
+            else
+            {
+                BindInspectionResultModule(displayModule!);
+                RefreshInspectionDisplayNoThrow();
+            }
 
             List<RectangleBlobCandidate> candidates;
             if (isNozzlePointProcedure)
@@ -1271,6 +1287,7 @@ public partial class MainWindow : Window
 
     private void PrepareLiveRendererForCameraAcquisition()
     {
+        ClearNozzleTeachingResultRenderersNoThrow();
         DetachCrosshairModule();
         _displayedModule = null;
         _livePreviewRenderReady = false;
@@ -1285,6 +1302,95 @@ public partial class MainWindow : Window
         catch
         {
             // 清理显示失败不影响相机流程；关键是不能再主动刷新空结果。
+        }
+    }
+
+    private void PrepareNozzleTeachingRenderersForCameraAcquisition()
+    {
+        PrepareLiveRendererForCameraAcquisition();
+        _calibrationRenderGeneration++;
+        CalibrationImagePlaceholder.Visibility = Visibility.Visible;
+        try
+        {
+            CalibrationRenderControl.ModuleSource = null;
+            CalibrationRenderControl.ClearDisplayView();
+        }
+        catch
+        {
+            // 清理第二张旧结果失败不影响本次流程；成功执行后会重新绑定圆查找结果。
+        }
+    }
+
+    private void BindNozzleTeachingResultModules(
+        IMVSCircleFindModuTool nozzle1ResultModule,
+        IMVSCircleFindModuTool nozzle2ResultModule)
+    {
+        DetachCrosshairModule();
+        _displayedModule = null;
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        CalibrationImagePlaceholder.Visibility = Visibility.Visible;
+        // 先标记为已占用，任一控件绑定异常时，后续流程仍会完整解绑两路结果模块。
+        _nozzleTeachingResultsDisplayed = true;
+        VisionRenderControl.ModuleSource = nozzle1ResultModule;
+        CalibrationRenderControl.ModuleSource = nozzle2ResultModule;
+    }
+
+    private void ClearNozzleTeachingResultRenderersNoThrow()
+    {
+        if (!_nozzleTeachingResultsDisplayed)
+        {
+            return;
+        }
+
+        _nozzleTeachingResultsDisplayed = false;
+        DetachCrosshairModule();
+        _displayedModule = null;
+        _livePreviewRenderReady = false;
+        Interlocked.Increment(ref _liveRenderGeneration);
+        _calibrationRenderGeneration++;
+        CenterCrosshair.Visibility = Visibility.Collapsed;
+        ImagePlaceholder.Visibility = Visibility.Visible;
+        CalibrationImagePlaceholder.Visibility = Visibility.Visible;
+        try
+        {
+            VisionRenderControl.ModuleSource = null;
+            VisionRenderControl.ClearDisplayView();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            CalibrationRenderControl.ModuleSource = null;
+            CalibrationRenderControl.ClearDisplayView();
+        }
+        catch
+        {
+        }
+    }
+
+    private void RefreshNozzleTeachingDisplaysNoThrow()
+    {
+        try
+        {
+            VisionRenderControl.UpdateVMResultShow();
+            ImagePlaceholder.Visibility = Visibility.Collapsed;
+        }
+        catch
+        {
+            // 第一张图显示不参与视觉结果判定。
+        }
+
+        try
+        {
+            CalibrationRenderControl.UpdateVMResultShow();
+            CalibrationImagePlaceholder.Visibility = Visibility.Collapsed;
+        }
+        catch
+        {
+            // 第二张图显示不参与视觉结果判定。
         }
     }
 
@@ -2820,7 +2926,11 @@ public partial class MainWindow : Window
     {
         if (string.Equals(_fullscreenRenderTarget, target, StringComparison.Ordinal))
         {
-            if (_showingCalibrationRender)
+            if (_showingSplitRender)
+            {
+                ApplySplitRenderLayout();
+            }
+            else if (_showingCalibrationRender)
             {
                 ApplyCalibrationRenderLayout();
             }
@@ -2851,6 +2961,8 @@ public partial class MainWindow : Window
 
     private void ApplySplitRenderLayout()
     {
+        _showingSplitRender = true;
+        _showingCalibrationRender = false;
         _fullscreenRenderTarget = null;
         WorkspaceSidebarColumn.Width = new GridLength(320);
         WorkspaceGapColumn.Width = new GridLength(6);
@@ -2902,16 +3014,43 @@ public partial class MainWindow : Window
 
     private void ApplyLiveRenderLayout()
     {
+        ClearNozzleTeachingResultRenderersNoThrow();
+        SetRenderPanelLabels("实时画面", "等待实时图像", "标定结果", "等待九点标定");
         ApplySingleRenderLayout(showLive: true);
     }
 
     private void ApplyCalibrationRenderLayout()
     {
+        ClearNozzleTeachingResultRenderersNoThrow();
+        SetRenderPanelLabels("实时画面", "等待实时图像", "标定结果", "等待九点标定");
         ApplySingleRenderLayout(showLive: false);
+    }
+
+    private void ApplyNozzleTeachingRenderLayout()
+    {
+        ApplySplitRenderLayout();
+        SetRenderPanelLabels(
+            "吸嘴1粗定位 · 圆查找2",
+            "等待吸嘴1粗定位结果",
+            "吸嘴2粗定位 · 圆查找1",
+            "等待吸嘴2粗定位结果");
+    }
+
+    private void SetRenderPanelLabels(
+        string liveTitle,
+        string livePlaceholder,
+        string calibrationTitle,
+        string calibrationPlaceholder)
+    {
+        LiveRenderTitleText.Text = liveTitle;
+        ImagePlaceholderText.Text = livePlaceholder;
+        CalibrationRenderTitleText.Text = calibrationTitle;
+        CalibrationImagePlaceholderText.Text = calibrationPlaceholder;
     }
 
     private void ApplySingleRenderLayout(bool showLive)
     {
+        _showingSplitRender = false;
         _showingCalibrationRender = !showLive;
         _fullscreenRenderTarget = null;
         WorkspaceSidebarColumn.Width = new GridLength(320);
@@ -3555,6 +3694,7 @@ public partial class MainWindow : Window
 
     private void ClearCalibrationRenderer()
     {
+        ClearNozzleTeachingResultRenderersNoThrow();
         _calibrationRenderGeneration++;
         try
         {
@@ -3788,6 +3928,7 @@ public partial class MainWindow : Window
 
     private void PrepareImageStepForFirstFrame(VisionModuleOption option)
     {
+        ClearNozzleTeachingResultRenderersNoThrow();
         DetachCrosshairModule();
         _livePreviewRenderReady = false;
         _clickCenterPixelReady = false;

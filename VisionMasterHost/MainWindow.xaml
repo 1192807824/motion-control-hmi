@@ -707,7 +707,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#00D77B" />
-                                    <TextBlock Margin="14,0,0,0" Text="实时画面" Foreground="#F4F8FB"
+                                    <TextBlock x:Name="LiveRenderTitleText" Margin="14,0,0,0" Text="实时画面" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -758,7 +758,7 @@
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#0D6EE8" />
-                                    <TextBlock Margin="14,0,0,0" Text="标定结果" Foreground="#F4F8FB"
+                                    <TextBlock x:Name="CalibrationRenderTitleText" Margin="14,0,0,0" Text="标定结果" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -781,7 +781,8 @@
                                   Background="#202427"
                                   IsHitTestVisible="False"
                                   Panel.ZIndex="30">
-                                <TextBlock Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"
+                                <TextBlock x:Name="CalibrationImagePlaceholderText"
+                                           Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"
                                            FontWeight="SemiBold"
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center" />
