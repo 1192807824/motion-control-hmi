@@ -6701,7 +6701,7 @@ public partial class HomePage : UserControl
     private void ShowLowerCameraCorrectionVisionStatus(int nozzleNumber)
     {
         BlobInspectionImageStatusText.Text =
-            $"下相机纠偏 · 吸嘴{nozzleNumber} · 图像源1";
+            $"下相机纠偏 · 吸嘴{nozzleNumber} · 当前流程结果（含渲染叠加）";
         BlobInspectionImageStatusText.Foreground =
             new SolidColorBrush(Color.FromRgb(242, 181, 68));
     }
