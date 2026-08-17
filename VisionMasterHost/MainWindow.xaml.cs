@@ -49,19 +49,6 @@ public partial class MainWindow : Window
     private const string LowerCameraCorrectionTransformModuleName = "标定转换3";
     private const string LowerCameraCorrectionCenterTransformModuleName = "标定转换4";
     private const uint LowerCameraCorrectionResultModuleId = 85;
-    private static readonly uint[] LowerCameraCorrectionRenderModuleIds =
-    [
-        87, // 旋转计算2
-        83, // 线线测量2
-        82, // 几何创建2
-        81, // 直线查找2
-        79, // 位置修正2
-        78, // 快速匹配1
-        77, // 颜色转换1
-        76, // 输出图像2
-        62, // Blob分析1
-        66  // 图像组合2
-    ];
     private const string GlobalVariableModuleName = "全局变量1";
 
     private readonly VisionCalibrationSettings _settings = VisionCalibrationSettings.Load();
@@ -668,9 +655,6 @@ public partial class MainWindow : Window
         transformModule.ModuParams.LoadCalibPath = calibrationPath;
         centerTransformModule.ModuParams.LoadCalibPath = calibrationPath;
 
-        var renderCandidates = CaptureLowerCameraCorrectionRenderCandidates(
-            procedure,
-            imageSourceModule);
         PrepareLiveRendererForCameraAcquisition();
         try
         {
@@ -678,11 +662,9 @@ public partial class MainWindow : Window
         }
         finally
         {
-            // 显示与流程判定解耦：即使流程返回 NG 或 Run 抛异常，只要本次相机已经
-            // 产生图像就刷新画面。执行到“旋转计算2”时优先绑定它，让 VM 沿输入关系
-            // 显示底图以及匹配、直线、旋转等渲染叠加；若流程中途 NG，则绑定本次
-            // 实际执行到的最末一个可渲染节点，最后才退回原始图像。
-            ShowLowerCameraCorrectionResultNoThrow(renderCandidates);
+            // 显示与流程判定解耦：即使流程返回 NG 或 Run 抛异常，也先绑定
+            // “旋转计算2”显示底图及全部上游渲染叠加；该节点没有图像时再回退原图。
+            ShowLowerCameraCorrectionResultNoThrow(rotationModule, imageSourceModule);
         }
 
         EnsureProcedureRunSucceeded(procedure, _lowerCameraCorrectionProcedureName);
@@ -709,52 +691,29 @@ public partial class MainWindow : Window
             correctionR.ToString("R", CultureInfo.InvariantCulture));
     }
 
-    private static List<(VmModule Module, uint ExecuteCount)>
-        CaptureLowerCameraCorrectionRenderCandidates(
-            VmProcedure procedure,
-            VmModule imageSourceModule)
-    {
-        var candidates = new List<(VmModule Module, uint ExecuteCount)>();
-        foreach (var moduleId in LowerCameraCorrectionRenderModuleIds)
-        {
-            var module = procedure.GetModuleByID(moduleId);
-            if (module is not null && candidates.All(candidate => !ReferenceEquals(candidate.Module, module)))
-            {
-                candidates.Add((module, module.ExecuteCount));
-            }
-        }
-
-        if (candidates.All(candidate => !ReferenceEquals(candidate.Module, imageSourceModule)))
-        {
-            candidates.Add((imageSourceModule, imageSourceModule.ExecuteCount));
-        }
-
-        return candidates;
-    }
-
     private void ShowLowerCameraCorrectionResultNoThrow(
-        IReadOnlyList<(VmModule Module, uint ExecuteCount)> renderCandidates)
+        VmModule renderedResultModule,
+        VmModule imageSourceModule)
     {
-        var displayModule = renderCandidates
-            .FirstOrDefault(candidate => candidate.Module.ExecuteCount != candidate.ExecuteCount)
-            .Module;
-        if (displayModule is null)
-        {
-            // 相机本身没有产生本次图像时不能拿上一轮缓存冒充当前结果。
-            return;
-        }
-
         try
         {
-            BindInspectionResultModule(displayModule);
-            RefreshInspectionDisplayNoThrow();
-            QueueInspectionResultRefreshNoThrow(DispatcherPriority.Render);
-            QueueInspectionResultRefreshNoThrow(DispatcherPriority.ContextIdle);
+            BindInspectionResultModule(renderedResultModule);
         }
         catch
         {
-            // 显示异常不能覆盖流程自身的成功/失败原因。
+            TryBindInspectionResultModuleNoThrow(imageSourceModule);
+            return;
         }
+
+        RefreshInspectionDisplayNoThrow();
+        QueueLowerCameraCorrectionResultRefreshNoThrow(
+            imageSourceModule,
+            DispatcherPriority.Render,
+            fallbackToImageSource: false);
+        QueueLowerCameraCorrectionResultRefreshNoThrow(
+            imageSourceModule,
+            DispatcherPriority.Background,
+            fallbackToImageSource: true);
     }
 
     private static TModule ResolveModuleById<TModule>(
@@ -1479,7 +1438,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void QueueInspectionResultRefreshNoThrow(DispatcherPriority priority)
+    private void TryBindInspectionResultModuleNoThrow(VmModule resultModule)
+    {
+        try
+        {
+            BindInspectionResultModule(resultModule);
+            RefreshInspectionDisplayNoThrow();
+        }
+        catch
+        {
+            // 显示异常不能覆盖流程自身的成功/失败原因。
+        }
+    }
+
+    private void QueueLowerCameraCorrectionResultRefreshNoThrow(
+        VmModule imageSourceModule,
+        DispatcherPriority priority,
+        bool fallbackToImageSource)
     {
         var generation = _liveRenderGeneration;
         try
@@ -1493,6 +1468,14 @@ public partial class MainWindow : Window
                     }
 
                     RefreshInspectionDisplayNoThrow();
+                    if (!fallbackToImageSource || HasCurrentVisionRenderImage())
+                    {
+                        return;
+                    }
+
+                    // Render 后仍没有图像，说明“旋转计算2”没有发布可渲染底图。
+                    // 此时绑定本次图像源，至少保证流程 NG 时原始相机图仍然可见。
+                    TryBindInspectionResultModuleNoThrow(imageSourceModule);
                 },
                 priority);
         }
