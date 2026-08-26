@@ -1403,8 +1403,17 @@
                             <Grid>
                                 <TextBlock Text="下相机拍照位（第一套 XY pulse）" Foreground="#EAF2F7"
                                            FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
-                                <TextBlock Text="吸嘴1 / 吸嘴2纠偏" Foreground="#49D17D" FontSize="10"
-                                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                            VerticalAlignment="Center">
+                                    <CheckBox x:Name="LowerCameraCorrection1CheckBox"
+                                              Content="下相机纠偏1"
+                                              Foreground="#49D17D"
+                                              FontSize="10"
+                                              VerticalAlignment="Center"
+                                              ToolTip="勾选时两个吸嘴依次执行下相机纠偏；不勾选时两个吸嘴分别按位置1、位置2原坐标放料"
+                                              Checked="LowerCameraCorrection1CheckBox_Changed"
+                                              Unchecked="LowerCameraCorrection1CheckBox_Changed" />
+                                </StackPanel>
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,2,0,2">
                                 <Grid.ColumnDefinitions>

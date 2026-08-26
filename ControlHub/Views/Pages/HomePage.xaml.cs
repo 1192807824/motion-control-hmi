@@ -1245,6 +1245,33 @@ public partial class HomePage : UserControl
         }
     }
 
+    private LowerCameraCorrectionResults SkipLowerCameraCorrections(
+        NozzlePickupBatch pickupBatch)
+    {
+        var nozzle1Summary = pickupBatch.Nozzle1.HasValue
+            ? "吸嘴1使用位置1原设定坐标"
+            : "吸嘴1本批无料";
+        var nozzle2Summary = pickupBatch.Nozzle2.HasValue
+            ? "吸嘴2使用位置2原设定坐标"
+            : "吸嘴2本批无料";
+        var skippedMessage =
+            $"下相机纠偏1未勾选，已跳过两个吸嘴的下相机纠偏：{nozzle1Summary}；{nozzle2Summary}。";
+        LowerCameraCorrectionResultText.Text = skippedMessage;
+        LowerCameraCorrectionResultText.Foreground =
+            new SolidColorBrush(Color.FromRgb(159, 177, 191));
+        BlobInspectionImageStatusText.Text = "下相机纠偏已跳过";
+        BlobInspectionImageStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(159, 177, 191));
+        SetStartProductionStatus(skippedMessage, Color.FromRgb(159, 177, 191));
+        return new LowerCameraCorrectionResults(
+            null,
+            null,
+            null,
+            null,
+            false,
+            false);
+    }
+
     private LowerCameraCorrectionProfile ReadLowerCameraCorrectionProfile(int nozzleNumber)
     {
         var rotationCenterX = nozzleNumber == 2
@@ -1692,10 +1719,17 @@ public partial class HomePage : UserControl
             // BIN配置点是两个吸嘴的中间位置，启动时锁定，避免运行中修改导致下料点变化。
             _binDropPositions = ReadBinDropPositions();
 
-            // 两个下相机拍照位、两个吸嘴的旋转中心和标定文件在启动时一次性锁定。
-            _lowerCameraPhotoPositions = ReadLowerCameraPhotoPositions();
-            var lowerCameraNozzle1Profile = ReadLowerCameraCorrectionProfile(1);
-            var lowerCameraNozzle2Profile = ReadLowerCameraCorrectionProfile(2);
+            // 下相机纠偏1总开关及两个吸嘴所需参数在启动时一次性锁定。
+            var lowerCameraCorrectionEnabled = _homeSettings.LowerCameraCorrectionEnabled ?? true;
+            _lowerCameraPhotoPositions = lowerCameraCorrectionEnabled
+                ? ReadLowerCameraPhotoPositions()
+                : null;
+            var lowerCameraNozzle1Profile = lowerCameraCorrectionEnabled
+                ? ReadLowerCameraCorrectionProfile(1)
+                : null;
+            var lowerCameraNozzle2Profile = lowerCameraCorrectionEnabled
+                ? ReadLowerCameraCorrectionProfile(2)
+                : null;
 
             // 在任何轴开始运动前读取并验证完整自动流程参数，避免流程中途才发现输入缺失。
             var position1X = ParseFiniteCoordinate(PresetPosition1XTextBox.Text, "位置 1 X 轴绝对脉冲");
@@ -2057,16 +2091,17 @@ public partial class HomePage : UserControl
                     FirstSetNozzle2RHardwareAxisNo,
                     FirstSetProductionPeerAxisNos);
 
-                // 两个吸嘴都取料并回安全Z后，依次到拍照位1/2执行各自的下相机纠偏。
-                // 视觉执行失败已在方法内部按吸嘴降级；运动、IO等异常必须继续抛出并停机，
-                // 不能把“未到拍照位”误判成普通纠偏失败后继续放料。
-                var correctionResults = await RunLowerCameraCorrectionsAsync(
-                    visualCalibrationController,
-                    lowerCameraNozzle1Profile,
-                    lowerCameraNozzle2Profile,
-                    assignedTargets,
-                    pickupRPositions,
-                    _productionCancellation.Token);
+                // 总开关启用时依次到拍照位1/2执行两个吸嘴的下相机纠偏；
+                // 关闭时两个吸嘴都跳过下相机，并继续使用各自的原设定放料坐标。
+                var correctionResults = lowerCameraCorrectionEnabled
+                    ? await RunLowerCameraCorrectionsAsync(
+                        visualCalibrationController,
+                        lowerCameraNozzle1Profile!,
+                        lowerCameraNozzle2Profile!,
+                        assignedTargets,
+                        pickupRPositions,
+                        _productionCancellation.Token)
+                    : SkipLowerCameraCorrections(assignedTargets);
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 var position1Target = new LowerCameraPlacementTarget(position1X, position1Y, 0d, 0d);
@@ -4874,6 +4909,24 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void LowerCameraCorrection1CheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingPresetPositions || LowerCameraCorrection1CheckBox is null)
+        {
+            return;
+        }
+
+        _homeSettings.LowerCameraCorrectionEnabled =
+            LowerCameraCorrection1CheckBox.IsChecked == true;
+        _homeSettingsStore.Save(_homeSettings);
+        SetLowerCameraPhotoPositionStatus(
+            LowerCameraCorrection1CheckBox.IsChecked == true
+                ? "下相机纠偏1已启用：两个吸嘴将依次拍照纠偏后放料。"
+                : "下相机纠偏1已关闭：两个吸嘴将分别按位置1、位置2原坐标放料。",
+            true);
+        UpdateHomeCommandState();
+    }
+
     private void LowerCameraRotationCenterTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SaveLowerCameraRotationCentersFromInputs();
@@ -4911,6 +4964,8 @@ public partial class HomePage : UserControl
     {
         _homeSettings = _homeSettingsStore.Load();
         _loadingPresetPositions = true;
+        LowerCameraCorrection1CheckBox.IsChecked =
+            _homeSettings.LowerCameraCorrectionEnabled ?? true;
         FirstSetTeachingCenterXTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetTeachingCenterX);
         FirstSetTeachingCenterYTextBox.Text = FormatPresetCoordinate(
@@ -6217,6 +6272,7 @@ public partial class HomePage : UserControl
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
+            LowerCameraCorrection1CheckBox is null ||
             LowerCameraPhotoPosition1XTextBox is null ||
             LowerCameraPhotoPosition1YTextBox is null ||
             LowerCameraPhotoPosition2XTextBox is null ||
@@ -6300,16 +6356,19 @@ public partial class HomePage : UserControl
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
+        var lowerCameraCorrectionEnabled = LowerCameraCorrection1CheckBox.IsChecked == true;
         var allLowerCameraPhotoPositionsValid =
-            TryParseCoordinate(LowerCameraPhotoPosition1XTextBox.Text, out _) &&
-            TryParseCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out _) &&
-            TryParseCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out _) &&
-            TryParseCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out _);
+            !lowerCameraCorrectionEnabled ||
+            (TryParseCoordinate(LowerCameraPhotoPosition1XTextBox.Text, out _) &&
+             TryParseCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out _) &&
+             TryParseCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out _) &&
+             TryParseCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out _));
         var allLowerCameraRotationCentersValid =
-            TryParseCoordinate(LowerCameraNozzle1RotationCenterXTextBox.Text, out _) &&
-            TryParseCoordinate(LowerCameraNozzle1RotationCenterYTextBox.Text, out _) &&
-            TryParseCoordinate(LowerCameraNozzle2RotationCenterXTextBox.Text, out _) &&
-            TryParseCoordinate(LowerCameraNozzle2RotationCenterYTextBox.Text, out _);
+            !lowerCameraCorrectionEnabled ||
+            (TryParseCoordinate(LowerCameraNozzle1RotationCenterXTextBox.Text, out _) &&
+             TryParseCoordinate(LowerCameraNozzle1RotationCenterYTextBox.Text, out _) &&
+             TryParseCoordinate(LowerCameraNozzle2RotationCenterXTextBox.Text, out _) &&
+             TryParseCoordinate(LowerCameraNozzle2RotationCenterYTextBox.Text, out _));
         var allBinDropPositionsValid =
             TryParseCoordinate(Bin0PositionXTextBox.Text, out _) &&
             TryParseCoordinate(Bin0PositionYTextBox.Text, out _) &&
@@ -6392,6 +6451,7 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
+        LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;
