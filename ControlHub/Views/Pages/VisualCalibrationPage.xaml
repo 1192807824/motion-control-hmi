@@ -617,6 +617,7 @@
                                                       Exited="VisionHost_Exited"
                                                       CalibrationToolbarActionRequested="VisionHost_CalibrationToolbarActionRequested"
                                                       CalibrationSidebarActionRequested="VisionHost_CalibrationSidebarActionRequested"
+                                                      ManualNozzleCirclesReceived="VisionHost_ManualNozzleCirclesReceived"
                                                       ClickTargetReceived="VisionHost_ClickTargetReceived"
                                                       ClickTargetFailed="VisionHost_ClickTargetFailed" />
                     <StackPanel x:Name="HostPlaceholder"

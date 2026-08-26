@@ -592,6 +592,36 @@
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
+                                <Button x:Name="SidebarManualCircleButton"
+                                        Content="手动画圆"
+                                        Style="{StaticResource SidebarButton}"
+                                        Background="#6B3FD6"
+                                        BorderBrush="#8A63E8"
+                                        IsEnabled="False"
+                                        Click="ManualNozzleCircleButton_Click" />
+                                <Button Grid.Column="2"
+                                        x:Name="SidebarClearManualCircleButton"
+                                        Content="清除重画"
+                                        Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E"
+                                        BorderBrush="#35546B"
+                                        IsEnabled="False"
+                                        Click="ClearManualNozzleCirclesButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="SidebarManualCircleStatusText"
+                                       Margin="26,0,0,6"
+                                       Text="采集画面后，每张图在圆周上点3点"
+                                       Foreground="#D5C5FF"
+                                       FontSize="11"
+                                       LineHeight="18"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                            <Grid Margin="26,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
                                 <Button x:Name="SidebarRecordNozzleButton" Tag="AssignPoint1Nozzle1"
                                         Grid.ColumnSpan="3" Content="保存双吸嘴结果" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
@@ -776,7 +806,9 @@
                             </Grid>
                         </Border>
                         <Grid Grid.Row="1">
-                            <vm:VmRenderControl x:Name="CalibrationRenderControl" CoordinateInfoVisible="True" />
+                            <vm:VmRenderControl x:Name="CalibrationRenderControl"
+                                                CoordinateInfoVisible="True"
+                                                OnMouseLeftButtonDownPixelChanged="CalibrationRenderControl_OnMouseLeftButtonDownPixelChanged" />
                             <Grid x:Name="CalibrationImagePlaceholder"
                                   Background="#202427"
                                   IsHitTestVisible="False"

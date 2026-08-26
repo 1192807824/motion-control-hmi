@@ -66,6 +66,8 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     public event EventHandler<VisionClickTargetFailedEventArgs>? ClickTargetFailed;
 
+    public event EventHandler<VisionManualNozzleCirclesEventArgs>? ManualNozzleCirclesReceived;
+
     public event EventHandler<CalibrationToolbarActionEventArgs>? CalibrationToolbarActionRequested;
 
     public event EventHandler<CalibrationSidebarActionEventArgs>? CalibrationSidebarActionRequested;
@@ -639,8 +641,8 @@ public sealed class VisionMasterProcessHost : HwndHost
     }
 
     /// <summary>
-    /// 手动触发固定方案中的“粗定位示教流程”，依次返回“圆查找1”和“圆查找2”的中心 X/Y。
-    /// 第一个结果固定对应吸嘴1，第二个结果固定对应吸嘴2。
+    /// 手动触发固定方案中的“粗定位示教流程”，采集并显示吸嘴1、吸嘴2画面。
+    /// 返回的自动圆结果仅用于兼容通信；最终示教坐标由画面上的手动画圆事件提供。
     /// </summary>
     public Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
         CancellationToken cancellationToken)
@@ -951,6 +953,36 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void DispatchHostEvent(string message)
     {
         var parts = message.Split('\t');
+        if (parts.Length == 7 &&
+            string.Equals(parts[0], "MANUAL_NOZZLE_CIRCLES", StringComparison.Ordinal) &&
+            double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle1X) &&
+            double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle1Y) &&
+            double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle1Radius) &&
+            double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle2X) &&
+            double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle2Y) &&
+            double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle2Radius) &&
+            double.IsFinite(nozzle1X) &&
+            double.IsFinite(nozzle1Y) &&
+            double.IsFinite(nozzle1Radius) &&
+            nozzle1Radius > 0 &&
+            double.IsFinite(nozzle2X) &&
+            double.IsFinite(nozzle2Y) &&
+            double.IsFinite(nozzle2Radius) &&
+            nozzle2Radius > 0)
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => ManualNozzleCirclesReceived?.Invoke(
+                    this,
+                    new VisionManualNozzleCirclesEventArgs(
+                        nozzle1X,
+                        nozzle1Y,
+                        nozzle1Radius,
+                        nozzle2X,
+                        nozzle2Y,
+                        nozzle2Radius)));
+            return;
+        }
+
         if (parts.Length == 3 &&
             string.Equals(parts[0], "CALIBRATION_SIDEBAR_ACTION", StringComparison.Ordinal))
         {
@@ -1629,6 +1661,27 @@ public sealed class VisionClickTargetEventArgs(
 public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
 {
     public string Message { get; } = message;
+}
+
+public sealed class VisionManualNozzleCirclesEventArgs(
+    double nozzle1X,
+    double nozzle1Y,
+    double nozzle1Radius,
+    double nozzle2X,
+    double nozzle2Y,
+    double nozzle2Radius) : EventArgs
+{
+    public double Nozzle1X { get; } = nozzle1X;
+
+    public double Nozzle1Y { get; } = nozzle1Y;
+
+    public double Nozzle1Radius { get; } = nozzle1Radius;
+
+    public double Nozzle2X { get; } = nozzle2X;
+
+    public double Nozzle2Y { get; } = nozzle2Y;
+
+    public double Nozzle2Radius { get; } = nozzle2Radius;
 }
 
 public enum CalibrationToolbarAction

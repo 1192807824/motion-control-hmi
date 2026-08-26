@@ -1323,17 +1323,14 @@ public partial class VisualCalibrationPage : UserControl
             UpdateNozzleTeachUi();
             UpdateCommandState();
             SetNozzleCalibrationStatus(
-                "正在执行“粗定位示教流程”：吸嘴1读取圆查找2，吸嘴2读取圆查找1…",
+                "正在采集两个吸嘴画面；采集完成后请在每张图上手动画圆…",
                 WorkflowStatus.Running);
 
-            _pendingNozzlePointResult = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
-            var point1 = _pendingNozzlePointResult.Rectangle1;
-            var point2 = _pendingNozzlePointResult.Rectangle2;
+            _ = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
             SetNozzleCalibrationStatus(
-                $"吸嘴1（圆查找2）：({point1.X:0.###}, {point1.Y:0.###})\n" +
-                $"吸嘴2（圆查找1）：({point2.X:0.###}, {point2.Y:0.###})\n" +
-                "请确认后点击“保存双吸嘴结果”。",
-                WorkflowStatus.Success);
+                "两个吸嘴画面已采集。请在每张图的圆周上均匀点击3个点；" +
+                "两个手动画圆完成后才能保存。",
+                WorkflowStatus.Ready);
         }
         catch (Exception exception)
         {
@@ -1353,6 +1350,48 @@ public partial class VisualCalibrationPage : UserControl
         await AssignNozzlePointsAsync();
     }
 
+    private void VisionHost_ManualNozzleCirclesReceived(
+        object? sender,
+        VisionManualNozzleCirclesEventArgs e)
+    {
+        if (IsLowerCameraMode || _nozzlePointSaving)
+        {
+            return;
+        }
+
+        var nozzle1 = new VisionBlobRectangle(
+            e.Nozzle1X,
+            e.Nozzle1Y,
+            0d,
+            e.Nozzle1X - e.Nozzle1Radius,
+            e.Nozzle1Y - e.Nozzle1Radius,
+            e.Nozzle1Radius * 2d,
+            e.Nozzle1Radius * 2d);
+        var nozzle2 = new VisionBlobRectangle(
+            e.Nozzle2X,
+            e.Nozzle2Y,
+            0d,
+            e.Nozzle2X - e.Nozzle2Radius,
+            e.Nozzle2Y - e.Nozzle2Radius,
+            e.Nozzle2Radius * 2d,
+            e.Nozzle2Radius * 2d);
+        _pendingNozzlePointResult = new VisionRectangleBlobResult(
+            new[] { nozzle1, nozzle2 },
+            string.Empty,
+            0,
+            0);
+        _nozzle1ClickVerified = false;
+        _nozzle2ClickVerified = false;
+        SetNozzleCalibrationStatus(
+            $"手动画圆完成：\n" +
+            $"吸嘴1圆心：({e.Nozzle1X:0.###}, {e.Nozzle1Y:0.###})　半径：{e.Nozzle1Radius:0.###}\n" +
+            $"吸嘴2圆心：({e.Nozzle2X:0.###}, {e.Nozzle2Y:0.###})　半径：{e.Nozzle2Radius:0.###}\n" +
+            "请点击“保存双吸嘴结果”。",
+            WorkflowStatus.Success);
+        UpdateNozzleTeachUi();
+        UpdateCommandState();
+    }
+
     private async void AssignPoint1ToNozzle2_Click(object sender, RoutedEventArgs e)
     {
         await AssignNozzlePointsAsync();
@@ -1368,7 +1407,7 @@ public partial class VisualCalibrationPage : UserControl
         try
         {
             var result = _pendingNozzlePointResult
-                ?? throw new InvalidOperationException("请先手动点击“执行粗定位示教”。");
+                ?? throw new InvalidOperationException("请先采集画面，并在两个吸嘴画面上完成手动画圆。");
             var photoPosition = _recordedCenter
                 ?? throw new InvalidOperationException(
                     "尚未移动到参数配置中心位，也未从九点标定文件恢复拍照位。");
@@ -1426,7 +1465,7 @@ public partial class VisualCalibrationPage : UserControl
             var profilePath = SaveCurrentCalibrationProfile();
             _pendingNozzlePointResult = null;
             SetNozzleCalibrationStatus(
-                $"吸嘴1（圆查找2）、吸嘴2（圆查找1）配置已保存：\n{profilePath}",
+                $"吸嘴1、吸嘴2手动画圆配置已保存：\n{profilePath}",
                 WorkflowStatus.Success);
         }
         catch (Exception exception)

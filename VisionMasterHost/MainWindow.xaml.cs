@@ -97,6 +97,11 @@ public partial class MainWindow : Window
     private bool _showingCalibrationRender;
     private bool _showingSplitRender;
     private bool _nozzleTeachingResultsDisplayed;
+    private bool _manualNozzleCircleMode;
+    private readonly List<Point> _manualNozzle1CirclePoints = [];
+    private readonly List<Point> _manualNozzle2CirclePoints = [];
+    private ManualNozzleCircle? _manualNozzle1Circle;
+    private ManualNozzleCircle? _manualNozzle2Circle;
     private string _activeCalibrationProcedureName;
     private readonly string? _configuredSolutionPath;
     private readonly string _inspectionProcedureName;
@@ -465,9 +470,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 单次执行“粗定位示教流程”：吸嘴1读取“圆查找2”的中心 X/Y，
-    /// 吸嘴2读取“圆查找1”的中心 X/Y。
-    /// 流程只负责找点，不驱动运动轴或吸嘴动作。
+    /// 单次执行“粗定位示教流程”，采集并显示两个吸嘴画面。
+    /// 自动圆仅作为视觉参考，最终示教坐标由操作员在两张图上的手动画圆产生。
+    /// 流程不驱动运动轴或吸嘴动作。
     /// </summary>
     private string RunNozzlePointInspection(IReadOnlyList<string> parts)
     {
@@ -974,10 +979,12 @@ public partial class MainWindow : Window
             {
                 // 现场安装方向中圆查找2对应吸嘴1、圆查找1对应吸嘴2，
                 // 按吸嘴顺序返回，避免上层显示和保存时再次交换。
+                // 手动画圆是粗定位示教的最终结果。自动圆只作为画面参考；即使自动圆
+                // 返回NG，也要把两张相机画面交给操作员，不能阻断手动画圆。
                 candidates =
                 [
-                    ReadCircleCenter(nozzle2CircleModule!, procedureName, Nozzle2CircleModuleName),
-                    ReadCircleCenter(nozzle1CircleModule!, procedureName, Nozzle1CircleModuleName)
+                    ReadCircleCenterOrPlaceholder(nozzle2CircleModule!, procedureName, Nozzle2CircleModuleName),
+                    ReadCircleCenterOrPlaceholder(nozzle1CircleModule!, procedureName, Nozzle1CircleModuleName)
                 ];
             }
             else
@@ -1365,10 +1372,12 @@ public partial class MainWindow : Window
         _nozzleTeachingResultsDisplayed = true;
         VisionRenderControl.ModuleSource = nozzle1ResultModule;
         CalibrationRenderControl.ModuleSource = nozzle2ResultModule;
+        BeginManualNozzleCircleSelection(restoreRender: false);
     }
 
     private void ClearNozzleTeachingResultRenderersNoThrow()
     {
+        ResetManualNozzleCircleSelection(disableControls: true);
         if (!_nozzleTeachingResultsDisplayed)
         {
             return;
@@ -1423,6 +1432,275 @@ public partial class MainWindow : Window
         {
             // 第二张图显示不参与视觉结果判定。
         }
+    }
+
+    private void ManualNozzleCircleButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_nozzleTeachingResultsDisplayed)
+        {
+            SetStatus("请先执行粗定位示教，采集两个吸嘴画面。", StatusKind.Error);
+            return;
+        }
+
+        BeginManualNozzleCircleSelection(restoreRender: true);
+    }
+
+    private void ClearManualNozzleCirclesButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_nozzleTeachingResultsDisplayed)
+        {
+            return;
+        }
+
+        BeginManualNozzleCircleSelection(restoreRender: true);
+    }
+
+    private void BeginManualNozzleCircleSelection(bool restoreRender)
+    {
+        _manualNozzle1CirclePoints.Clear();
+        _manualNozzle2CirclePoints.Clear();
+        _manualNozzle1Circle = null;
+        _manualNozzle2Circle = null;
+        _manualNozzleCircleMode = true;
+        SidebarManualCircleButton.IsEnabled = true;
+        SidebarManualCircleButton.Content = "重新画圆";
+        SidebarClearManualCircleButton.IsEnabled = true;
+        SidebarManualCircleStatusText.Text = "吸嘴1：0/3　吸嘴2：0/3\n请分别在两个圆周上点3点";
+        if (restoreRender)
+        {
+            RestoreNozzleTeachingResultImagesNoThrow();
+        }
+
+        SetStatus("手动画圆已开启：请在每张吸嘴画面的圆周上依次点3点。", StatusKind.Ready);
+    }
+
+    private void ResetManualNozzleCircleSelection(bool disableControls)
+    {
+        _manualNozzleCircleMode = false;
+        _manualNozzle1CirclePoints.Clear();
+        _manualNozzle2CirclePoints.Clear();
+        _manualNozzle1Circle = null;
+        _manualNozzle2Circle = null;
+        if (SidebarManualCircleButton is null || SidebarClearManualCircleButton is null ||
+            SidebarManualCircleStatusText is null)
+        {
+            return;
+        }
+
+        SidebarManualCircleButton.Content = "手动画圆";
+        SidebarManualCircleButton.IsEnabled = !disableControls && _nozzleTeachingResultsDisplayed;
+        SidebarClearManualCircleButton.IsEnabled = !disableControls && _nozzleTeachingResultsDisplayed;
+        SidebarManualCircleStatusText.Text = "采集画面后，每张图在圆周上点3点";
+    }
+
+    private void RestoreNozzleTeachingResultImagesNoThrow()
+    {
+        try
+        {
+            VisionRenderControl.UpdateVMResultShow();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            CalibrationRenderControl.UpdateVMResultShow();
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task HandleManualNozzleCircleClickAsync(int nozzleNumber, int pixelX, int pixelY)
+    {
+        if (!_manualNozzleCircleMode || !_nozzleTeachingResultsDisplayed || _closed)
+        {
+            return;
+        }
+
+        var points = nozzleNumber == 1
+            ? _manualNozzle1CirclePoints
+            : _manualNozzle2CirclePoints;
+        var existingCircle = nozzleNumber == 1
+            ? _manualNozzle1Circle
+            : _manualNozzle2Circle;
+        if (existingCircle is not null || points.Count >= 3)
+        {
+            return;
+        }
+
+        var point = new Point(pixelX, pixelY);
+        points.Add(point);
+        DrawManualCirclePoint(nozzleNumber, point, points.Count);
+
+        if (points.Count == 3)
+        {
+            if (!TryFitManualCircle(points[0], points[1], points[2], out var circle))
+            {
+                points.RemoveAt(2);
+                RestoreAndRedrawManualNozzleCircles();
+                SidebarManualCircleStatusText.Text =
+                    $"吸嘴{nozzleNumber}的3个点接近直线，请重新点第3点。";
+                SetStatus($"吸嘴{nozzleNumber}画圆失败：3个点不能在同一直线上。", StatusKind.Error);
+                return;
+            }
+
+            if (nozzleNumber == 1)
+            {
+                _manualNozzle1Circle = circle;
+            }
+            else
+            {
+                _manualNozzle2Circle = circle;
+            }
+
+            DrawManualCircle(nozzleNumber, circle);
+        }
+
+        UpdateManualNozzleCircleStatus();
+        if (_manualNozzle1Circle is null || _manualNozzle2Circle is null)
+        {
+            return;
+        }
+
+        _manualNozzleCircleMode = false;
+        SidebarManualCircleButton.Content = "重新画圆";
+        SidebarManualCircleStatusText.Text =
+            $"完成：吸嘴1 ({_manualNozzle1Circle.Center.X:0.##}, {_manualNozzle1Circle.Center.Y:0.##})　" +
+            $"吸嘴2 ({_manualNozzle2Circle.Center.X:0.##}, {_manualNozzle2Circle.Center.Y:0.##})";
+        SetStatus("两个手动画圆均已完成，可以保存双吸嘴结果。", StatusKind.Success);
+        await SendHostEventAsync(string.Join(
+            "\t",
+            "MANUAL_NOZZLE_CIRCLES",
+            _manualNozzle1Circle.Center.X.ToString("R", CultureInfo.InvariantCulture),
+            _manualNozzle1Circle.Center.Y.ToString("R", CultureInfo.InvariantCulture),
+            _manualNozzle1Circle.Radius.ToString("R", CultureInfo.InvariantCulture),
+            _manualNozzle2Circle.Center.X.ToString("R", CultureInfo.InvariantCulture),
+            _manualNozzle2Circle.Center.Y.ToString("R", CultureInfo.InvariantCulture),
+            _manualNozzle2Circle.Radius.ToString("R", CultureInfo.InvariantCulture)));
+    }
+
+    private void UpdateManualNozzleCircleStatus()
+    {
+        var nozzle1Status = _manualNozzle1Circle is null
+            ? $"{_manualNozzle1CirclePoints.Count}/3"
+            : "完成";
+        var nozzle2Status = _manualNozzle2Circle is null
+            ? $"{_manualNozzle2CirclePoints.Count}/3"
+            : "完成";
+        SidebarManualCircleStatusText.Text =
+            $"吸嘴1：{nozzle1Status}　吸嘴2：{nozzle2Status}\n请在圆周上均匀选点";
+    }
+
+    private void RestoreAndRedrawManualNozzleCircles()
+    {
+        RestoreNozzleTeachingResultImagesNoThrow();
+        for (var index = 0; index < _manualNozzle1CirclePoints.Count; index++)
+        {
+            DrawManualCirclePoint(1, _manualNozzle1CirclePoints[index], index + 1);
+        }
+
+        for (var index = 0; index < _manualNozzle2CirclePoints.Count; index++)
+        {
+            DrawManualCirclePoint(2, _manualNozzle2CirclePoints[index], index + 1);
+        }
+
+        if (_manualNozzle1Circle is not null)
+        {
+            DrawManualCircle(1, _manualNozzle1Circle);
+        }
+
+        if (_manualNozzle2Circle is not null)
+        {
+            DrawManualCircle(2, _manualNozzle2Circle);
+        }
+    }
+
+    private void DrawManualCirclePoint(int nozzleNumber, Point point, int pointNumber)
+    {
+        var renderControl = nozzleNumber == 1 ? VisionRenderControl : CalibrationRenderControl;
+        renderControl.DrawShape(new VMControls.WPF.PointEx(
+            (float)point.X,
+            (float)point.Y,
+            1d,
+            "#FFD54F",
+            5d,
+            $"手动画圆点{pointNumber}"));
+    }
+
+    private void DrawManualCircle(int nozzleNumber, ManualNozzleCircle circle)
+    {
+        var renderControl = nozzleNumber == 1 ? VisionRenderControl : CalibrationRenderControl;
+        const string color = "#00E676";
+        renderControl.DrawShape(new VMControls.WPF.CircleEx(
+            circle.Center,
+            circle.Radius,
+            1d,
+            color,
+            "#00000000",
+            3d,
+            $"吸嘴{nozzleNumber}手动画圆"));
+
+        var crosshairHalfLength = Math.Max(8d, Math.Min(24d, circle.Radius * 0.2d));
+        renderControl.DrawShape(new VMControls.WPF.LineEx(
+            new Point(circle.Center.X - crosshairHalfLength, circle.Center.Y),
+            new Point(circle.Center.X + crosshairHalfLength, circle.Center.Y),
+            1d,
+            color,
+            3d,
+            false,
+            "手动画圆圆心"));
+        renderControl.DrawShape(new VMControls.WPF.LineEx(
+            new Point(circle.Center.X, circle.Center.Y - crosshairHalfLength),
+            new Point(circle.Center.X, circle.Center.Y + crosshairHalfLength),
+            1d,
+            color,
+            3d,
+            false,
+            "手动画圆圆心"));
+    }
+
+    private static bool TryFitManualCircle(
+        Point first,
+        Point second,
+        Point third,
+        out ManualNozzleCircle circle)
+    {
+        var denominator = 2d *
+            (first.X * (second.Y - third.Y) +
+             second.X * (third.Y - first.Y) +
+             third.X * (first.Y - second.Y));
+        if (Math.Abs(denominator) < 0.001d)
+        {
+            circle = null!;
+            return false;
+        }
+
+        var firstSquared = first.X * first.X + first.Y * first.Y;
+        var secondSquared = second.X * second.X + second.Y * second.Y;
+        var thirdSquared = third.X * third.X + third.Y * third.Y;
+        var centerX =
+            (firstSquared * (second.Y - third.Y) +
+             secondSquared * (third.Y - first.Y) +
+             thirdSquared * (first.Y - second.Y)) / denominator;
+        var centerY =
+            (firstSquared * (third.X - second.X) +
+             secondSquared * (first.X - third.X) +
+             thirdSquared * (second.X - first.X)) / denominator;
+        var radius = Math.Sqrt(
+            (centerX - first.X) * (centerX - first.X) +
+            (centerY - first.Y) * (centerY - first.Y));
+        if (double.IsNaN(centerX) || double.IsInfinity(centerX) ||
+            double.IsNaN(centerY) || double.IsInfinity(centerY) ||
+            double.IsNaN(radius) || double.IsInfinity(radius) || radius < 2d)
+        {
+            circle = null!;
+            return false;
+        }
+
+        circle = new ManualNozzleCircle(new Point(centerX, centerY), radius);
+        return true;
     }
 
     private void RefreshInspectionDisplayNoThrow()
@@ -1870,6 +2148,21 @@ public partial class MainWindow : Window
             (int)Math.Round(center.Y),
             1,
             1);
+    }
+
+    private static RectangleBlobCandidate ReadCircleCenterOrPlaceholder(
+        IMVSCircleFindModuTool module,
+        string procedureName,
+        string moduleName)
+    {
+        try
+        {
+            return ReadCircleCenter(module, procedureName, moduleName);
+        }
+        catch
+        {
+            return new RectangleBlobCandidate(0f, 0f, 0f, 0f, 0, 0, 1, 1);
+        }
     }
 
     private string TransformPixel(IReadOnlyList<string> parts)
@@ -2597,7 +2890,36 @@ public partial class MainWindow : Window
 
     private async void VisionRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
     {
+        if (_manualNozzleCircleMode && _nozzleTeachingResultsDisplayed)
+        {
+            try
+            {
+                await HandleManualNozzleCircleClickAsync(1, pixelX, pixelY);
+            }
+            catch (Exception exception)
+            {
+                SetStatus($"吸嘴1手动画圆失败：{FormatException(exception)}", StatusKind.Error);
+            }
+
+            return;
+        }
+
         await HandleVisionImageClickAsync(pixelX, pixelY, null, null);
+    }
+
+    private async void CalibrationRenderControl_OnMouseLeftButtonDownPixelChanged(int pixelX, int pixelY)
+    {
+        if (_manualNozzleCircleMode && _nozzleTeachingResultsDisplayed)
+        {
+            try
+            {
+                await HandleManualNozzleCircleClickAsync(2, pixelX, pixelY);
+            }
+            catch (Exception exception)
+            {
+                SetStatus($"吸嘴2手动画圆失败：{FormatException(exception)}", StatusKind.Error);
+            }
+        }
     }
 
     private async Task HandleVisionImageClickAsync(
@@ -4332,6 +4654,19 @@ public partial class MainWindow : Window
         public int PixelWidth { get; }
 
         public int PixelHeight { get; }
+    }
+
+    private sealed class ManualNozzleCircle
+    {
+        public ManualNozzleCircle(Point center, double radius)
+        {
+            Center = center;
+            Radius = radius;
+        }
+
+        public Point Center { get; }
+
+        public double Radius { get; }
     }
 
     private enum StatusKind
