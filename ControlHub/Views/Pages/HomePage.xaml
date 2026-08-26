@@ -603,12 +603,30 @@
                                 BorderBrush="#29465C"
                                 BorderThickness="1"
                                 CornerRadius="3">
-                            <TextBlock x:Name="LowerCameraCorrectionResultText"
-                                       Text="下相机纠偏：等待吸嘴1/2取料"
-                                       Foreground="#9FB1BF"
-                                       FontSize="11"
-                                       FontFamily="Consolas"
-                                       TextWrapping="Wrap" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="LowerCameraCorrectionResultText"
+                                           Text="下相机纠偏：等待吸嘴1/2取料"
+                                           Foreground="#9FB1BF"
+                                           FontSize="11"
+                                           FontFamily="Consolas"
+                                           TextWrapping="Wrap"
+                                           VerticalAlignment="Center" />
+                                <CheckBox Grid.Column="1"
+                                          x:Name="LowerCameraCorrection1CheckBox"
+                                          Content="下相机纠偏1"
+                                          Margin="12,0,0,0"
+                                          Foreground="#49D17D"
+                                          FontSize="11"
+                                          FontWeight="Bold"
+                                          VerticalAlignment="Center"
+                                          ToolTip="勾选时两个吸嘴依次执行下相机纠偏；不勾选时两个吸嘴分别按位置1、位置2原坐标放料"
+                                          Checked="LowerCameraCorrection1CheckBox_Changed"
+                                          Unchecked="LowerCameraCorrection1CheckBox_Changed" />
+                            </Grid>
                         </Border>
                     </Grid>
                 </Border>
@@ -1403,17 +1421,8 @@
                             <Grid>
                                 <TextBlock Text="下相机拍照位（第一套 XY pulse）" Foreground="#EAF2F7"
                                            FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
-                                            VerticalAlignment="Center">
-                                    <CheckBox x:Name="LowerCameraCorrection1CheckBox"
-                                              Content="下相机纠偏1"
-                                              Foreground="#49D17D"
-                                              FontSize="10"
-                                              VerticalAlignment="Center"
-                                              ToolTip="勾选时两个吸嘴依次执行下相机纠偏；不勾选时两个吸嘴分别按位置1、位置2原坐标放料"
-                                              Checked="LowerCameraCorrection1CheckBox_Changed"
-                                              Unchecked="LowerCameraCorrection1CheckBox_Changed" />
-                                </StackPanel>
+                                <TextBlock Text="吸嘴1 / 吸嘴2纠偏参数" Foreground="#49D17D" FontSize="10"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center" />
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,2,0,2">
                                 <Grid.ColumnDefinitions>
