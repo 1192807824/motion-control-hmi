@@ -1328,7 +1328,7 @@ public partial class VisualCalibrationPage : UserControl
 
             _ = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
             SetNozzleCalibrationStatus(
-                "两个吸嘴画面已采集。请在每张图的圆周上均匀点击3个点；" +
+                "两个吸嘴画面已采集。请在每张图先点击圆心、再点击圆边；" +
                 "两个手动画圆完成后才能保存。",
                 WorkflowStatus.Ready);
         }

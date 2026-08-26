@@ -102,6 +102,8 @@ public partial class MainWindow : Window
     private readonly List<Point> _manualNozzle2CirclePoints = [];
     private ManualNozzleCircle? _manualNozzle1Circle;
     private ManualNozzleCircle? _manualNozzle2Circle;
+    private Point? _automaticNozzle1Center;
+    private Point? _automaticNozzle2Center;
     private string _activeCalibrationProcedureName;
     private readonly string? _configuredSolutionPath;
     private readonly string _inspectionProcedureName;
@@ -981,10 +983,20 @@ public partial class MainWindow : Window
                 // 按吸嘴顺序返回，避免上层显示和保存时再次交换。
                 // 手动画圆是粗定位示教的最终结果。自动圆只作为画面参考；即使自动圆
                 // 返回NG，也要把两张相机画面交给操作员，不能阻断手动画圆。
+                var automaticNozzle1 = ReadCircleCenterOrPlaceholder(
+                    nozzle2CircleModule!,
+                    procedureName,
+                    Nozzle2CircleModuleName);
+                var automaticNozzle2 = ReadCircleCenterOrPlaceholder(
+                    nozzle1CircleModule!,
+                    procedureName,
+                    Nozzle1CircleModuleName);
+                _automaticNozzle1Center = TryGetAutomaticCircleCenter(automaticNozzle1);
+                _automaticNozzle2Center = TryGetAutomaticCircleCenter(automaticNozzle2);
                 candidates =
                 [
-                    ReadCircleCenterOrPlaceholder(nozzle2CircleModule!, procedureName, Nozzle2CircleModuleName),
-                    ReadCircleCenterOrPlaceholder(nozzle1CircleModule!, procedureName, Nozzle1CircleModuleName)
+                    automaticNozzle1,
+                    automaticNozzle2
                 ];
             }
             else
@@ -1345,6 +1357,8 @@ public partial class MainWindow : Window
 
     private void PrepareNozzleTeachingRenderersForCameraAcquisition()
     {
+        _automaticNozzle1Center = null;
+        _automaticNozzle2Center = null;
         PrepareLiveRendererForCameraAcquisition();
         _calibrationRenderGeneration++;
         CalibrationImagePlaceholder.Visibility = Visibility.Visible;
@@ -1465,13 +1479,13 @@ public partial class MainWindow : Window
         SidebarManualCircleButton.IsEnabled = true;
         SidebarManualCircleButton.Content = "重新画圆";
         SidebarClearManualCircleButton.IsEnabled = true;
-        SidebarManualCircleStatusText.Text = "吸嘴1：0/3　吸嘴2：0/3\n请分别在两个圆周上点3点";
+        SidebarManualCircleStatusText.Text = "吸嘴1：0/2　吸嘴2：0/2\n每张图先点圆心、再点圆边";
         if (restoreRender)
         {
             RestoreNozzleTeachingResultImagesNoThrow();
         }
 
-        SetStatus("手动画圆已开启：请在每张吸嘴画面的圆周上依次点3点。", StatusKind.Ready);
+        SetStatus("手动画圆已开启：每张图第一下点圆心，第二下点圆边。", StatusKind.Ready);
     }
 
     private void ResetManualNozzleCircleSelection(bool disableControls)
@@ -1490,7 +1504,7 @@ public partial class MainWindow : Window
         SidebarManualCircleButton.Content = "手动画圆";
         SidebarManualCircleButton.IsEnabled = !disableControls && _nozzleTeachingResultsDisplayed;
         SidebarClearManualCircleButton.IsEnabled = !disableControls && _nozzleTeachingResultsDisplayed;
-        SidebarManualCircleStatusText.Text = "采集画面后，每张图在圆周上点3点";
+        SidebarManualCircleStatusText.Text = "采集画面后，每张图先点圆心、再点圆边";
     }
 
     private void RestoreNozzleTeachingResultImagesNoThrow()
@@ -1525,7 +1539,7 @@ public partial class MainWindow : Window
         var existingCircle = nozzleNumber == 1
             ? _manualNozzle1Circle
             : _manualNozzle2Circle;
-        if (existingCircle is not null || points.Count >= 3)
+        if (existingCircle is not null || points.Count >= 2)
         {
             return;
         }
@@ -1534,15 +1548,20 @@ public partial class MainWindow : Window
         points.Add(point);
         DrawManualCirclePoint(nozzleNumber, point, points.Count);
 
-        if (points.Count == 3)
+        if (points.Count == 2)
         {
-            if (!TryFitManualCircle(points[0], points[1], points[2], out var circle))
+            var deltaX = points[1].X - points[0].X;
+            var deltaY = points[1].Y - points[0].Y;
+            var circle = new ManualNozzleCircle(
+                points[0],
+                Math.Sqrt(deltaX * deltaX + deltaY * deltaY));
+            if (!TryValidateManualNozzleCircle(nozzleNumber, circle, out var validationError))
             {
-                points.RemoveAt(2);
+                points.RemoveAt(1);
                 RestoreAndRedrawManualNozzleCircles();
                 SidebarManualCircleStatusText.Text =
-                    $"吸嘴{nozzleNumber}的3个点接近直线，请重新点第3点。";
-                SetStatus($"吸嘴{nozzleNumber}画圆失败：3个点不能在同一直线上。", StatusKind.Error);
+                    $"吸嘴{nozzleNumber}：{validationError}\n请保留圆心，重新点击圆边。";
+                SetStatus($"吸嘴{nozzleNumber}画圆未通过检查：{validationError}", StatusKind.Error);
                 return;
             }
 
@@ -1584,13 +1603,13 @@ public partial class MainWindow : Window
     private void UpdateManualNozzleCircleStatus()
     {
         var nozzle1Status = _manualNozzle1Circle is null
-            ? $"{_manualNozzle1CirclePoints.Count}/3"
+            ? $"{_manualNozzle1CirclePoints.Count}/2"
             : "完成";
         var nozzle2Status = _manualNozzle2Circle is null
-            ? $"{_manualNozzle2CirclePoints.Count}/3"
+            ? $"{_manualNozzle2CirclePoints.Count}/2"
             : "完成";
         SidebarManualCircleStatusText.Text =
-            $"吸嘴1：{nozzle1Status}　吸嘴2：{nozzle2Status}\n请在圆周上均匀选点";
+            $"吸嘴1：{nozzle1Status}　吸嘴2：{nozzle2Status}\n第一下点圆心，第二下点圆边";
     }
 
     private void RestoreAndRedrawManualNozzleCircles()
@@ -1661,46 +1680,62 @@ public partial class MainWindow : Window
             "手动画圆圆心"));
     }
 
-    private static bool TryFitManualCircle(
-        Point first,
-        Point second,
-        Point third,
-        out ManualNozzleCircle circle)
+    private bool TryValidateManualNozzleCircle(
+        int nozzleNumber,
+        ManualNozzleCircle circle,
+        out string error)
     {
-        var denominator = 2d *
-            (first.X * (second.Y - third.Y) +
-             second.X * (third.Y - first.Y) +
-             third.X * (first.Y - second.Y));
-        if (Math.Abs(denominator) < 0.001d)
+        if (double.IsNaN(circle.Radius) || double.IsInfinity(circle.Radius) || circle.Radius < 5d)
         {
-            circle = null!;
+            error = "圆半径太小";
             return false;
         }
 
-        var firstSquared = first.X * first.X + first.Y * first.Y;
-        var secondSquared = second.X * second.X + second.Y * second.Y;
-        var thirdSquared = third.X * third.X + third.Y * third.Y;
-        var centerX =
-            (firstSquared * (second.Y - third.Y) +
-             secondSquared * (third.Y - first.Y) +
-             thirdSquared * (first.Y - second.Y)) / denominator;
-        var centerY =
-            (firstSquared * (third.X - second.X) +
-             secondSquared * (first.X - third.X) +
-             thirdSquared * (second.X - first.X)) / denominator;
-        var radius = Math.Sqrt(
-            (centerX - first.X) * (centerX - first.X) +
-            (centerY - first.Y) * (centerY - first.Y));
-        if (double.IsNaN(centerX) || double.IsInfinity(centerX) ||
-            double.IsNaN(centerY) || double.IsInfinity(centerY) ||
-            double.IsNaN(radius) || double.IsInfinity(radius) || radius < 2d)
+        var renderControl = nozzleNumber == 1 ? VisionRenderControl : CalibrationRenderControl;
+        var image = renderControl.ImageSource;
+        if (image is null || image.Width <= 0 || image.Height <= 0)
         {
-            circle = null!;
+            error = "无法读取当前画面尺寸";
             return false;
         }
 
-        circle = new ManualNozzleCircle(new Point(centerX, centerY), radius);
+        const double edgeTolerance = 2d;
+        if (circle.Center.X - circle.Radius < -edgeTolerance ||
+            circle.Center.Y - circle.Radius < -edgeTolerance ||
+            circle.Center.X + circle.Radius > image.Width - 1d + edgeTolerance ||
+            circle.Center.Y + circle.Radius > image.Height - 1d + edgeTolerance)
+        {
+            error = "画出的圆超出当前画面";
+            return false;
+        }
+
+        var automaticCenter = nozzleNumber == 1
+            ? _automaticNozzle1Center
+            : _automaticNozzle2Center;
+        if (automaticCenter is { } reference)
+        {
+            var automaticDeltaX = circle.Center.X - reference.X;
+            var automaticDeltaY = circle.Center.Y - reference.Y;
+            var centerDistance = Math.Sqrt(
+                automaticDeltaX * automaticDeltaX + automaticDeltaY * automaticDeltaY);
+            var maximumAllowedDistance = Math.Max(100d, circle.Radius * 2d);
+            if (centerDistance > maximumAllowedDistance)
+            {
+                error =
+                    $"手动圆心与吸嘴{nozzleNumber}原位置相差{centerDistance:0.#}像素，已禁止保存";
+                return false;
+            }
+        }
+
+        error = string.Empty;
         return true;
+    }
+
+    private static Point? TryGetAutomaticCircleCenter(RectangleBlobCandidate candidate)
+    {
+        return candidate.PixelX > 0f && candidate.PixelY > 0f
+            ? new Point(candidate.PixelX, candidate.PixelY)
+            : null;
     }
 
     private void RefreshInspectionDisplayNoThrow()

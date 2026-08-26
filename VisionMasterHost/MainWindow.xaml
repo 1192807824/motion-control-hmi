@@ -610,7 +610,7 @@
                             </Grid>
                             <TextBlock x:Name="SidebarManualCircleStatusText"
                                        Margin="26,0,0,6"
-                                       Text="采集画面后，每张图在圆周上点3点"
+                                       Text="采集画面后，每张图先点圆心、再点圆边"
                                        Foreground="#D5C5FF"
                                        FontSize="11"
                                        LineHeight="18"
