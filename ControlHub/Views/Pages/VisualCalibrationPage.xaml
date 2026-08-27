@@ -93,7 +93,7 @@
 
     <Grid Margin="8" Background="#071D2F">
         <Grid.RowDefinitions>
-            <RowDefinition Height="88" />
+            <RowDefinition Height="56" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -104,10 +104,6 @@
                 BorderThickness="1"
                 CornerRadius="4">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="54" />
-                    <RowDefinition Height="30" />
-                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -231,6 +227,34 @@
                             Margin="10,0,0,0"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
+                    <Button x:Name="VibrationFeederLightToggleButton"
+                            Width="104"
+                            Height="28"
+                            Margin="0,0,6,0"
+                            Content="振动盘灯：关"
+                            Foreground="White"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            FontSize="10"
+                            FontWeight="SemiBold"
+                            Cursor="Hand"
+                            IsEnabled="False"
+                            ToolTip="全局振动盘光源开关，不区分标定类型"
+                            Click="VibrationFeederLightToggle_Click" />
+                    <Button x:Name="LowerCameraLightToggleButton"
+                            Width="104"
+                            Height="28"
+                            Margin="0,0,8,0"
+                            Content="下相机灯：关"
+                            Foreground="White"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            FontSize="10"
+                            FontWeight="SemiBold"
+                            Cursor="Hand"
+                            IsEnabled="False"
+                            ToolTip="全局下相机光源开关，控制Y10，不区分标定类型"
+                            Click="LowerCameraLightToggle_Click" />
                     <Button x:Name="CalibrationEmergencyStopButton"
                             Content="全轴急停"
                             Height="38"
@@ -265,52 +289,6 @@
                             Cursor="Hand"
                             Click="CloseVision_Click"
                              ToolTip="关闭 VisionMasterHost 和所有 VisionMaster 相关进程，释放相机及视觉资源" />
-                </StackPanel>
-                <StackPanel Grid.Row="1"
-                            Grid.ColumnSpan="3"
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center">
-                    <TextBlock Text="全局光源"
-                               Margin="0,0,10,0"
-                               Foreground="#AFC0CD"
-                               FontSize="11"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center" />
-                    <Button x:Name="VibrationFeederLightToggleButton"
-                            Width="126"
-                            Height="26"
-                            Margin="0,0,8,0"
-                            Content="振动盘光源：关"
-                            Foreground="White"
-                            Background="#294A64"
-                            BorderBrush="#45647A"
-                            FontSize="11"
-                            FontWeight="SemiBold"
-                            Cursor="Hand"
-                            IsEnabled="False"
-                            Click="VibrationFeederLightToggle_Click" />
-                    <Button x:Name="LowerCameraLightToggleButton"
-                            Width="126"
-                            Height="26"
-                            Margin="0,0,10,0"
-                            Content="下相机光源：关"
-                            Foreground="White"
-                            Background="#294A64"
-                            BorderBrush="#45647A"
-                            FontSize="11"
-                            FontWeight="SemiBold"
-                            Cursor="Hand"
-                            IsEnabled="False"
-                            Click="LowerCameraLightToggle_Click" />
-                    <TextBlock x:Name="GlobalLightStatusText"
-                               Width="250"
-                               Text="光源控制器尚未连接"
-                               Foreground="#8FA6B7"
-                               FontSize="10"
-                               TextTrimming="CharacterEllipsis"
-                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
-                               VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
         </Border>

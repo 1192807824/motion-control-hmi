@@ -1001,8 +1001,7 @@ public partial class VisualCalibrationPage : UserControl
     private void UpdateGlobalLightButtons()
     {
         if (VibrationFeederLightToggleButton is null ||
-            LowerCameraLightToggleButton is null ||
-            GlobalLightStatusText is null)
+            LowerCameraLightToggleButton is null)
         {
             return;
         }
@@ -1011,11 +1010,11 @@ public partial class VisualCalibrationPage : UserControl
             _connectionConfigController?.IsVibrationFeederLightEnabled == true;
         ApplyGlobalLightButtonState(
             VibrationFeederLightToggleButton,
-            "振动盘光源",
+            "振动盘灯",
             feederLightEnabled);
         ApplyGlobalLightButtonState(
             LowerCameraLightToggleButton,
-            "下相机光源",
+            "下相机灯",
             _lowerCameraLightEnabled);
         VibrationFeederLightToggleButton.IsEnabled =
             _connectionConfigController is not null && !_globalLightCommandRunning;
@@ -1039,10 +1038,9 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetGlobalLightStatus(string message, bool success)
     {
-        GlobalLightStatusText.Text = message;
-        GlobalLightStatusText.Foreground = new SolidColorBrush(success
-            ? Color.FromRgb(73, 209, 125)
-            : Color.FromRgb(242, 122, 128));
+        SetWorkflowStatus(
+            message,
+            success ? WorkflowStatus.Success : WorkflowStatus.Error);
     }
 
     public async Task EnsureStartedAsync()
