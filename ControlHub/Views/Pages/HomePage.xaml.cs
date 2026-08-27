@@ -1657,6 +1657,7 @@ public partial class HomePage : UserControl
         Task activeSecondSetPickupTask = Task.CompletedTask;
         Task<CalibrationCenterPosition>? activeFirstSetReturnToCenterTask = null;
         Task<CarouselAdvanceResult>? activeCarouselAdvanceTask = null;
+        Task activeFeederVibrationTask = Task.CompletedTask;
         Task<int> activeFinalTestTask = Task.FromResult(0);
 
         // 如果当前已经在连续生产，再次点击按钮用于在安全节点暂停或继续。
@@ -1908,6 +1909,19 @@ public partial class HomePage : UserControl
 
                 if (pendingPickupBatches.Count == 0)
                 {
+                    // 最后一批物料取走后，振动已在后续纠偏/上料期间并行执行。
+                    // 回到拍照位时只补等尚未结束的部分，确保停振后再开灯取像。
+                    if (!activeFeederVibrationTask.IsCompleted)
+                    {
+                        SetStartProductionStatus(
+                            $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束后开灯拍照…",
+                            Color.FromRgb(242, 181, 68));
+                    }
+
+                    await activeFeederVibrationTask;
+                    activeFeederVibrationTask = Task.CompletedTask;
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+
                     // 只有缓存已经取空时才重新执行找芯片流程；一次接收脚本1返回的全部X/Y/R结果。
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
@@ -2097,6 +2111,22 @@ public partial class HomePage : UserControl
                 await EnsureActiveSetNozzlesAtSafeZAsync(_productionCancellation.Token);
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
+                // 本次拍照缓存的最后一批已经离开振动盘，立即在后台启动下一次震动。
+                // 震动与下相机纠偏、DD转动、上料及回拍照位并行，拍照前再统一确认已停振。
+                if (vibrateAfterPickupCachePlaced && pendingPickupBatches.Count == 0)
+                {
+                    var vibrationReason = singleChipRemainsAfterPickupCache
+                        ? "本次缓存成对物料已全部取完，料盘最后还剩1颗"
+                        : "本次最多10条缓存已全部取完";
+                    activeFeederVibrationTask = RunProductionVibrationAsync(
+                        cycleNumber,
+                        vibrationReason,
+                        _productionCancellation.Token);
+                    consecutiveLowMaterialVibrations = singleChipRemainsAfterPickupCache ? 1 : 0;
+                    vibrateAfterPickupCachePlaced = false;
+                    singleChipRemainsAfterPickupCache = false;
+                }
+
                 // 保存找芯片角度粗校正之前的R轴基准。放料后两根R轴必须回到这里，
                 // 不能回到已经包含粗校正量的位置，否则多轮生产会持续累加旋转。
                 var pickupRPositions = motionController.CaptureCalibrationFeedback(
@@ -2169,13 +2199,18 @@ public partial class HomePage : UserControl
                     }
                 }
 
-                // 拍照和双吸嘴取料不等待DD；真正放料前只等待DD完成固定两次转动。
-                if (activeCarouselAdvanceTask is not null)
+                async Task WaitForCarouselBeforePlacementAsync(string placementName)
                 {
+                    if (activeCarouselAdvanceTask is null)
+                    {
+                        return;
+                    }
+
                     if (!activeCarouselAdvanceTask.IsCompleted)
                     {
                         SetStartProductionStatus(
-                            $"第{cycleNumber}轮：本批{assignedTargets.Count}颗已吸取，正在等待DD完成两次转动及已启用测试站动作…",
+                            $"第{cycleNumber}轮：XY已到{placementName}并保持Z轴安全高度，" +
+                            "正在等待DD完成两次转动及已启用测试站动作…",
                             Color.FromRgb(242, 181, 68));
                     }
 
@@ -2185,16 +2220,16 @@ public partial class HomePage : UserControl
                     activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
                     activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
                     SetStartProductionStatus(
-                        $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动，测试任务已启动，立即开始上下料…",
+                        $"第{cycleNumber}轮：DD已完成 {carouselAdvanceResult.Turns} 次转动并停稳，" +
+                        $"XY已在{placementName}，立即下压放料…",
                         Color.FromRgb(73, 209, 125));
                 }
-                await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 if (nozzle1HasPart)
                 {
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，" +
-                        $"正在按{position1TargetDescription}放料到1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
+                        $"正在按{position1TargetDescription}前往1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
                         $"{(nozzle1OriginalR.HasValue ? $", R={position1Target.R:0.###}" : string.Empty)})…",
                         Color.FromRgb(242, 181, 68));
 
@@ -2214,6 +2249,8 @@ public partial class HomePage : UserControl
                             position1Target.Y,
                             _productionCancellation.Token);
                     }
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+                    await WaitForCarouselBeforePlacementAsync("1工位");
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                     SetStartProductionStatus(
@@ -2235,7 +2272,7 @@ public partial class HomePage : UserControl
                         (nozzle1HasPart
                             ? $"第{cycleNumber}轮：Z1已放料、R1已回本批取料基准位，"
                             : $"第{cycleNumber}轮：缺料收尾，") +
-                        $"正在按{position2TargetDescription}放料到2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
+                        $"正在按{position2TargetDescription}前往2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
                         $"{(nozzle2OriginalR.HasValue ? $", R={position2Target.R:0.###}" : string.Empty)})…",
                         Color.FromRgb(242, 181, 68));
 
@@ -2256,6 +2293,8 @@ public partial class HomePage : UserControl
                             position2Target.Y,
                             _productionCancellation.Token);
                     }
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+                    await WaitForCarouselBeforePlacementAsync("2工位");
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                     SetStartProductionStatus(
@@ -2376,23 +2415,6 @@ public partial class HomePage : UserControl
                     ProductionHandlingAxisNos,
                     _productionCancellation.Token);
 
-                // 震动盘与DD、测试站和第二套下料机构不共用运动轴。
-                // 必须先启动上面的转盘并行任务，再在第一套取料分支中等待震动；
-                // 否则整段震动时间内DD、测试和下料都会被错误推迟。
-                if (vibrateAfterPickupCachePlaced && pendingPickupBatches.Count == 0)
-                {
-                    var vibrationReason = singleChipRemainsAfterPickupCache
-                        ? "本次缓存成对物料已全部放完，料盘最后还剩1颗"
-                        : "本次最多10条缓存已全部放完";
-                    await RunProductionVibrationAsync(
-                        cycleNumber,
-                        vibrationReason,
-                        _productionCancellation.Token);
-                    consecutiveLowMaterialVibrations = singleChipRemainsAfterPickupCache ? 1 : 0;
-                    vibrateAfterPickupCachePlaced = false;
-                    singleChipRemainsAfterPickupCache = false;
-                }
-
                 SetStartProductionStatus(
                     nextCycleNeedsPhoto
                         ? $"第{cycleNumber}轮放料完成，DD在第二套取料完成后固定转动两次；" +
@@ -2431,6 +2453,7 @@ public partial class HomePage : UserControl
             }
 
             await ObserveCarouselAdvanceTaskNoThrowAsync(activeCarouselAdvanceTask);
+            await ObserveTaskNoThrowAsync(activeFeederVibrationTask);
             await ObserveTaskNoThrowAsync(activeFinalTestTask);
             StopUphTracking();
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
