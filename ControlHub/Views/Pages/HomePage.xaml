@@ -615,17 +615,28 @@
                                            FontFamily="Consolas"
                                            TextWrapping="Wrap"
                                            VerticalAlignment="Center" />
-                                <CheckBox Grid.Column="1"
-                                          x:Name="LowerCameraCorrection1CheckBox"
-                                          Content="下相机纠偏1"
-                                          Margin="12,0,0,0"
-                                          Foreground="#49D17D"
-                                          FontSize="11"
-                                          FontWeight="Bold"
-                                          VerticalAlignment="Center"
-                                          ToolTip="勾选时两个吸嘴依次执行下相机纠偏；不勾选时两个吸嘴分别按位置1、位置2原坐标放料"
-                                          Checked="LowerCameraCorrection1CheckBox_Changed"
-                                          Unchecked="LowerCameraCorrection1CheckBox_Changed" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                            Margin="12,0,0,0" VerticalAlignment="Center">
+                                    <CheckBox x:Name="LowerCameraCorrection1CheckBox"
+                                              Content="下相机纠偏1"
+                                              Foreground="#49D17D"
+                                              FontSize="11"
+                                              FontWeight="Bold"
+                                              VerticalAlignment="Center"
+                                              ToolTip="勾选时两个吸嘴依次执行下相机纠偏；不勾选时两个吸嘴分别按位置1、位置2原坐标放料"
+                                              Checked="LowerCameraCorrection1CheckBox_Changed"
+                                              Unchecked="LowerCameraCorrection1CheckBox_Changed" />
+                                    <CheckBox x:Name="UpperCameraCorrectionCheckBox"
+                                              Content="上相机纠偏"
+                                              Margin="14,0,0,0"
+                                              Foreground="#62B5FF"
+                                              FontSize="11"
+                                              FontWeight="Bold"
+                                              VerticalAlignment="Center"
+                                              ToolTip="勾选时按上相机测得角度旋转R1/R2；不勾选时上相机仍拍照和XY对位，但R1/R2不执行角度旋转"
+                                              Checked="UpperCameraCorrectionCheckBox_Changed"
+                                              Unchecked="UpperCameraCorrectionCheckBox_Changed" />
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </Grid>

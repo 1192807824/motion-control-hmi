@@ -1087,6 +1087,7 @@ public partial class HomePage : UserControl
         LowerCameraCorrectionProfile nozzle2Profile,
         NozzlePickupBatch pickupBatch,
         CalibrationCenterPosition pickupRPositions,
+        bool upperCameraCorrectionEnabled,
         CancellationToken cancellationToken)
     {
         if (VisionCalibration.XHardwareAxisNo != VisionCalibrationService.FirstSetXHardwareAxisNo ||
@@ -1120,6 +1121,7 @@ public partial class HomePage : UserControl
             firstPhotoPositionY,
             pickupBatch,
             pickupRPositions,
+            upperCameraCorrectionEnabled,
             cancellationToken);
         var lightMayBeOn = true;
         try
@@ -1719,7 +1721,8 @@ public partial class HomePage : UserControl
             // BIN配置点是两个吸嘴的中间位置，启动时锁定，避免运行中修改导致下料点变化。
             _binDropPositions = ReadBinDropPositions();
 
-            // 下相机纠偏1总开关及两个吸嘴所需参数在启动时一次性锁定。
+            // 上、下相机纠偏开关在启动时一次性锁定，运行中修改不影响当前生产。
+            var upperCameraCorrectionEnabled = _homeSettings.UpperCameraCorrectionEnabled ?? true;
             var lowerCameraCorrectionEnabled = _homeSettings.LowerCameraCorrectionEnabled ?? true;
             _lowerCameraPhotoPositions = lowerCameraCorrectionEnabled
                 ? ReadLowerCameraPhotoPositions()
@@ -2093,15 +2096,30 @@ public partial class HomePage : UserControl
 
                 // 总开关启用时依次到拍照位1/2执行两个吸嘴的下相机纠偏；
                 // 关闭时两个吸嘴都跳过下相机，并继续使用各自的原设定放料坐标。
-                var correctionResults = lowerCameraCorrectionEnabled
-                    ? await RunLowerCameraCorrectionsAsync(
+                LowerCameraCorrectionResults correctionResults;
+                if (lowerCameraCorrectionEnabled)
+                {
+                    correctionResults = await RunLowerCameraCorrectionsAsync(
                         visualCalibrationController,
                         lowerCameraNozzle1Profile!,
                         lowerCameraNozzle2Profile!,
                         assignedTargets,
                         pickupRPositions,
-                        _productionCancellation.Token)
-                    : SkipLowerCameraCorrections(assignedTargets);
+                        upperCameraCorrectionEnabled,
+                        _productionCancellation.Token);
+                }
+                else
+                {
+                    if (upperCameraCorrectionEnabled)
+                    {
+                        await ApplyUpperCameraRotationCorrectionsAsync(
+                            assignedTargets,
+                            pickupRPositions,
+                            _productionCancellation.Token);
+                    }
+
+                    correctionResults = SkipLowerCameraCorrections(assignedTargets);
+                }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
                 var position1Target = new LowerCameraPlacementTarget(position1X, position1Y, 0d, 0d);
@@ -4717,6 +4735,7 @@ public partial class HomePage : UserControl
         double targetY,
         NozzlePickupBatch pickupBatch,
         CalibrationCenterPosition pickupRPositions,
+        bool upperCameraCorrectionEnabled,
         CancellationToken cancellationToken)
     {
         if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
@@ -4728,54 +4747,32 @@ public partial class HomePage : UserControl
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
 
-        // 找芯片脚本返回的是正方形某条边相对水平线的当前姿态，不是电机相对量。
-        // 正方形边方向每90°等价：先求到统一水平/垂直方向的最短校正角，
-        // 再从本批取料R基准构造绝对目标。
         var absoluteTargets = new Dictionary<int, double>
         {
             [VisionCalibrationService.FirstSetXHardwareAxisNo] = targetX,
             [VisionCalibrationService.FirstSetYHardwareAxisNo] = targetY
         };
-
-        double? nozzle1RPulses = null;
-        double? nozzle1CorrectionDegrees = null;
-        double? nozzle1TargetR = null;
-        if (pickupBatch.Nozzle1 is { } nozzle1PickupTarget)
+        var rotationTargets = upperCameraCorrectionEnabled
+            ? CalculateUpperCameraRotationTargets(pickupBatch, pickupRPositions)
+            : UpperCameraRotationTargets.Empty;
+        foreach (var (axisNo, target) in rotationTargets.AbsoluteTargets)
         {
-            nozzle1RPulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
-                nozzle1PickupTarget.RotationDegrees,
-                GetUpperCameraRotationSign(1),
-                out var correctionDegrees);
-            nozzle1CorrectionDegrees = correctionDegrees;
-            nozzle1TargetR = pickupRPositions.ActualX + nozzle1RPulses.Value;
-            absoluteTargets[FirstSetNozzle1RHardwareAxisNo] = nozzle1TargetR.Value;
-        }
-
-        double? nozzle2RPulses = null;
-        double? nozzle2CorrectionDegrees = null;
-        double? nozzle2TargetR = null;
-        if (pickupBatch.Nozzle2 is { } nozzle2Target)
-        {
-            nozzle2RPulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
-                nozzle2Target.RotationDegrees,
-                GetUpperCameraRotationSign(2),
-                out var correctionDegrees);
-            nozzle2CorrectionDegrees = correctionDegrees;
-            nozzle2TargetR = pickupRPositions.ActualY + nozzle2RPulses.Value;
-            absoluteTargets[FirstSetNozzle2RHardwareAxisNo] = nozzle2TargetR.Value;
+            absoluteTargets[axisNo] = target;
         }
 
         SetFirstSetPositionStatus(
-            $"正在同步移动{positionName}并将已取芯片粗校正到0°：X={targetX:0.###}，Y={targetY:0.###}" +
-            (nozzle1RPulses.HasValue
+            (upperCameraCorrectionEnabled
+                ? $"正在同步移动{positionName}并执行上相机旋转纠偏：X={targetX:0.###}，Y={targetY:0.###}"
+                : $"正在移动{positionName}；上相机旋转纠偏未勾选：X={targetX:0.###}，Y={targetY:0.###}") +
+            (rotationTargets.Nozzle1Pulses.HasValue
                 ? $"，吸嘴1 测量{pickupBatch.Nozzle1!.Value.RotationDegrees:0.###}°" +
-                  $"→校正{nozzle1CorrectionDegrees!.Value:0.###}°" +
-                  $"（R目标{nozzle1TargetR!.Value:0.###} pulse）"
+                  $"→校正{rotationTargets.Nozzle1CorrectionDegrees!.Value:0.###}°" +
+                  $"（R目标{rotationTargets.Nozzle1TargetR!.Value:0.###} pulse）"
                 : string.Empty) +
-            (nozzle2RPulses.HasValue
+            (rotationTargets.Nozzle2Pulses.HasValue
                 ? $"，吸嘴2 测量{pickupBatch.Nozzle2!.Value.RotationDegrees:0.###}°" +
-                  $"→校正{nozzle2CorrectionDegrees!.Value:0.###}°" +
-                  $"（R目标{nozzle2TargetR!.Value:0.###} pulse）"
+                  $"→校正{rotationTargets.Nozzle2CorrectionDegrees!.Value:0.###}°" +
+                  $"（R目标{rotationTargets.Nozzle2TargetR!.Value:0.###} pulse）"
                 : string.Empty) +
             "…",
             true);
@@ -4794,16 +4791,101 @@ public partial class HomePage : UserControl
             VisionCalibrationService.FirstSetYHardwareAxisNo,
             AllowedProductionPeerAxisNos);
         SetFirstSetPositionStatus(
-            $"{positionName}与芯片统一角度粗校正已同步完成：" +
-            $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}，" +
-            (nozzle1RPulses.HasValue
-                ? $"R1校正{nozzle1CorrectionDegrees!.Value:0.###}°/{nozzle1RPulses.Value:0.###} pulse"
-                : "R1无料") +
-            (nozzle2RPulses.HasValue
-                ? $"，R2校正{nozzle2CorrectionDegrees!.Value:0.###}°/" +
-                  $"{nozzle2RPulses.Value:0.###} pulse。"
-                : "。"),
+            upperCameraCorrectionEnabled
+                ? $"{positionName}与上相机旋转纠偏已同步完成：" +
+                  $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}，" +
+                  FormatUpperCameraRotationCompletion(rotationTargets)
+                : $"{positionName}已到位，上相机旋转纠偏已跳过：" +
+                  $"X={actualXy.ActualX:0.###}，Y={actualXy.ActualY:0.###}。",
             true);
+    }
+
+    private async Task ApplyUpperCameraRotationCorrectionsAsync(
+        NozzlePickupBatch pickupBatch,
+        CalibrationCenterPosition pickupRPositions,
+        CancellationToken cancellationToken)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var rotationTargets = CalculateUpperCameraRotationTargets(pickupBatch, pickupRPositions);
+        if (rotationTargets.AbsoluteTargets.Count == 0)
+        {
+            return;
+        }
+
+        SetFirstSetPositionStatus(
+            "下相机纠偏已关闭，正在单独执行上相机R轴旋转纠偏…",
+            true);
+        var movingAxisNos = rotationTargets.AbsoluteTargets.Keys.ToArray();
+        await motionController.MoveAxesSynchronizedAsync(
+            rotationTargets.AbsoluteTargets,
+            new Dictionary<int, double>(),
+            cancellationToken,
+            allowedMovingAxisNos: AllowedProductionPeerAxisNos,
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverrides: GetProductionAxisVelocities(movingAxisNos));
+        SetFirstSetPositionStatus(
+            $"上相机R轴旋转纠偏完成：{FormatUpperCameraRotationCompletion(rotationTargets)}",
+            true);
+    }
+
+    private UpperCameraRotationTargets CalculateUpperCameraRotationTargets(
+        NozzlePickupBatch pickupBatch,
+        CalibrationCenterPosition pickupRPositions)
+    {
+        // 找芯片脚本返回的是正方形某条边相对水平线的当前姿态，不是电机相对量。
+        // 正方形边方向每90°等价：先求到统一方向的最短校正角，再构造R轴绝对目标。
+        var absoluteTargets = new Dictionary<int, double>();
+        double? nozzle1Pulses = null;
+        double? nozzle1CorrectionDegrees = null;
+        double? nozzle1TargetR = null;
+        if (pickupBatch.Nozzle1 is { } nozzle1Target)
+        {
+            nozzle1Pulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
+                nozzle1Target.RotationDegrees,
+                GetUpperCameraRotationSign(1),
+                out var correctionDegrees);
+            nozzle1CorrectionDegrees = correctionDegrees;
+            nozzle1TargetR = pickupRPositions.ActualX + nozzle1Pulses.Value;
+            absoluteTargets[FirstSetNozzle1RHardwareAxisNo] = nozzle1TargetR.Value;
+        }
+
+        double? nozzle2Pulses = null;
+        double? nozzle2CorrectionDegrees = null;
+        double? nozzle2TargetR = null;
+        if (pickupBatch.Nozzle2 is { } nozzle2Target)
+        {
+            nozzle2Pulses = ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
+                nozzle2Target.RotationDegrees,
+                GetUpperCameraRotationSign(2),
+                out var correctionDegrees);
+            nozzle2CorrectionDegrees = correctionDegrees;
+            nozzle2TargetR = pickupRPositions.ActualY + nozzle2Pulses.Value;
+            absoluteTargets[FirstSetNozzle2RHardwareAxisNo] = nozzle2TargetR.Value;
+        }
+
+        return new UpperCameraRotationTargets(
+            absoluteTargets,
+            nozzle1Pulses,
+            nozzle1CorrectionDegrees,
+            nozzle1TargetR,
+            nozzle2Pulses,
+            nozzle2CorrectionDegrees,
+            nozzle2TargetR);
+    }
+
+    private static string FormatUpperCameraRotationCompletion(
+        UpperCameraRotationTargets targets)
+    {
+        return (targets.Nozzle1Pulses.HasValue
+                   ? $"R1校正{targets.Nozzle1CorrectionDegrees!.Value:0.###}°/" +
+                     $"{targets.Nozzle1Pulses.Value:0.###} pulse"
+                   : "R1无料") +
+               (targets.Nozzle2Pulses.HasValue
+                   ? $"，R2校正{targets.Nozzle2CorrectionDegrees!.Value:0.###}°/" +
+                     $"{targets.Nozzle2Pulses.Value:0.###} pulse。"
+                   : "。");
     }
 
     private static double ConvertUpperCameraMeasuredAngleToRCorrectionPulses(
@@ -4927,6 +5009,24 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void UpperCameraCorrectionCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingPresetPositions || UpperCameraCorrectionCheckBox is null)
+        {
+            return;
+        }
+
+        _homeSettings.UpperCameraCorrectionEnabled =
+            UpperCameraCorrectionCheckBox.IsChecked == true;
+        _homeSettingsStore.Save(_homeSettings);
+        SetLowerCameraPhotoPositionStatus(
+            UpperCameraCorrectionCheckBox.IsChecked == true
+                ? "上相机纠偏已启用：R1/R2将按上相机测得角度旋转。"
+                : "上相机纠偏已关闭：保留拍照和XY对位，R1/R2不执行上相机角度旋转。",
+            true);
+        UpdateHomeCommandState();
+    }
+
     private void LowerCameraRotationCenterTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SaveLowerCameraRotationCentersFromInputs();
@@ -4964,6 +5064,8 @@ public partial class HomePage : UserControl
     {
         _homeSettings = _homeSettingsStore.Load();
         _loadingPresetPositions = true;
+        UpperCameraCorrectionCheckBox.IsChecked =
+            _homeSettings.UpperCameraCorrectionEnabled ?? true;
         LowerCameraCorrection1CheckBox.IsChecked =
             _homeSettings.LowerCameraCorrectionEnabled ?? true;
         FirstSetTeachingCenterXTextBox.Text = FormatPresetCoordinate(
@@ -6272,6 +6374,7 @@ public partial class HomePage : UserControl
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
+            UpperCameraCorrectionCheckBox is null ||
             LowerCameraCorrection1CheckBox is null ||
             LowerCameraPhotoPosition1XTextBox is null ||
             LowerCameraPhotoPosition1YTextBox is null ||
@@ -6451,6 +6554,7 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.IsEnabled = commandsIdle;
         PresetPosition2XTextBox.IsEnabled = commandsIdle;
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
+        UpperCameraCorrectionCheckBox.IsEnabled = commandsIdle;
         LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
@@ -7169,6 +7273,25 @@ public partial class HomePage : UserControl
         string CalibrationFilePath,
         double RotationCenterX,
         double RotationCenterY);
+
+    private sealed record UpperCameraRotationTargets(
+        Dictionary<int, double> AbsoluteTargets,
+        double? Nozzle1Pulses,
+        double? Nozzle1CorrectionDegrees,
+        double? Nozzle1TargetR,
+        double? Nozzle2Pulses,
+        double? Nozzle2CorrectionDegrees,
+        double? Nozzle2TargetR)
+    {
+        public static UpperCameraRotationTargets Empty { get; } = new(
+            [],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+    }
 
     private sealed record LowerCameraCorrectionResults(
         VisionLowerCameraCorrectionResult? Nozzle1,
