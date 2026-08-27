@@ -589,6 +589,153 @@ public sealed class LeisaiMotionCard : IMotionCard
         }
     }
 
+    public void MoveLinearAbsolute(
+        int coordinateSystemNo,
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> targetPositions,
+        IReadOnlyList<double> maximumAxisVelocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(targetPositions);
+        ArgumentNullException.ThrowIfNull(maximumAxisVelocities);
+
+        if (coordinateSystemNo < 0 || coordinateSystemNo > ushort.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
+        }
+
+        if (hardwareAxisNos.Count != 2 ||
+            hardwareAxisNos.Count != targetPositions.Count ||
+            hardwareAxisNos.Count != maximumAxisVelocities.Count ||
+            hardwareAxisNos.Distinct().Count() != hardwareAxisNos.Count)
+        {
+            throw new ArgumentException("XY直线插补必须提供两根不同轴及对应的目标位置和最大速度。");
+        }
+
+        lock (_sync)
+        {
+            EnsureOpen();
+            var coordinate = checked((ushort)coordinateSystemNo);
+            var coordinateDone = LeisaiNative.dmc_check_done_multicoor(_cardNo, coordinate);
+            if (coordinateDone is not (0 or 1))
+            {
+                throw NativeFailure("dmc_check_done_multicoor", coordinateDone);
+            }
+
+            if (coordinateDone == 0)
+            {
+                throw new MotionCardException(
+                    $"插补坐标系 {coordinateSystemNo} 正在运动，拒绝重复下发命令。",
+                    "插补坐标系忙检查");
+            }
+
+            var axisList = new ushort[hardwareAxisNos.Count];
+            var targets = new double[targetPositions.Count];
+            var distances = new double[targetPositions.Count];
+            var profiles = new MotionMoveProfile[hardwareAxisNos.Count];
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var target = targetPositions[index];
+                var axisVelocity = maximumAxisVelocities[index];
+                if (!double.IsFinite(target))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(targetPositions), "插补目标位置必须是有限数值。");
+                }
+
+                ValidateVelocity(axisVelocity, allowSigned: false);
+                var axis = GetAxis(hardwareAxisNos[index]);
+                double currentPosition = 0;
+                EnsureSuccess(
+                    LeisaiNative.dmc_get_position_unit(_cardNo, axis, ref currentPosition),
+                    "dmc_get_position_unit");
+                var distance = target - currentPosition;
+                EnsureAxisReadyForDirection(axis, Math.Sign(distance));
+                EnsureAxisStopped(axis);
+
+                var profile = _options.GetMoveProfile(axis);
+                profile.Validate();
+                if (profile.StartVelocity > axisVelocity || profile.StopVelocity > axisVelocity)
+                {
+                    throw new InvalidDataException(
+                        $"硬件轴 {axis} 的启动/停止速度不能大于插补最大轴速度 {axisVelocity:0.###}。");
+                }
+
+                EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+                EnsureSuccess(
+                    LeisaiNative.dmc_set_dec_stop_time(_cardNo, axis, profile.DecelerationStopSeconds),
+                    "dmc_set_dec_stop_time");
+                axisList[index] = axis;
+                targets[index] = target;
+                distances[index] = distance;
+                profiles[index] = profile;
+            }
+
+            var pathLength = Math.Sqrt(distances.Sum(distance => distance * distance));
+            if (!double.IsFinite(pathLength) || pathLength <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetPositions), "插补路径长度必须大于0。");
+            }
+
+            var activeComponents = Enumerable.Range(0, distances.Length)
+                .Where(index => Math.Abs(distances[index]) > 0)
+                .Select(index => new
+                {
+                    Index = index,
+                    Ratio = Math.Abs(distances[index]) / pathLength
+                })
+                .ToArray();
+            var maximumVectorVelocity = activeComponents.Min(component =>
+                maximumAxisVelocities[component.Index] / component.Ratio);
+            var minimumVectorVelocity = activeComponents.Min(component =>
+                profiles[component.Index].StartVelocity / component.Ratio);
+            var stopVectorVelocity = activeComponents.Min(component =>
+                profiles[component.Index].StopVelocity / component.Ratio);
+            minimumVectorVelocity = Math.Min(minimumVectorVelocity, maximumVectorVelocity);
+            stopVectorVelocity = Math.Min(stopVectorVelocity, maximumVectorVelocity);
+            var accelerationSeconds = profiles.Max(profile => profile.AccelerationSeconds);
+            var decelerationSeconds = profiles.Max(profile => profile.DecelerationSeconds);
+
+            EnsureSuccess(
+                LeisaiNative.dmc_set_vector_profile_unit(
+                    _cardNo,
+                    coordinate,
+                    minimumVectorVelocity,
+                    maximumVectorVelocity,
+                    accelerationSeconds,
+                    decelerationSeconds,
+                    stopVectorVelocity),
+                "dmc_set_vector_profile_unit");
+            EnsureSuccess(
+                LeisaiNative.dmc_line_unit(
+                    _cardNo,
+                    coordinate,
+                    checked((ushort)axisList.Length),
+                    axisList,
+                    targets,
+                    1),
+                "dmc_line_unit");
+        }
+    }
+
+    public void StopLinearInterpolation(int coordinateSystemNo, bool emergency = false)
+    {
+        if (coordinateSystemNo < 0 || coordinateSystemNo > ushort.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
+        }
+
+        lock (_sync)
+        {
+            EnsureOpen();
+            EnsureSuccess(
+                LeisaiNative.dmc_stop_multicoor(
+                    _cardNo,
+                    checked((ushort)coordinateSystemNo),
+                    emergency ? (ushort)1 : (ushort)0),
+                "dmc_stop_multicoor");
+        }
+    }
+
     public void MoveAbsolute(int hardwareAxisNo, double position, double velocity)
     {
         lock (_sync)

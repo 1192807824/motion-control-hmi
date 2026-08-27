@@ -55,6 +55,9 @@ public sealed class HomePageSettingsStore
 
 public sealed class HomePageSettings
 {
+    // 可空用于兼容旧配置：旧配置没有该字段时继续使用原同步点位运动。
+    public bool? XyLinearInterpolationEnabled { get; set; }
+
     // 可空用于兼容旧配置：旧配置没有该字段时，按启用上相机旋转纠偏处理。
     public bool? UpperCameraCorrectionEnabled { get; set; }
 

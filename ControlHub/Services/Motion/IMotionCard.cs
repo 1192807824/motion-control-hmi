@@ -51,6 +51,14 @@ public interface IMotionCard : IDisposable
         IReadOnlyList<double> distances,
         IReadOnlyList<double> velocities);
 
+    void MoveLinearAbsolute(
+        int coordinateSystemNo,
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> targetPositions,
+        IReadOnlyList<double> maximumAxisVelocities);
+
+    void StopLinearInterpolation(int coordinateSystemNo, bool emergency = false);
+
     void MoveAbsolute(int hardwareAxisNo, double position, double velocity);
 
     void Stop(int hardwareAxisNo, bool emergency = false);

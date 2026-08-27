@@ -58,6 +58,8 @@ public partial class HomePage : UserControl
     private const double DefaultNozzleSafeZPosition = -5_000d;
     private const double DefaultNozzleZVelocity = 20_000d;
     private const double DefaultNozzleRVelocity = 50_000d;
+    private const int FirstSetXyInterpolationCoordinateSystemNo = 0;
+    private const int SecondSetXyInterpolationCoordinateSystemNo = 1;
     private const int StartupNozzleRHomeMode = 33;
     private const double StartupNozzleRHomeVelocity = 50_000d;
     private const double StartupNozzleRHomeOffset = 0d;
@@ -182,6 +184,7 @@ public partial class HomePage : UserControl
     private bool _presetPositionMoveRunning;
     private bool _oneKeyResetRunning;
     private bool _startSequenceRunning;
+    private bool _productionXyLinearInterpolationEnabled;
     private bool _oneKeyCollectRunning;
     private bool _assignedNozzleMoveRunning;
     private CancellationTokenSource? _productionCancellation;
@@ -1727,6 +1730,8 @@ public partial class HomePage : UserControl
             // 上、下相机纠偏开关在启动时一次性锁定，运行中修改不影响当前生产。
             var upperCameraCorrectionEnabled = _homeSettings.UpperCameraCorrectionEnabled ?? true;
             var lowerCameraCorrectionEnabled = _homeSettings.LowerCameraCorrectionEnabled ?? true;
+            _productionXyLinearInterpolationEnabled =
+                _homeSettings.XyLinearInterpolationEnabled ?? false;
             _lowerCameraPhotoPositions = lowerCameraCorrectionEnabled
                 ? ReadLowerCameraPhotoPositions()
                 : null;
@@ -1895,7 +1900,8 @@ public partial class HomePage : UserControl
                         moveTimeoutMilliseconds: timeoutMilliseconds,
                         cancellationToken: _productionCancellation.Token,
                         allowedMovingAxisNos: AllowedProductionPeerAxisNos,
-                        yVelocityOverride: firstSetYVelocity);
+                        yVelocityOverride: firstSetYVelocity,
+                        linearInterpolationCoordinateSystemNo: GetFirstSetXyInterpolationCoordinateSystemNo());
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
@@ -2437,6 +2443,7 @@ public partial class HomePage : UserControl
             _lowerCameraPhotoPositions = null;
             _productionAxisMotionSettings = null;
             _testStationSettings = null;
+            _productionXyLinearInterpolationEnabled = false;
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
 
@@ -2783,7 +2790,29 @@ public partial class HomePage : UserControl
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
             allowedMovingAxisNos: FirstSetProductionPeerAxisNos,
-            yVelocityOverride: yVelocity);
+            yVelocityOverride: yVelocity,
+            linearInterpolationCoordinateSystemNo: GetFirstSetXyInterpolationCoordinateSystemNo());
+    }
+
+    private bool IsXyLinearInterpolationEnabledForCurrentOperation()
+    {
+        return _startSequenceRunning
+            ? _productionXyLinearInterpolationEnabled
+            : XyLinearInterpolationCheckBox?.IsChecked == true;
+    }
+
+    private int? GetFirstSetXyInterpolationCoordinateSystemNo()
+    {
+        return IsXyLinearInterpolationEnabledForCurrentOperation()
+            ? FirstSetXyInterpolationCoordinateSystemNo
+            : null;
+    }
+
+    private int? GetSecondSetXyInterpolationCoordinateSystemNo()
+    {
+        return IsXyLinearInterpolationEnabledForCurrentOperation()
+            ? SecondSetXyInterpolationCoordinateSystemNo
+            : null;
     }
 
     private static async Task ObserveTaskNoThrowAsync(Task task)
@@ -3156,7 +3185,8 @@ public partial class HomePage : UserControl
                 moveTimeoutMilliseconds: timeoutMilliseconds,
                 cancellationToken: cancellationToken,
                 allowedMovingAxisNos: SecondSetProductionPeerAxisNos,
-                yVelocityOverride: yVelocity);
+                yVelocityOverride: yVelocity,
+                linearInterpolationCoordinateSystemNo: GetSecondSetXyInterpolationCoordinateSystemNo());
         }
         catch (Exception exception)
         {
@@ -4184,7 +4214,8 @@ public partial class HomePage : UserControl
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
             allowedMovingAxisNos: AllowedProductionPeerAxisNos,
-            yVelocityOverride: yVelocity);
+            yVelocityOverride: yVelocity,
+            linearInterpolationCoordinateSystemNo: GetFirstSetXyInterpolationCoordinateSystemNo());
 
         if (step == 1)
         {
@@ -4800,7 +4831,8 @@ public partial class HomePage : UserControl
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
             allowedMovingAxisNos: AllowedProductionPeerAxisNos,
-            yVelocityOverride: yVelocity);
+            yVelocityOverride: yVelocity,
+            linearInterpolationCoordinateSystemNo: GetFirstSetXyInterpolationCoordinateSystemNo());
         SetFirstSetPositionStatus(
             $"{positionName}已到位：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。",
             true);
@@ -4855,13 +4887,18 @@ public partial class HomePage : UserControl
             true);
 
         var movingAxisNos = absoluteTargets.Keys.ToArray();
+        var interpolationCoordinateSystemNo = GetFirstSetXyInterpolationCoordinateSystemNo();
         await motionController.MoveAxesSynchronizedAsync(
             absoluteTargets,
             new Dictionary<int, double>(),
             cancellationToken,
             allowedMovingAxisNos: AllowedProductionPeerAxisNos,
             minimumCompletionTolerance: HomePageCompletionTolerance,
-            velocityOverrides: GetProductionAxisVelocities(movingAxisNos));
+            velocityOverrides: GetProductionAxisVelocities(movingAxisNos),
+            linearInterpolationCoordinateSystemNo: interpolationCoordinateSystemNo,
+            linearInterpolationAxisNos: interpolationCoordinateSystemNo is null
+                ? null
+                : FirstSetAxisNos);
 
         var actualXy = motionController.CaptureCalibrationFeedback(
             VisionCalibrationService.FirstSetXHardwareAxisNo,
@@ -5086,6 +5123,24 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void XyLinearInterpolationCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingPresetPositions || XyLinearInterpolationCheckBox is null)
+        {
+            return;
+        }
+
+        _homeSettings.XyLinearInterpolationEnabled =
+            XyLinearInterpolationCheckBox.IsChecked == true;
+        _homeSettingsStore.Save(_homeSettings);
+        SetFirstSetPositionStatus(
+            XyLinearInterpolationCheckBox.IsChecked == true
+                ? "生产XY直线插补已启用：两套XY将沿直线运动。"
+                : "生产XY直线插补已关闭：两套XY恢复原同步点位运动。",
+            true);
+        UpdateHomeCommandState();
+    }
+
     private void UpperCameraCorrectionCheckBox_Changed(object sender, RoutedEventArgs e)
     {
         if (_loadingPresetPositions || UpperCameraCorrectionCheckBox is null)
@@ -5141,6 +5196,8 @@ public partial class HomePage : UserControl
     {
         _homeSettings = _homeSettingsStore.Load();
         _loadingPresetPositions = true;
+        XyLinearInterpolationCheckBox.IsChecked =
+            _homeSettings.XyLinearInterpolationEnabled ?? false;
         UpperCameraCorrectionCheckBox.IsChecked =
             _homeSettings.UpperCameraCorrectionEnabled ?? true;
         LowerCameraCorrection1CheckBox.IsChecked =
@@ -6451,6 +6508,7 @@ public partial class HomePage : UserControl
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
+            XyLinearInterpolationCheckBox is null ||
             UpperCameraCorrectionCheckBox is null ||
             LowerCameraCorrection1CheckBox is null ||
             LowerCameraPhotoPosition1XTextBox is null ||
@@ -6633,6 +6691,7 @@ public partial class HomePage : UserControl
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
         UpperCameraCorrectionCheckBox.IsEnabled = commandsIdle;
         LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
+        XyLinearInterpolationCheckBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;

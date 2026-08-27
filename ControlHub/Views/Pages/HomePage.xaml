@@ -1067,7 +1067,21 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Text="设备操作" Style="{StaticResource SectionTitle}" FontSize="17" />
+                    <Grid>
+                        <TextBlock Text="设备操作"
+                                   Style="{StaticResource SectionTitle}"
+                                   FontSize="17" />
+                        <CheckBox x:Name="XyLinearInterpolationCheckBox"
+                                  Content="生产 XY 插补"
+                                  HorizontalAlignment="Right"
+                                  VerticalAlignment="Center"
+                                  Foreground="#62B5FF"
+                                  FontSize="11"
+                                  FontWeight="Bold"
+                                  ToolTip="勾选后主页和自动生产中的两套XY使用直线插补；不勾选时保持原同步点位运动"
+                                  Checked="XyLinearInterpolationCheckBox_Changed"
+                                  Unchecked="XyLinearInterpolationCheckBox_Changed" />
+                    </Grid>
 
                     <Button Grid.Row="1"
                             x:Name="OneKeyResetButton"

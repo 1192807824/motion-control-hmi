@@ -560,7 +560,8 @@ public partial class MotionControlPage : UserControl
         int moveTimeoutMilliseconds,
         CancellationToken cancellationToken,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null,
-        double? yVelocityOverride = null)
+        double? yVelocityOverride = null,
+        int? linearInterpolationCoordinateSystemNo = null)
     {
         if (xHardwareAxisNo < 0 || yHardwareAxisNo < 0 || xHardwareAxisNo == yHardwareAxisNo)
         {
@@ -579,6 +580,13 @@ public partial class MotionControlPage : UserControl
             moveTimeoutMilliseconds < 100)
         {
             throw new ArgumentOutOfRangeException(nameof(velocity), "点击移动的速度、容差或超时参数无效。");
+        }
+
+        if (linearInterpolationCoordinateSystemNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(linearInterpolationCoordinateSystemNo),
+                "插补坐标系编号不能小于0。");
         }
 
         if (_closed)
@@ -623,7 +631,8 @@ public partial class MotionControlPage : UserControl
                 positionTolerance,
                 moveTimeoutMilliseconds,
                 linkedCancellation.Token,
-                yVelocityOverride);
+                yVelocityOverride,
+                linearInterpolationCoordinateSystemNo);
             var settled = ReadSettledCalibrationPosition(
                 xAxis,
                 yAxis,
@@ -641,7 +650,10 @@ public partial class MotionControlPage : UserControl
         {
             if (!completed && _motionCard.IsOpen)
             {
-                StopCalibrationAxesNoThrow(xAxis, yAxis);
+                StopCalibrationAxesNoThrow(
+                    xAxis,
+                    yAxis,
+                    linearInterpolationCoordinateSystemNo);
             }
 
             _calibrationOperationActive = false;
@@ -1140,7 +1152,9 @@ public partial class MotionControlPage : UserControl
         int minimumTimeoutMilliseconds = 10_000,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null,
         double? minimumCompletionTolerance = null,
-        IReadOnlyDictionary<int, double>? velocityOverrides = null)
+        IReadOnlyDictionary<int, double>? velocityOverrides = null,
+        int? linearInterpolationCoordinateSystemNo = null,
+        IReadOnlyCollection<int>? linearInterpolationAxisNos = null)
     {
         ArgumentNullException.ThrowIfNull(absoluteTargetPositions);
         ArgumentNullException.ThrowIfNull(relativePulseDistances);
@@ -1180,6 +1194,20 @@ public partial class MotionControlPage : UserControl
             throw new ArgumentOutOfRangeException(
                 nameof(relativePulseDistances),
                 "逐轴相对移动脉冲必须是非零有限数值。");
+        }
+
+        var interpolationAxisNumbers = linearInterpolationAxisNos?
+            .Distinct()
+            .OrderBy(axisNo => axisNo)
+            .ToArray();
+        if ((linearInterpolationCoordinateSystemNo is null) != (interpolationAxisNumbers is null) ||
+            linearInterpolationCoordinateSystemNo < 0 ||
+            (interpolationAxisNumbers is not null &&
+             (interpolationAxisNumbers.Length != 2 ||
+              interpolationAxisNumbers.Any(axisNo => !axisNumbers.Contains(axisNo)))))
+        {
+            throw new ArgumentException(
+                "轴组插补必须同时指定非负坐标系编号，以及本次运动中的两根XY轴。");
         }
 
         if (minimumCompletionTolerance is { } requestedCompletionTolerance &&
@@ -1288,12 +1316,31 @@ public partial class MotionControlPage : UserControl
         try
         {
             var activeMoves = moves.Where(move => move.Distance != 0).ToArray();
-            if (activeMoves.Length > 0)
+            var interpolationAxisSet = interpolationAxisNumbers?.ToHashSet() ?? [];
+            var interpolationMoves = interpolationAxisNumbers is null
+                ? []
+                : moves.Where(move => interpolationAxisSet.Contains(move.Axis.HardwareAxisNo)).ToArray();
+            var pointMoves = activeMoves
+                .Where(move => !interpolationAxisSet.Contains(move.Axis.HardwareAxisNo))
+                .ToArray();
+            commandedAxes.AddRange(activeMoves.Select(move => move.Axis));
+
+            if (pointMoves.Length > 0)
             {
                 _motionCard.MoveRelativeSynchronized(
-                    activeMoves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
-                    activeMoves.Select(move => move.Distance).ToArray(),
-                    activeMoves.Select(move => move.Velocity).ToArray());
+                    pointMoves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                    pointMoves.Select(move => move.Distance).ToArray(),
+                    pointMoves.Select(move => move.Velocity).ToArray());
+            }
+
+            if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo &&
+                interpolationMoves.Any(move => move.Distance != 0))
+            {
+                _motionCard.MoveLinearAbsolute(
+                    coordinateSystemNo,
+                    interpolationMoves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                    interpolationMoves.Select(move => move.Target).ToArray(),
+                    interpolationMoves.Select(move => move.Velocity).ToArray());
             }
 
             foreach (var move in moves)
@@ -1304,11 +1351,12 @@ public partial class MotionControlPage : UserControl
                     continue;
                 }
 
-                commandedAxes.Add(move.Axis);
                 move.Axis.IsMoving = true;
-                move.Axis.State = move.IsRelative
-                    ? $"同步相对位置命令已发送：{move.Distance:0.###} {move.Axis.Unit}"
-                    : $"同步绝对目标已发送：{move.Target:0.###} {move.Axis.Unit}";
+                move.Axis.State = interpolationAxisSet.Contains(move.Axis.HardwareAxisNo)
+                    ? $"XY直线插补目标已发送：{move.Target:0.###} {move.Axis.Unit}"
+                    : move.IsRelative
+                        ? $"同步相对位置命令已发送：{move.Distance:0.###} {move.Axis.Unit}"
+                        : $"同步绝对目标已发送：{move.Target:0.###} {move.Axis.Unit}";
             }
 
             _commandStopwatch = Stopwatch.StartNew();
@@ -1370,6 +1418,18 @@ public partial class MotionControlPage : UserControl
         }
         catch (Exception exception)
         {
+            if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo)
+            {
+                try
+                {
+                    _motionCard.StopLinearInterpolation(coordinateSystemNo);
+                }
+                catch
+                {
+                    // 继续执行原有逐轴停止与升级急停安全链。
+                }
+            }
+
             foreach (var axis in commandedAxes)
             {
                 IssueAxisStopWithEscalation(
@@ -2147,24 +2207,39 @@ public partial class MotionControlPage : UserControl
         double positionTolerance,
         int moveTimeoutMilliseconds,
         CancellationToken cancellationToken,
-        double? yVelocityOverride = null)
+        double? yVelocityOverride = null,
+        int? linearInterpolationCoordinateSystemNo = null)
     {
         var beforeX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
         var beforeY = _motionCard.ReadAxis(yAxis.HardwareAxisNo);
         EnsureCalibrationAxisSafe(beforeX, "X");
         EnsureCalibrationAxisSafe(beforeY, "Y");
 
-        if (Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance)
+        var xNeedsMove = Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance;
+        var yNeedsMove = Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance;
+        if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo &&
+            (xNeedsMove || yNeedsMove))
         {
-            _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, velocity);
+            _motionCard.MoveLinearAbsolute(
+                coordinateSystemNo,
+                [xAxis.HardwareAxisNo, yAxis.HardwareAxisNo],
+                [targetX, targetY],
+                [velocity, yVelocityOverride ?? velocity]);
         }
-
-        if (Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance)
+        else
         {
-            _motionCard.MoveAbsolute(
-                yAxis.HardwareAxisNo,
-                targetY,
-                yVelocityOverride ?? velocity);
+            if (xNeedsMove)
+            {
+                _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, velocity);
+            }
+
+            if (yNeedsMove)
+            {
+                _motionCard.MoveAbsolute(
+                    yAxis.HardwareAxisNo,
+                    targetY,
+                    yVelocityOverride ?? velocity);
+            }
         }
 
         xAxis.Target = targetX;
@@ -2276,8 +2351,23 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private void StopCalibrationAxesNoThrow(AxisStatus xAxis, AxisStatus yAxis)
+    private void StopCalibrationAxesNoThrow(
+        AxisStatus xAxis,
+        AxisStatus yAxis,
+        int? linearInterpolationCoordinateSystemNo = null)
     {
+        if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo)
+        {
+            try
+            {
+                _motionCard.StopLinearInterpolation(coordinateSystemNo);
+            }
+            catch
+            {
+                // 继续逐轴停止，确保插补坐标系停止失败时仍能进入原有安全停止链。
+            }
+        }
+
         foreach (var axis in new[] { xAxis, yAxis }.DistinctBy(item => item.HardwareAxisNo))
         {
             try

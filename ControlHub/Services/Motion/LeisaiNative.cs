@@ -99,6 +99,34 @@ internal static class LeisaiNative
         ushort[] positionModeList);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_vector_profile_unit(
+        ushort cardNo,
+        ushort coordinateSystemNo,
+        double minimumVelocity,
+        double maximumVelocity,
+        double accelerationSeconds,
+        double decelerationSeconds,
+        double stopVelocity);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_line_unit(
+        ushort cardNo,
+        ushort coordinateSystemNo,
+        ushort axisCount,
+        ushort[] axisList,
+        double[] targetPositions,
+        ushort positionMode);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_check_done_multicoor(ushort cardNo, ushort coordinateSystemNo);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_stop_multicoor(
+        ushort cardNo,
+        ushort coordinateSystemNo,
+        ushort stopMode);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_vmove(ushort cardNo, ushort axis, ushort direction);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
