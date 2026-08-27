@@ -34,6 +34,8 @@ public partial class HomePage : UserControl
     private const int SecondSetZ2VacuumOutputBit = 21;
     private const int Station13BreakVacuumOutputBit = 22;
     private const int Station14BreakVacuumOutputBit = 23;
+    private const int CarouselUpperVacuumOutputBit = 24;
+    private const int CarouselLowerSprayOutputBit = 25;
     private const int OneKeyCollectCancelVacuumOutputBit = 26;
     private const int OneKeyCollectBreakVacuumOutputBit = 25;
     private const int OneKeyCollectCancelVacuumDelayMilliseconds = 1_000;
@@ -87,6 +89,7 @@ public partial class HomePage : UserControl
     private const int TestStationMoveTimeoutMilliseconds = 60_000;
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
+    private const int CarouselVacuumSprayPulseMilliseconds = 30;
     private const int DefaultTestStationDwellMilliseconds = 100;
     private const int MoveAwayBeforeDdMilliseconds = 500;
     private const string CarouselStatusLoaded = "有料";
@@ -3192,6 +3195,11 @@ public partial class HomePage : UserControl
                 cancellationToken,
                 allowedMovingAxisNos);
 
+            SetStartProductionStatus(
+                $"DD马达第 {turn}/{maximumTurnsBeforeReload} 次转动完成，正在短时开启工位上方吸和下方喷…",
+                Color.FromRgb(242, 181, 68));
+            await PulseCarouselVacuumAndSprayAsync(cancellationToken);
+
             AdvanceCarouselOccupancy(carouselStations);
             UpdateCarouselStationDisplay(carouselStations);
             SetStartProductionStatus(
@@ -3221,6 +3229,75 @@ public partial class HomePage : UserControl
             finalTestTask,
             Task.CompletedTask,
             Task.CompletedTask);
+    }
+
+    private async Task PulseCarouselVacuumAndSprayAsync(CancellationToken cancellationToken)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+
+        try
+        {
+            SetCarouselVacuumSprayOutput(
+                motionController,
+                CarouselUpperVacuumOutputBit,
+                enabled: false,
+                "开启工位上方吸 Y24=0");
+            SetCarouselVacuumSprayOutput(
+                motionController,
+                CarouselLowerSprayOutputBit,
+                enabled: false,
+                "开启工位下方喷 Y25=0");
+            await Task.Delay(CarouselVacuumSprayPulseMilliseconds, cancellationToken);
+        }
+        finally
+        {
+            Exception? closeFailure = null;
+            try
+            {
+                SetCarouselVacuumSprayOutput(
+                    motionController,
+                    CarouselUpperVacuumOutputBit,
+                    enabled: true,
+                    "关闭工位上方吸 Y24=1");
+            }
+            catch (Exception exception)
+            {
+                closeFailure = exception;
+            }
+
+            try
+            {
+                SetCarouselVacuumSprayOutput(
+                    motionController,
+                    CarouselLowerSprayOutputBit,
+                    enabled: true,
+                    "关闭工位下方喷 Y25=1");
+            }
+            catch (Exception exception)
+            {
+                closeFailure ??= exception;
+            }
+
+            if (closeFailure is not null)
+            {
+                throw new InvalidOperationException(
+                    "DD工位脉冲结束后，Y24/Y25未能全部关闭。",
+                    closeFailure);
+            }
+        }
+    }
+
+    private static void SetCarouselVacuumSprayOutput(
+        MotionControlPage motionController,
+        int bitNo,
+        bool enabled,
+        string actionName)
+    {
+        if (!motionController.SetDigitalOutputHardwareBit(bitNo, enabled))
+        {
+            throw new InvalidOperationException($"DD工位IO操作失败：{actionName}。");
+        }
     }
 
     private int CountLoadedTestStations(IReadOnlyList<CarouselStationState> carouselStations)
