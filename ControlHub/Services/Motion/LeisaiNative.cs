@@ -109,6 +109,13 @@ internal static class LeisaiNative
         double stopVelocity);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short dmc_set_vector_s_profile(
+        ushort cardNo,
+        ushort coordinateSystemNo,
+        ushort mode,
+        double timeSeconds);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_line_unit(
         ushort cardNo,
         ushort coordinateSystemNo,

@@ -694,6 +694,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             stopVectorVelocity = Math.Min(stopVectorVelocity, maximumVectorVelocity);
             var accelerationSeconds = profiles.Max(profile => profile.AccelerationSeconds);
             var decelerationSeconds = profiles.Max(profile => profile.DecelerationSeconds);
+            var sTimeSeconds = profiles.Max(profile => profile.STimeSeconds);
 
             EnsureSuccess(
                 LeisaiNative.dmc_set_vector_profile_unit(
@@ -705,6 +706,13 @@ public sealed class LeisaiMotionCard : IMotionCard
                     decelerationSeconds,
                     stopVectorVelocity),
                 "dmc_set_vector_profile_unit");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_vector_s_profile(
+                    _cardNo,
+                    coordinate,
+                    0,
+                    sTimeSeconds),
+                "dmc_set_vector_s_profile");
             EnsureSuccess(
                 LeisaiNative.dmc_line_unit(
                     _cardNo,
