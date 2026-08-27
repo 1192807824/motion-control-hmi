@@ -20,6 +20,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         VisualCalibrationContent.AttachMotionController(MotionPage);
+        VisualCalibrationContent.AttachConnectionConfigController(ConnectionConfigContent);
         HomeContent.AttachMotionController(MotionPage);
         VisualCalibrationContent.AttachHomeSettingsProvider(
             HomeContent.GetCurrentParameterSettings,

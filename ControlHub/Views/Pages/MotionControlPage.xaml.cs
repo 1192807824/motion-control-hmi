@@ -1676,6 +1676,34 @@ public partial class MotionControlPage : UserControl
         return true;
     }
 
+    public bool TryReadDigitalOutputHardwareBit(int bitNo, out bool enabled)
+    {
+        enabled = false;
+        if (bitNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bitNo));
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            return false;
+        }
+
+        var count = _motionCard.DigitalOutputCount;
+        if (bitNo >= count)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(bitNo),
+                $"数字输出位必须在 0 到 {count - 1} 之间。");
+        }
+
+        var portNo = bitNo / 32;
+        var portBitNo = bitNo % 32;
+        var state = _motionCard.ReadDigitalOutputs(portNo);
+        enabled = (state & (1u << portBitNo)) != 0;
+        return true;
+    }
+
     public async Task HomeAxesAsync(
         IReadOnlyCollection<int> hardwareAxisNos,
         int homeMode,

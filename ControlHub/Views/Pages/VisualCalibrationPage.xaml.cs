@@ -30,6 +30,7 @@ public partial class VisualCalibrationPage : UserControl
     private const int FirstSetNozzle1RHardwareAxisNo = 6;
     private const int FirstSetNozzle2ZHardwareAxisNo = 7;
     private const int FirstSetNozzle2RHardwareAxisNo = 8;
+    private const int LowerCameraLightOutputBit = 10;
     private const double RotationCenterStepPulses = 10_000d;
     private const double ArrivalPositionVelocityPulsesPerSecond = 100_000d;
     private static readonly string DefaultCalibrationDirectory = Path.Combine(
@@ -78,6 +79,7 @@ public partial class VisualCalibrationPage : UserControl
     private bool _suppressClickMoveModeEvent;
     private bool _suppressLowerCameraNozzleEvent;
     private MotionControlPage? _motionController;
+    private ConnectionConfigPage? _connectionConfigController;
     private Func<HomePageSettings>? _homeSettingsProvider;
     private Action<int, double, double>? _lowerCameraRotationCenterUpdater;
     private Action<int>? _lowerCameraRotationCenterClearer;
@@ -95,6 +97,8 @@ public partial class VisualCalibrationPage : UserControl
     private VisualCalibrationSettings _uiSettings = VisionCalibrationService.Shared.Settings;
     private bool _settingsLoaded;
     private int? _manualJogAxisNo;
+    private bool _lowerCameraLightEnabled;
+    private bool _globalLightCommandRunning;
 
     private VisionCalibrationAxisPair ActiveAxisPair => _visionCalibration.ActiveAxisPair;
 
@@ -138,7 +142,16 @@ public partial class VisualCalibrationPage : UserControl
     public void AttachMotionController(MotionControlPage motionController)
     {
         _motionController = motionController ?? throw new ArgumentNullException(nameof(motionController));
+        RefreshGlobalLightStates();
         UpdateCommandState();
+    }
+
+    public void AttachConnectionConfigController(ConnectionConfigPage connectionConfigController)
+    {
+        _connectionConfigController = connectionConfigController
+            ?? throw new ArgumentNullException(nameof(connectionConfigController));
+        RefreshGlobalLightStates();
+        SetGlobalLightStatus("全局光源控制已就绪。", success: true);
     }
 
     public void AttachHomeSettingsProvider(
@@ -866,7 +879,170 @@ public partial class VisualCalibrationPage : UserControl
 
     public void RefreshVisionDisplay()
     {
+        RefreshGlobalLightStates();
         VisionHost.RefreshDisplayHost();
+    }
+
+    private async void VibrationFeederLightToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_globalLightCommandRunning)
+        {
+            return;
+        }
+
+        var connectionController = _connectionConfigController;
+        if (connectionController is null)
+        {
+            SetGlobalLightStatus("振动盘控制器尚未绑定。", success: false);
+            return;
+        }
+
+        var targetEnabled = !connectionController.IsVibrationFeederLightEnabled;
+        try
+        {
+            _globalLightCommandRunning = true;
+            UpdateGlobalLightButtons();
+            SetGlobalLightStatus(
+                $"正在{(targetEnabled ? "打开" : "关闭")}振动盘光源…",
+                success: true);
+            var succeeded = await connectionController.SetCalibrationLightAsync(targetEnabled);
+            SetGlobalLightStatus(
+                succeeded
+                    ? $"振动盘光源已{(targetEnabled ? "打开" : "关闭")}。"
+                    : $"振动盘光源{(targetEnabled ? "打开" : "关闭")}失败，请检查TCP连接。",
+                succeeded);
+        }
+        catch (Exception exception)
+        {
+            SetGlobalLightStatus($"振动盘光源切换失败：{exception.Message}", success: false);
+        }
+        finally
+        {
+            _globalLightCommandRunning = false;
+            UpdateGlobalLightButtons();
+        }
+    }
+
+    private void LowerCameraLightToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_globalLightCommandRunning)
+        {
+            return;
+        }
+
+        var motionController = _motionController;
+        if (motionController is null)
+        {
+            SetGlobalLightStatus("运动控制器尚未绑定，无法控制下相机光源。", success: false);
+            return;
+        }
+
+        try
+        {
+            _globalLightCommandRunning = true;
+            if (motionController.TryReadDigitalOutputHardwareBit(
+                    LowerCameraLightOutputBit,
+                    out var actualEnabled))
+            {
+                _lowerCameraLightEnabled = actualEnabled;
+            }
+
+            var targetEnabled = !_lowerCameraLightEnabled;
+            if (!motionController.SetDigitalOutputHardwareBit(
+                    LowerCameraLightOutputBit,
+                    targetEnabled))
+            {
+                SetGlobalLightStatus(
+                    $"下相机光源Y{LowerCameraLightOutputBit:00}" +
+                    $"{(targetEnabled ? "打开" : "关闭")}失败，请检查运动控制连接。",
+                    success: false);
+                return;
+            }
+
+            _lowerCameraLightEnabled = targetEnabled;
+            SetGlobalLightStatus(
+                $"下相机光源Y{LowerCameraLightOutputBit:00}已" +
+                $"{(targetEnabled ? "打开" : "关闭")}。",
+                success: true);
+        }
+        catch (Exception exception)
+        {
+            SetGlobalLightStatus($"下相机光源切换失败：{exception.Message}", success: false);
+        }
+        finally
+        {
+            _globalLightCommandRunning = false;
+            UpdateGlobalLightButtons();
+        }
+    }
+
+    private void RefreshGlobalLightStates()
+    {
+        if (_motionController is { } motionController)
+        {
+            try
+            {
+                if (motionController.TryReadDigitalOutputHardwareBit(
+                        LowerCameraLightOutputBit,
+                        out var enabled))
+                {
+                    _lowerCameraLightEnabled = enabled;
+                }
+            }
+            catch
+            {
+                // 页面刷新不能因IO状态读取失败而影响视觉显示。
+            }
+        }
+
+        UpdateGlobalLightButtons();
+    }
+
+    private void UpdateGlobalLightButtons()
+    {
+        if (VibrationFeederLightToggleButton is null ||
+            LowerCameraLightToggleButton is null ||
+            GlobalLightStatusText is null)
+        {
+            return;
+        }
+
+        var feederLightEnabled =
+            _connectionConfigController?.IsVibrationFeederLightEnabled == true;
+        ApplyGlobalLightButtonState(
+            VibrationFeederLightToggleButton,
+            "振动盘光源",
+            feederLightEnabled);
+        ApplyGlobalLightButtonState(
+            LowerCameraLightToggleButton,
+            "下相机光源",
+            _lowerCameraLightEnabled);
+        VibrationFeederLightToggleButton.IsEnabled =
+            _connectionConfigController is not null && !_globalLightCommandRunning;
+        LowerCameraLightToggleButton.IsEnabled =
+            _motionController is not null && !_globalLightCommandRunning;
+    }
+
+    private static void ApplyGlobalLightButtonState(
+        Button button,
+        string label,
+        bool enabled)
+    {
+        button.Content = $"{label}：{(enabled ? "开" : "关")}";
+        button.Background = new SolidColorBrush(enabled
+            ? Color.FromRgb(22, 122, 83)
+            : Color.FromRgb(41, 74, 100));
+        button.BorderBrush = new SolidColorBrush(enabled
+            ? Color.FromRgb(73, 209, 125)
+            : Color.FromRgb(69, 100, 122));
+    }
+
+    private void SetGlobalLightStatus(string message, bool success)
+    {
+        GlobalLightStatusText.Text = message;
+        GlobalLightStatusText.Foreground = new SolidColorBrush(success
+            ? Color.FromRgb(73, 209, 125)
+            : Color.FromRgb(242, 122, 128));
     }
 
     public async Task EnsureStartedAsync()

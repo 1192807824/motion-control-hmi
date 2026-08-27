@@ -68,6 +68,7 @@ public partial class ConnectionConfigPage : UserControl
     private bool _serialMeterOperationRunning;
     private bool _loaded;
     private bool _vibrationSequenceRunning;
+    private bool _vibrationFeederLightEnabled;
     private CancellationTokenSource? _vibrationOperationCancellation;
     private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
 
@@ -97,6 +98,9 @@ public partial class ConnectionConfigPage : UserControl
     public bool IsE4981AConnected => _generalTcpClient.IsConnected;
 
     public bool IsSM7110Connected => _serialClient.IsConnected;
+
+    public bool IsVibrationFeederLightEnabled =>
+        _tcpClient.IsConnected && _vibrationFeederLightEnabled;
 
     public async Task<E4981AMeasurementResult> MeasureE4981AAsync(
         CancellationToken cancellationToken)
@@ -1111,26 +1115,42 @@ public partial class ConnectionConfigPage : UserControl
     /// 自动生产找芯片拍照专用光源控制。开灯时同步下发当前亮度，
     /// 任一指令失败都由上层停止本轮拍照，避免在无可靠照明时继续取像。
     /// </summary>
-    public async Task<bool> SetProductionLightAsync(bool enabled)
+    public Task<bool> SetProductionLightAsync(bool enabled)
+    {
+        return SetVibrationFeederLightAsync(enabled, "生产拍照光源");
+    }
+
+    public Task<bool> SetCalibrationLightAsync(bool enabled)
+    {
+        return SetVibrationFeederLightAsync(enabled, "视觉标定振动盘光源");
+    }
+
+    private async Task<bool> SetVibrationFeederLightAsync(bool enabled, string actionName)
     {
         if (_closed || !_tcpClient.IsConnected)
         {
-            AddLog($"生产拍照光源{(enabled ? "打开" : "关闭")}失败：请先建立 TCP 连接");
+            _vibrationFeederLightEnabled = false;
+            AddLog($"{actionName}{(enabled ? "打开" : "关闭")}失败：请先建立 TCP 连接");
             return false;
         }
 
         _brightnessSendTimer.Stop();
         if (!enabled)
         {
-            return await SendAsciiProtocolCommandAsync(
+            var lightOffSucceeded = await SendAsciiProtocolCommandAsync(
                 LightOffCommand,
-                "生产拍照光源关闭");
+                $"{actionName}关闭");
+            if (lightOffSucceeded)
+            {
+                _vibrationFeederLightEnabled = false;
+            }
+            return lightOffSucceeded;
         }
 
         var settings = Settings;
         if (settings is null)
         {
-            AddLog("生产拍照光源打开失败：振动盘参数未加载");
+            AddLog($"{actionName}打开失败：振动盘参数未加载");
             return false;
         }
 
@@ -1143,22 +1163,24 @@ public partial class ConnectionConfigPage : UserControl
         _settingsStore.Save(settings);
         if (!await SendAsciiProtocolCommandAsync(
                 LightOnCommand,
-                "生产拍照光源打开"))
+                $"{actionName}打开"))
         {
             return false;
         }
 
         if (await SendAsciiProtocolCommandAsync(
                 $"&06,{normalizedBrightness:00},XX$",
-                $"生产拍照光源亮度 {normalizedBrightness:00}%"))
+                $"{actionName}亮度 {normalizedBrightness:00}%"))
         {
+            _vibrationFeederLightEnabled = true;
             return true;
         }
 
         // 光源已打开但亮度指令失败时立即关灯，不允许继续拍照。
         await SendAsciiProtocolCommandAsync(
             LightOffCommand,
-            "生产拍照光源失败回退关闭");
+            $"{actionName}失败回退关闭");
+        _vibrationFeederLightEnabled = false;
         return false;
     }
 
@@ -1187,14 +1209,13 @@ public partial class ConnectionConfigPage : UserControl
 
         _brightnessSendTimer.Stop();
         SaveSettings(writeLog: false);
-        await SendAsciiProtocolCommandAsync(LightOnCommand, "\u5149\u6e90\u6253\u5f00");
-        await ApplyLightBrightnessAsync("\u6253\u5f00\u540e\u8bbe\u7f6e\u4eae\u5ea6");
+        _ = await SetVibrationFeederLightAsync(enabled: true, "手动振动盘光源");
     }
 
     private async void LightOff_Click(object sender, RoutedEventArgs e)
     {
         _brightnessSendTimer.Stop();
-        await SendAsciiProtocolCommandAsync(LightOffCommand, "\u5149\u6e90\u5173\u95ed");
+        _ = await SetVibrationFeederLightAsync(enabled: false, "手动振动盘光源");
     }
 
     private void DecreaseLightBrightness_Click(object sender, RoutedEventArgs e)
@@ -1686,6 +1707,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            _vibrationFeederLightEnabled = false;
             SetFeederStatus("\u672a\u8fde\u63a5");
 
             AddLog(exception is null
