@@ -12,8 +12,8 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     private bool _appendNewLine = true;
     private int _lightOnBrightness = 99;
     private int _directionalVibrationFrequency = 44;
-    private int _directionalVibrationAmplitude = 50;
-    private int _directionalVibrationDurationMilliseconds = 1500;
+    private int _directionalVibrationAmplitude = 60;
+    private int _directionalVibrationDurationMilliseconds = 1000;
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
