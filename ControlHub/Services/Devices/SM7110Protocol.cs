@@ -67,6 +67,7 @@ public static class SM7110Protocol
         if (string.Equals(range, "AUTO", StringComparison.OrdinalIgnoreCase))
         {
             commands.Add(":RANGe:AUTO ON");
+            commands.Add(":RANGe:AUTO:TIMeout ON");
         }
         else
         {

@@ -16,7 +16,7 @@ public sealed class SerialConnectionSettings : INotifyPropertyChanged
     private int _commandTimeoutMilliseconds = 10_000;
     private string _measurementMode = "R";
     private double _appliedVoltageVolts = 100;
-    private string _measurementSpeed = "MED";
+    private string _measurementSpeed = "FAST2";
     private string _measurementRange = "AUTO";
     private string _averageMode = "OFF";
     private int _averageCount = 5;
