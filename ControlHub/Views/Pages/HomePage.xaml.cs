@@ -1658,6 +1658,7 @@ public partial class HomePage : UserControl
         Task<CalibrationCenterPosition>? activeFirstSetReturnToCenterTask = null;
         Task<CarouselAdvanceResult>? activeCarouselAdvanceTask = null;
         Task activeFeederVibrationTask = Task.CompletedTask;
+        Task<bool>? activeFeederLightOnTask = null;
         Task<int> activeFinalTestTask = Task.FromResult(0);
 
         // 如果当前已经在连续生产，再次点击按钮用于在安全节点暂停或继续。
@@ -1806,10 +1807,16 @@ public partial class HomePage : UserControl
             // 刷新主页按钮状态，把“开始运行”切成“停止循环”，并锁住其它会冲突的操作。
             UpdateHomeCommandState();
 
+            // 先清空旧画面，并在启动轴动作期间并行预热主页视觉显示。
+            // 后续每轮XY到拍照位时直接执行找芯片流程，不再重复激活和布局VisionMaster窗口。
+            ClearBlobInspectionResult();
+            var prepareInspectionViewTask = PrepareBlobInspectionVisionDisplayAsync(
+                visualCalibrationController);
+
             // 启动生产前先让R1/R2回原，同时经过位置2这个安全过渡点。
-            // XY仍必须严格先走Y、确认到位后再走X；两项都完成后才进入第一轮取料。
+            // XY仍必须严格先走Y、确认到位后再走X；视觉预热与这些动作并行。
             var productionAxes = VisionCalibration;
-            var startupSafePosition = await PrepareProductionStartupAxesAsync(
+            var startupAxesTask = PrepareProductionStartupAxesAsync(
                 motionController,
                 productionAxes.XHardwareAxisNo,
                 productionAxes.YHardwareAxisNo,
@@ -1818,6 +1825,8 @@ public partial class HomePage : UserControl
                 velocity,
                 firstSetYVelocity,
                 _productionCancellation.Token);
+            await Task.WhenAll(prepareInspectionViewTask, startupAxesTask);
+            var startupSafePosition = await startupAxesTask;
             await WaitIfProductionPausedAsync(_productionCancellation.Token);
             SetStartProductionStatus(
                 $"启动准备完成：R1/R2已回原，XY已按Y后X到达位置2" +
@@ -1837,7 +1846,6 @@ public partial class HomePage : UserControl
             var singleChipRemainsAfterPickupCache = false;
             var consecutiveLowMaterialVibrations = 0;
             var stopAfterCurrentBatch = false;
-            ClearBlobInspectionResult();
 
             // 连续生产会一直循环，直到用户请求停止或流程抛出异常。
             while (true)
@@ -1852,6 +1860,15 @@ public partial class HomePage : UserControl
 
                 // 清空上一轮缓存的吸嘴目标，避免异常重试时使用过期坐标。
                 ClearAssignedNozzleTargets();
+
+                // 缓存为空说明本轮需要拍照。振动一结束就提前开灯，
+                // 与XY回拍照位并行，避免到位后才开始等待光源通信。
+                if (pendingPickupBatches.Count == 0)
+                {
+                    activeFeederLightOnTask ??= OpenProductionLightAfterVibrationAsync(
+                        activeFeederVibrationTask,
+                        _productionCancellation.Token);
+                }
 
                 CalibrationCenterPosition actual;
                 if (pendingPickupBatches.Count > 0)
@@ -1910,11 +1927,11 @@ public partial class HomePage : UserControl
                 if (pendingPickupBatches.Count == 0)
                 {
                     // 最后一批物料取走后，振动已在后续纠偏/上料期间并行执行。
-                    // 回到拍照位时只补等尚未结束的部分，确保停振后再开灯取像。
+                    // 停振后光源会立即提前打开，并与XY回拍照位并行。
                     if (!activeFeederVibrationTask.IsCompleted)
                     {
                         SetStartProductionStatus(
-                            $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束后开灯拍照…",
+                            $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束；光源随后立即开启…",
                             Color.FromRgb(242, 181, 68));
                     }
 
@@ -1927,10 +1944,18 @@ public partial class HomePage : UserControl
                         $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
                         $"缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}…",
                         Color.FromRgb(242, 181, 68));
-                    await PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
-                    var blobResult = await RunChipInspectionWithFeederLightAsync(
-                        visualCalibrationController,
-                        _productionCancellation.Token);
+                    VisionRectangleBlobResult blobResult;
+                    try
+                    {
+                        blobResult = await RunChipInspectionWithFeederLightAsync(
+                            visualCalibrationController,
+                            activeFeederLightOnTask,
+                            _productionCancellation.Token);
+                    }
+                    finally
+                    {
+                        activeFeederLightOnTask = null;
+                    }
                     SetBlobInspectionResult(blobResult);
                     var selectedChipCount = Math.Min(
                         blobResult.Rectangles.Count,
@@ -2454,6 +2479,14 @@ public partial class HomePage : UserControl
 
             await ObserveCarouselAdvanceTaskNoThrowAsync(activeCarouselAdvanceTask);
             await ObserveTaskNoThrowAsync(activeFeederVibrationTask);
+            if (activeFeederLightOnTask is not null)
+            {
+                await ObserveTaskNoThrowAsync(activeFeederLightOnTask);
+            }
+            if (_connectionConfigController?.IsVibrationFeederLightEnabled == true)
+            {
+                _ = await _connectionConfigController.SetProductionLightAsync(enabled: false);
+            }
             await ObserveTaskNoThrowAsync(activeFinalTestTask);
             StopUphTracking();
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
@@ -2548,22 +2581,32 @@ public partial class HomePage : UserControl
 
     private async Task<VisionRectangleBlobResult> RunChipInspectionWithFeederLightAsync(
         VisualCalibrationPage visualCalibrationController,
+        Task<bool>? earlyLightOnTask,
         CancellationToken cancellationToken)
     {
         var connectionController = _connectionConfigController
             ?? throw new InvalidOperationException("振动盘控制组件未连接，无法控制拍照光源。");
 
         SetStartProductionStatus(
-            $"{ChipInspectionProcedureName}拍照前正在打开振动盘光源…",
+            $"{ChipInspectionProcedureName}视觉已预热，正在等待提前开启的光源并立即执行流程…",
             Color.FromRgb(242, 181, 68));
-        if (!await connectionController.SetProductionLightAsync(enabled: true))
-        {
-            throw new InvalidOperationException("振动盘拍照光源打开失败，已取消本次拍照。");
-        }
-
+        var lightOnTask = earlyLightOnTask ?? connectionController.SetProductionLightAsync(enabled: true);
+        var prepareVisionTask =
+            BlobInspectionVisionDisplayHost.Visibility == Visibility.Visible &&
+            BlobInspectionVisionDisplayHost.HostWindow != IntPtr.Zero
+                ? Task.CompletedTask
+                : PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
+        var lightTurnedOn = false;
         var inspectionCompleted = false;
         try
         {
+            await Task.WhenAll(lightOnTask, prepareVisionTask);
+            lightTurnedOn = await lightOnTask;
+            if (!lightTurnedOn)
+            {
+                throw new InvalidOperationException("振动盘拍照光源打开失败，已取消本次拍照。");
+            }
+
             var result = await visualCalibrationController.RunRectangleBlobInspectionAsync(
                 cancellationToken);
             inspectionCompleted = true;
@@ -2571,15 +2614,31 @@ public partial class HomePage : UserControl
         }
         finally
         {
-            // 无论拍照成功、视觉异常还是用户停止，都必须尝试关灯。
-            var lightTurnedOff = await connectionController.SetProductionLightAsync(enabled: false);
-            if (!lightTurnedOff &&
-                inspectionCompleted &&
-                !cancellationToken.IsCancellationRequested)
+            // 开灯与视觉显示准备并行；任一步异常时也必须关闭已经打开的光源。
+            if (lightTurnedOn || connectionController.IsVibrationFeederLightEnabled)
             {
-                throw new InvalidOperationException("振动盘已拍照，但光源关闭失败，已停止自动生产。");
+                var lightTurnedOff = await connectionController.SetProductionLightAsync(enabled: false);
+                if (!lightTurnedOff &&
+                    inspectionCompleted &&
+                    !cancellationToken.IsCancellationRequested)
+                {
+                    throw new InvalidOperationException("振动盘已拍照，但光源关闭失败，已停止自动生产。");
+                }
             }
         }
+    }
+
+    private async Task<bool> OpenProductionLightAfterVibrationAsync(
+        Task feederVibrationTask,
+        CancellationToken cancellationToken)
+    {
+        await feederVibrationTask;
+        await WaitIfProductionPausedAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var connectionController = _connectionConfigController
+            ?? throw new InvalidOperationException("振动盘控制组件未连接，无法提前打开拍照光源。");
+        return await connectionController.SetProductionLightAsync(enabled: true);
     }
 
     private bool RequestProductionPause()
