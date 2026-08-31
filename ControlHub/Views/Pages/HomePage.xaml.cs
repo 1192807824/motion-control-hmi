@@ -2223,11 +2223,12 @@ public partial class HomePage : UserControl
                 if (pendingPickupBatches.Count == 0)
                 {
                     // 最后一批物料取走后，振动已在后续纠偏/上料期间并行执行。
-                    // 停振后光源会立即提前打开，并与XY回拍照位并行。
+                    // 等后台震动序列结束后仍要经过最终停振安全门；首轮也不能因为
+                    // activeFeederVibrationTask 初始为 CompletedTask 就跳过停振确认。
                     if (!activeFeederVibrationTask.IsCompleted)
                     {
                         SetStartProductionStatus(
-                            $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束；光源随后立即开启…",
+                            $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束并停稳…",
                             Color.FromRgb(242, 181, 68));
                     }
 
@@ -2235,10 +2236,24 @@ public partial class HomePage : UserControl
                     activeFeederVibrationTask = Task.CompletedTask;
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
+                    var connectionController = _connectionConfigController
+                        ?? throw new InvalidOperationException("振动盘控制组件未连接，无法确认拍照前停振。");
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：震动序列已结束，正在执行最终停振并等待振动盘停稳…",
+                        Color.FromRgb(242, 181, 68));
+                    if (!await connectionController.EnsureStoppedForProductionPhotoAsync(
+                            _productionCancellation.Token))
+                    {
+                        _productionCancellation.Token.ThrowIfCancellationRequested();
+                        throw new InvalidOperationException(
+                            "拍照前最终停振失败，已取消本次拍照。");
+                    }
+                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
+
                     // 只有缓存已经取空时才重新执行找芯片流程；一次接收脚本1返回的全部X/Y/R结果。
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
-                        $"缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}…",
+                        $"振动盘已停稳，缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}…",
                         Color.FromRgb(242, 181, 68));
                     VisionRectangleBlobResult blobResult;
                     try

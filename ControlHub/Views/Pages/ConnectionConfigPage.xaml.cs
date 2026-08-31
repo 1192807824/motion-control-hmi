@@ -25,6 +25,7 @@ public partial class ConnectionConfigPage : UserControl
     private const int MaxConnectionLogCount = 300;
     private const int BrightnessSendDebounceMs = 150;
     private const int VibrationStopSettleMilliseconds = 50;
+    private const int ProductionPhotoSettleMilliseconds = 200;
     private const int ProductionUpDownGatherDurationMilliseconds = 100;
     private const string StopVibrationCommand = "&04$";
     private const string ProtocolCommandName = "\u632f\u52a8\u76d8\u534f\u8bae";
@@ -1127,6 +1128,35 @@ public partial class ConnectionConfigPage : UserControl
 
             _vibrationSequenceRunning = false;
         }
+    }
+
+    /// <summary>
+    /// 拍照前的最终停振安全门。即使上层记录的震动任务已经完成，也重新下发一次
+    /// 停止命令并等待机械余振消失；这样首轮拍照和外部手动震动后的拍照同样安全。
+    /// </summary>
+    public async Task<bool> EnsureStoppedForProductionPhotoAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog("拍照前停振确认失败：请先建立 TCP 连接");
+            return false;
+        }
+
+        // 开始生产时若仍有手动震动序列，先终止它；正在执行的脉冲会在 finally 中
+        // 再补发一次停止命令，和这里的最终停止命令不会冲突。
+        _vibrationOperationCancellation?.Cancel();
+
+        if (!await SendAsciiProtocolCommandAsync(
+                StopVibrationCommand,
+                "生产拍照前最终停振"))
+        {
+            return false;
+        }
+
+        await Task.Delay(ProductionPhotoSettleMilliseconds, cancellationToken);
+        AddLog($"生产拍照停振确认完成：已等待 {ProductionPhotoSettleMilliseconds} ms 停稳");
+        return true;
     }
 
     /// <summary>
