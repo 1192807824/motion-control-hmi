@@ -202,7 +202,6 @@ public partial class HomePage : UserControl
     private readonly Stopwatch _uphStopwatch = new();
     private readonly DispatcherTimer _uphRefreshTimer;
     private long _uphCompletedUnitCount;
-    private readonly Queue<(TimeSpan CompletedAt, int UnitCount)> _uphRecentCompletedBatches = [];
     private volatile bool _preserveIoOnEmergencyStop;
     private VisionCalibrationAxisSet? _productionAxisSet;
     private ProductionZPositions? _productionZPositions;
@@ -2128,6 +2127,7 @@ public partial class HomePage : UserControl
                 $"启动准备完成：R1/R2已回原，XY已按Y后X到达位置2" +
                 $"({startupSafePosition.ActualX:0.###}, {startupSafePosition.ActualY:0.###})，准备进入取料流程…",
                 Color.FromRgb(73, 209, 125));
+            StartUphTracking();
 
             // 从第 0 轮开始计数，进入循环后先自增为第 1 轮。
             var cycleNumber = 0;
@@ -2427,7 +2427,6 @@ public partial class HomePage : UserControl
                             Color.FromRgb(242, 181, 68));
                         await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
                         await WaitIfProductionPausedAsync(_productionCancellation.Token);
-                        StartUphTracking();
                         nozzle1SafePositionTask = nozzle2HasPart
                             ? await PickFirstSetNozzle1UntilXyReleaseAsync(
                                 _productionCancellation.Token)
@@ -2453,7 +2452,6 @@ public partial class HomePage : UserControl
                                 ? FirstSetNozzle1EarlyReleasePeerAxisNos
                                 : null);
                         await WaitIfProductionPausedAsync(_productionCancellation.Token);
-                        StartUphTracking();
                         await PickWithActiveSetNozzleAsync(
                             2,
                             _productionCancellation.Token,
@@ -3076,8 +3074,10 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             "生产流程已在安全节点暂停；点击“继续运行”将从下一步接着执行。",
             Color.FromRgb(242, 181, 68));
+        StopUphTracking();
         await resumeSignal.Task.WaitAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
+        StartUphTracking();
     }
 
     private async Task<CalibrationCenterPosition> MoveToStartupPosition2SafelyAsync(
@@ -3470,7 +3470,6 @@ public partial class HomePage : UserControl
     {
         try
         {
-            var completedUnitCount = 0;
             var pickWithNozzle2 = carouselStations[SecondSetNozzle2UnloadStation].Occupied;
             var pickWithNozzle1 = carouselStations[SecondSetNozzle1UnloadStation].Occupied;
             var zPositions = GetProductionZPositions();
@@ -3590,11 +3589,6 @@ public partial class HomePage : UserControl
                     nozzle1ZPositions.Safe,
                     cancellationToken);
                 RecordCompletedUphUnit();
-                completedUnitCount++;
-                if (!pickWithNozzle2)
-                {
-                    RecordCompletedUphBatch(completedUnitCount);
-                }
                 await WaitIfProductionPausedAsync(cancellationToken);
             }
 
@@ -3613,8 +3607,6 @@ public partial class HomePage : UserControl
                     nozzle2ZPositions.Safe,
                     cancellationToken);
                 RecordCompletedUphUnit();
-                completedUnitCount++;
-                RecordCompletedUphBatch(completedUnitCount);
                 await WaitIfProductionPausedAsync(cancellationToken);
             }
 
@@ -7661,13 +7653,12 @@ public partial class HomePage : UserControl
         _uphRefreshTimer.Stop();
         _uphStopwatch.Reset();
         _uphCompletedUnitCount = 0;
-        _uphRecentCompletedBatches.Clear();
         UpdateUphDisplay();
     }
 
     private void StartUphTracking()
     {
-        if (_uphStopwatch.IsRunning || _uphStopwatch.Elapsed > TimeSpan.Zero)
+        if (_uphStopwatch.IsRunning)
         {
             return;
         }
@@ -7699,23 +7690,6 @@ public partial class HomePage : UserControl
         UpdateUphDisplay();
     }
 
-    private void RecordCompletedUphBatch(int completedUnitCount)
-    {
-        if (completedUnitCount <= 0 || _uphStopwatch.Elapsed == TimeSpan.Zero)
-        {
-            return;
-        }
-
-        _uphRecentCompletedBatches.Enqueue((_uphStopwatch.Elapsed, completedUnitCount));
-        // 保留最近10个完整批次间隔；首个批次只作为计算起点。
-        while (_uphRecentCompletedBatches.Count > 11)
-        {
-            _uphRecentCompletedBatches.Dequeue();
-        }
-
-        UpdateUphDisplay();
-    }
-
     private void UpdateUphDisplay()
     {
         if (UphValueText is null)
@@ -7724,33 +7698,16 @@ public partial class HomePage : UserControl
         }
 
         var elapsedHours = _uphStopwatch.Elapsed.TotalHours;
-        var cumulativeUph = elapsedHours > 0
+        var uph = elapsedHours > 0
             ? _uphCompletedUnitCount / elapsedHours
             : 0d;
-        var displayedUph = cumulativeUph;
-        var calculationDescription = "累计实际平均";
-        var recentBatches = _uphRecentCompletedBatches.ToArray();
-        if (recentBatches.Length >= 2)
-        {
-            var rollingElapsedHours =
-                (recentBatches[^1].CompletedAt - recentBatches[0].CompletedAt).TotalHours;
-            if (rollingElapsedHours > 0)
-            {
-                var rollingCompletedUnits = recentBatches
-                    .Skip(1)
-                    .Sum(batch => batch.UnitCount);
-                displayedUph = rollingCompletedUnits / rollingElapsedHours;
-                calculationDescription = $"最近{recentBatches.Length - 1}批当前节拍";
-            }
-        }
-
-        UphValueText.Text = Math.Round(displayedUph, MidpointRounding.AwayFromZero)
+        UphValueText.Text = Math.Round(uph, MidpointRounding.AwayFromZero)
             .ToString("0", CultureInfo.InvariantCulture);
         UphValueText.ToolTip = _uphStopwatch.Elapsed == TimeSpan.Zero
-            ? "等待生产后按最近10批完成节拍统计"
-            : $"{calculationDescription} · 已完成 {_uphCompletedUnitCount} 件 · " +
-              $"累计 {_uphStopwatch.Elapsed:hh\\:mm\\:ss} · " +
-              $"累计UPH {Math.Round(cumulativeUph, MidpointRounding.AwayFromZero):0}";
+            ? "等待正式生产后开始统计"
+            : $"实际平均 · 已完成 {_uphCompletedUnitCount} 件 · " +
+              $"有效生产时间 {_uphStopwatch.Elapsed:hh\\:mm\\:ss} · " +
+              $"UPH {Math.Round(uph, MidpointRounding.AwayFromZero):0}";
     }
 
     private void SetOneKeyResetStatus(string message, Color color)

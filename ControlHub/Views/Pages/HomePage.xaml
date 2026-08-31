@@ -229,7 +229,7 @@
                     <TextBlock Text="LOT-20260715-A" Foreground="{StaticResource TextPrimary}" FontFamily="Consolas" FontSize="14" FontWeight="Bold" Margin="0,3,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="3" VerticalAlignment="Center">
-                    <TextBlock Text="当前UPH" Style="{StaticResource MutedLabel}" />
+                    <TextBlock Text="UPH" Style="{StaticResource MutedLabel}" />
                     <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
                         <TextBlock x:Name="UphValueText"
                                    Text="0"
