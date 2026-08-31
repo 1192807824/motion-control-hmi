@@ -778,7 +778,39 @@ public sealed class LeisaiMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
-            EnsureSuccess(LeisaiNative.dmc_emg_stop(_cardNo), "dmc_emg_stop");
+            var failures = new List<(string Operation, int ErrorCode)>();
+
+            // DMC-E3064S现场使用的是EtherCAT总线轴。除控制卡全局急停外，
+            // 再对每根实际总线轴下发立即停止，避免全局接口返回成功但总线轴未停。
+            var globalResult = LeisaiNative.dmc_emg_stop(_cardNo);
+            if (globalResult != 0)
+            {
+                failures.Add(("dmc_emg_stop", globalResult));
+            }
+
+            for (var hardwareAxisNo = 0; hardwareAxisNo < AxisCount; hardwareAxisNo++)
+            {
+                var axis = checked((ushort)hardwareAxisNo);
+                var axisResult = LeisaiNative.dmc_stop(_cardNo, axis, 1);
+                if (axisResult != 0)
+                {
+                    failures.Add(($"dmc_stop(axis={hardwareAxisNo}, emergency=1)", axisResult));
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                var firstFailure = failures[0];
+                throw new MotionCardException(
+                    "全轴急停存在下发失败：" +
+                    string.Join(
+                        "；",
+                        failures.Select(failure =>
+                            $"{failure.Operation} 返回 {failure.ErrorCode} " +
+                            $"(0x{unchecked((ushort)failure.ErrorCode):X4})")),
+                    firstFailure.Operation,
+                    firstFailure.ErrorCode);
+            }
         }
     }
 

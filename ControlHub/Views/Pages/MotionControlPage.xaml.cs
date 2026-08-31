@@ -4820,18 +4820,27 @@ public partial class MotionControlPage : UserControl
         }
 
         _externalEmergencyStopInputActive = true;
-        SetConnectionText("运动控制：外部急停按钮已按下");
-        RecordAlarmOnce(
-            "external-emergency-stop-active",
-            "EXTERNAL-EMERGENCY-STOP",
-            $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位{_motionOptions.ExternalEmergencyStopInputBit}触发，已执行全轴急停。");
         if (_externalEmergencyStopCommandIssued)
         {
+            if (!_motionSafetyLock)
+            {
+                SetConnectionText("运动控制：外部急停按钮已按下");
+            }
             return;
         }
 
         _externalEmergencyStopCommandIssued = true;
-        _ = EmergencyStopAllAxes("外部IO急停按钮触发");
+        SetConnectionText("运动控制：外部急停触发，正在停止全部轴");
+        var issued = EmergencyStopAllAxes("外部IO急停按钮触发");
+        if (issued)
+        {
+            RecordAlarmOnce(
+                "external-emergency-stop-active",
+                "EXTERNAL-EMERGENCY-STOP",
+                $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位{_motionOptions.ExternalEmergencyStopInputBit}触发；" +
+                "已下发控制卡全局急停及全部EtherCAT轴逐轴立即停止。");
+            SetConnectionText("运动控制：外部急停已下发，正在确认全部轴停止");
+        }
     }
 
     private void ThrowIfExternalEmergencyStopActive()
