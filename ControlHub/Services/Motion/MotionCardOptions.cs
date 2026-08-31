@@ -23,6 +23,14 @@ public sealed class MotionCardOptions
 
     public int DigitalOutputStartBit { get; init; }
 
+    public bool ExternalEmergencyStopEnabled { get; init; }
+
+    public int ExternalEmergencyStopInputPort { get; init; }
+
+    public int ExternalEmergencyStopInputBit { get; init; } = 1;
+
+    public bool ExternalEmergencyStopActiveLow { get; init; } = true;
+
     public int SimulationDigitalInputCount { get; init; } = 32;
 
     public int SimulationDigitalOutputCount { get; init; } = 32;
@@ -216,6 +224,16 @@ public sealed class MotionCardOptions
         if (DigitalOutputStartBit is < 0 or > 31)
         {
             throw new InvalidDataException("DigitalOutputStartBit 必须在 0 到 31 之间。");
+        }
+
+        if (ExternalEmergencyStopInputPort is < 0 or > ushort.MaxValue)
+        {
+            throw new InvalidDataException("ExternalEmergencyStopInputPort 超出有效范围。");
+        }
+
+        if (ExternalEmergencyStopInputBit is < 0 or > 31)
+        {
+            throw new InvalidDataException("ExternalEmergencyStopInputBit 必须在 0 到 31 之间。");
         }
 
         foreach (var count in new[]

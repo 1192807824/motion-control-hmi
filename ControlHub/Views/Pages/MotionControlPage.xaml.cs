@@ -64,6 +64,8 @@ public partial class MotionControlPage : UserControl
     private bool _polling;
     private bool _closed;
     private bool _motionSafetyLock;
+    private bool _externalEmergencyStopInputActive;
+    private bool _externalEmergencyStopCommandIssued;
     private bool _loadingAxisSettings;
     private bool _homeConfigurationSaveHealthy = true;
     private bool _calibrationOperationActive;
@@ -387,6 +389,8 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
+        ThrowIfExternalEmergencyStopActive();
+
         if (ViewModel?.MotionControlsEnabled != true)
         {
             throw new InvalidOperationException("运动控制尚未就绪。");
@@ -604,6 +608,8 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
+        ThrowIfExternalEmergencyStopActive();
+
         if (IsAnyMotionWorkflowActiveExcept(
                 allowedMovingAxisNos,
                 [xHardwareAxisNo, yHardwareAxisNo]))
@@ -703,6 +709,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActive())
         {
@@ -822,6 +830,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActiveExcept(allowedMovingAxisNos, hardwareAxisNo))
         {
@@ -985,6 +995,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActive())
         {
@@ -1243,6 +1255,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActiveExcept(
                 allowedMovingAxisNos,
@@ -1532,6 +1546,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActiveExcept(
                 allowedMovingAxisNos,
@@ -1832,6 +1848,8 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
+        ThrowIfExternalEmergencyStopActive();
+
         if (IsAnyMotionWorkflowActiveExcept(allowedMovingAxisNos, axisNumbers))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行轴组回原。");
@@ -1982,6 +2000,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。 ");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActive())
         {
@@ -4168,6 +4188,8 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
         }
 
+        ThrowIfExternalEmergencyStopActive();
+
         Dictionary<int, AxisStatus> axes;
         var resetStages = CreateTestOneKeyResetStages();
         try
@@ -4701,6 +4723,8 @@ public partial class MotionControlPage : UserControl
                             : $"运动控制：EtherCAT 正常（{_motionCard.AxisCount} 轴）");
             }
 
+            PollExternalEmergencyStopInput();
+
             foreach (var axis in Axes ?? [])
             {
                 if (!axis.IsAvailable)
@@ -4749,6 +4773,91 @@ public partial class MotionControlPage : UserControl
             HomeAllButton?.SetCurrentValue(IsEnabledProperty, CanRunHomeSequence());
             UpdateHomeEditorState();
             _polling = false;
+        }
+    }
+
+    private bool ExternalEmergencyStopMonitoringEnabled =>
+        _motionOptions.ExternalEmergencyStopEnabled && !_motionOptions.SimulationMode;
+
+    private bool ReadExternalEmergencyStopInputActive()
+    {
+        var state = _motionCard.ReadDigitalInputs(_motionOptions.ExternalEmergencyStopInputPort);
+        var inputHigh = (state & (1u << _motionOptions.ExternalEmergencyStopInputBit)) != 0;
+        return _motionOptions.ExternalEmergencyStopActiveLow ? !inputHigh : inputHigh;
+    }
+
+    private void PollExternalEmergencyStopInput()
+    {
+        if (!ExternalEmergencyStopMonitoringEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            UpdateExternalEmergencyStopState(ReadExternalEmergencyStopInputActive());
+            _activeAlarmKeys.Remove("external-emergency-stop-read");
+        }
+        catch (Exception exception)
+        {
+            SetConnectionText("运动控制：外部急停输入读取失败");
+            RecordAlarmOnce(
+                "external-emergency-stop-read",
+                "EXTERNAL-EMERGENCY-STOP-READ",
+                $"无法读取模块1001的外部急停输入，运动期间将执行全轴急停：{FormatException(exception)}");
+            HandleGlobalMonitoringFailure("外部急停输入读取失败");
+        }
+    }
+
+    private void UpdateExternalEmergencyStopState(bool active)
+    {
+        if (!active)
+        {
+            _externalEmergencyStopInputActive = false;
+            _externalEmergencyStopCommandIssued = false;
+            _activeAlarmKeys.Remove("external-emergency-stop-active");
+            return;
+        }
+
+        _externalEmergencyStopInputActive = true;
+        SetConnectionText("运动控制：外部急停按钮已按下");
+        RecordAlarmOnce(
+            "external-emergency-stop-active",
+            "EXTERNAL-EMERGENCY-STOP",
+            $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位{_motionOptions.ExternalEmergencyStopInputBit}触发，已执行全轴急停。");
+        if (_externalEmergencyStopCommandIssued)
+        {
+            return;
+        }
+
+        _externalEmergencyStopCommandIssued = true;
+        _ = EmergencyStopAllAxes("外部IO急停按钮触发");
+    }
+
+    private void ThrowIfExternalEmergencyStopActive()
+    {
+        if (!ExternalEmergencyStopMonitoringEnabled || !_motionCard.IsOpen)
+        {
+            return;
+        }
+
+        try
+        {
+            UpdateExternalEmergencyStopState(ReadExternalEmergencyStopInputActive());
+            _activeAlarmKeys.Remove("external-emergency-stop-read");
+        }
+        catch (Exception exception)
+        {
+            RecordAlarmOnce(
+                "external-emergency-stop-read",
+                "EXTERNAL-EMERGENCY-STOP-READ",
+                $"无法读取模块1001的外部急停输入，禁止启动运动：{FormatException(exception)}");
+            throw new InvalidOperationException("外部急停输入读取失败，禁止启动运动。", exception);
+        }
+
+        if (_externalEmergencyStopInputActive)
+        {
+            throw new InvalidOperationException("外部急停按钮仍处于按下状态，请释放按钮后再启动运动。");
         }
     }
 
@@ -5532,6 +5641,15 @@ public partial class MotionControlPage : UserControl
 
     private bool EnsureProcessIoWriteReady()
     {
+        if (_externalEmergencyStopInputActive)
+        {
+            RecordAlarmOnce(
+                "process-io-blocked-by-external-emergency-stop",
+                "PROCESS-IO-EXTERNAL-EMERGENCY-STOP",
+                "外部急停按钮仍处于按下状态，生产IO写入已冻结。");
+            return false;
+        }
+
         if (_motionSafetyLock)
         {
             RecordAlarmOnce(
@@ -5566,7 +5684,19 @@ public partial class MotionControlPage : UserControl
 
         if (_motionCard.IsOpen)
         {
-            return true;
+            try
+            {
+                ThrowIfExternalEmergencyStopActive();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                RecordAlarmOnce(
+                    "motion-command-blocked-by-external-emergency-stop",
+                    "MOTION-EXTERNAL-EMERGENCY-STOP",
+                    FormatException(exception));
+                return false;
+            }
         }
 
         return false;
@@ -5634,6 +5764,7 @@ public partial class MotionControlPage : UserControl
         HomeEditorPanel.IsEnabled =
             ViewModel?.MotionControlsEnabled == true &&
             !_motionSafetyLock &&
+            !_externalEmergencyStopInputActive &&
             !IsAnyMotionWorkflowActive() &&
             SelectedAxis is { IsAvailable: true, StatusReadHealthy: true, IsMoving: false };
         UpdateHomeActionState();
@@ -5647,6 +5778,7 @@ public partial class MotionControlPage : UserControl
             _homeConfigurationSaveHealthy &&
             workflowIdle &&
             !_motionSafetyLock &&
+            !_externalEmergencyStopInputActive &&
             SelectedAxis?.CanHome == true);
         HomeAllButton?.SetCurrentValue(
             IsEnabledProperty,
@@ -5661,6 +5793,7 @@ public partial class MotionControlPage : UserControl
         var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
+               !_externalEmergencyStopInputActive &&
                !IsAnyMotionWorkflowActive() &&
                CreateTestOneKeyResetStages()
                    .SelectMany(stage => stage.Groups)
@@ -5681,6 +5814,7 @@ public partial class MotionControlPage : UserControl
         var sequence = _motionOptions.GetHomeSequence();
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
+               !_externalEmergencyStopInputActive &&
                !IsAnyMotionWorkflowActive() &&
                sequence.Count > 0 &&
                sequence.All(hardwareAxisNo =>

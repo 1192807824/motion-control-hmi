@@ -93,7 +93,7 @@ public partial class HomePage : UserControl
     private const int CarouselStationCount = 16;
     private const int CarouselVacuumSprayPulseMilliseconds = 30;
     private const int DefaultTestStationDwellMilliseconds = 20;
-    private const int MoveAwayBeforeDdMilliseconds = 500;
+    private const int MoveAwayBeforeDdMilliseconds = 200;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
