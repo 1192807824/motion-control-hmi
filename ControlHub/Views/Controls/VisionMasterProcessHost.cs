@@ -723,8 +723,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 CultureInfo.InvariantCulture,
                 out var imageHeight) ||
             !((imageWidth > 0 &&
-               imageHeight > 0 &&
-               !string.IsNullOrWhiteSpace(parts[imageOffset + 2])) ||
+               imageHeight > 0) ||
               (imageWidth == 0 &&
                imageHeight == 0 &&
                string.IsNullOrWhiteSpace(parts[imageOffset + 2]))))

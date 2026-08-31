@@ -1024,9 +1024,20 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    // 生产主页已直接承载VisionMaster画面，坐标结果应先返回；
-                    // 显示改为后台刷新，不再同步渲染并保存随后会被主页删除的临时图片。
-                    QueueInspectionDisplayRefreshNoThrow();
+                    // 生产主页直接承载VisionMaster画面，不再保存随后会被删除的临时图片；
+                    // 但吸嘴坐标换算必须使用本次图像的真实中心，因此仍需刷新一次并返回宽高。
+                    VisionRenderControl.UpdateVMResultShow();
+                    ImagePlaceholder.Visibility = Visibility.Collapsed;
+                    var image = VisionRenderControl.ImageSource;
+                    if (image is null || image.Width <= 0 || image.Height <= 0)
+                    {
+                        throw new InvalidOperationException("本次检测图像没有有效尺寸。");
+                    }
+
+                    inspectionImage = new InspectionImageFile(
+                        string.Empty,
+                        image.Width,
+                        image.Height);
                 }
             }
             catch (Exception exception)
@@ -1756,27 +1767,6 @@ public partial class MainWindow : Window
         catch
         {
             // 图像显示不参与生产判定；视觉流程结果仍按各结果模块正常读取。
-        }
-    }
-
-    private void QueueInspectionDisplayRefreshNoThrow()
-    {
-        var generation = _liveRenderGeneration;
-        try
-        {
-            _ = Dispatcher.InvokeAsync(
-                () =>
-                {
-                    if (generation == _liveRenderGeneration)
-                    {
-                        RefreshInspectionDisplayNoThrow();
-                    }
-                },
-                DispatcherPriority.Background);
-        }
-        catch
-        {
-            // 窗口关闭时不再安排显示刷新；生产坐标结果不受影响。
         }
     }
 
