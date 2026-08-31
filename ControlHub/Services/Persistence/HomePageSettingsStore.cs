@@ -145,6 +145,9 @@ public sealed class HomePageSettings
 
     public int? VacuumValveSwitchDelayMilliseconds { get; set; }
 
+    // 第一套吸嘴1取料后沿Z轴负方向上升此距离即可放行XY；0表示等待完整安全位。
+    public double? FirstSetNozzle1XyReleaseLiftPulses { get; set; }
+
     public double? SecondSetPickupPosition1X { get; set; }
 
     public double? SecondSetPickupPosition1Y { get; set; }

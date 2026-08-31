@@ -530,6 +530,64 @@ public partial class MotionControlPage : UserControl
             y.FeedbackPosition);
     }
 
+    /// <summary>
+    /// 监视一根正在运动的轴；反馈位置到达或低于指定负方向阈值后立即返回，
+    /// 不停止该轴，调用方可让它继续运动到原命令的最终目标。
+    /// </summary>
+    public async Task<MotionAxisSnapshot> WaitForAxisFeedbackAtOrBelowAsync(
+        int hardwareAxisNo,
+        double releasePosition,
+        Task motionCompletionTask,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(motionCompletionTask);
+        if (hardwareAxisNo < 0 || !double.IsFinite(releasePosition))
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        if (_closed || !_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接，不能监视Z轴XY放行位置。");
+        }
+
+        var axis = Axes?.FirstOrDefault(item =>
+                       item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (motionCompletionTask.IsCompleted)
+            {
+                await motionCompletionTask;
+            }
+
+            var snapshot = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, snapshot);
+            if (snapshot.Alarm || snapshot.EmergencyInput || snapshot.StopReason != 0)
+            {
+                throw new MotionCardException(
+                    $"{axis.Name}等待XY放行位置时发生报警、急停或异常停止：{snapshot.StateText}。",
+                    "Z轴XY放行位置监视");
+            }
+
+            if (snapshot.FeedbackPosition <= releasePosition)
+            {
+                return snapshot;
+            }
+
+            if (motionCompletionTask.IsCompleted)
+            {
+                throw new InvalidOperationException(
+                    $"{axis.Name}已停止，但未到XY放行位置：" +
+                    $"{snapshot.FeedbackPosition:0.###}/{releasePosition:0.###} pulse。");
+            }
+
+            await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
+        }
+    }
+
     public void ConfigureAxisMoveParameters(
         int hardwareAxisNo,
         double startVelocity,
