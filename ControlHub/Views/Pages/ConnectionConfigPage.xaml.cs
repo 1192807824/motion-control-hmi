@@ -24,6 +24,7 @@ public partial class ConnectionConfigPage : UserControl
 
     private const int MaxConnectionLogCount = 300;
     private const int BrightnessSendDebounceMs = 150;
+    private const int VibrationStopSettleMilliseconds = 50;
     private const string StopVibrationCommand = "&04$";
     private const string ProtocolCommandName = "\u632f\u52a8\u76d8\u534f\u8bae";
     private const string LightOnCommand = "&07,1$";
@@ -71,6 +72,8 @@ public partial class ConnectionConfigPage : UserControl
     private bool _loaded;
     private bool _vibrationSequenceRunning;
     private bool _vibrationFeederLightEnabled;
+    private string? _productionVibrationSetupSignature;
+    private int? _appliedFeederBrightness;
     private CancellationTokenSource? _vibrationOperationCancellation;
     private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
 
@@ -708,10 +711,22 @@ public partial class ConnectionConfigPage : UserControl
     private async Task ConnectFeederAsync(VibrationFeederSettings settings)
     {
         _connecting = true;
+        _productionVibrationSetupSignature = null;
+        _appliedFeederBrightness = null;
 
         try
         {
             await _tcpClient.ConnectAsync(settings, _lifetimeCancellation.Token);
+            if (!await EnsureProductionVibrationSettingsAppliedAsync(
+                    settings,
+                    _lifetimeCancellation.Token) ||
+                !await EnsureFeederBrightnessAppliedAsync(
+                    settings,
+                    "连接初始化光源亮度"))
+            {
+                _tcpClient.Close();
+                throw new InvalidOperationException("振动盘生产参数初始化失败。");
+            }
             settings.LastSuccessfulConnectionSignature = CreateTcpConnectionSignature(settings.Host, settings.Port);
             _settingsStore.Save(settings);
             SetFeederStatus($"\u5df2\u8fde\u63a5\uff1a{settings.Host}:{settings.Port}");
@@ -1051,9 +1066,6 @@ public partial class ConnectionConfigPage : UserControl
             return false;
         }
 
-        CommitInputBindings(this);
-        _settingsStore.Save(settings);
-
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _lifetimeCancellation.Token);
@@ -1064,19 +1076,21 @@ public partial class ConnectionConfigPage : UserControl
             AddLog(
                 $"生产震动开始：震散 -> 向左，频率 {settings.DirectionalVibrationFrequency}，" +
                 $"振幅 {settings.DirectionalVibrationAmplitude}%，每段 {settings.DirectionalVibrationDurationMilliseconds} ms");
-            if (!await SendAsciiProtocolCommandAsync("&05,00$", "生产震动-切换正常模式"))
+            if (!await EnsureProductionVibrationSettingsAppliedAsync(
+                    settings,
+                    operationCancellation.Token))
             {
                 return false;
             }
 
             if (!await RunVibrationPulseAsync(
-                    BuildDirectionalVibrationParameterCommand(settings, "04"),
+                    parameterCommand: null,
                     "&03,04$",
                     settings.DirectionalVibrationDurationMilliseconds,
                     "生产震动-震散",
                     operationCancellation.Token) ||
                 !await RunVibrationPulseAsync(
-                    BuildDirectionalVibrationParameterCommand(settings, "03"),
+                    parameterCommand: null,
                     "&03,03$",
                     settings.DirectionalVibrationDurationMilliseconds,
                     "生产震动-向左",
@@ -1154,7 +1168,6 @@ public partial class ConnectionConfigPage : UserControl
             settings.LightOnBrightness = normalizedBrightness;
         }
 
-        _settingsStore.Save(settings);
         if (!await SendAsciiProtocolCommandAsync(
                 LightOnCommand,
                 $"{actionName}打开"))
@@ -1162,9 +1175,7 @@ public partial class ConnectionConfigPage : UserControl
             return false;
         }
 
-        if (await SendAsciiProtocolCommandAsync(
-                $"&06,{normalizedBrightness:00},XX$",
-                $"{actionName}亮度 {normalizedBrightness:00}%"))
+        if (await EnsureFeederBrightnessAppliedAsync(settings, $"{actionName}亮度"))
         {
             _vibrationFeederLightEnabled = true;
             return true;
@@ -1186,6 +1197,62 @@ public partial class ConnectionConfigPage : UserControl
         var amplitude = Math.Clamp(settings.DirectionalVibrationAmplitude, 0, 100);
         var channel = $"{frequency:000},{amplitude:000},1";
         return $"&02,{channel},{channel},{channel},{channel},{mode}$";
+    }
+
+    private async Task<bool> EnsureProductionVibrationSettingsAppliedAsync(
+        VibrationFeederSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var setupCommands = new[]
+        {
+            "&05,00$",
+            BuildDirectionalVibrationParameterCommand(settings, "04"),
+            BuildDirectionalVibrationParameterCommand(settings, "03")
+        };
+        var setupSignature = string.Join('\n', setupCommands);
+        if (string.Equals(
+                _productionVibrationSetupSignature,
+                setupSignature,
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        for (var index = 0; index < setupCommands.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!await SendAsciiProtocolCommandAsync(
+                    setupCommands[index],
+                    $"生产参数初始化 {index + 1}/{setupCommands.Length}"))
+            {
+                return false;
+            }
+        }
+
+        _productionVibrationSetupSignature = setupSignature;
+        AddLog("生产震动参数已下发；后续每轮只发送启动和停止命令");
+        return true;
+    }
+
+    private async Task<bool> EnsureFeederBrightnessAppliedAsync(
+        VibrationFeederSettings settings,
+        string actionName)
+    {
+        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
+        if (_appliedFeederBrightness == normalizedBrightness)
+        {
+            return true;
+        }
+
+        if (!await SendAsciiProtocolCommandAsync(
+                $"&06,{normalizedBrightness:00},XX$",
+                $"{actionName} {normalizedBrightness:00}%"))
+        {
+            return false;
+        }
+
+        _appliedFeederBrightness = normalizedBrightness;
+        return true;
     }
 
     private async void LightOn_Click(object sender, RoutedEventArgs e)
@@ -1279,9 +1346,12 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         _settingsStore.Save(settings);
-        await SendAsciiProtocolCommandAsync(
-            $"&06,{normalizedBrightness:00},XX$",
-            $"{actionName} {normalizedBrightness:00}%");
+        if (await SendAsciiProtocolCommandAsync(
+                $"&06,{normalizedBrightness:00},XX$",
+                $"{actionName} {normalizedBrightness:00}%"))
+        {
+            _appliedFeederBrightness = normalizedBrightness;
+        }
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
@@ -1454,15 +1524,16 @@ public partial class ConnectionConfigPage : UserControl
     }
 
     private async Task<bool> RunVibrationPulseAsync(
-        string parameterCommand,
+        string? parameterCommand,
         string startCommand,
         int durationMs,
         string actionName,
         CancellationToken cancellationToken)
     {
-        if (!await SendAsciiProtocolCommandAsync(
-                parameterCommand,
-                $"{actionName}-\u4e0b\u53d1\u53c2\u6570") ||
+        if ((!string.IsNullOrWhiteSpace(parameterCommand) &&
+             !await SendAsciiProtocolCommandAsync(
+                 parameterCommand,
+                 $"{actionName}-\u4e0b\u53d1\u53c2\u6570")) ||
             !await SendAsciiProtocolCommandAsync(
                 startCommand,
                 $"{actionName}-\u542f\u52a8"))
@@ -1483,7 +1554,7 @@ public partial class ConnectionConfigPage : UserControl
                 $"{actionName}-\u505c\u6b62");
         }
 
-        await Task.Delay(120, cancellationToken);
+        await Task.Delay(VibrationStopSettleMilliseconds, cancellationToken);
         return stopped;
     }
 
@@ -1728,6 +1799,8 @@ public partial class ConnectionConfigPage : UserControl
         Dispatcher.BeginInvoke(new Action(() =>
         {
             _vibrationFeederLightEnabled = false;
+            _productionVibrationSetupSignature = null;
+            _appliedFeederBrightness = null;
             SetFeederStatus("\u672a\u8fde\u63a5");
 
             AddLog(exception is null

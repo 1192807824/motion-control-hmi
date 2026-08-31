@@ -7154,6 +7154,28 @@ public partial class HomePage : UserControl
 
     private void SetBlobInspectionResult(VisionRectangleBlobResult result)
     {
+        if (BlobInspectionVisionDisplayHost.Visibility == Visibility.Visible)
+        {
+            if (!string.IsNullOrWhiteSpace(result.ImagePath))
+            {
+                try
+                {
+                    File.Delete(result.ImagePath);
+                }
+                catch
+                {
+                }
+            }
+
+            BlobInspectionImageStatusText.Text =
+                result.ImageWidth > 0 && result.ImageHeight > 0
+                    ? $"找芯片流程 · {result.Rectangles.Count}颗 · 图像源1 · {result.ImageWidth}×{result.ImageHeight}"
+                    : $"找芯片流程 · {result.Rectangles.Count}颗 · 图像源1";
+            BlobInspectionImageStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(73, 209, 125));
+            return;
+        }
+
         if (result.ImageWidth <= 0 ||
             result.ImageHeight <= 0 ||
             string.IsNullOrWhiteSpace(result.ImagePath))
@@ -7161,23 +7183,6 @@ public partial class HomePage : UserControl
             BlobInspectionImageStatusText.Text = "XY已显示 · 本次未返回检测图";
             BlobInspectionImageStatusText.Foreground =
                 new SolidColorBrush(Color.FromRgb(242, 181, 68));
-            return;
-        }
-
-        if (BlobInspectionVisionDisplayHost.Visibility == Visibility.Visible)
-        {
-            try
-            {
-                File.Delete(result.ImagePath);
-            }
-            catch
-            {
-            }
-
-            BlobInspectionImageStatusText.Text =
-                $"找芯片流程 · {result.Rectangles.Count}颗 · 图像源1 · {result.ImageWidth}×{result.ImageHeight}";
-            BlobInspectionImageStatusText.Foreground =
-                new SolidColorBrush(Color.FromRgb(73, 209, 125));
             return;
         }
 

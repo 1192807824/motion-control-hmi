@@ -973,7 +973,6 @@ public partial class MainWindow : Window
             else
             {
                 BindInspectionResultModule(displayModule!);
-                RefreshInspectionDisplayNoThrow();
             }
 
             List<RectangleBlobCandidate> candidates;
@@ -1017,9 +1016,18 @@ public partial class MainWindow : Window
             var imageWarning = "";
             try
             {
-                VisionRenderControl.UpdateVMResultShow();
-                ImagePlaceholder.Visibility = Visibility.Collapsed;
-                inspectionImage = SaveInspectionImage();
+                if (isNozzlePointProcedure)
+                {
+                    VisionRenderControl.UpdateVMResultShow();
+                    ImagePlaceholder.Visibility = Visibility.Collapsed;
+                    inspectionImage = SaveInspectionImage();
+                }
+                else
+                {
+                    // 生产主页已直接承载VisionMaster画面，坐标结果应先返回；
+                    // 显示改为后台刷新，不再同步渲染并保存随后会被主页删除的临时图片。
+                    QueueInspectionDisplayRefreshNoThrow();
+                }
             }
             catch (Exception exception)
             {
@@ -1748,6 +1756,27 @@ public partial class MainWindow : Window
         catch
         {
             // 图像显示不参与生产判定；视觉流程结果仍按各结果模块正常读取。
+        }
+    }
+
+    private void QueueInspectionDisplayRefreshNoThrow()
+    {
+        var generation = _liveRenderGeneration;
+        try
+        {
+            _ = Dispatcher.InvokeAsync(
+                () =>
+                {
+                    if (generation == _liveRenderGeneration)
+                    {
+                        RefreshInspectionDisplayNoThrow();
+                    }
+                },
+                DispatcherPriority.Background);
+        }
+        catch
+        {
+            // 窗口关闭时不再安排显示刷新；生产坐标结果不受影响。
         }
     }
 
