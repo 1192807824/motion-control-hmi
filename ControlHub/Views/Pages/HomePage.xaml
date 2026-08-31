@@ -2186,7 +2186,7 @@
                                                FontSize="12"
                                                FontWeight="Bold"
                                                VerticalAlignment="Center" />
-                                    <UniformGrid Grid.Row="1" Rows="6" Columns="4">
+                                    <UniformGrid Grid.Row="1" Rows="7" Columns="4">
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="上料 · 吸嘴1 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="FirstSetNozzle1PickupZPositionTextBox"
@@ -2269,7 +2269,7 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="吸嘴2 · 预下降量（+Z）"
+                                    <TextBlock Text="取料吸嘴2 · 预下降量（+Z）"
                                                Foreground="#F4C95D"
                                                FontSize="9"
                                                FontWeight="Bold" />
@@ -2281,6 +2281,21 @@
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
                                              ToolTip="吸嘴1取料时，吸嘴2从安全位沿Z轴正方向提前下降此脉冲量；请输入经现场确认不会干涉XY横移的正数，0表示禁用"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="放料吸嘴2 · 预下降量（+Z）"
+                                               Foreground="#F4C95D"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                    <TextBox x:Name="FirstSetNozzle2PlacePreDropTextBox"
+                                             Height="25"
+                                             Text="0"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="吸嘴1放料时，吸嘴2从安全位沿Z轴正方向提前下降此脉冲量；请输入经现场确认不会干涉XY横移的正数，0表示禁用"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">

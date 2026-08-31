@@ -46,6 +46,7 @@ public partial class HomePage : UserControl
     private const int DefaultVacuumPickupDwellMilliseconds = 500;
     private const double DefaultFirstSetNozzle1XyReleaseLiftPulses = 1_000d;
     private const double DefaultFirstSetNozzle2PreDropPulses = 0d;
+    private const double DefaultFirstSetNozzle2PlacePreDropPulses = 0d;
     private const int FirstSetNozzle1ZHardwareAxisNo = 5;
     private const int FirstSetNozzle1RHardwareAxisNo = 6;
     private const int FirstSetNozzle2ZHardwareAxisNo = 7;
@@ -964,7 +965,8 @@ public partial class HomePage : UserControl
 
     private async Task PlaceWithActiveSetNozzleAsync(
         int nozzleNumber,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         var axisSet = _productionAxisSet ?? _visionCalibration.ActiveAxisSet;
         var positions = GetProductionZPositions().Resolve(axisSet, nozzleNumber);
@@ -973,7 +975,8 @@ public partial class HomePage : UserControl
             nozzleNumber,
             positions.Drop,
             positions.Safe,
-            cancellationToken);
+            cancellationToken,
+            allowedMovingAxisNos);
     }
 
     private async Task PlaceWithNozzleAsync(
@@ -981,14 +984,16 @@ public partial class HomePage : UserControl
         int nozzleNumber,
         double dropPosition,
         double safePosition,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         await MoveNozzleZToAsync(
             axisSet,
             nozzleNumber,
             dropPosition,
             "放料位",
-            cancellationToken);
+            cancellationToken,
+            allowedMovingAxisNos);
 
         await PulseNozzleBreakVacuumAsync(axisSet, nozzleNumber, cancellationToken);
 
@@ -997,7 +1002,84 @@ public partial class HomePage : UserControl
             nozzleNumber,
             safePosition,
             "安全位",
+            cancellationToken,
+            allowedMovingAxisNos);
+    }
+
+    private async Task<Task> PlaceFirstSetNozzle1UntilXyReleaseAsync(
+        CancellationToken cancellationToken)
+    {
+        var positions = GetProductionZPositions();
+        var nozzle1Positions = positions.FirstSetNozzle1;
+        var placePreDropPulses = GetProductionZDwellTimes().FirstSetNozzle2PlacePreDropPulses;
+
+        if (placePreDropPulses > 0)
+        {
+            await MoveFirstSetNozzle1ToDropWithNozzle2PreDropAsync(
+                nozzle1Positions.Drop,
+                positions.FirstSetNozzle2.Safe + placePreDropPulses,
+                placePreDropPulses,
+                cancellationToken);
+        }
+        else
+        {
+            await MoveNozzleZToAsync(
+                VisionCalibrationAxisSet.First,
+                1,
+                nozzle1Positions.Drop,
+                "放料位",
+                cancellationToken);
+        }
+
+        await PulseNozzleBreakVacuumAsync(
+            VisionCalibrationAxisSet.First,
+            1,
             cancellationToken);
+
+        // 破真空完成即放行XY；Z1沿-Z回安全位的动作继续在后台执行。
+        var safePositionTask = MoveNozzleZToAsync(
+            VisionCalibrationAxisSet.First,
+            1,
+            nozzle1Positions.Safe,
+            "安全位",
+            cancellationToken);
+        SetFirstSetPositionStatus(
+            "Z1破真空已完成，XY立即放行前往位置2；Z1继续沿-Z回安全位。",
+            true);
+        return safePositionTask;
+    }
+
+    private async Task MoveFirstSetNozzle1ToDropWithNozzle2PreDropAsync(
+        double nozzle1DropPosition,
+        double nozzle2PreDropPosition,
+        double nozzle2PreDropPulses,
+        CancellationToken cancellationToken)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        ApplyCurrentProductionAxisMotionSettings(motionController);
+        var targets = new Dictionary<int, double>
+        {
+            [FirstSetNozzle1ZHardwareAxisNo] = nozzle1DropPosition,
+            [FirstSetNozzle2ZHardwareAxisNo] = nozzle2PreDropPosition
+        };
+        SetFirstSetPositionStatus(
+            $"Z1正在下降到放料位 {nozzle1DropPosition:0.###}；" +
+            $"Z2同步沿+Z执行放料预下降 {nozzle2PreDropPulses:0.###} pulse " +
+            $"至 {nozzle2PreDropPosition:0.###}…",
+            true);
+
+        var actual = await motionController.MoveAxesAbsoluteAsync(
+            targets,
+            cancellationToken,
+            allowedMovingAxisNos: FirstSetProductionPeerAxisNos,
+            minimumCompletionTolerance: HomePageCompletionTolerance,
+            velocityOverrides: GetProductionAxisVelocities(targets.Keys));
+        var actualByAxis = actual.ToDictionary(item => item.HardwareAxisNo);
+        SetFirstSetPositionStatus(
+            $"Z1已到放料位 {actualByAxis[FirstSetNozzle1ZHardwareAxisNo].FeedbackPosition:0.###}；" +
+            $"Z2已完成放料预下降 {actualByAxis[FirstSetNozzle2ZHardwareAxisNo].FeedbackPosition:0.###} pulse。",
+            true);
     }
 
     private async Task MoveNozzleZToAsync(
@@ -1068,7 +1150,8 @@ public partial class HomePage : UserControl
         int nozzleNumber,
         string positionName,
         LowerCameraPlacementTarget target,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (nozzleNumber is not (1 or 2))
         {
@@ -1111,7 +1194,8 @@ public partial class HomePage : UserControl
         var actual = await motionController.MoveAxesAbsoluteAsync(
             targets,
             cancellationToken,
-            allowedMovingAxisNos: GetProductionPeerAxisNos(VisionCalibrationAxisSet.First),
+            allowedMovingAxisNos: allowedMovingAxisNos ??
+                                  GetProductionPeerAxisNos(VisionCalibrationAxisSet.First),
             minimumCompletionTolerance: HomePageCompletionTolerance,
             velocityOverrides: GetProductionAxisVelocities(targets.Keys));
         var actualByAxis = actual.ToDictionary(item => item.HardwareAxisNo);
@@ -2405,6 +2489,9 @@ public partial class HomePage : UserControl
                         Color.FromRgb(73, 209, 125));
                 }
 
+                Task nozzle1PlaceSafePositionTask = Task.CompletedTask;
+                try
+                {
                 if (nozzle1HasPart)
                 {
                     SetStartProductionStatus(
@@ -2436,13 +2523,22 @@ public partial class HomePage : UserControl
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：1工位已到位，Z1正在下降到配置放料位…",
                         Color.FromRgb(242, 181, 68));
-                    await PlaceWithActiveSetNozzleAsync(1, _productionCancellation.Token);
-                    await MoveNozzleRToAsync(
-                        VisionCalibrationAxisSet.First,
-                        1,
-                        pickupRPositions.ActualX,
-                        "本批取料基准位",
-                        _productionCancellation.Token);
+                    nozzle1PlaceSafePositionTask = nozzle2HasPart
+                        ? await PlaceFirstSetNozzle1UntilXyReleaseAsync(
+                            _productionCancellation.Token)
+                        : PlaceWithActiveSetNozzleAsync(
+                            1,
+                            _productionCancellation.Token);
+                    if (!nozzle2HasPart)
+                    {
+                        await nozzle1PlaceSafePositionTask;
+                        await MoveNozzleRToAsync(
+                            VisionCalibrationAxisSet.First,
+                            1,
+                            pickupRPositions.ActualX,
+                            "本批取料基准位",
+                            _productionCancellation.Token);
+                    }
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
                 }
 
@@ -2450,7 +2546,7 @@ public partial class HomePage : UserControl
                 {
                     SetStartProductionStatus(
                         (nozzle1HasPart
-                            ? $"第{cycleNumber}轮：Z1已放料、R1已回本批取料基准位，"
+                            ? $"第{cycleNumber}轮：Z1已破真空并开始沿-Z回安全位，"
                             : $"第{cycleNumber}轮：缺料收尾，") +
                         $"正在按{position2TargetDescription}前往2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
                         $"{(nozzle2OriginalR.HasValue ? $", R={position2Target.R:0.###}" : string.Empty)})…",
@@ -2463,7 +2559,10 @@ public partial class HomePage : UserControl
                             2,
                             "位置 2",
                             position2Target,
-                            _productionCancellation.Token);
+                            _productionCancellation.Token,
+                            nozzle1HasPart
+                                ? FirstSetNozzle1EarlyReleasePeerAxisNos
+                                : null);
                     }
                     else
                     {
@@ -2471,7 +2570,10 @@ public partial class HomePage : UserControl
                             "位置 2",
                             position2Target.X,
                             position2Target.Y,
-                            _productionCancellation.Token);
+                            _productionCancellation.Token,
+                            nozzle1HasPart
+                                ? FirstSetNozzle1EarlyReleasePeerAxisNos
+                                : null);
                     }
                     await WaitIfProductionPausedAsync(_productionCancellation.Token);
                     await WaitForCarouselBeforePlacementAsync("2工位");
@@ -2480,13 +2582,35 @@ public partial class HomePage : UserControl
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：2工位已到位，Z2正在下降到配置放料位…",
                         Color.FromRgb(242, 181, 68));
-                    await PlaceWithActiveSetNozzleAsync(2, _productionCancellation.Token);
+                    await PlaceWithActiveSetNozzleAsync(
+                        2,
+                        _productionCancellation.Token,
+                        nozzle1HasPart
+                            ? FirstSetNozzle1EarlyReleasePeerAxisNos
+                            : null);
+                    await nozzle1PlaceSafePositionTask;
+                    if (nozzle1HasPart)
+                    {
+                        await MoveNozzleRToAsync(
+                            VisionCalibrationAxisSet.First,
+                            1,
+                            pickupRPositions.ActualX,
+                            "本批取料基准位",
+                            _productionCancellation.Token);
+                    }
                     await MoveNozzleRToAsync(
                         VisionCalibrationAxisSet.First,
                         2,
                         pickupRPositions.ActualY,
                         "本批取料基准位",
                         _productionCancellation.Token);
+                }
+                await nozzle1PlaceSafePositionTask;
+                }
+                catch
+                {
+                    await ObserveTaskNoThrowAsync(nozzle1PlaceSafePositionTask);
+                    throw;
                 }
                 CloseAllActiveSetNozzleVacuumOutputs();
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
@@ -5045,7 +5169,8 @@ public partial class HomePage : UserControl
         string positionName,
         double targetX,
         double targetY,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
         {
@@ -5066,7 +5191,7 @@ public partial class HomePage : UserControl
         var current = motionController.CaptureCalibrationFeedback(
             VisionCalibration.XHardwareAxisNo,
             VisionCalibration.YHardwareAxisNo,
-            AllowedProductionPeerAxisNos);
+            allowedMovingAxisNos ?? AllowedProductionPeerAxisNos);
         var timeoutMilliseconds = CalculateStartMoveTimeout(
             current.ActualX,
             current.ActualY,
@@ -5082,7 +5207,7 @@ public partial class HomePage : UserControl
             positionTolerance: HomePageCompletionTolerance,
             moveTimeoutMilliseconds: timeoutMilliseconds,
             cancellationToken: cancellationToken,
-            allowedMovingAxisNos: AllowedProductionPeerAxisNos,
+            allowedMovingAxisNos: allowedMovingAxisNos ?? AllowedProductionPeerAxisNos,
             yVelocityOverride: yVelocity,
             linearInterpolationCoordinateSystemNo: GetFirstSetXyInterpolationCoordinateSystemNo());
         SetFirstSetPositionStatus(
@@ -5561,6 +5686,9 @@ public partial class HomePage : UserControl
         FirstSetNozzle2PreDropTextBox.Text = (
             _homeSettings.FirstSetNozzle2PreDropPulses
             ?? DefaultFirstSetNozzle2PreDropPulses).ToString(CultureInfo.CurrentCulture);
+        FirstSetNozzle2PlacePreDropTextBox.Text = (
+            _homeSettings.FirstSetNozzle2PlacePreDropPulses
+            ?? DefaultFirstSetNozzle2PlacePreDropPulses).ToString(CultureInfo.CurrentCulture);
         SecondSetPosition1XTextBox.Text = FormatPresetCoordinate(
             _homeSettings.SecondSetPickupPosition1X ?? DefaultSecondSetPickupPosition1X);
         SecondSetPosition1YTextBox.Text = FormatPresetCoordinate(
@@ -5933,6 +6061,9 @@ public partial class HomePage : UserControl
         var nozzle2PreDropPulses = ParseNonNegativeCoordinate(
             FirstSetNozzle2PreDropTextBox.Text,
             "第一套吸嘴2预下降量");
+        var nozzle2PlacePreDropPulses = ParseNonNegativeCoordinate(
+            FirstSetNozzle2PlacePreDropTextBox.Text,
+            "第一套放料吸嘴2预下降量");
         var positions = GetProductionZPositions();
         ValidateFirstSetNozzle1XyReleaseLift(
             positions.FirstSetNozzle1,
@@ -5940,6 +6071,9 @@ public partial class HomePage : UserControl
         ValidateFirstSetNozzle2PreDrop(
             positions.FirstSetNozzle2,
             nozzle2PreDropPulses);
+        ValidateFirstSetNozzle2PlacePreDrop(
+            positions.FirstSetNozzle2,
+            nozzle2PlacePreDropPulses);
         return new ProductionZDwellTimes(
             ParseMilliseconds(
                 VacuumPickupDwellTextBox.Text,
@@ -5951,7 +6085,8 @@ public partial class HomePage : UserControl
                 VacuumValveSwitchDelayTextBox.Text,
                 "真空阀切换间隔"),
             releaseLiftPulses,
-            nozzle2PreDropPulses);
+            nozzle2PreDropPulses,
+            nozzle2PlacePreDropPulses);
     }
 
     private static void ValidateFirstSetNozzle1XyReleaseLift(
@@ -5999,6 +6134,30 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException(
                 $"第一套吸嘴2预下降量 {preDropPulses:0.###} pulse " +
                 $"超过安全位到取料位的正方向行程 {positiveDirectionTravel:0.###} pulse。");
+        }
+    }
+
+    private static void ValidateFirstSetNozzle2PlacePreDrop(
+        NozzleZPositions positions,
+        double preDropPulses)
+    {
+        if (preDropPulses <= 0)
+        {
+            return;
+        }
+
+        var positiveDirectionTravel = positions.Drop - positions.Safe;
+        if (positiveDirectionTravel <= 0)
+        {
+            throw new InvalidOperationException(
+                "第一套吸嘴2放料Z必须大于安全Z，才能按正方向提前下降。");
+        }
+
+        if (preDropPulses > positiveDirectionTravel)
+        {
+            throw new InvalidOperationException(
+                $"第一套放料吸嘴2预下降量 {preDropPulses:0.###} pulse " +
+                $"超过安全位到放料位的正方向行程 {positiveDirectionTravel:0.###} pulse。");
         }
     }
 
@@ -6381,6 +6540,7 @@ public partial class HomePage : UserControl
             VacuumValveSwitchDelayTextBox is null ||
             FirstSetNozzle1XyReleaseLiftTextBox is null ||
             FirstSetNozzle2PreDropTextBox is null ||
+            FirstSetNozzle2PlacePreDropTextBox is null ||
             !TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out var firstSetNozzle1Pickup) ||
             !TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out var firstSetNozzle1Drop) ||
             !TryParseCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, out var firstSetNozzle1Safe) ||
@@ -6402,7 +6562,14 @@ public partial class HomePage : UserControl
             nozzle2PreDropPulses < 0 ||
             (nozzle2PreDropPulses > 0 &&
              (firstSetNozzle2Pickup <= firstSetNozzle2Safe ||
-              nozzle2PreDropPulses > firstSetNozzle2Pickup - firstSetNozzle2Safe)))
+              nozzle2PreDropPulses > firstSetNozzle2Pickup - firstSetNozzle2Safe)) ||
+            !TryParseCoordinate(
+                FirstSetNozzle2PlacePreDropTextBox.Text,
+                out var nozzle2PlacePreDropPulses) ||
+            nozzle2PlacePreDropPulses < 0 ||
+            (nozzle2PlacePreDropPulses > 0 &&
+             (firstSetNozzle2Drop <= firstSetNozzle2Safe ||
+              nozzle2PlacePreDropPulses > firstSetNozzle2Drop - firstSetNozzle2Safe)))
         {
             return;
         }
@@ -6424,6 +6591,7 @@ public partial class HomePage : UserControl
         _homeSettings.VacuumValveSwitchDelayMilliseconds = valveSwitchDelay;
         _homeSettings.FirstSetNozzle1XyReleaseLiftPulses = releaseLiftPulses;
         _homeSettings.FirstSetNozzle2PreDropPulses = nozzle2PreDropPulses;
+        _homeSettings.FirstSetNozzle2PlacePreDropPulses = nozzle2PlacePreDropPulses;
         try
         {
             _homeSettingsStore.Save(_homeSettings);
@@ -6905,6 +7073,7 @@ public partial class HomePage : UserControl
              VacuumValveSwitchDelayTextBox is null ||
              FirstSetNozzle1XyReleaseLiftTextBox is null ||
              FirstSetNozzle2PreDropTextBox is null ||
+             FirstSetNozzle2PlacePreDropTextBox is null ||
              SecondSetPosition1XTextBox is null ||
              SecondSetPosition1YTextBox is null ||
              SecondSetPosition2XTextBox is null ||
@@ -6947,7 +7116,7 @@ public partial class HomePage : UserControl
             TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, out var firstSetNozzle1Safe) &&
             TryParseCoordinate(FirstSetNozzle2PickupZPositionTextBox.Text, out var firstSetNozzle2Pickup) &&
-            TryParseCoordinate(FirstSetNozzle2DropZPositionTextBox.Text, out _) &&
+            TryParseCoordinate(FirstSetNozzle2DropZPositionTextBox.Text, out var firstSetNozzle2Drop) &&
             TryParseCoordinate(FirstSetNozzle2SafeZPositionTextBox.Text, out var firstSetNozzle2Safe) &&
             TryParseCoordinate(SecondSetNozzle1PickupZPositionTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetNozzle1DropZPositionTextBox.Text, out _) &&
@@ -6967,7 +7136,14 @@ public partial class HomePage : UserControl
             nozzle2PreDropPulses >= 0 &&
             (nozzle2PreDropPulses == 0 ||
              (firstSetNozzle2Pickup > firstSetNozzle2Safe &&
-              nozzle2PreDropPulses <= firstSetNozzle2Pickup - firstSetNozzle2Safe));
+              nozzle2PreDropPulses <= firstSetNozzle2Pickup - firstSetNozzle2Safe)) &&
+            TryParseCoordinate(
+                FirstSetNozzle2PlacePreDropTextBox.Text,
+                out var nozzle2PlacePreDropPulses) &&
+            nozzle2PlacePreDropPulses >= 0 &&
+            (nozzle2PlacePreDropPulses == 0 ||
+             (firstSetNozzle2Drop > firstSetNozzle2Safe &&
+              nozzle2PlacePreDropPulses <= firstSetNozzle2Drop - firstSetNozzle2Safe));
         var allSecondSetXyPositionsValid =
             TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _) &&
@@ -7113,6 +7289,7 @@ public partial class HomePage : UserControl
         VacuumValveSwitchDelayTextBox.IsEnabled = commandsIdle;
         FirstSetNozzle1XyReleaseLiftTextBox.IsEnabled = commandsIdle;
         FirstSetNozzle2PreDropTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle2PlacePreDropTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1XTextBox.IsEnabled = commandsIdle;
         SecondSetPosition1YTextBox.IsEnabled = commandsIdle;
         SecondSetPosition2XTextBox.IsEnabled = commandsIdle;
@@ -7839,7 +8016,8 @@ public partial class HomePage : UserControl
         int BreakVacuumMilliseconds,
         int ValveSwitchDelayMilliseconds,
         double FirstSetNozzle1XyReleaseLiftPulses,
-        double FirstSetNozzle2PreDropPulses);
+        double FirstSetNozzle2PreDropPulses,
+        double FirstSetNozzle2PlacePreDropPulses);
 
     private readonly record struct SecondSetXyPositions(
         double Position1X,
