@@ -154,6 +154,9 @@ public sealed class HomePageSettings
     // 第一套吸嘴1放料时，吸嘴2从安全位沿Z轴正方向提前下降的距离；0表示禁用。
     public double? FirstSetNozzle2PlacePreDropPulses { get; set; }
 
+    // 第二套吸嘴2取13工位时，吸嘴1从安全位沿Z轴正方向提前下降的距离；0表示禁用。
+    public double? SecondSetNozzle1PreDropPulses { get; set; }
+
     public double? SecondSetPickupPosition1X { get; set; }
 
     public double? SecondSetPickupPosition1Y { get; set; }

@@ -2356,6 +2356,21 @@
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="下料吸嘴1 · 预下降量（+Z）"
+                                               Foreground="#F4C95D"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                    <TextBox x:Name="SecondSetNozzle1PreDropTextBox"
+                                             Height="25"
+                                             Text="0"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="下料吸嘴2在13工位完成吸附后，吸嘴1从安全位沿Z轴正方向提前下降此脉冲量；0表示禁用"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
                                     <TextBlock Text="真空阀切换间隔（ms）" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="VacuumValveSwitchDelayTextBox"
                                              Height="25"
