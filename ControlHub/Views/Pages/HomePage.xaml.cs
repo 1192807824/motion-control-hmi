@@ -199,7 +199,7 @@ public partial class HomePage : UserControl
     private readonly DispatcherTimer _uphRefreshTimer;
     private long _uphCompletedUnitCount;
     private readonly Queue<(TimeSpan CompletedAt, int UnitCount)> _uphRecentCompletedBatches = [];
-    private bool _preserveIoOnEmergencyStop;
+    private volatile bool _preserveIoOnEmergencyStop;
     private VisionCalibrationAxisSet? _productionAxisSet;
     private ProductionZPositions? _productionZPositions;
     private ProductionZDwellTimes? _productionZDwellTimes;
@@ -560,8 +560,18 @@ public partial class HomePage : UserControl
 
     private void MotionController_EmergencyStopIssued(object? sender, EventArgs e)
     {
+        // 该事件可能来自独立急停监控线程。这里只做无界面依赖的IO冻结，
+        // 让控制卡急停命令不必等待UI线程；生产取消与状态刷新投递回UI线程执行。
         _preserveIoOnEmergencyStop = true;
-        _ = RequestProductionStop();
+        if (Dispatcher.CheckAccess())
+        {
+            _ = RequestProductionStop();
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Send,
+            new Action(() => _ = RequestProductionStop()));
     }
 
     public void AttachVisionCalibrationController(VisualCalibrationPage visualCalibrationController)

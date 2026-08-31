@@ -40,6 +40,8 @@ public partial class MotionControlPage : UserControl
     private CancellationTokenSource? _positionMoveCancellation;
     private CancellationTokenSource? _axisSelectionFeedbackCancellation;
     private CancellationTokenSource? _calibrationMotionCancellation;
+    private CancellationTokenSource? _externalEmergencyStopMonitorCancellation;
+    private Thread? _externalEmergencyStopMonitorThread;
     private Stopwatch? _commandStopwatch;
     private int? _activeJogAxisNo;
     private FrameworkElement? _activeJogInputOwner;
@@ -64,8 +66,8 @@ public partial class MotionControlPage : UserControl
     private bool _polling;
     private bool _closed;
     private bool _motionSafetyLock;
-    private bool _externalEmergencyStopInputActive;
-    private bool _externalEmergencyStopCommandIssued;
+    private volatile bool _externalEmergencyStopInputActive;
+    private int _externalEmergencyStopTriggerLatched;
     private bool _loadingAxisSettings;
     private bool _homeConfigurationSaveHealthy = true;
     private bool _calibrationOperationActive;
@@ -323,6 +325,7 @@ public partial class MotionControlPage : UserControl
         }
 
         _closed = true;
+        StopExternalEmergencyStopMonitor();
         _pollTimer.Stop();
         if (_ownerWindow is not null)
         {
@@ -2540,6 +2543,7 @@ public partial class MotionControlPage : UserControl
             ConfigureIoPoints(IoPointKind.DigitalInput);
             SetWorkbenchMode(MotionWorkbenchMode.ContinuousJog);
             SetCommandStage(CommandStage.Ready, "准备");
+            StartExternalEmergencyStopMonitor();
             PollMotionState();
             _pollTimer.Start();
         }
@@ -3354,9 +3358,19 @@ public partial class MotionControlPage : UserControl
             catch (Exception exception)
             {
                 // 急停通知失败不能阻止真正的控制卡急停命令继续下发。
-                RecordAlarm(
-                    "EMERGENCY-STOP-NOTIFICATION-FAILED",
-                    $"急停前冻结生产IO的通知失败：{FormatException(exception)}");
+                var details = $"急停前冻结生产IO的通知失败：{FormatException(exception)}";
+                if (Dispatcher.CheckAccess())
+                {
+                    RecordAlarm("EMERGENCY-STOP-NOTIFICATION-FAILED", details);
+                }
+                else
+                {
+                    _ = Dispatcher.BeginInvoke(
+                        DispatcherPriority.Send,
+                        new Action(() => RecordAlarm(
+                            "EMERGENCY-STOP-NOTIFICATION-FAILED",
+                            details)));
+                }
             }
         }
     }
@@ -4139,6 +4153,12 @@ public partial class MotionControlPage : UserControl
             return false;
         }
 
+        CompleteEmergencyStopStateAfterHardwareIssued();
+        return true;
+    }
+
+    private void CompleteEmergencyStopStateAfterHardwareIssued()
+    {
         // 急停只停止运动轴。全轴急停下发时已先通知生产流程冻结 IO 状态，
         // 此处再取消各运动任务，防止异步任务进入 finally 后改写真空吸、破真空等输出。
         _homeSequenceCancellation?.Cancel();
@@ -4173,7 +4193,6 @@ public partial class MotionControlPage : UserControl
                 ? "全轴急停重试已下发，安全锁保持至重启"
                 : "全轴急停，等待确认");
         PollMotionState();
-        return true;
     }
 
     private void ClearAlarm_Click(object sender, RoutedEventArgs e)
@@ -4781,8 +4800,6 @@ public partial class MotionControlPage : UserControl
                             : $"运动控制：EtherCAT 正常（{_motionCard.AxisCount} 轴）");
             }
 
-            PollExternalEmergencyStopInput();
-
             foreach (var axis in Axes ?? [])
             {
                 if (!axis.IsAvailable)
@@ -4844,61 +4861,174 @@ public partial class MotionControlPage : UserControl
         return _motionOptions.ExternalEmergencyStopActiveLow ? !inputHigh : inputHigh;
     }
 
-    private void PollExternalEmergencyStopInput()
+    private void StartExternalEmergencyStopMonitor()
     {
-        if (!ExternalEmergencyStopMonitoringEnabled)
+        if (!ExternalEmergencyStopMonitoringEnabled ||
+            _externalEmergencyStopMonitorCancellation is not null ||
+            _closed)
         {
             return;
         }
 
-        try
+        var cancellation = new CancellationTokenSource();
+        _externalEmergencyStopMonitorCancellation = cancellation;
+        _externalEmergencyStopMonitorThread = new Thread(
+            () => MonitorExternalEmergencyStopInput(cancellation.Token))
         {
-            UpdateExternalEmergencyStopState(ReadExternalEmergencyStopInputActive());
-            _activeAlarmKeys.Remove("external-emergency-stop-read");
-        }
-        catch (Exception exception)
+            IsBackground = true,
+            Name = "ExternalEmergencyStopMonitor",
+            Priority = ThreadPriority.AboveNormal
+        };
+        _externalEmergencyStopMonitorThread.Start();
+    }
+
+    private void StopExternalEmergencyStopMonitor()
+    {
+        var cancellation = _externalEmergencyStopMonitorCancellation;
+        _externalEmergencyStopMonitorCancellation = null;
+        _externalEmergencyStopMonitorThread = null;
+        cancellation?.Cancel();
+    }
+
+    private void MonitorExternalEmergencyStopInput(CancellationToken cancellationToken)
+    {
+        var lastActive = false;
+        while (!cancellationToken.IsCancellationRequested)
         {
-            SetConnectionText("运动控制：外部急停输入读取失败");
-            RecordAlarmOnce(
-                "external-emergency-stop-read",
-                "EXTERNAL-EMERGENCY-STOP-READ",
-                $"无法读取模块1001的外部急停输入，运动期间将执行全轴急停：{FormatException(exception)}");
-            HandleGlobalMonitoringFailure("外部急停输入读取失败");
+            try
+            {
+                var active = ReadExternalEmergencyStopInputActive();
+                _externalEmergencyStopInputActive = active;
+                if (active)
+                {
+                    if (Interlocked.CompareExchange(
+                            ref _externalEmergencyStopTriggerLatched,
+                            1,
+                            0) == 0)
+                    {
+                        IssueExternalEmergencyStopFromMonitor(
+                            "外部IO急停按钮触发",
+                            "EXTERNAL-EMERGENCY-STOP",
+                            $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位" +
+                            $"{_motionOptions.ExternalEmergencyStopInputBit}触发");
+                    }
+                }
+                else
+                {
+                    Interlocked.Exchange(ref _externalEmergencyStopTriggerLatched, 0);
+                    if (lastActive)
+                    {
+                        PostExternalEmergencyStopReleasedToUi();
+                    }
+                }
+
+                lastActive = active;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                // 急停输入失去可靠监控时采用失效安全策略：不等待UI，立即停止全部轴。
+                _externalEmergencyStopInputActive = true;
+                if (Interlocked.CompareExchange(
+                        ref _externalEmergencyStopTriggerLatched,
+                        1,
+                        0) == 0)
+                {
+                    IssueExternalEmergencyStopFromMonitor(
+                        "外部急停输入读取失败",
+                        "EXTERNAL-EMERGENCY-STOP-READ",
+                        "无法可靠读取外部急停输入",
+                        exception);
+                }
+            }
+
+            if (cancellationToken.WaitHandle.WaitOne(
+                    _motionOptions.PollIntervalMilliseconds))
+            {
+                break;
+            }
         }
     }
 
-    private void UpdateExternalEmergencyStopState(bool active)
+    private void IssueExternalEmergencyStopFromMonitor(
+        string reason,
+        string alarmCode,
+        string details,
+        Exception? monitoringException = null)
     {
-        if (!active)
+        Exception? stopException = null;
+        try
         {
-            _externalEmergencyStopInputActive = false;
-            _externalEmergencyStopCommandIssued = false;
-            _activeAlarmKeys.Remove("external-emergency-stop-active");
+            // 这条调用运行在独立监控线程：先冻结生产IO，再直接调用控制卡急停。
+            IssueEmergencyStopAndNotify();
+        }
+        catch (Exception exception)
+        {
+            stopException = exception;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Send,
+            new Action(() => CompleteExternalEmergencyStopOnUiThread(
+                reason,
+                alarmCode,
+                details,
+                monitoringException,
+                stopException)));
+    }
+
+    private void CompleteExternalEmergencyStopOnUiThread(
+        string reason,
+        string alarmCode,
+        string details,
+        Exception? monitoringException,
+        Exception? stopException)
+    {
+        if (_closed)
+        {
             return;
         }
 
-        _externalEmergencyStopInputActive = true;
-        if (_externalEmergencyStopCommandIssued)
+        if (stopException is not null)
         {
-            if (!_motionSafetyLock)
+            ActivateMotionSafetyLock(reason, stopException, $"{alarmCode}-STOP-FAILED");
+            return;
+        }
+
+        CompleteEmergencyStopStateAfterHardwareIssued();
+        var monitoringDetails = monitoringException is null
+            ? details
+            : $"{details}：{FormatException(monitoringException)}";
+        RecordAlarmOnce(
+            $"external-emergency-stop:{alarmCode}",
+            alarmCode,
+            $"{monitoringDetails}；已由独立20ms监控直接下发控制卡全局急停及全部EtherCAT轴逐轴立即停止。");
+        SetConnectionText(
+            monitoringException is null
+                ? "运动控制：外部急停已立即下发，正在确认全部轴停止"
+                : "运动控制：外部急停监控异常，已失效安全停止全部轴");
+    }
+
+    private void PostExternalEmergencyStopReleasedToUi()
+    {
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
             {
-                SetConnectionText("运动控制：外部急停按钮已按下");
-            }
-            return;
-        }
+                if (_closed)
+                {
+                    return;
+                }
 
-        _externalEmergencyStopCommandIssued = true;
-        SetConnectionText("运动控制：外部急停触发，正在停止全部轴");
-        var issued = EmergencyStopAllAxes("外部IO急停按钮触发");
-        if (issued)
-        {
-            RecordAlarmOnce(
-                "external-emergency-stop-active",
-                "EXTERNAL-EMERGENCY-STOP",
-                $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位{_motionOptions.ExternalEmergencyStopInputBit}触发；" +
-                "已下发控制卡全局急停及全部EtherCAT轴逐轴立即停止。");
-            SetConnectionText("运动控制：外部急停已下发，正在确认全部轴停止");
-        }
+                _activeAlarmKeys.Remove("external-emergency-stop:EXTERNAL-EMERGENCY-STOP");
+                if (!_motionSafetyLock)
+                {
+                    SetConnectionText("运动控制：外部急停按钮已释放");
+                }
+            }));
     }
 
     private void ThrowIfExternalEmergencyStopActive()
@@ -4910,7 +5040,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            UpdateExternalEmergencyStopState(ReadExternalEmergencyStopInputActive());
+            _externalEmergencyStopInputActive = ReadExternalEmergencyStopInputActive();
             _activeAlarmKeys.Remove("external-emergency-stop-read");
         }
         catch (Exception exception)
