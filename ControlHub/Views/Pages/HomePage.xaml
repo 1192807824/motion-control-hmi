@@ -2235,18 +2235,6 @@
                                              ToolTip="吸嘴1取料后沿Z轴负方向上升此脉冲量即可放行XY；请输入正数，0表示等待完整安全位"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
-                                <StackPanel Margin="0,2,0,2">
-                                    <TextBlock Text="吸料停留（ms）" Foreground="#9FB1BF" FontSize="9" />
-                                    <TextBox x:Name="VacuumPickupDwellTextBox"
-                                             Height="25"
-                                             Text="500"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             ToolTip="Z轴到取料位并开启真空吸后的保持时间"
-                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
-                                </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="上料 · 吸嘴2 · 取料Z" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="FirstSetNozzle2PickupZPositionTextBox"
@@ -2278,6 +2266,33 @@
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="吸嘴2 · 预下降量（+Z）"
+                                               Foreground="#F4C95D"
+                                               FontSize="9"
+                                               FontWeight="Bold" />
+                                    <TextBox x:Name="FirstSetNozzle2PreDropTextBox"
+                                             Height="25"
+                                             Text="0"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="吸嘴1取料时，吸嘴2从安全位沿Z轴正方向提前下降此脉冲量；请输入经现场确认不会干涉XY横移的正数，0表示禁用"
+                                             TextChanged="ProductionZPositionTextBox_TextChanged" />
+                                </StackPanel>
+                                <StackPanel Margin="0,2,0,2">
+                                    <TextBlock Text="吸料停留（ms）" Foreground="#9FB1BF" FontSize="9" />
+                                    <TextBox x:Name="VacuumPickupDwellTextBox"
+                                             Height="25"
+                                             Text="500"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="Z轴到取料位并开启真空吸后的保持时间"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
                                 <StackPanel Margin="0,2,0,2">
@@ -2370,7 +2385,6 @@
                                              Background="#F7FAFC"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
-                                <StackPanel />
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="测试站01 · 下压位" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="TestStation1PressPositionTextBox"

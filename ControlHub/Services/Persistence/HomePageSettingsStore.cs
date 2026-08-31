@@ -148,6 +148,9 @@ public sealed class HomePageSettings
     // 第一套吸嘴1取料后沿Z轴负方向上升此距离即可放行XY；0表示等待完整安全位。
     public double? FirstSetNozzle1XyReleaseLiftPulses { get; set; }
 
+    // 第一套吸嘴1取料时，吸嘴2从安全位沿Z轴正方向提前下降的距离；0表示禁用。
+    public double? FirstSetNozzle2PreDropPulses { get; set; }
+
     public double? SecondSetPickupPosition1X { get; set; }
 
     public double? SecondSetPickupPosition1Y { get; set; }
