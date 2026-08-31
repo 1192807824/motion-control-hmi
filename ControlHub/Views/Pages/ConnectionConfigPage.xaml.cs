@@ -25,6 +25,7 @@ public partial class ConnectionConfigPage : UserControl
     private const int MaxConnectionLogCount = 300;
     private const int BrightnessSendDebounceMs = 150;
     private const int VibrationStopSettleMilliseconds = 50;
+    private const int ProductionUpDownGatherDurationMilliseconds = 100;
     private const string StopVibrationCommand = "&04$";
     private const string ProtocolCommandName = "\u632f\u52a8\u76d8\u534f\u8bae";
     private const string LightOnCommand = "&07,1$";
@@ -1043,8 +1044,9 @@ public partial class ConnectionConfigPage : UserControl
     }
 
     /// <summary>
-    /// 自动生产专用补料序列：先震散，再把物料向左移入拍照视野。
-    /// 两段均使用连接配置页当前的方向震动频率、振幅和持续时间。
+    /// 自动生产专用补料序列：先震散，再向左移入拍照视野，最后上下聚拢。
+    /// 三段均使用连接配置页当前的方向震动频率和振幅；前两段使用配置时长，
+    /// 上下聚拢固定执行100 ms。
     /// </summary>
     public async Task<bool> RunProductionScatterThenLeftAsync(
         CancellationToken cancellationToken)
@@ -1074,8 +1076,10 @@ public partial class ConnectionConfigPage : UserControl
         try
         {
             AddLog(
-                $"生产震动开始：震散 -> 向左，频率 {settings.DirectionalVibrationFrequency}，" +
-                $"振幅 {settings.DirectionalVibrationAmplitude}%，每段 {settings.DirectionalVibrationDurationMilliseconds} ms");
+                $"生产震动开始：震散 -> 向左 -> 上下聚拢，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，前两段各 " +
+                $"{settings.DirectionalVibrationDurationMilliseconds} ms，上下聚拢 " +
+                $"{ProductionUpDownGatherDurationMilliseconds} ms");
             if (!await EnsureProductionVibrationSettingsAppliedAsync(
                     settings,
                     operationCancellation.Token))
@@ -1094,12 +1098,18 @@ public partial class ConnectionConfigPage : UserControl
                     "&03,03$",
                     settings.DirectionalVibrationDurationMilliseconds,
                     "生产震动-向左",
+                    operationCancellation.Token) ||
+                !await RunVibrationPulseAsync(
+                    parameterCommand: null,
+                    UpDownGatherStartCommand,
+                    ProductionUpDownGatherDurationMilliseconds,
+                    "生产震动-上下聚拢",
                     operationCancellation.Token))
             {
                 return false;
             }
 
-            AddLog("生产震动完成：震散 -> 向左");
+            AddLog("生产震动完成：震散 -> 向左 -> 上下聚拢");
             return true;
         }
         catch (OperationCanceledException) when (
@@ -1207,7 +1217,8 @@ public partial class ConnectionConfigPage : UserControl
         {
             "&05,00$",
             BuildDirectionalVibrationParameterCommand(settings, "04"),
-            BuildDirectionalVibrationParameterCommand(settings, "03")
+            BuildDirectionalVibrationParameterCommand(settings, "03"),
+            BuildDirectionalVibrationParameterCommand(settings, "06")
         };
         var setupSignature = string.Join('\n', setupCommands);
         if (string.Equals(
