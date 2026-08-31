@@ -3,7 +3,7 @@
   "SimulationMode": false,
   "CardNo": null,
   "AxisCount": 16,
-  "PollIntervalMilliseconds": 50,
+  "PollIntervalMilliseconds": 20,
   "DigitalInputPort": 0,
   "DigitalOutputPort": 0,
   "DigitalInputStartBit": 16,

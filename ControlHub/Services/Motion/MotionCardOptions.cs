@@ -13,7 +13,7 @@ public sealed class MotionCardOptions
 
     public int AxisCount { get; init; } = 16;
 
-    public int PollIntervalMilliseconds { get; init; } = 200;
+    public int PollIntervalMilliseconds { get; init; } = 20;
 
     public int DigitalInputPort { get; init; }
 
@@ -201,9 +201,9 @@ public sealed class MotionCardOptions
             throw new InvalidDataException("AxisCount 必须在 1 到 64 之间。");
         }
 
-        if (PollIntervalMilliseconds is < 50 or > 5000)
+        if (PollIntervalMilliseconds is < 20 or > 5000)
         {
-            throw new InvalidDataException("PollIntervalMilliseconds 必须在 50 到 5000 之间。");
+            throw new InvalidDataException("PollIntervalMilliseconds 必须在 20 到 5000 之间。");
         }
 
         if (DigitalInputPort is < 0 or > ushort.MaxValue)
