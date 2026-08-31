@@ -219,6 +219,7 @@ public sealed class ProductRecipeStore
         recipe.E4981A ??= new TcpConnectionSettings();
         recipe.SM7110 ??= new SerialConnectionSettings();
         recipe.VibrationFeeder ??= new VibrationFeederSettings();
+        recipe.VibrationFeeder.MigrateLegacyProductionVibrationPreset();
     }
 
     private string GetRecipeDirectory(string recipeId)

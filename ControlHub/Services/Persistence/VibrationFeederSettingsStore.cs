@@ -17,8 +17,10 @@ public sealed class VibrationFeederSettingsStore
 
         try
         {
-            return JsonSerializer.Deserialize<VibrationFeederSettings>(File.ReadAllText(_filePath))
-                ?? new VibrationFeederSettings();
+            var settings = JsonSerializer.Deserialize<VibrationFeederSettings>(File.ReadAllText(_filePath))
+                           ?? new VibrationFeederSettings();
+            settings.MigrateLegacyProductionVibrationPreset();
+            return settings;
         }
         catch (IOException)
         {

@@ -5,15 +5,22 @@ namespace ControlHub.Services.Devices;
 
 public sealed class VibrationFeederSettings : INotifyPropertyChanged
 {
+    private const int LegacyProductionVibrationFrequency = 25;
+    private const int LegacyProductionVibrationAmplitude = 65;
+    private const int LegacyProductionVibrationDurationMilliseconds = 500;
+    private const int DefaultProductionVibrationFrequency = 45;
+    private const int DefaultProductionVibrationAmplitude = 65;
+    private const int DefaultProductionVibrationDurationMilliseconds = 600;
+
     private string _host = "192.168.1.100";
     private int _port = 4001;
     private string _newLine = "\\r\\n";
     private string _manualSendText = "";
     private bool _appendNewLine = true;
     private int _lightOnBrightness = 99;
-    private int _directionalVibrationFrequency = 25;
-    private int _directionalVibrationAmplitude = 65;
-    private int _directionalVibrationDurationMilliseconds = 500;
+    private int _directionalVibrationFrequency = DefaultProductionVibrationFrequency;
+    private int _directionalVibrationAmplitude = DefaultProductionVibrationAmplitude;
+    private int _directionalVibrationDurationMilliseconds = DefaultProductionVibrationDurationMilliseconds;
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -76,6 +83,20 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     {
         get => _lastSuccessfulConnectionSignature;
         set => SetField(ref _lastSuccessfulConnectionSignature, value);
+    }
+
+    internal void MigrateLegacyProductionVibrationPreset()
+    {
+        if (_directionalVibrationFrequency != LegacyProductionVibrationFrequency ||
+            _directionalVibrationAmplitude != LegacyProductionVibrationAmplitude ||
+            _directionalVibrationDurationMilliseconds != LegacyProductionVibrationDurationMilliseconds)
+        {
+            return;
+        }
+
+        DirectionalVibrationFrequency = DefaultProductionVibrationFrequency;
+        DirectionalVibrationAmplitude = DefaultProductionVibrationAmplitude;
+        DirectionalVibrationDurationMilliseconds = DefaultProductionVibrationDurationMilliseconds;
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
