@@ -55,6 +55,9 @@ public sealed class HomePageSettingsStore
 
 public sealed class HomePageSettings
 {
+    // 单次上相机识别后最多缓存并抓取的芯片数；空值兼容旧配置并使用当前默认值。
+    public int? VisionPickupCount { get; set; }
+
     // 可空用于兼容旧配置：旧配置没有该字段时继续使用原同步点位运动。
     public bool? XyLinearInterpolationEnabled { get; set; }
 

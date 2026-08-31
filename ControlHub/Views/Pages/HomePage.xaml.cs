@@ -22,7 +22,9 @@ public partial class HomePage : UserControl
 {
     private const string ChipInspectionProcedureName = "找芯片流程";
     private const string ChipInspectionResultModuleName = "脚本1";
-    private const int MaxCachedChipCount = 10;
+    private const int DefaultVisionPickupCount = 20;
+    private const int MinVisionPickupCount = 2;
+    private const int MaxVisionPickupCount = 100;
     private const int EmptyTraySingleChipVibrationThreshold = 3;
     private const int FirstSetZ1VacuumOutputBit = 15;
     private const int FirstSetZ1BreakVacuumOutputBit = 14;
@@ -396,6 +398,7 @@ public partial class HomePage : UserControl
 
     public HomePageSettings CaptureRecipeSettings()
     {
+        SaveVisionPickupCountFromInput();
         SaveFirstSetTeachingPositionsFromInputs();
         SavePresetPositionsFromInputs();
         SaveLowerCameraPhotoPositionsFromInputs();
@@ -1731,6 +1734,9 @@ public partial class HomePage : UserControl
             _binDropPositions = ReadBinDropPositions();
 
             // 上、下相机纠偏开关在启动时一次性锁定，运行中修改不影响当前生产。
+            var visionPickupCount = ParseVisionPickupCount(
+                VisionPickupCountTextBox.Text,
+                "单次视觉抓取颗数");
             var upperCameraCorrectionEnabled = _homeSettings.UpperCameraCorrectionEnabled ?? true;
             var lowerCameraCorrectionEnabled = _homeSettings.LowerCameraCorrectionEnabled ?? true;
             _productionXyLinearInterpolationEnabled =
@@ -1959,7 +1965,7 @@ public partial class HomePage : UserControl
                     SetBlobInspectionResult(blobResult);
                     var selectedChipCount = Math.Min(
                         blobResult.Rectangles.Count,
-                        MaxCachedChipCount);
+                        visionPickupCount);
 
                     if (selectedChipCount == 0)
                     {
@@ -2058,7 +2064,8 @@ public partial class HomePage : UserControl
                                          blobResult,
                                          calibrationFile.FilePath,
                                          actual.ActualX,
-                                         actual.ActualY))
+                                         actual.ActualY,
+                                         visionPickupCount))
                             {
                                 pendingPickupBatches.Enqueue(batch);
                             }
@@ -2142,7 +2149,7 @@ public partial class HomePage : UserControl
                 {
                     var vibrationReason = singleChipRemainsAfterPickupCache
                         ? "本次缓存成对物料已全部取完，料盘最后还剩1颗"
-                        : "本次最多10条缓存已全部取完";
+                        : $"本次最多{visionPickupCount}条缓存已全部取完";
                     activeFeederVibrationTask = RunProductionVibrationAsync(
                         cycleNumber,
                         vibrationReason,
@@ -3983,7 +3990,7 @@ public partial class HomePage : UserControl
     }
 
     /// <summary>
-    /// 按 VisionMaster 原始结果顺序最多取10条，每两个组成一批：
+    /// 按 VisionMaster 原始结果顺序读取配置数量，每两个组成一批：
     /// 每批第一个给吸嘴1，第二个给吸嘴2。奇数最后1条不缓存，留在盘中震动后重拍。
     /// 全部目标都使用同一次拍照时的轴绝对位置换算。
     /// </summary>
@@ -3991,7 +3998,8 @@ public partial class HomePage : UserControl
         VisionRectangleBlobResult blobResult,
         string calibrationFilePath,
         double captureX,
-        double captureY)
+        double captureY,
+        int maxCachedChipCount)
     {
         _ = EnsureFirstSetToolsReady();
         if (blobResult.ImageWidth <= 0 || blobResult.ImageHeight <= 0)
@@ -3999,7 +4007,7 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException("本次Blob结果没有有效图像尺寸，无法计算吸嘴目标。");
         }
 
-        var selectedCount = Math.Min(blobResult.Rectangles.Count, MaxCachedChipCount);
+        var selectedCount = Math.Min(blobResult.Rectangles.Count, maxCachedChipCount);
         for (var index = 0; index < selectedCount; index++)
         {
             ValidateBlobPixel(
@@ -4062,7 +4070,8 @@ public partial class HomePage : UserControl
             duplicatedSingleResult,
             calibrationFilePath,
             captureX,
-            captureY);
+            captureY,
+            MinVisionPickupCount);
         return new NozzlePickupBatch(null, batches[0].Nozzle2);
     }
 
@@ -5181,6 +5190,15 @@ public partial class HomePage : UserControl
         }
     }
 
+    private void VisionPickupCountTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SaveVisionPickupCountFromInput();
+        if (!_loadingPresetPositions)
+        {
+            UpdateHomeCommandState();
+        }
+    }
+
     private void TestStationPositionTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_loadingPresetPositions)
@@ -5293,6 +5311,9 @@ public partial class HomePage : UserControl
             _homeSettings.UpperCameraCorrectionEnabled ?? true;
         LowerCameraCorrection1CheckBox.IsChecked =
             _homeSettings.LowerCameraCorrectionEnabled ?? true;
+        var visionPickupCount = _homeSettings.VisionPickupCount ?? DefaultVisionPickupCount;
+        _homeSettings.VisionPickupCount = visionPickupCount;
+        VisionPickupCountTextBox.Text = visionPickupCount.ToString(CultureInfo.CurrentCulture);
         FirstSetTeachingCenterXTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetTeachingCenterX);
         FirstSetTeachingCenterYTextBox.Text = FormatPresetCoordinate(
@@ -6052,6 +6073,26 @@ public partial class HomePage : UserControl
         }
     }
 
+    private void SaveVisionPickupCountFromInput()
+    {
+        if (_loadingPresetPositions ||
+            VisionPickupCountTextBox is null ||
+            !TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out var pickupCount))
+        {
+            return;
+        }
+
+        _homeSettings.VisionPickupCount = pickupCount;
+        try
+        {
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception)
+        {
+            SetFirstSetPositionStatus($"保存视觉抓取颗数失败：{exception.Message}", false);
+        }
+    }
+
     private void ApplyProductionAxisMotionSettings(
         MotionControlPage motionController,
         IReadOnlyDictionary<int, ProductionAxisMotionSettings> settingsByAxis)
@@ -6610,6 +6651,7 @@ public partial class HomePage : UserControl
             LowerCameraNozzle1RotationCenterYTextBox is null ||
             LowerCameraNozzle2RotationCenterXTextBox is null ||
             LowerCameraNozzle2RotationCenterYTextBox is null ||
+            VisionPickupCountTextBox is null ||
             RecordLowerCameraPhotoPosition1Button is null ||
             RecordLowerCameraPhotoPosition2Button is null ||
             MoveLowerCameraPhotoPosition1Button is null ||
@@ -6664,6 +6706,8 @@ public partial class HomePage : UserControl
             !_assignedNozzleMoveRunning;
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
         var allTestStationParametersValid = AllTestStationParametersValid();
+        var visionPickupCountValid =
+            TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out _);
         var allZPositionsValid =
             TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out _) &&
@@ -6712,6 +6756,7 @@ public partial class HomePage : UserControl
             visionControllersReady &&
             allProductionAxisParametersValid &&
             allTestStationParametersValid &&
+            visionPickupCountValid &&
             allZPositionsValid &&
             allSecondSetXyPositionsValid &&
             allLowerCameraPhotoPositionsValid &&
@@ -6783,6 +6828,7 @@ public partial class HomePage : UserControl
         UpperCameraCorrectionCheckBox.IsEnabled = commandsIdle;
         LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
         XyLinearInterpolationCheckBox.IsEnabled = commandsIdle;
+        VisionPickupCountTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;
@@ -7435,6 +7481,28 @@ public partial class HomePage : UserControl
         }
 
         return milliseconds;
+    }
+
+    private static int ParseVisionPickupCount(string? value, string fieldName)
+    {
+        if (!TryParseVisionPickupCount(value, out var pickupCount))
+        {
+            throw new ArgumentException(
+                $"{fieldName}必须是{MinVisionPickupCount}–{MaxVisionPickupCount}之间的偶数。");
+        }
+
+        return pickupCount;
+    }
+
+    private static bool TryParseVisionPickupCount(string? value, out int pickupCount)
+    {
+        return int.TryParse(
+                   value,
+                   NumberStyles.Integer,
+                   CultureInfo.CurrentCulture,
+                   out pickupCount) &&
+               pickupCount is >= MinVisionPickupCount and <= MaxVisionPickupCount &&
+               pickupCount % 2 == 0;
     }
 
     private static bool TryParseMilliseconds(string? value, out int milliseconds)
