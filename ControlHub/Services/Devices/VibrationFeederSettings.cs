@@ -10,7 +10,8 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     private const int LegacyProductionVibrationDurationMilliseconds = 500;
     private const int DefaultProductionVibrationFrequency = 45;
     private const int DefaultProductionVibrationAmplitude = 65;
-    private const int DefaultProductionVibrationDurationMilliseconds = 600;
+    private const int PreviousProductionVibrationDurationMilliseconds = 600;
+    private const int DefaultProductionVibrationDurationMilliseconds = 400;
 
     private string _host = "192.168.1.100";
     private int _port = 4001;
@@ -87,9 +88,15 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
 
     internal void MigrateLegacyProductionVibrationPreset()
     {
-        if (_directionalVibrationFrequency != LegacyProductionVibrationFrequency ||
-            _directionalVibrationAmplitude != LegacyProductionVibrationAmplitude ||
-            _directionalVibrationDurationMilliseconds != LegacyProductionVibrationDurationMilliseconds)
+        var usesLegacyPreset =
+            _directionalVibrationFrequency == LegacyProductionVibrationFrequency &&
+            _directionalVibrationAmplitude == LegacyProductionVibrationAmplitude &&
+            _directionalVibrationDurationMilliseconds == LegacyProductionVibrationDurationMilliseconds;
+        var usesPreviousDefaultPreset =
+            _directionalVibrationFrequency == DefaultProductionVibrationFrequency &&
+            _directionalVibrationAmplitude == DefaultProductionVibrationAmplitude &&
+            _directionalVibrationDurationMilliseconds == PreviousProductionVibrationDurationMilliseconds;
+        if (!usesLegacyPreset && !usesPreviousDefaultPreset)
         {
             return;
         }
