@@ -99,7 +99,6 @@ public partial class VisualCalibrationPage : UserControl
     private int? _manualJogAxisNo;
     private bool _lowerCameraLightEnabled;
     private bool _globalLightCommandRunning;
-    private IntPtr _inspectionDisplayHostWindow;
 
     private VisionCalibrationAxisPair ActiveAxisPair => _visionCalibration.ActiveAxisPair;
 
@@ -851,7 +850,6 @@ public partial class VisualCalibrationPage : UserControl
 
     public void AttachInspectionDisplayHost(IntPtr displayHostWindow)
     {
-        _inspectionDisplayHostWindow = displayHostWindow;
         VisionHost.AttachDisplayHost(displayHostWindow);
     }
 
@@ -863,7 +861,6 @@ public partial class VisualCalibrationPage : UserControl
         }
 
         _calibrationViewRequested = false;
-        _inspectionDisplayHostWindow = displayHostWindow;
         VisionHost.AttachDisplayHost(displayHostWindow);
         await EnsureStartedAsync();
         if (!_hostReady)
@@ -877,7 +874,6 @@ public partial class VisualCalibrationPage : UserControl
 
     public void UseDefaultVisionDisplay()
     {
-        _inspectionDisplayHostWindow = IntPtr.Zero;
         VisionHost.UseDefaultDisplayHost();
     }
 
@@ -1222,34 +1218,12 @@ public partial class VisualCalibrationPage : UserControl
                 "视觉组件尚未就绪，无法运行找芯片流程。");
         }
 
-        // VisionMaster 的窗口跨进程嵌入主页后，厂商控件在 procedure.Run 和
-        // UpdateVMResultShow 期间会向父窗口同步发送原生消息。仅把命名管道等待放到
-        // Task.Run 仍会卡住 ControlHub 的 Dispatcher，所以取像前先把外部窗口从
-        // 主页 HwndHost 摘下；坐标结果返回后再挂回，主页此时一次性显示完成图像。
-        var displayHostWindow = _inspectionDisplayHostWindow;
-        var displaySuspended = displayHostWindow != IntPtr.Zero &&
-                               VisionHost.SuspendEmbeddedDisplayForAcquisition();
-        try
-        {
-            return await Task.Run(
-                () => VisionHost.RunRectangleBlobInspectionAsync(cancellationToken),
-                cancellationToken);
-        }
-        finally
-        {
-            if (displaySuspended && displayHostWindow != IntPtr.Zero)
-            {
-                if (_inspectionDisplayHostWindow == displayHostWindow)
-                {
-                    VisionHost.AttachDisplayHost(displayHostWindow);
-                }
-                else
-                {
-                    VisionHost.UseDefaultDisplayHost();
-                }
-                VisionHost.RefreshDisplayHost();
-            }
-        }
+        // VisionMaster 的单次流程调用在厂商SDK内部可能同步等待相机和算法结果。
+        // 即使外层接口返回Task，也不能让这段同步等待占住ControlHub的UI线程；否则
+        // 同一时刻正在等待轮询的DD、测试轴和第二套下料任务无法继续它们的后续步骤。
+        return await Task.Run(
+            () => VisionHost.RunRectangleBlobInspectionAsync(cancellationToken),
+            cancellationToken);
     }
 
     public async Task<VisionLowerCameraCorrectionResult> RunLowerCameraCorrectionAsync(
