@@ -1169,7 +1169,7 @@
                             BorderBrush="#38A3C5"
                             IsEnabled="False"
                             Click="OneKeyCollect_Click"
-                            ToolTip="只执行Y26/Y25收料IO，不移动任何轴；阀切换和破真空时间与开始流程一致">
+                            ToolTip="DD单步转16次，每次停稳后执行与生产流程相同的Y24/Y25工位IO；下料XY不动">
                         <Grid Margin="12,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="35" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
@@ -1181,7 +1181,7 @@
                                            FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis" />
                                 <TextBlock x:Name="OneKeyCollectHintText"
-                                           Text="仅收料IO · 不移动任何轴"
+                                           Text="DD转1工位 + 流程IO × 16"
                                            Foreground="#D8F3FA"
                                            FontSize="9"
                                            Margin="0,2,0,0"

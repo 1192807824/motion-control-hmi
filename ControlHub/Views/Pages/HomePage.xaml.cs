@@ -38,8 +38,6 @@ public partial class HomePage : UserControl
     private const int Station14BreakVacuumOutputBit = 23;
     private const int CarouselUpperVacuumOutputBit = 24;
     private const int CarouselLowerSprayOutputBit = 25;
-    private const int OneKeyCollectCancelVacuumOutputBit = 26;
-    private const int OneKeyCollectBreakVacuumOutputBit = 25;
     private const int LowerCameraLightOutputBit = 10;
     private const int DefaultVacuumBreakPulseMilliseconds = 30;
     private const int DefaultVacuumValveSwitchDelayMilliseconds = 20;
@@ -6356,36 +6354,42 @@ public partial class HomePage : UserControl
         var settingsByAxis = new Dictionary<int, ProductionAxisMotionSettings>();
         foreach (var definition in ProductionAxisDefinitions)
         {
-            var editors = _productionAxisMotionEditors[definition.AxisNo];
-            var settings = new ProductionAxisMotionSettings
-            {
-                RunVelocity = ParseProductionVelocity(
-                    editors.RunVelocity.Text,
-                    $"轴{definition.AxisNo}运行速度"),
-                StartVelocity = ParseNonNegativeCoordinate(
-                    editors.StartVelocity.Text,
-                    $"轴{definition.AxisNo}初始速度"),
-                StopVelocity = ParseNonNegativeCoordinate(
-                    editors.StopVelocity.Text,
-                    $"轴{definition.AxisNo}停止速度"),
-                AccelerationMilliseconds = ParseProductionVelocity(
-                    editors.AccelerationMilliseconds.Text,
-                    $"轴{definition.AxisNo}加速时间"),
-                DecelerationMilliseconds = ParseProductionVelocity(
-                    editors.DecelerationMilliseconds.Text,
-                    $"轴{definition.AxisNo}减速时间"),
-                STimeMilliseconds = ParseNonNegativeCoordinate(
-                    editors.STimeMilliseconds.Text,
-                    $"轴{definition.AxisNo}S曲线时间"),
-                DecelerationStopMilliseconds = ParseProductionVelocity(
-                    editors.DecelerationStopMilliseconds.Text,
-                    $"轴{definition.AxisNo}减速停止时间")
-            };
-            ValidateProductionAxisMotionSettings(definition, settings);
-            settingsByAxis[definition.AxisNo] = settings;
+            settingsByAxis[definition.AxisNo] = ReadProductionAxisMotionSettings(definition);
         }
 
         return settingsByAxis;
+    }
+
+    private ProductionAxisMotionSettings ReadProductionAxisMotionSettings(
+        ProductionAxisDefinition definition)
+    {
+        var editors = _productionAxisMotionEditors[definition.AxisNo];
+        var settings = new ProductionAxisMotionSettings
+        {
+            RunVelocity = ParseProductionVelocity(
+                editors.RunVelocity.Text,
+                $"轴{definition.AxisNo}运行速度"),
+            StartVelocity = ParseNonNegativeCoordinate(
+                editors.StartVelocity.Text,
+                $"轴{definition.AxisNo}初始速度"),
+            StopVelocity = ParseNonNegativeCoordinate(
+                editors.StopVelocity.Text,
+                $"轴{definition.AxisNo}停止速度"),
+            AccelerationMilliseconds = ParseProductionVelocity(
+                editors.AccelerationMilliseconds.Text,
+                $"轴{definition.AxisNo}加速时间"),
+            DecelerationMilliseconds = ParseProductionVelocity(
+                editors.DecelerationMilliseconds.Text,
+                $"轴{definition.AxisNo}减速时间"),
+            STimeMilliseconds = ParseNonNegativeCoordinate(
+                editors.STimeMilliseconds.Text,
+                $"轴{definition.AxisNo}S曲线时间"),
+            DecelerationStopMilliseconds = ParseProductionVelocity(
+                editors.DecelerationStopMilliseconds.Text,
+                $"轴{definition.AxisNo}减速停止时间")
+        };
+        ValidateProductionAxisMotionSettings(definition, settings);
+        return settings;
     }
 
     private IReadOnlyDictionary<int, TestStationSettings> ReadTestStationSettings()
@@ -6512,6 +6516,21 @@ public partial class HomePage : UserControl
             return true;
         }
         catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private bool ProductionAxisParametersValid(int axisNo)
+    {
+        try
+        {
+            var definition = ProductionAxisDefinitions.Single(item => item.AxisNo == axisNo);
+            _ = ReadProductionAxisMotionSettings(definition);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
         {
             return false;
         }
@@ -6932,9 +6951,10 @@ public partial class HomePage : UserControl
 
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
-            "一键收料只执行Y26/Y25收料IO，不移动DD、XY、Z、R或测试轴。\n" +
-            "IO先后顺序与开始流程一致，并使用参数设置中的阀切换和破真空时间。\n\n" +
-            "请确认收料IO可以安全动作。",
+            "一键收料只转动DD：每次转一个工位，停稳后执行与生产流程完全相同的" +
+            "Y24上方吸/Y25下方喷IO和相同时长，共转16次。\n\n" +
+            "第二套下料XY/Z/R、第一套XY/Z/R和测试轴均不移动。\n" +
+            "请确认DD转盘可以安全转动。",
             "一键收料安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -6948,12 +6968,12 @@ public partial class HomePage : UserControl
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-            var breakPulseMilliseconds = ParseMilliseconds(
-                VacuumBreakPulseTextBox.Text,
-                "破真空时间");
-            var valveSwitchDelayMilliseconds = ParseMilliseconds(
-                VacuumValveSwitchDelayTextBox.Text,
-                "阀切换等待");
+            var ddAxisDefinition = ProductionAxisDefinitions.Single(definition => definition.AxisNo == 0);
+            _productionAxisMotionSettings = new Dictionary<int, ProductionAxisMotionSettings>
+            {
+                [0] = ReadProductionAxisMotionSettings(ddAxisDefinition)
+            };
+            ApplyProductionAxisMotionSettings(motionController, _productionAxisMotionSettings);
 
             _productionCancellation = new CancellationTokenSource();
             _productionCompletion = new TaskCompletionSource<bool>(
@@ -6966,18 +6986,28 @@ public partial class HomePage : UserControl
             _startSequenceRunning = true;
             UpdateHomeCommandState();
 
-            SetOneKeyCollectStatus(
-                $"正在执行收料IO：Y26=0 → 等待{valveSwitchDelayMilliseconds} ms → " +
-                $"Y25=0 → 等待{breakPulseMilliseconds} ms → 关闭输出…",
-                Color.FromRgb(242, 181, 68));
-            await RunOneKeyCollectIoSequenceAsync(
-                motionController,
-                valveSwitchDelayMilliseconds,
-                breakPulseMilliseconds,
-                _productionCancellation.Token);
+            for (var turn = 1; turn <= CarouselStationCount; turn++)
+            {
+                var cancellationToken = _productionCancellation.Token;
+                cancellationToken.ThrowIfCancellationRequested();
+                SetOneKeyCollectStatus(
+                    $"一键收料 {turn}/{CarouselStationCount}：DD正在转动一个工位…",
+                    Color.FromRgb(242, 181, 68));
+                _ = await MoveAxis0RelativeCoreAsync(
+                    DdMotorPulsePerTurn,
+                    cancellationToken);
+                AdvanceCarouselOccupancy(_carouselStations);
+                UpdateCarouselStationDisplay(_carouselStations);
+
+                SetOneKeyCollectStatus(
+                    $"一键收料 {turn}/{CarouselStationCount}：DD已停稳，" +
+                    $"正在执行流程Y24/Y25 IO {CarouselVacuumSprayPulseMilliseconds} ms…",
+                    Color.FromRgb(242, 181, 68));
+                await PulseCarouselVacuumAndSprayAsync(cancellationToken);
+            }
 
             SetOneKeyCollectStatus(
-                "一键收料IO完成；全程未移动任何轴。",
+                "一键收料完成：DD已转满一圈，每次停稳后均已执行生产流程Y24/Y25 IO；下料XY全程未动。",
                 Color.FromRgb(73, 209, 125));
         }
         catch (OperationCanceledException)
@@ -6994,7 +7024,8 @@ public partial class HomePage : UserControl
         {
             _productionCancellation?.Cancel();
             _productionResumeSignal?.TrySetResult(true);
-            CloseOneKeyCollectOutputsNoThrow();
+            CloseCarouselVacuumSprayOutputsNoThrow();
+            _productionAxisMotionSettings = null;
             _productionStopRequested = false;
             _productionPauseRequested = false;
             _productionResumeSignal = null;
@@ -7010,53 +7041,7 @@ public partial class HomePage : UserControl
         }
     }
 
-    private static async Task RunOneKeyCollectIoSequenceAsync(
-        MotionControlPage motionController,
-        int valveSwitchDelayMilliseconds,
-        int breakPulseMilliseconds,
-        CancellationToken cancellationToken)
-    {
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectCancelVacuumOutputBit,
-            enabled: false,
-            "取消吸 Y26=0");
-        await Task.Delay(valveSwitchDelayMilliseconds, cancellationToken);
-
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectBreakVacuumOutputBit,
-            enabled: false,
-            "破真空 Y25=0");
-        await Task.Delay(breakPulseMilliseconds, cancellationToken);
-
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectCancelVacuumOutputBit,
-            enabled: true,
-            "关闭取消吸 Y26=1");
-        await Task.Delay(valveSwitchDelayMilliseconds, cancellationToken);
-
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectBreakVacuumOutputBit,
-            enabled: true,
-            "关闭破真空 Y25=1");
-    }
-
-    private static void SetOneKeyCollectOutput(
-        MotionControlPage motionController,
-        int bitNo,
-        bool enabled,
-        string actionName)
-    {
-        if (!motionController.SetDigitalOutputHardwareBit(bitNo, enabled))
-        {
-            throw new InvalidOperationException($"一键收料IO操作失败：{actionName}。");
-        }
-    }
-
-    private void CloseOneKeyCollectOutputsNoThrow()
+    private void CloseCarouselVacuumSprayOutputsNoThrow()
     {
         if (_preserveIoOnEmergencyStop || _motionController is not { } motionController)
         {
@@ -7066,15 +7051,15 @@ public partial class HomePage : UserControl
         try
         {
             _ = motionController.SetDigitalOutputHardwareBit(
-                OneKeyCollectCancelVacuumOutputBit,
+                CarouselUpperVacuumOutputBit,
                 enabled: true);
             _ = motionController.SetDigitalOutputHardwareBit(
-                OneKeyCollectBreakVacuumOutputBit,
+                CarouselLowerSprayOutputBit,
                 enabled: true);
         }
         catch
         {
-            // 收尾不覆盖原始IO异常；错误已由主流程状态显示。
+            // 收尾不覆盖原始IO异常；正常节拍已在Pulse的finally中关闭输出。
         }
     }
 
@@ -7238,6 +7223,7 @@ public partial class HomePage : UserControl
             !_presetPositionMoveRunning &&
             !_startSequenceRunning;
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
+        var ddAxisParametersValid = ProductionAxisParametersValid(0);
         var allTestStationParametersValid = AllTestStationParametersValid();
         var visionPickupCountValid =
             TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out _);
@@ -7339,8 +7325,7 @@ public partial class HomePage : UserControl
         OneKeyResetButton.IsEnabled = _motionController is not null && commandsIdle;
         OneKeyCollectButton.IsEnabled =
             _motionController is not null &&
-            TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out _) &&
-            TryParseMilliseconds(VacuumValveSwitchDelayTextBox.Text, out _) &&
+            ddAxisParametersValid &&
             (_oneKeyCollectRunning ? !_productionStopRequested : commandsIdle);
         OneKeyCollectTitleText.Text = _oneKeyCollectRunning
             ? (_productionStopRequested ? "正在停止" : "停止收料")
