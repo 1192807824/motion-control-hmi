@@ -27,6 +27,7 @@ public partial class MainWindow : Window
             HomeContent.SetLowerCameraRotationCenter,
             HomeContent.ClearLowerCameraRotationCenter);
         UsbMicroscopeContent.AttachHomeController(HomeContent);
+        HomeContent.AttachUsbMicroscopeController(UsbMicroscopeContent);
         HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
         HomeContent.AttachConnectionConfigController(ConnectionConfigContent);
         ParameterSettingsContent.AttachSettingsContent(HomeContent.DetachParameterSettingsPanel());
@@ -92,12 +93,12 @@ public partial class MainWindow : Window
 
     private async void HomeMenu_Click(object sender, RoutedEventArgs e)
     {
-        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
         }
         ShowHomePage();
+        await UsbMicroscopeContent.ActivateAsync();
     }
 
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)

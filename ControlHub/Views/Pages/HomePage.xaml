@@ -1062,8 +1062,6 @@
                         <RowDefinition Height="86" />
                         <RowDefinition Height="10" />
                         <RowDefinition Height="70" />
-                        <RowDefinition Height="10" />
-                        <RowDefinition Height="70" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
@@ -1171,7 +1169,7 @@
                             BorderBrush="#38A3C5"
                             IsEnabled="False"
                             Click="OneKeyCollect_Click"
-                            ToolTip="XY/Z均不动；DD单步转16次，每次停稳后执行Y26/Y25收料IO序列">
+                            ToolTip="按开始运行的节拍排空转盘：DD转两工位、测试、第二套XY/Z收料并放入BIN">
                         <Grid Margin="12,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="35" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/start.png" Stretch="Uniform" VerticalAlignment="Center" />
@@ -1183,7 +1181,7 @@
                                            FontWeight="Bold"
                                            TextTrimming="CharacterEllipsis" />
                                 <TextBlock x:Name="OneKeyCollectHintText"
-                                           Text="DD转1工位 → Y26/Y25序列 × 16"
+                                           Text="同开始流程节拍 · 测试并排空到BIN"
                                            Foreground="#D8F3FA"
                                            FontSize="9"
                                            Margin="0,2,0,0"
@@ -1192,67 +1190,71 @@
                         </Grid>
                     </Button>
 
-                    <Button Grid.Row="7"
-                            x:Name="MoveAssignedNozzleButton"
-                            Style="{StaticResource OperationButton}"
-                            Background="#315873"
-                            BorderBrush="#527993"
-                            IsEnabled="False"
-                            Click="MoveAssignedNozzle_Click">
-                            <Grid Margin="12,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="35" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                <Image Width="25" Height="25" Source="/Assets/Icons/ControlPanel/reset.png" Stretch="Uniform" VerticalAlignment="Center" />
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock x:Name="MoveAssignedNozzleTitleText"
-                                               Text="自动顺序对位"
-                                               Foreground="White"
-                                               FontSize="16"
-                                               FontWeight="Bold"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock x:Name="MoveAssignedNozzleHintText"
-                                               Text="开始运行后自动执行"
-                                               Foreground="#D5E1E9"
-                                               FontSize="9"
-                                               Margin="0,2,0,0"
-                                               TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                            </Grid>
-                    </Button>
-
-                    <Border Grid.Row="8"
+                    <Border Grid.Row="6"
                             Margin="0,14,0,0"
-                            Padding="16"
-                            Background="#12283A"
+                            Background="#0B1D2B"
                             BorderBrush="#2D4A61"
                             BorderThickness="1"
-                            CornerRadius="5">
-                        <StackPanel>
-                            <TextBlock Text="运行操作提示"
-                                       Foreground="#EAF2F7"
-                                       FontSize="14"
-                                       FontWeight="Bold" />
-                            <TextBlock Text="生产位置、运动速度与 Z 轴高度已集中到顶部“参数设置”。主页仅保留设备运行与安全操作。"
-                                       Margin="0,9,0,0"
-                                       Foreground="#9FB1BF"
-                                       FontSize="12"
-                                       TextWrapping="Wrap"
-                                       LineHeight="20" />
-                            <Border Height="1" Background="#2D4A61" Margin="0,14,0,12" />
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="参数保存"
-                                           Foreground="#9FB1BF"
-                                           FontSize="12" />
-                                <TextBlock Grid.Column="1"
-                                           Text="自动保存"
-                                           Foreground="#49D17D"
-                                           FontSize="12"
-                                           FontWeight="Bold" />
+                            CornerRadius="5"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="38" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Padding="12,0"
+                                    Background="#12283A"
+                                    BorderBrush="#2D4A61"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <TextBlock Text="USB 显微镜"
+                                               Foreground="#EAF2F7"
+                                               FontSize="14"
+                                               FontWeight="Bold"
+                                               VerticalAlignment="Center" />
+                                    <Ellipse x:Name="HomeMicroscopeStatusIndicator"
+                                             Width="9"
+                                             Height="9"
+                                             HorizontalAlignment="Right"
+                                             VerticalAlignment="Center"
+                                             Fill="#6F8190" />
+                                </Grid>
+                            </Border>
+                            <Grid Grid.Row="1" Background="#090F14">
+                                <Image x:Name="HomeMicroscopePreviewImage"
+                                       Stretch="Uniform"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                <StackPanel x:Name="HomeMicroscopePreviewPlaceholder"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Margin="14"
+                                            IsHitTestVisible="False">
+                                    <TextBlock Text="USB"
+                                               Foreground="#526A7C"
+                                               FontSize="30"
+                                               FontWeight="Bold"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="请先在“USB显微镜”页面连接设备"
+                                               Margin="0,8,0,0"
+                                               Foreground="#91A6B7"
+                                               FontSize="11"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border HorizontalAlignment="Left"
+                                        VerticalAlignment="Bottom"
+                                        Margin="8"
+                                        Padding="8,4"
+                                        Background="#B8071D2F"
+                                        CornerRadius="3">
+                                    <TextBlock x:Name="HomeMicroscopeStatusText"
+                                               Text="等待显微镜连接"
+                                               Foreground="#D8E4EC"
+                                               FontSize="10"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Border>
                             </Grid>
-                        </StackPanel>
+                        </Grid>
                     </Border>
 
                     <ScrollViewer x:Name="ParameterSettingsPanel"

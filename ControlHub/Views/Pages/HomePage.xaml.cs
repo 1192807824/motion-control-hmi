@@ -38,8 +38,6 @@ public partial class HomePage : UserControl
     private const int Station14BreakVacuumOutputBit = 23;
     private const int CarouselUpperVacuumOutputBit = 24;
     private const int CarouselLowerSprayOutputBit = 25;
-    private const int OneKeyCollectCancelVacuumOutputBit = 26;
-    private const int OneKeyCollectBreakVacuumOutputBit = 25;
     private const int LowerCameraLightOutputBit = 10;
     private const int DefaultVacuumBreakPulseMilliseconds = 30;
     private const int DefaultVacuumValveSwitchDelayMilliseconds = 20;
@@ -188,12 +186,12 @@ public partial class HomePage : UserControl
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
     private ConnectionConfigPage? _connectionConfigController;
+    private UsbMicroscopePage? _usbMicroscopeController;
     private bool _presetPositionMoveRunning;
     private bool _oneKeyResetRunning;
     private bool _startSequenceRunning;
     private bool _productionXyLinearInterpolationEnabled;
     private bool _oneKeyCollectRunning;
-    private bool _assignedNozzleMoveRunning;
     private CancellationTokenSource? _productionCancellation;
     private TaskCompletionSource<bool>? _productionCompletion;
     private bool _productionStopRequested;
@@ -215,7 +213,6 @@ public partial class HomePage : UserControl
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
-    private int _nextAssignedNozzleMoveStep;
     private int _carouselVisualStepOffset;
     private CarouselStationState[] _carouselStations = CreateCarouselStationStates();
     private bool _loadingPresetPositions = true;
@@ -537,8 +534,7 @@ public partial class HomePage : UserControl
     public void ApplyRecipeSettings(HomePageSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (_startSequenceRunning || _oneKeyResetRunning || _presetPositionMoveRunning ||
-            _assignedNozzleMoveRunning)
+        if (_startSequenceRunning || _oneKeyResetRunning || _presetPositionMoveRunning)
         {
             throw new InvalidOperationException("设备正在运行，不能切换产品配方。");
         }
@@ -588,6 +584,58 @@ public partial class HomePage : UserControl
     {
         _connectionConfigController = connectionConfigController
             ?? throw new ArgumentNullException(nameof(connectionConfigController));
+    }
+
+    public void AttachUsbMicroscopeController(UsbMicroscopePage usbMicroscopeController)
+    {
+        ArgumentNullException.ThrowIfNull(usbMicroscopeController);
+        if (_usbMicroscopeController is not null)
+        {
+            _usbMicroscopeController.PreviewChanged -= UsbMicroscopeController_PreviewChanged;
+        }
+
+        _usbMicroscopeController = usbMicroscopeController;
+        _usbMicroscopeController.PreviewChanged += UsbMicroscopeController_PreviewChanged;
+        UpdateHomeMicroscopePreview();
+    }
+
+    private void UsbMicroscopeController_PreviewChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            UpdateHomeMicroscopePreview();
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(UpdateHomeMicroscopePreview));
+    }
+
+    private void UpdateHomeMicroscopePreview()
+    {
+        if (HomeMicroscopePreviewImage is null ||
+            HomeMicroscopePreviewPlaceholder is null ||
+            HomeMicroscopeStatusText is null ||
+            HomeMicroscopeStatusIndicator is null)
+        {
+            return;
+        }
+
+        var controller = _usbMicroscopeController;
+        var frame = controller?.LatestPreviewFrame;
+        HomeMicroscopePreviewImage.Source = frame;
+        HomeMicroscopePreviewPlaceholder.Visibility = frame is null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HomeMicroscopeStatusText.Text = controller?.PreviewStatus ?? "等待显微镜连接";
+        HomeMicroscopeStatusText.ToolTip = HomeMicroscopeStatusText.Text;
+        HomeMicroscopeStatusIndicator.Fill = new SolidColorBrush(
+            frame is not null
+                ? Color.FromRgb(57, 197, 107)
+                : controller?.IsMicroscopeConnected == true
+                    ? Color.FromRgb(224, 162, 26)
+                    : Color.FromRgb(111, 129, 144));
     }
 
     public async Task DeactivateProductionAsync()
@@ -1977,8 +2025,7 @@ public partial class HomePage : UserControl
 
         // 只要已有其它运动命令在执行，就不允许启动连续生产，避免多个轴命令互相抢控制权。
         if (_oneKeyResetRunning ||
-            _presetPositionMoveRunning ||
-            _assignedNozzleMoveRunning)
+            _presetPositionMoveRunning)
         {
             // 当前设备还没空下来，直接忽略本次开始请求。
             return;
@@ -2425,7 +2472,7 @@ public partial class HomePage : UserControl
                         SetStartProductionStatus(
                             $"第{cycleNumber}轮：Blob识别完成，吸嘴1正在对位本批第1颗…",
                             Color.FromRgb(242, 181, 68));
-                        await MoveAssignedNozzleStepAsync(1, _productionCancellation.Token);
+                        await MoveNozzleToAssignedTargetAsync(1, _productionCancellation.Token);
                         await WaitIfProductionPausedAsync(_productionCancellation.Token);
                         nozzle1SafePositionTask = nozzle2HasPart
                             ? await PickFirstSetNozzle1UntilXyReleaseAsync(
@@ -2445,7 +2492,7 @@ public partial class HomePage : UserControl
                                 ? $"第{cycleNumber}轮：Z1已达到XY放行上升量并继续回安全位，吸嘴2正在对位本批第2颗…"
                                 : $"第{cycleNumber}轮：缺料收尾，吸嘴2正在对位最后1颗…",
                             Color.FromRgb(242, 181, 68));
-                        await MoveAssignedNozzleStepAsync(
+                        await MoveNozzleToAssignedTargetAsync(
                             2,
                             _productionCancellation.Token,
                             nozzle1HasPart
@@ -2904,9 +2951,6 @@ public partial class HomePage : UserControl
 
             // 恢复位置2按钮文字。
             MovePresetPosition2Button.Content = "移动";
-
-            // 根据当前吸嘴步骤刷新吸嘴对位按钮文字。
-            UpdateAssignedNozzleButtonText();
 
             // 重新计算主页所有命令按钮的启用状态。
             UpdateHomeCommandState();
@@ -4571,7 +4615,6 @@ public partial class HomePage : UserControl
     {
         _blob1Nozzle1Target = targets.Nozzle1;
         _blob2Nozzle2Target = targets.Nozzle2;
-        _nextAssignedNozzleMoveStep = targets.Nozzle1.HasValue ? 1 : 2;
         UpdateAssignedNozzleVisionText();
         var assignmentMessage = targets switch
         {
@@ -4585,7 +4628,6 @@ public partial class HomePage : UserControl
             _ => throw new InvalidOperationException("本批没有可用的吸嘴目标。")
         };
         SetFirstSetPositionStatus(assignmentMessage, true);
-        UpdateAssignedNozzleButtonText();
         UpdateHomeCommandState();
     }
 
@@ -4593,9 +4635,7 @@ public partial class HomePage : UserControl
     {
         _blob1Nozzle1Target = null;
         _blob2Nozzle2Target = null;
-        _nextAssignedNozzleMoveStep = 0;
         UpdateAssignedNozzleVisionText();
-        UpdateAssignedNozzleButtonText();
         UpdateHomeCommandState();
     }
 
@@ -4611,7 +4651,7 @@ public partial class HomePage : UserControl
             : "吸嘴1：等待分配";
         Nozzle2RawVisionResultText.Text = _blob2Nozzle2Target is { } nozzle2
             ? FormatAssignedNozzleVisionText(2, nozzle2)
-            : _nextAssignedNozzleMoveStep == 0
+            : _blob1Nozzle1Target is null
                 ? "吸嘴2：等待分配"
                 : "吸嘴2：本批无产品";
     }
@@ -4627,50 +4667,12 @@ public partial class HomePage : UserControl
                $"原始R={target.RotationDegrees:0.#####}°  归一化R={normalizedRotation:0.#####}°";
     }
 
-    /// <summary>
-    /// 正常生产由“开始运行”自动连续执行两个步骤；此按钮仅用于异常后的当前步骤重试。
-    /// </summary>
-    private async void MoveAssignedNozzle_Click(object sender, RoutedEventArgs e)
-    {
-        if (_assignedNozzleMoveRunning ||
-            _presetPositionMoveRunning ||
-            _startSequenceRunning)
-        {
-            return;
-        }
-
-        var step = _nextAssignedNozzleMoveStep;
-        if (step is not (1 or 2))
-        {
-            SetFirstSetPositionStatus("请先点击“开始运行”完成Blob识别和吸嘴分配。", false);
-            return;
-        }
-
-        try
-        {
-            _assignedNozzleMoveRunning = true;
-            UpdateHomeCommandState();
-            await MoveAssignedNozzleStepAsync(step, CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
-            SetFirstSetPositionStatus($"{nozzleName}对位失败：{exception.Message}", false);
-        }
-        finally
-        {
-            _assignedNozzleMoveRunning = false;
-            UpdateAssignedNozzleButtonText();
-            UpdateHomeCommandState();
-        }
-    }
-
-    private async Task MoveAssignedNozzleStepAsync(
-        int step,
+    private async Task MoveNozzleToAssignedTargetAsync(
+        int nozzleNumber,
         CancellationToken cancellationToken,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
-        var target = step switch
+        var target = nozzleNumber switch
         {
             1 => _blob1Nozzle1Target,
             2 => _blob2Nozzle2Target,
@@ -4689,10 +4691,8 @@ public partial class HomePage : UserControl
         var yVelocity = GetProductionAxisMotionSettings(
             VisionCalibrationService.FirstSetYHardwareAxisNo).RunVelocity;
 
-        var nozzleName = step == 1 ? "吸嘴1" : "吸嘴2";
-        var objectName = step == 1 ? "物体1" : "物体2";
-        MoveAssignedNozzleTitleText.Text = $"{nozzleName}移动中";
-        MoveAssignedNozzleHintText.Text = $"正在自动对位{objectName}…";
+        var nozzleName = nozzleNumber == 1 ? "吸嘴1" : "吸嘴2";
+        var objectName = nozzleNumber == 1 ? "物体1" : "物体2";
         SetFirstSetPositionStatus(
             $"正在移动{nozzleName}到{objectName}：X={target.Value.X:0.###}，Y={target.Value.Y:0.###}",
             true);
@@ -4721,31 +4721,16 @@ public partial class HomePage : UserControl
             yVelocityOverride: yVelocity,
             linearInterpolationCoordinateSystemNo: GetFirstSetXyInterpolationCoordinateSystemNo());
 
-        if (step == 1)
-        {
-            _nextAssignedNozzleMoveStep = 2;
-            SetFirstSetPositionStatus(
-                $"吸嘴1已到物体1({actual.ActualX:0.###}, {actual.ActualY:0.###})；即将自动对位吸嘴2。",
-                true);
-        }
-        else
-        {
-            _nextAssignedNozzleMoveStep = 3;
-            SetFirstSetPositionStatus(
-                $"吸嘴2已到物体2({actual.ActualX:0.###}, {actual.ActualY:0.###})；两次顺序对位完成。",
-                true);
-        }
-
-        UpdateAssignedNozzleButtonText();
-        UpdateHomeCommandState();
+        SetFirstSetPositionStatus(
+            $"{nozzleName}已到{objectName}({actual.ActualX:0.###}, {actual.ActualY:0.###})。",
+            true);
     }
 
     public Task<MotionAxisSnapshot> RotateDdOnceAsync(CancellationToken cancellationToken)
     {
         if (_startSequenceRunning ||
             _presetPositionMoveRunning ||
-            _oneKeyResetRunning ||
-            _assignedNozzleMoveRunning)
+            _oneKeyResetRunning)
         {
             throw new InvalidOperationException("当前存在生产、复位或示教运动，不能单独转动 DD 马达。");
         }
@@ -4884,8 +4869,7 @@ public partial class HomePage : UserControl
     {
         if (_presetPositionMoveRunning ||
             _oneKeyResetRunning ||
-            _startSequenceRunning ||
-            _assignedNozzleMoveRunning)
+            _startSequenceRunning)
         {
             return;
         }
@@ -5010,7 +4994,7 @@ public partial class HomePage : UserControl
         Button moveButton)
     {
         if (_presetPositionMoveRunning || _oneKeyResetRunning ||
-            _startSequenceRunning || _assignedNozzleMoveRunning)
+            _startSequenceRunning)
         {
             return;
         }
@@ -5169,8 +5153,7 @@ public partial class HomePage : UserControl
     {
         if (_presetPositionMoveRunning ||
             _oneKeyResetRunning ||
-            _startSequenceRunning ||
-            _assignedNozzleMoveRunning)
+            _startSequenceRunning)
         {
             return;
         }
@@ -5260,8 +5243,7 @@ public partial class HomePage : UserControl
         Button moveButton)
     {
         if (_presetPositionMoveRunning ||
-            _startSequenceRunning ||
-            _assignedNozzleMoveRunning)
+            _startSequenceRunning)
         {
             return;
         }
@@ -6941,18 +6923,27 @@ public partial class HomePage : UserControl
 
         if (_startSequenceRunning ||
             _oneKeyResetRunning ||
-            _presetPositionMoveRunning ||
-            _assignedNozzleMoveRunning)
+            _presetPositionMoveRunning)
         {
+            return;
+        }
+
+        var pendingProductCount = CountOccupiedCarouselStations(_carouselStations);
+        if (pendingProductCount == 0)
+        {
+            SetOneKeyCollectStatus(
+                "当前转盘工位缓存无待收物料，无需执行一键收料。",
+                Color.FromRgb(73, 209, 125));
             return;
         }
 
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
-            "一键收料不移动任何XY或Z轴，只让DD每次转动一个工位。" +
-            "每次停稳后依次执行Y26=0、Y25=0、Y26=1、Y25=1；" +
-            "共转16次，转满一整圈。\n\n" +
-            "请确认DD转盘在安全区域。",
+            "一键收料将按“开始运行”的同一流程和时间参数排空转盘：\n" +
+            "DD每节拍转两个工位，执行工位IO和已启用测试，" +
+            "再由第二套XY/Z从13/14工位取料并放入对应BIN。\n\n" +
+            $"当前工位缓存共有 {pendingProductCount} 件待收物料。" +
+            "请确认DD、第二套XY/Z、测试站和BIN区域均安全。",
             "一键收料安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -6962,15 +6953,23 @@ public partial class HomePage : UserControl
             return;
         }
 
-        var collectIoSequenceActive = false;
         try
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
-            // 一键收料只使用DD轴参数和扩展IO，不读取也不调用XY/Z、测试站或BIN位置。
+            // 与开始运行一样，在启动时锁定轴、Z轴时间、测试站、
+            // 第二套XY和BIN参数，保证收料节拍与正常生产完全一致。
             _productionAxisMotionSettings = ReadProductionAxisMotionSettings();
             ApplyProductionAxisMotionSettings(motionController, _productionAxisMotionSettings);
+            _testStationSettings = ReadTestStationSettings();
+            EnsureAssignedTestInstrumentsConnected();
+            _productionZPositions = ReadProductionZPositions();
+            _productionZDwellTimes = ReadProductionZDwellTimes();
+            _secondSetXyPositions = ReadSecondSetXyPositions();
+            _binDropPositions = ReadBinDropPositions();
+            _productionXyLinearInterpolationEnabled =
+                _homeSettings.XyLinearInterpolationEnabled ?? false;
 
             _productionCancellation = new CancellationTokenSource();
             _productionCompletion = new TaskCompletionSource<bool>(
@@ -6982,35 +6981,26 @@ public partial class HomePage : UserControl
             _productionAxisSet = VisionCalibrationAxisSet.First;
             _oneKeyCollectRunning = true;
             _startSequenceRunning = true;
+            ResetUphTracking();
+            StartUphTracking();
+            UpdateCarouselStationDisplay(_carouselStations);
             UpdateHomeCommandState();
 
-            for (var turn = 1; turn <= CarouselStationCount; turn++)
-            {
-                var cancellationToken = _productionCancellation.Token;
-                cancellationToken.ThrowIfCancellationRequested();
-                SetOneKeyCollectStatus(
-                    $"一键收料 {turn}/{CarouselStationCount}：DD正在转动一个工位…",
-                    Color.FromRgb(242, 181, 68));
-                _ = await MoveAxis0RelativeCoreAsync(
-                    DdMotorPulsePerTurn,
-                    cancellationToken);
-                AdvanceCarouselOccupancy(_carouselStations);
-                UpdateCarouselStationDisplay(_carouselStations);
-
-                SetOneKeyCollectStatus(
-                    $"一键收料 {turn}/{CarouselStationCount}：DD已停稳，" +
-                    "正在执行Y26=0 → Y25=0 → Y26=1 → Y25=1…",
-                    Color.FromRgb(242, 181, 68));
-                collectIoSequenceActive = true;
-                await RunOneKeyCollectIoSequenceAsync(
-                    motionController,
-                    cancellationToken);
-                collectIoSequenceActive = false;
-            }
+            SetOneKeyCollectStatus(
+                $"一键收料已启动：正按生产节拍排空 {pendingProductCount} 件物料…",
+                Color.FromRgb(242, 181, 68));
+            await DrainCarouselAfterFeederEmptyAsync(
+                _carouselStations,
+                DdMotorPulsePerTurn,
+                Task.FromResult(0),
+                Task.CompletedTask,
+                Task.CompletedTask,
+                ProductionHandlingAxisNos,
+                _productionCancellation.Token);
 
             UpdateCarouselStationDisplay(_carouselStations);
             SetOneKeyCollectStatus(
-                "一键收料完成：DD已转16次、每次停稳后的Y26/Y25序列均已完成，转盘已转满一圈。",
+                $"一键收料完成：{pendingProductCount} 件物料已按开始流程的测试和下料节拍全部排空到BIN。",
                 Color.FromRgb(73, 209, 125));
         }
         catch (OperationCanceledException)
@@ -7027,13 +7017,16 @@ public partial class HomePage : UserControl
         {
             _productionCancellation?.Cancel();
             _productionResumeSignal?.TrySetResult(true);
-            if (collectIoSequenceActive)
-            {
-                CloseOneKeyCollectOutputsNoThrow();
-            }
-
+            StopUphTracking();
+            CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
             _productionAxisSet = null;
+            _productionZPositions = null;
+            _productionZDwellTimes = null;
+            _secondSetXyPositions = null;
+            _binDropPositions = null;
             _productionAxisMotionSettings = null;
+            _testStationSettings = null;
+            _productionXyLinearInterpolationEnabled = false;
             _productionStopRequested = false;
             _productionPauseRequested = false;
             _productionResumeSignal = null;
@@ -7049,80 +7042,11 @@ public partial class HomePage : UserControl
         }
     }
 
-    private async Task RunOneKeyCollectIoSequenceAsync(
-        MotionControlPage motionController,
-        CancellationToken cancellationToken)
-    {
-        // 按现场记录原样下发扩展IO：
-        // nmc_write_outbit_extern(0, 2, 1001, 26/25, value)。
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectCancelVacuumOutputBit,
-            enabled: false,
-            "取消吸 Y26=0");
-        await Task.Delay(DefaultVacuumValveSwitchDelayMilliseconds, cancellationToken);
-
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectBreakVacuumOutputBit,
-            enabled: false,
-            "破 Y25=0");
-        await Task.Delay(DefaultVacuumBreakPulseMilliseconds, cancellationToken);
-
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectCancelVacuumOutputBit,
-            enabled: true,
-            "关闭取消吸 Y26=1");
-        await Task.Delay(DefaultVacuumValveSwitchDelayMilliseconds, cancellationToken);
-
-        SetOneKeyCollectOutput(
-            motionController,
-            OneKeyCollectBreakVacuumOutputBit,
-            enabled: true,
-            "关闭破 Y25=1");
-    }
-
-    private static void SetOneKeyCollectOutput(
-        MotionControlPage motionController,
-        int bitNo,
-        bool enabled,
-        string actionName)
-    {
-        if (!motionController.SetDigitalOutputHardwareBit(bitNo, enabled))
-        {
-            throw new InvalidOperationException($"一键收料IO操作失败：{actionName}。");
-        }
-    }
-
-    private void CloseOneKeyCollectOutputsNoThrow()
-    {
-        if (_preserveIoOnEmergencyStop || _motionController is not { } motionController)
-        {
-            return;
-        }
-
-        try
-        {
-            _ = motionController.SetDigitalOutputHardwareBit(
-                OneKeyCollectCancelVacuumOutputBit,
-                enabled: true);
-            _ = motionController.SetDigitalOutputHardwareBit(
-                OneKeyCollectBreakVacuumOutputBit,
-                enabled: true);
-        }
-        catch
-        {
-            // 收尾不覆盖原始运动或IO异常；错误已由主流程状态显示。
-        }
-    }
-
     private async void OneKeyReset_Click(object sender, RoutedEventArgs e)
     {
         if (_oneKeyResetRunning ||
             _startSequenceRunning ||
-            _presetPositionMoveRunning ||
-            _assignedNozzleMoveRunning)
+            _presetPositionMoveRunning)
         {
             return;
         }
@@ -7198,7 +7122,6 @@ public partial class HomePage : UserControl
             OneKeyCollectButton is null ||
             OneKeyCollectTitleText is null ||
             OneKeyCollectHintText is null ||
-            MoveAssignedNozzleButton is null ||
             FirstSetTeachingCenterXTextBox is null ||
             FirstSetTeachingCenterYTextBox is null ||
             FirstSetTeachingPressPositionXTextBox is null ||
@@ -7277,8 +7200,7 @@ public partial class HomePage : UserControl
         var commandsIdle =
             !_oneKeyResetRunning &&
             !_presetPositionMoveRunning &&
-            !_startSequenceRunning &&
-            !_assignedNozzleMoveRunning;
+            !_startSequenceRunning;
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
         var allTestStationParametersValid = AllTestStationParametersValid();
         var visionPickupCountValid =
@@ -7382,6 +7304,10 @@ public partial class HomePage : UserControl
         OneKeyCollectButton.IsEnabled =
             _motionController is not null &&
             allProductionAxisParametersValid &&
+            allTestStationParametersValid &&
+            allZPositionsValid &&
+            allSecondSetXyPositionsValid &&
+            allBinDropPositionsValid &&
             (_oneKeyCollectRunning ? !_productionStopRequested : commandsIdle);
         OneKeyCollectTitleText.Text = _oneKeyCollectRunning
             ? (_productionStopRequested ? "正在停止" : "停止收料")
@@ -7394,12 +7320,6 @@ public partial class HomePage : UserControl
             _oneKeyCollectRunning
                 ? Color.FromRgb(255, 98, 110)
                 : Color.FromRgb(56, 163, 197));
-        MoveAssignedNozzleButton.IsEnabled =
-            visionControllersReady &&
-            commandsIdle &&
-            allProductionAxisParametersValid &&
-            ((_nextAssignedNozzleMoveStep == 1 && _blob1Nozzle1Target is not null) ||
-              (_nextAssignedNozzleMoveStep == 2 && _blob2Nozzle2Target is not null));
         FirstSetTeachingCenterXTextBox.IsEnabled = commandsIdle;
         FirstSetTeachingCenterYTextBox.IsEnabled = commandsIdle;
         FirstSetTeachingPressPositionXTextBox.IsEnabled = commandsIdle;
@@ -7525,34 +7445,6 @@ public partial class HomePage : UserControl
             TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
         HomeEmergencyStopButton.IsEnabled = _motionController is not null;
-    }
-
-    private void UpdateAssignedNozzleButtonText()
-    {
-        if (MoveAssignedNozzleTitleText is null || MoveAssignedNozzleHintText is null)
-        {
-            return;
-        }
-
-        switch (_nextAssignedNozzleMoveStep)
-        {
-            case 1:
-                MoveAssignedNozzleTitleText.Text = "吸嘴1 → 物体1";
-                MoveAssignedNozzleHintText.Text = "自动步骤1；失败时可点击重试";
-                break;
-            case 2:
-                MoveAssignedNozzleTitleText.Text = "吸嘴2 → 物体2";
-                MoveAssignedNozzleHintText.Text = "自动步骤2；失败时可点击重试";
-                break;
-            case 3:
-                MoveAssignedNozzleTitleText.Text = "顺序对位完成";
-                MoveAssignedNozzleHintText.Text = "重新开始识别后可再次执行";
-                break;
-            default:
-                MoveAssignedNozzleTitleText.Text = "自动顺序对位";
-                MoveAssignedNozzleHintText.Text = "开始运行后自动执行";
-                break;
-        }
     }
 
     private void SetStartProductionStatus(string message, Color color)

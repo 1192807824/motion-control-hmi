@@ -56,6 +56,17 @@ public partial class UsbMicroscopePage : UserControl
         InitializeComponent();
     }
 
+    public event EventHandler? PreviewChanged;
+
+    public BitmapSource? LatestPreviewFrame => _latestFrame;
+
+    public bool IsMicroscopeConnected => _captureDevice is not null;
+
+    public string PreviewStatus =>
+        _captureDevice is not null && _latestFrame is not null
+            ? FrameStatusText.Text
+            : ConnectionStatusText.Text;
+
     public void AttachHomeController(HomePage homeController)
     {
         _homeController = homeController ?? throw new ArgumentNullException(nameof(homeController));
@@ -368,6 +379,8 @@ public partial class UsbMicroscopePage : UserControl
                     : 0;
                 FrameStatusText.Text = $"实时画面  {frame.PixelWidth}×{frame.PixelHeight}  {fps:0.0} FPS";
             }
+
+            PreviewChanged?.Invoke(this, EventArgs.Empty);
         }, DispatcherPriority.Render);
     }
 
@@ -1632,6 +1645,7 @@ public partial class UsbMicroscopePage : UserControl
             MicroscopeStatus.Error => Color.FromRgb(217, 13, 22),
             _ => Color.FromRgb(111, 129, 144)
         });
+        PreviewChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private sealed class MicroscopeDeviceItem
