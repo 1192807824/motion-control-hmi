@@ -1218,12 +1218,7 @@ public partial class VisualCalibrationPage : UserControl
                 "视觉组件尚未就绪，无法运行找芯片流程。");
         }
 
-        // VisionMaster 的单次流程调用在厂商SDK内部可能同步等待相机和算法结果。
-        // 即使外层接口返回Task，也不能让这段同步等待占住ControlHub的UI线程；否则
-        // 同一时刻正在等待轮询的DD、测试轴和第二套下料任务无法继续它们的后续步骤。
-        return await Task.Run(
-            () => VisionHost.RunRectangleBlobInspectionAsync(cancellationToken),
-            cancellationToken);
+        return await VisionHost.RunRectangleBlobInspectionAsync(cancellationToken);
     }
 
     public async Task<VisionLowerCameraCorrectionResult> RunLowerCameraCorrectionAsync(
