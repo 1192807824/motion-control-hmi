@@ -23,6 +23,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     };
 
     private const int GwlStyle = -16;
+    private const int SwHide = 0;
     private const int SwShow = 5;
     private const int WmClose = 0x0010;
     private const int WmSize = 0x0005;
@@ -52,6 +53,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     private IntPtr _hostWindow;
     private IntPtr _visionWindow;
     private IntPtr _activeDisplayWindow;
+    private bool _embeddedDisplaySuspended;
     private bool _disposed;
     private string? _solutionPath;
     private VisionProcedureNames _procedureNames = new();
@@ -138,6 +140,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             exitedProcess = _process;
             _process = null;
             _visionWindow = IntPtr.Zero;
+            _embeddedDisplaySuspended = false;
             _startCancellation?.Dispose();
             _startCancellation = new CancellationTokenSource();
         }
@@ -746,13 +749,23 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
 
         _activeDisplayWindow = displayHostWindow;
+        var wasSuspended = _embeddedDisplaySuspended;
+        _embeddedDisplaySuspended = false;
         if (_visionWindow == IntPtr.Zero)
         {
             return;
         }
 
-        ReparentVisionWindow(displayHostWindow);
-        ResizeVisionWindow();
+        try
+        {
+            ReparentVisionWindow(displayHostWindow);
+            ResizeVisionWindow();
+        }
+        catch
+        {
+            _embeddedDisplaySuspended = wasSuspended;
+            throw;
+        }
     }
 
     public void UseDefaultDisplayHost()
@@ -763,11 +776,67 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
 
         _activeDisplayWindow = IntPtr.Zero;
+        _embeddedDisplaySuspended = false;
         if (_hostWindow != IntPtr.Zero && _visionWindow != IntPtr.Zero)
         {
             ReparentVisionWindow(_hostWindow);
             ResizeVisionWindow();
         }
+    }
+
+    /// <summary>
+    /// 相机取像和厂商结果渲染期间，临时把跨进程 VisionMaster 窗口从 WPF 的
+    /// HwndHost 父窗口中摘下并隐藏。厂商控件会向嵌入父窗口同步发送原生消息；
+    /// 保持嵌入会占住 ControlHub 的 Dispatcher，进而暂停运动任务的后续步骤。
+    /// </summary>
+    public bool SuspendEmbeddedDisplayForAcquisition()
+    {
+        if (_embeddedDisplaySuspended)
+        {
+            return true;
+        }
+
+        if (_disposed || _visionWindow == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (!IsWindow(_visionWindow))
+        {
+            throw new Win32Exception("VisionMaster 窗口句柄已经失效。");
+        }
+
+        _ = ShowWindow(_visionWindow, SwHide);
+        Marshal.SetLastPInvokeError(0);
+        var previousParent = SetParent(_visionWindow, IntPtr.Zero);
+        var setParentError = Marshal.GetLastPInvokeError();
+        if (previousParent == IntPtr.Zero && setParentError != 0)
+        {
+            _ = ShowWindow(_visionWindow, SwShow);
+            throw new Win32Exception(setParentError, "无法临时分离 VisionMaster 显示窗口。");
+        }
+
+        if (GetParent(_visionWindow) != IntPtr.Zero)
+        {
+            _ = SetParent(_visionWindow, previousParent);
+            _ = ShowWindow(_visionWindow, SwShow);
+            throw new Win32Exception("VisionMaster 显示窗口未能从主页承载区分离。");
+        }
+
+        try
+        {
+            SetVisionWindowStyle(embedded: false);
+        }
+        catch
+        {
+            _ = SetParent(_visionWindow, previousParent);
+            SetVisionWindowStyle(embedded: true);
+            _ = ShowWindow(_visionWindow, SwShow);
+            throw;
+        }
+
+        _embeddedDisplaySuspended = true;
+        return true;
     }
 
     public void RefreshDisplayHost()
@@ -1245,6 +1314,11 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     private void ResizeVisionWindow(bool throwOnFailure = false)
     {
+        if (_embeddedDisplaySuspended)
+        {
+            return;
+        }
+
         var displayHostWindow = GetActiveDisplayWindow();
         if (displayHostWindow == IntPtr.Zero || _visionWindow == IntPtr.Zero)
         {
@@ -1313,7 +1387,38 @@ public sealed class VisionMasterProcessHost : HwndHost
             throw new Win32Exception("VisionMaster 显示承载窗口验证失败。");
         }
 
+        SetVisionWindowStyle(embedded: true);
         _ = ShowWindow(_visionWindow, SwShow);
+    }
+
+    private void SetVisionWindowStyle(bool embedded)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var style = GetWindowLong(_visionWindow, GwlStyle);
+        var getStyleError = Marshal.GetLastPInvokeError();
+        if (style == 0 && getStyleError != 0)
+        {
+            throw new Win32Exception(getStyleError, "无法读取 VisionMaster 窗口样式。");
+        }
+
+        if (embedded)
+        {
+            style &= ~(WsPopup | WsCaption | WsThickFrame);
+            style |= WsChild | WsVisible | WsClipChildren | WsClipSiblings;
+        }
+        else
+        {
+            style &= ~(WsChild | WsVisible);
+            style |= WsPopup;
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        var previousStyle = SetWindowLong(_visionWindow, GwlStyle, style);
+        var setStyleError = Marshal.GetLastPInvokeError();
+        if (previousStyle == 0 && setStyleError != 0)
+        {
+            throw new Win32Exception(setStyleError, "无法切换 VisionMaster 窗口样式。");
+        }
     }
 
     private void StopProcess()
@@ -1329,6 +1434,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             _process = null;
             visionWindow = _visionWindow;
             _visionWindow = IntPtr.Zero;
+            _embeddedDisplaySuspended = false;
         }
 
         if (process is null)
@@ -1474,6 +1580,7 @@ public sealed class VisionMasterProcessHost : HwndHost
             }
 
             _visionWindow = IntPtr.Zero;
+            _embeddedDisplaySuspended = false;
             shouldNotify = !_disposed;
         }
 
