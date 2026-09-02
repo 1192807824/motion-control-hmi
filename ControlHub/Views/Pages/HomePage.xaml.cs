@@ -38,6 +38,8 @@ public partial class HomePage : UserControl
     private const int Station14BreakVacuumOutputBit = 23;
     private const int CarouselUpperVacuumOutputBit = 24;
     private const int CarouselLowerSprayOutputBit = 25;
+    private const int OneKeyCollectCancelVacuumOutputBit = 26;
+    private const int OneKeyCollectBreakVacuumOutputBit = 25;
     private const int LowerCameraLightOutputBit = 10;
     private const int DefaultVacuumBreakPulseMilliseconds = 30;
     private const int DefaultVacuumValveSwitchDelayMilliseconds = 20;
@@ -6928,22 +6930,11 @@ public partial class HomePage : UserControl
             return;
         }
 
-        var pendingProductCount = CountOccupiedCarouselStations(_carouselStations);
-        if (pendingProductCount == 0)
-        {
-            SetOneKeyCollectStatus(
-                "当前转盘工位缓存无待收物料，无需执行一键收料。",
-                Color.FromRgb(73, 209, 125));
-            return;
-        }
-
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
-            "一键收料将按“开始运行”的同一流程和时间参数排空转盘：\n" +
-            "DD每节拍转两个工位，执行工位IO和已启用测试，" +
-            "再由第二套XY/Z从13/14工位取料并放入对应BIN。\n\n" +
-            $"当前工位缓存共有 {pendingProductCount} 件待收物料。" +
-            "请确认DD、第二套XY/Z、测试站和BIN区域均安全。",
+            "一键收料只执行Y26/Y25收料IO，不移动DD、XY、Z、R或测试轴。\n" +
+            "IO先后顺序与开始流程一致，并使用参数设置中的阀切换和破真空时间。\n\n" +
+            "请确认收料IO可以安全动作。",
             "一键收料安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -6957,19 +6948,12 @@ public partial class HomePage : UserControl
         {
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
-
-            // 与开始运行一样，在启动时锁定轴、Z轴时间、测试站、
-            // 第二套XY和BIN参数，保证收料节拍与正常生产完全一致。
-            _productionAxisMotionSettings = ReadProductionAxisMotionSettings();
-            ApplyProductionAxisMotionSettings(motionController, _productionAxisMotionSettings);
-            _testStationSettings = ReadTestStationSettings();
-            EnsureAssignedTestInstrumentsConnected();
-            _productionZPositions = ReadProductionZPositions();
-            _productionZDwellTimes = ReadProductionZDwellTimes();
-            _secondSetXyPositions = ReadSecondSetXyPositions();
-            _binDropPositions = ReadBinDropPositions();
-            _productionXyLinearInterpolationEnabled =
-                _homeSettings.XyLinearInterpolationEnabled ?? false;
+            var breakPulseMilliseconds = ParseMilliseconds(
+                VacuumBreakPulseTextBox.Text,
+                "破真空时间");
+            var valveSwitchDelayMilliseconds = ParseMilliseconds(
+                VacuumValveSwitchDelayTextBox.Text,
+                "阀切换等待");
 
             _productionCancellation = new CancellationTokenSource();
             _productionCompletion = new TaskCompletionSource<bool>(
@@ -6978,29 +6962,22 @@ public partial class HomePage : UserControl
             _productionStopRequested = false;
             _productionPauseRequested = false;
             _productionResumeSignal = null;
-            _productionAxisSet = VisionCalibrationAxisSet.First;
             _oneKeyCollectRunning = true;
             _startSequenceRunning = true;
-            ResetUphTracking();
-            StartUphTracking();
-            UpdateCarouselStationDisplay(_carouselStations);
             UpdateHomeCommandState();
 
             SetOneKeyCollectStatus(
-                $"一键收料已启动：正按生产节拍排空 {pendingProductCount} 件物料…",
+                $"正在执行收料IO：Y26=0 → 等待{valveSwitchDelayMilliseconds} ms → " +
+                $"Y25=0 → 等待{breakPulseMilliseconds} ms → 关闭输出…",
                 Color.FromRgb(242, 181, 68));
-            await DrainCarouselAfterFeederEmptyAsync(
-                _carouselStations,
-                DdMotorPulsePerTurn,
-                Task.FromResult(0),
-                Task.CompletedTask,
-                Task.CompletedTask,
-                ProductionHandlingAxisNos,
+            await RunOneKeyCollectIoSequenceAsync(
+                motionController,
+                valveSwitchDelayMilliseconds,
+                breakPulseMilliseconds,
                 _productionCancellation.Token);
 
-            UpdateCarouselStationDisplay(_carouselStations);
             SetOneKeyCollectStatus(
-                $"一键收料完成：{pendingProductCount} 件物料已按开始流程的测试和下料节拍全部排空到BIN。",
+                "一键收料IO完成；全程未移动任何轴。",
                 Color.FromRgb(73, 209, 125));
         }
         catch (OperationCanceledException)
@@ -7017,16 +6994,7 @@ public partial class HomePage : UserControl
         {
             _productionCancellation?.Cancel();
             _productionResumeSignal?.TrySetResult(true);
-            StopUphTracking();
-            CloseNozzleVacuumOutputsNoThrow(VisionCalibrationAxisSet.Second);
-            _productionAxisSet = null;
-            _productionZPositions = null;
-            _productionZDwellTimes = null;
-            _secondSetXyPositions = null;
-            _binDropPositions = null;
-            _productionAxisMotionSettings = null;
-            _testStationSettings = null;
-            _productionXyLinearInterpolationEnabled = false;
+            CloseOneKeyCollectOutputsNoThrow();
             _productionStopRequested = false;
             _productionPauseRequested = false;
             _productionResumeSignal = null;
@@ -7039,6 +7007,74 @@ public partial class HomePage : UserControl
             _productionCompletion = null;
             UpdateHomeCommandState();
             productionCompletion?.TrySetResult(true);
+        }
+    }
+
+    private static async Task RunOneKeyCollectIoSequenceAsync(
+        MotionControlPage motionController,
+        int valveSwitchDelayMilliseconds,
+        int breakPulseMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectCancelVacuumOutputBit,
+            enabled: false,
+            "取消吸 Y26=0");
+        await Task.Delay(valveSwitchDelayMilliseconds, cancellationToken);
+
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectBreakVacuumOutputBit,
+            enabled: false,
+            "破真空 Y25=0");
+        await Task.Delay(breakPulseMilliseconds, cancellationToken);
+
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectCancelVacuumOutputBit,
+            enabled: true,
+            "关闭取消吸 Y26=1");
+        await Task.Delay(valveSwitchDelayMilliseconds, cancellationToken);
+
+        SetOneKeyCollectOutput(
+            motionController,
+            OneKeyCollectBreakVacuumOutputBit,
+            enabled: true,
+            "关闭破真空 Y25=1");
+    }
+
+    private static void SetOneKeyCollectOutput(
+        MotionControlPage motionController,
+        int bitNo,
+        bool enabled,
+        string actionName)
+    {
+        if (!motionController.SetDigitalOutputHardwareBit(bitNo, enabled))
+        {
+            throw new InvalidOperationException($"一键收料IO操作失败：{actionName}。");
+        }
+    }
+
+    private void CloseOneKeyCollectOutputsNoThrow()
+    {
+        if (_preserveIoOnEmergencyStop || _motionController is not { } motionController)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = motionController.SetDigitalOutputHardwareBit(
+                OneKeyCollectCancelVacuumOutputBit,
+                enabled: true);
+            _ = motionController.SetDigitalOutputHardwareBit(
+                OneKeyCollectBreakVacuumOutputBit,
+                enabled: true);
+        }
+        catch
+        {
+            // 收尾不覆盖原始IO异常；错误已由主流程状态显示。
         }
     }
 
@@ -7303,11 +7339,8 @@ public partial class HomePage : UserControl
         OneKeyResetButton.IsEnabled = _motionController is not null && commandsIdle;
         OneKeyCollectButton.IsEnabled =
             _motionController is not null &&
-            allProductionAxisParametersValid &&
-            allTestStationParametersValid &&
-            allZPositionsValid &&
-            allSecondSetXyPositionsValid &&
-            allBinDropPositionsValid &&
+            TryParseMilliseconds(VacuumBreakPulseTextBox.Text, out _) &&
+            TryParseMilliseconds(VacuumValveSwitchDelayTextBox.Text, out _) &&
             (_oneKeyCollectRunning ? !_productionStopRequested : commandsIdle);
         OneKeyCollectTitleText.Text = _oneKeyCollectRunning
             ? (_productionStopRequested ? "正在停止" : "停止收料")
