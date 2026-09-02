@@ -94,7 +94,7 @@ public partial class HomePage : UserControl
     private const int CarouselStationCount = 16;
     private const int CarouselVacuumSprayPulseMilliseconds = 30;
     private const int DefaultTestStationDwellMilliseconds = 20;
-    private const int MoveAwayBeforeDdMilliseconds = 100;
+    private const int MoveAwayBeforeDdMilliseconds = 50;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
     private const string CarouselStatusDwelling = "停留";
@@ -3371,7 +3371,7 @@ public partial class HomePage : UserControl
                 Color.FromRgb(242, 181, 68));
         }
 
-        // DD必须等待已启用测试站回到等待位、第二套完成取料，并确认XY已离开放料点100 ms。
+        // DD必须等待已启用测试站回到等待位、第二套完成取料，并确认XY已离开放料点50 ms。
         // 第二套后续移动到两个收料位置并放料，不再阻塞DD。
         await Task.WhenAll(
             requiredFinalTestTask,
