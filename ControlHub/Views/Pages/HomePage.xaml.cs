@@ -2305,10 +2305,36 @@ public partial class HomePage : UserControl
                     VisionRectangleBlobResult blobResult;
                     try
                     {
-                        blobResult = await RunChipInspectionWithFeederLightAsync(
+                        // 相机结果只约束第一套XY后续取料；等待视觉返回期间，上一轮已经启动的
+                        // DD、测试站和第二套下料流水线必须继续独立运行，不能把它们串到拍照await之后。
+                        var inspectionTask = RunChipInspectionWithFeederLightAsync(
                             visualCalibrationController,
                             activeFeederLightOnTask,
                             _productionCancellation.Token);
+
+                        // 后台转盘任务可能在相机返回前完成。此时立即接管它产生的测试和第二套
+                        // 下料任务，继续保持完整的任务跟踪；不等待这些任务完成，也不阻塞相机。
+                        if (activeCarouselAdvanceTask is not null)
+                        {
+                            var completedTask = await Task.WhenAny(
+                                inspectionTask,
+                                activeCarouselAdvanceTask);
+                            if (ReferenceEquals(completedTask, activeCarouselAdvanceTask) &&
+                                activeCarouselAdvanceTask.IsCompletedSuccessfully)
+                            {
+                                var carouselAdvanceResult = await activeCarouselAdvanceTask;
+                                activeCarouselAdvanceTask = null;
+                                activeFinalTestTask = carouselAdvanceResult.FinalTestTask;
+                                activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
+                                activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
+                                SetFirstSetPositionStatus(
+                                    $"第{cycleNumber}轮等待相机结果期间，DD及工位动作已继续执行；" +
+                                    "第二套下料流水线保持独立运行。",
+                                    true);
+                            }
+                        }
+
+                        blobResult = await inspectionTask;
                     }
                     finally
                     {
