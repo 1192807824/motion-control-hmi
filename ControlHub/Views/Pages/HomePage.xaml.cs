@@ -2269,69 +2269,71 @@ public partial class HomePage : UserControl
 
                 if (pendingPickupBatches.Count == 0)
                 {
-                    // 最后一批物料取走后，振动已在后续纠偏/上料期间并行执行。
-                    // 等后台震动序列结束后仍要经过最终停振安全门；首轮也不能因为
-                    // activeFeederVibrationTask 初始为 CompletedTask 就跳过停振确认。
-                    if (!activeFeederVibrationTask.IsCompleted)
-                    {
-                        SetStartProductionStatus(
-                            $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束并停稳…",
-                            Color.FromRgb(242, 181, 68));
-                    }
-
-                    await activeFeederVibrationTask;
+                    // 把“等待震动结束、最终停振、开灯及相机返回”整体作为独立任务启动。
+                    // 主流程等待它期间持续调度下方的DD、测试站和第二套下料流水线。
+                    var inspectionTask = RunProductionUpperCameraInspectionAsync(
+                        visualCalibrationController,
+                        actual,
+                        activeFeederVibrationTask,
+                        activeFeederLightOnTask,
+                        cycleNumber,
+                        _productionCancellation.Token);
                     activeFeederVibrationTask = Task.CompletedTask;
-                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
-
-                    var connectionController = _connectionConfigController
-                        ?? throw new InvalidOperationException("振动盘控制组件未连接，无法确认拍照前停振。");
-                    SetStartProductionStatus(
-                        $"第{cycleNumber}轮：震动序列已结束，正在执行最终停振并等待振动盘停稳…",
-                        Color.FromRgb(242, 181, 68));
-                    if (!await connectionController.EnsureStoppedForProductionPhotoAsync(
-                            _productionCancellation.Token))
-                    {
-                        _productionCancellation.Token.ThrowIfCancellationRequested();
-                        throw new InvalidOperationException(
-                            "拍照前最终停振失败，已取消本次拍照。");
-                    }
-                    await WaitIfProductionPausedAsync(_productionCancellation.Token);
-
-                    // 只有缓存已经取空时才重新执行找芯片流程；一次接收脚本1返回的全部X/Y/R结果。
-                    SetStartProductionStatus(
-                        $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
-                        $"振动盘已停稳，缓存已空，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}…",
-                        Color.FromRgb(242, 181, 68));
                     VisionRectangleBlobResult blobResult;
                     try
                     {
-                        // 相机结果只约束第一套XY后续取料；等待视觉返回期间，上一轮已经启动的
-                        // DD、测试站和第二套下料流水线必须继续独立运行，不能把它们串到拍照await之后。
-                        var inspectionTask = RunChipInspectionWithFeederLightAsync(
-                            visualCalibrationController,
-                            activeFeederLightOnTask,
-                            _productionCancellation.Token);
-
-                        // 后台转盘任务可能在相机返回前完成。此时立即接管它产生的测试和第二套
-                        // 下料任务，继续保持完整的任务跟踪；不等待这些任务完成，也不阻塞相机。
-                        if (activeCarouselAdvanceTask is not null)
+                        // 上相机等待可能明显慢于一次DD双工位节拍。不能只等上一段后台任务结束后
+                        // 就让下游空闲；只要转盘仍有在制品且下一次推进不会把15/16工位的
+                        // 产品回卷到1/2上料位，就持续调度DD、测试站和第二套下料。
+                        while (!inspectionTask.IsCompleted)
                         {
+                            if (activeCarouselAdvanceTask is null)
+                            {
+                                if (!CanAdvanceCarouselWhileWaitingForInspection(carouselStations))
+                                {
+                                    break;
+                                }
+
+                                var inspectionWaitFinalTestTask = activeFinalTestTask;
+                                activeFinalTestTask = Task.FromResult(0);
+                                var inspectionWaitSecondSetPickupTask = activeSecondSetPickupTask;
+                                activeSecondSetPickupTask = Task.CompletedTask;
+                                var inspectionWaitPreviousSecondSetUnloadTask = activeSecondSetUnloadTask;
+                                activeSecondSetUnloadTask = Task.CompletedTask;
+                                activeCarouselAdvanceTask = StartCarouselAfterSafetyBarrierAsync(
+                                    inspectionWaitFinalTestTask,
+                                    inspectionWaitSecondSetPickupTask,
+                                    inspectionWaitPreviousSecondSetUnloadTask,
+                                    Task.CompletedTask,
+                                    carouselStations,
+                                    axis0PulseDistance,
+                                    ProductionHandlingAxisNos,
+                                    _productionCancellation.Token);
+                                SetFirstSetPositionStatus(
+                                    $"第{cycleNumber}轮正在等待相机结果；转盘、测试和第二套下料继续独立推进。",
+                                    true);
+                            }
+
                             var completedTask = await Task.WhenAny(
                                 inspectionTask,
                                 activeCarouselAdvanceTask);
-                            if (ReferenceEquals(completedTask, activeCarouselAdvanceTask) &&
-                                activeCarouselAdvanceTask.IsCompletedSuccessfully)
+                            if (ReferenceEquals(completedTask, inspectionTask))
                             {
-                                var carouselAdvanceResult = await activeCarouselAdvanceTask;
-                                activeCarouselAdvanceTask = null;
-                                activeFinalTestTask = carouselAdvanceResult.FinalTestTask;
-                                activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
-                                activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
-                                SetFirstSetPositionStatus(
-                                    $"第{cycleNumber}轮等待相机结果期间，DD及工位动作已继续执行；" +
-                                    "第二套下料流水线保持独立运行。",
-                                    true);
+                                break;
                             }
+
+                            // 异常仍由原有放料安全门在相机返回后统一处理，避免相机任务和光源
+                            // 在后台失去跟踪；正常完成则立即接管并尝试调度下一段下游节拍。
+                            if (!activeCarouselAdvanceTask.IsCompletedSuccessfully)
+                            {
+                                break;
+                            }
+
+                            var carouselAdvanceResult = await activeCarouselAdvanceTask;
+                            activeCarouselAdvanceTask = null;
+                            activeFinalTestTask = carouselAdvanceResult.FinalTestTask;
+                            activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
+                            activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
                         }
 
                         blobResult = await inspectionTask;
@@ -3025,6 +3027,49 @@ public partial class HomePage : UserControl
         SetStartProductionStatus(
             $"第{cycleNumber}轮：{reason}，“震散 → 向左 → 上下聚拢”完成，下一轮重新拍照。",
             Color.FromRgb(73, 209, 125));
+    }
+
+    private async Task<VisionRectangleBlobResult> RunProductionUpperCameraInspectionAsync(
+        VisualCalibrationPage visualCalibrationController,
+        CalibrationCenterPosition actual,
+        Task feederVibrationTask,
+        Task<bool>? earlyLightOnTask,
+        int cycleNumber,
+        CancellationToken cancellationToken)
+    {
+        // 最后一批物料取走后，振动已在后续纠偏/上料期间并行执行。
+        // 本任务只约束第一套XY继续取料，不约束下方转盘、测试和第二套下料。
+        if (!feederVibrationTask.IsCompleted)
+        {
+            SetStartProductionStatus(
+                $"第{cycleNumber}轮：XY已回拍照位，正在等待并行震动结束并停稳；下方流水线继续运行…",
+                Color.FromRgb(242, 181, 68));
+        }
+
+        await feederVibrationTask;
+        await WaitIfProductionPausedAsync(cancellationToken);
+
+        var connectionController = _connectionConfigController
+            ?? throw new InvalidOperationException("振动盘控制组件未连接，无法确认拍照前停振。");
+        SetStartProductionStatus(
+            $"第{cycleNumber}轮：震动序列已结束，正在执行最终停振并等待振动盘停稳；下方流水线继续运行…",
+            Color.FromRgb(242, 181, 68));
+        if (!await connectionController.EnsureStoppedForProductionPhotoAsync(cancellationToken))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("拍照前最终停振失败，已取消本次拍照。");
+        }
+        await WaitIfProductionPausedAsync(cancellationToken);
+
+        SetStartProductionStatus(
+            $"第{cycleNumber}轮：XY已到初始位置({actual.ActualX:0.###}, {actual.ActualY:0.###})，" +
+            $"振动盘已停稳，正在运行{ChipInspectionProcedureName} → {ChipInspectionResultModuleName}；" +
+            "下方流水线继续运行…",
+            Color.FromRgb(242, 181, 68));
+        return await RunChipInspectionWithFeederLightAsync(
+            visualCalibrationController,
+            earlyLightOnTask,
+            cancellationToken);
     }
 
     private async Task<VisionRectangleBlobResult> RunChipInspectionWithFeederLightAsync(
@@ -4342,6 +4387,21 @@ public partial class HomePage : UserControl
     {
         return Enumerable.Range(1, Math.Min(CarouselStationCount, carouselStations.Count - 1))
             .Count(station => carouselStations[station].Occupied);
+    }
+
+    private static bool CanAdvanceCarouselWhileWaitingForInspection(
+        IReadOnlyList<CarouselStationState> carouselStations)
+    {
+        if (carouselStations.Count <= CarouselStationCount ||
+            CountOccupiedCarouselStations(carouselStations) == 0)
+        {
+            return false;
+        }
+
+        // 一段后台节拍固定推进两格：原15号会到1号、原16号会到2号。
+        // 拍照完成后第一套还要向1/2上料，因此这两个来源工位必须为空。
+        return !carouselStations[CarouselStationCount - 1].Occupied &&
+               !carouselStations[CarouselStationCount].Occupied;
     }
 
     private (string FilePath, bool WasSelected) GetOrSelectFirstSetCalibrationFile()
