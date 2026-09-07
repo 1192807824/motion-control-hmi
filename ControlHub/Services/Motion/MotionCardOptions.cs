@@ -5,6 +5,8 @@ namespace ControlHub.Services.Motion;
 
 public sealed class MotionCardOptions
 {
+    public const int DefaultPollIntervalMilliseconds = 10;
+
     public int ConfigurationVersion { get; set; }
 
     public bool SimulationMode { get; init; }
@@ -13,7 +15,7 @@ public sealed class MotionCardOptions
 
     public int AxisCount { get; init; } = 16;
 
-    public int PollIntervalMilliseconds { get; init; } = 20;
+    public int PollIntervalMilliseconds { get; set; } = DefaultPollIntervalMilliseconds;
 
     public int DigitalInputPort { get; init; }
 
@@ -63,7 +65,7 @@ public sealed class MotionCardOptions
 
     public void ApplyMigrations()
     {
-        if (ConfigurationVersion >= 4)
+        if (ConfigurationVersion >= 5)
         {
             return;
         }
@@ -114,8 +116,13 @@ public sealed class MotionCardOptions
             };
         }
 
-        ApplyOneKeyResetHomeModes();
-        ConfigurationVersion = 4;
+        if (ConfigurationVersion < 4)
+        {
+            ApplyOneKeyResetHomeModes();
+        }
+
+        PollIntervalMilliseconds = DefaultPollIntervalMilliseconds;
+        ConfigurationVersion = 5;
     }
 
     private void ApplyOneKeyResetHomeModes()
@@ -201,9 +208,9 @@ public sealed class MotionCardOptions
             throw new InvalidDataException("AxisCount 必须在 1 到 64 之间。");
         }
 
-        if (PollIntervalMilliseconds is < 20 or > 5000)
+        if (PollIntervalMilliseconds is < DefaultPollIntervalMilliseconds or > 5000)
         {
-            throw new InvalidDataException("PollIntervalMilliseconds 必须在 20 到 5000 之间。");
+            throw new InvalidDataException("PollIntervalMilliseconds 必须在 10 到 5000 之间。");
         }
 
         if (DigitalInputPort is < 0 or > ushort.MaxValue)

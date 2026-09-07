@@ -1,9 +1,9 @@
 {
-  "ConfigurationVersion": 4,
+  "ConfigurationVersion": 5,
   "SimulationMode": false,
   "CardNo": null,
   "AxisCount": 16,
-  "PollIntervalMilliseconds": 20,
+  "PollIntervalMilliseconds": 10,
   "DigitalInputPort": 0,
   "DigitalOutputPort": 0,
   "DigitalInputStartBit": 16,

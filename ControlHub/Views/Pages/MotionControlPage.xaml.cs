@@ -1178,7 +1178,7 @@ public partial class MotionControlPage : UserControl
                 }
 
                 SetCommandStage(CommandStage.Running, "轴组同步运动中");
-                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+                await Task.Delay(_motionOptions.PollIntervalMilliseconds, linkedCancellation.Token);
             }
         }
         catch (Exception exception)
@@ -1488,7 +1488,7 @@ public partial class MotionControlPage : UserControl
                 }
 
                 SetCommandStage(CommandStage.Running, "轴组同步运动中");
-                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+                await Task.Delay(_motionOptions.PollIntervalMilliseconds, linkedCancellation.Token);
             }
         }
         catch (Exception exception)
@@ -1732,7 +1732,7 @@ public partial class MotionControlPage : UserControl
                 }
 
                 SetCommandStage(CommandStage.Running, "轴组同步运动中");
-                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+                await Task.Delay(_motionOptions.PollIntervalMilliseconds, linkedCancellation.Token);
             }
         }
         catch (Exception exception)
@@ -2351,7 +2351,7 @@ public partial class MotionControlPage : UserControl
                     $"Y={currentY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
             }
 
-            await Task.Delay(50, cancellationToken);
+            await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
         }
     }
 
@@ -3075,7 +3075,7 @@ public partial class MotionControlPage : UserControl
     {
         var deadline = _activePositionDeadlineUtc
             ?? throw new InvalidOperationException("定位命令没有有效的超时截止时间。");
-        await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), cancellationToken);
+        await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -3452,7 +3452,7 @@ public partial class MotionControlPage : UserControl
                 break;
             }
 
-            Thread.Sleep(Math.Clamp(_motionOptions.PollIntervalMilliseconds / 2, 25, 100));
+            Thread.Sleep(_motionOptions.PollIntervalMilliseconds);
         }
 
         var axisText = string.Join(", ", pendingAxisNos.Select(axisNo => axisNo.ToString()));

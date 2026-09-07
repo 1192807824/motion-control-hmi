@@ -996,7 +996,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                 }
             }
 
-            Thread.Sleep(20);
+            Thread.Sleep(_options.PollIntervalMilliseconds);
         }
 
         throw new MotionCardException(

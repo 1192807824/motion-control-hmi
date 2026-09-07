@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using System.Xml.Linq;
 using ControlHub.Services.Motion;
 using ControlHub.Services.Persistence;
+using ControlHub.Services.Production;
 using ControlHub.Services.Vision;
 using ControlHub.Views.Controls;
 using Microsoft.Win32;
@@ -3456,29 +3457,26 @@ public partial class HomePage : UserControl
             allowedMovingAxisNos,
             cancellationToken);
 
-        // 13/14工位状态在DD停稳的这一刻已经更新。这里直接启动第二套收料，
-        // 不经过主循环，因此不等待第一套下一轮的拍照、取料或放料动作。
-        // 若上一批第二套仍在向BIN位放料，只等待它释放轴3/4，避免同一轴组冲突。
+        // DD停稳后立即向第一套返回放料许可。第二套独立排队等待上一批BIN完成，
+        // 它的取料完成信号仍交给下一次DD安全门，避免转盘在13/14取料前继续转动。
         if (!requiredPreviousSecondSetUnloadTask.IsCompleted)
         {
             SetFirstSetPositionStatus(
-                "DD已停稳且13/14工位已更新；等待第二套完成上一批BIN放料后立即取料。",
+                "DD已停稳，第一套可放料；第二套独立等待上一批BIN放料完成后取料。",
                 true);
         }
 
-        await requiredPreviousSecondSetUnloadTask;
-        await WaitIfProductionPausedAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        var (secondSetUnloadTask, secondSetPickupTask) = SecondSetUnloadSequence.Start(
+            requiredPreviousSecondSetUnloadTask,
+            (pickupCompletion, token) => RunSecondSetUnloadIfReadyAsync(
+                carouselStations, pickupCompletion, token),
+            cancellationToken);
 
-        var secondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
-            carouselStations,
-            cancellationToken,
-            out var secondSetPickupTask);
-        if (!secondSetPickupTask.IsCompleted)
+        // 已知失败或取消不能当作正常DD放料许可返回；仅运行中的BIN任务允许并行。
+        if (secondSetUnloadTask.IsFaulted || secondSetUnloadTask.IsCanceled)
         {
-            SetFirstSetPositionStatus(
-                "DD已停稳，13/14工位存在待收料产品；第二套已立即启动取料，不等待第一套上料。",
-                true);
+            await ObserveTaskNoThrowAsync(secondSetPickupTask);
+            await secondSetUnloadTask;
         }
 
         return carouselAdvanceResult with
@@ -3549,19 +3547,20 @@ public partial class HomePage : UserControl
         }
     }
 
-    private Task StartSecondSetUnloadIfReadyAsync(
+    private async Task RunSecondSetUnloadIfReadyAsync(
         CarouselStationState[] carouselStations,
-        CancellationToken cancellationToken,
-        out Task pickupCompletedTask)
+        TaskCompletionSource<bool> pickupCompletion,
+        CancellationToken cancellationToken)
     {
+        await WaitIfProductionPausedAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         // DD每次转动后会同步更新工位缓存。13、14任一工位有料即启动对应吸嘴收料，
         // 这样奇数批次的最后1颗也能独立完成下料。
         if (carouselStations.Length <= SecondSetNozzle1UnloadStation ||
             (!carouselStations[SecondSetNozzle2UnloadStation].Occupied &&
              !carouselStations[SecondSetNozzle1UnloadStation].Occupied))
         {
-            pickupCompletedTask = Task.CompletedTask;
-            return Task.CompletedTask;
+            return;
         }
 
         if (_productionAxisSet != VisionCalibrationAxisSet.First)
@@ -3569,10 +3568,10 @@ public partial class HomePage : UserControl
             throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行13/14工位收料。");
         }
 
-        var pickupCompletion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        pickupCompletedTask = pickupCompletion.Task;
-        return RunSecondSetUnloadAsync(
+        SetFirstSetPositionStatus(
+            "DD已停稳，13/14工位存在待收料产品；第二套开始取料，与第一套上料并行。",
+            true);
+        await RunSecondSetUnloadAsync(
             carouselStations,
             pickupCompletion,
             cancellationToken);
