@@ -83,7 +83,6 @@ public partial class MainWindow : Window
     private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
-        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -104,7 +103,6 @@ public partial class MainWindow : Window
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
-        await UsbMicroscopeContent.DeactivateAsync();
         VisualCalibrationContent.RefreshTeachingPositions();
         ShowVisualCalibrationPage();
         try
@@ -137,7 +135,6 @@ public partial class MainWindow : Window
     private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
-        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -148,7 +145,6 @@ public partial class MainWindow : Window
     private async void ParameterSettingsMenu_Click(object sender, RoutedEventArgs e)
     {
         await HomeContent.DeactivateProductionAsync();
-        await UsbMicroscopeContent.DeactivateAsync();
         if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
         {
             return;
@@ -233,6 +229,7 @@ public partial class MainWindow : Window
 
     private void ShowHomePage()
     {
+        UsbMicroscopeContent.UseHomePreview();
         HomeMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
@@ -268,6 +265,7 @@ public partial class MainWindow : Window
 
     private void ShowUsbMicroscopePage()
     {
+        UsbMicroscopeContent.UseDefaultPreview();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];

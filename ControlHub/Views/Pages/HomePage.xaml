@@ -1220,40 +1220,10 @@
                                              Fill="#6F8190" />
                                 </Grid>
                             </Border>
-                            <Grid Grid.Row="1" Background="#090F14">
-                                <Image x:Name="HomeMicroscopePreviewImage"
-                                       Stretch="Uniform"
-                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                <StackPanel x:Name="HomeMicroscopePreviewPlaceholder"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Margin="14"
-                                            IsHitTestVisible="False">
-                                    <TextBlock Text="USB"
-                                               Foreground="#526A7C"
-                                               FontSize="30"
-                                               FontWeight="Bold"
-                                               HorizontalAlignment="Center" />
-                                    <TextBlock Text="请先在“USB显微镜”页面连接设备"
-                                               Margin="0,8,0,0"
-                                               Foreground="#91A6B7"
-                                               FontSize="11"
-                                               TextAlignment="Center"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Border HorizontalAlignment="Left"
-                                        VerticalAlignment="Bottom"
-                                        Margin="8"
-                                        Padding="8,4"
-                                        Background="#B8071D2F"
-                                        CornerRadius="3">
-                                    <TextBlock x:Name="HomeMicroscopeStatusText"
-                                               Text="等待显微镜连接"
-                                               Foreground="#D8E4EC"
-                                               FontSize="10"
-                                               TextTrimming="CharacterEllipsis" />
-                                </Border>
-                            </Grid>
+                            <ContentControl x:Name="HomeMicroscopePreviewHost"
+                                            Grid.Row="1"
+                                            HorizontalContentAlignment="Stretch"
+                                            VerticalContentAlignment="Stretch" />
                         </Grid>
                     </Border>
 

@@ -596,6 +596,7 @@ public partial class HomePage : UserControl
         }
 
         _usbMicroscopeController = usbMicroscopeController;
+        _usbMicroscopeController.AttachHomePreviewHost(HomeMicroscopePreviewHost);
         _usbMicroscopeController.PreviewChanged += UsbMicroscopeController_PreviewChanged;
         UpdateHomeMicroscopePreview();
     }
@@ -615,22 +616,14 @@ public partial class HomePage : UserControl
 
     private void UpdateHomeMicroscopePreview()
     {
-        if (HomeMicroscopePreviewImage is null ||
-            HomeMicroscopePreviewPlaceholder is null ||
-            HomeMicroscopeStatusText is null ||
-            HomeMicroscopeStatusIndicator is null)
+        if (HomeMicroscopeStatusIndicator is null)
         {
             return;
         }
 
         var controller = _usbMicroscopeController;
         var frame = controller?.LatestPreviewFrame;
-        HomeMicroscopePreviewImage.Source = frame;
-        HomeMicroscopePreviewPlaceholder.Visibility = frame is null
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        HomeMicroscopeStatusText.Text = controller?.PreviewStatus ?? "等待显微镜连接";
-        HomeMicroscopeStatusText.ToolTip = HomeMicroscopeStatusText.Text;
+        HomeMicroscopeStatusIndicator.ToolTip = controller?.PreviewStatus ?? "等待显微镜连接";
         HomeMicroscopeStatusIndicator.Fill = new SolidColorBrush(
             frame is not null
                 ? Color.FromRgb(57, 197, 107)

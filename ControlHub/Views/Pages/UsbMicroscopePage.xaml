@@ -134,30 +134,54 @@
                             BorderBrush="#45647A"
                             IsEnabled="False"
                             Click="DeviceProperties_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ContentControl x:Name="DefaultPreviewHost"
+                        Grid.Row="2"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch">
+            <Grid x:Name="MicroscopeWorkspace" Background="#0B1D2B">
+                <Grid.Resources>
+                    <Style x:Key="AnnotationButton" TargetType="Button" BasedOn="{StaticResource MicroscopeButton}">
+                        <Setter Property="Height" Value="28" />
+                        <Setter Property="MinWidth" Value="64" />
+                        <Setter Property="FontSize" Value="11" />
+                        <Setter Property="Padding" Value="7,0" />
+                        <Setter Property="Margin" Value="3" />
+                    </Style>
+                </Grid.Resources>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <WrapPanel Margin="4,3">
                     <Button x:Name="DrawCircleButton"
                             Content="点选圆"
-                            Style="{StaticResource MicroscopeButton}"
+                            Style="{StaticResource AnnotationButton}"
                             Background="#7A4DB3"
                             BorderBrush="#A273D7"
                             IsEnabled="False"
                             Click="DrawCircle_Click" />
                     <Button x:Name="DrawRectangleButton"
                             Content="点选矩形"
-                            Style="{StaticResource MicroscopeButton}"
+                            Style="{StaticResource AnnotationButton}"
                             Background="#187F94"
                             BorderBrush="#36ABC0"
                             IsEnabled="False"
                             Click="DrawRectangle_Click" />
                     <Button x:Name="UndoPointButton"
                             Content="撤销点"
-                            Style="{StaticResource MicroscopeButton}"
+                            Style="{StaticResource AnnotationButton}"
                             Background="#294A64"
                             BorderBrush="#45647A"
                             IsEnabled="False"
                             Click="UndoPoint_Click" />
                     <Button x:Name="ClearAnnotationButton"
                             Content="清除标记"
-                            Style="{StaticResource MicroscopeButton}"
+                            Style="{StaticResource AnnotationButton}"
                             Background="#294A64"
                             BorderBrush="#45647A"
                             IsEnabled="False"
@@ -165,100 +189,109 @@
                     <Button x:Name="RotateDdButton"
                             Content="转动一次"
                             ToolTip="DD 马达轴正向移动 22500 脉冲"
-                            Style="{StaticResource MicroscopeButton}"
+                            Style="{StaticResource AnnotationButton}"
                             Background="#C66A12"
                             BorderBrush="#E58B33"
                             IsEnabled="False"
                             Click="RotateDdOnce_Click" />
                     <Button x:Name="CaptureButton"
                             Content="拍照保存"
-                            Style="{StaticResource MicroscopeButton}"
+                            Style="{StaticResource AnnotationButton}"
                             Background="#0A8A57"
                             BorderBrush="#19B978"
                             IsEnabled="False"
                             Click="Capture_Click" />
-                </StackPanel>
-            </Grid>
-        </Border>
+                </WrapPanel>
+                <TextBlock x:Name="AnnotationStatusText"
+                           Grid.Row="1"
+                           Margin="8,0,8,5"
+                           Text="请先在“USB显微镜”页面连接设备"
+                           Foreground="#AFC0CD"
+                           FontSize="11"
+                           TextWrapping="Wrap" />
+                <Border Grid.Row="2"
+                        Background="#11171C"
+                        BorderBrush="#345269"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        ClipToBounds="True">
+                    <Grid x:Name="PreviewSurface"
+                          Background="Transparent"
+                          PreviewMouseWheel="PreviewSurface_PreviewMouseWheel">
+                        <Grid x:Name="ZoomContent">
+                            <Image x:Name="PreviewImage"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
 
-        <Border Grid.Row="2"
-                Background="#11171C"
-                BorderBrush="#345269"
-                BorderThickness="1"
-                CornerRadius="4"
-                ClipToBounds="True">
-            <Grid x:Name="PreviewSurface"
-                  Background="Transparent"
-                  PreviewMouseWheel="PreviewSurface_PreviewMouseWheel">
-                <Grid x:Name="ZoomContent">
-                    <Image x:Name="PreviewImage"
-                           Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Canvas x:Name="AnnotationCanvas"
+                                    Background="Transparent"
+                                    IsHitTestVisible="False"
+                                    SizeChanged="AnnotationCanvas_SizeChanged"
+                                    MouseLeftButtonDown="AnnotationCanvas_MouseLeftButtonDown"
+                                    MouseMove="AnnotationCanvas_MouseMove"
+                                    MouseLeftButtonUp="AnnotationCanvas_MouseLeftButtonUp">
+                                <Ellipse x:Name="CircleAnnotationEllipse"
+                                         Visibility="Collapsed"
+                                         Stroke="#FF3B42"
+                                         StrokeThickness="3"
+                                         Fill="#18FF3B42"
+                                         IsHitTestVisible="False" />
+                                <Polygon x:Name="RectangleAnnotationPolygon"
+                                         Visibility="Collapsed"
+                                         Stroke="#35D5FF"
+                                         StrokeThickness="3"
+                                         Fill="#1835D5FF"
+                                         IsHitTestVisible="False" />
+                            </Canvas>
+                        </Grid>
 
-                    <Canvas x:Name="AnnotationCanvas"
-                            Background="Transparent"
-                            IsHitTestVisible="False"
-                            SizeChanged="AnnotationCanvas_SizeChanged"
-                            MouseLeftButtonDown="AnnotationCanvas_MouseLeftButtonDown"
-                            MouseMove="AnnotationCanvas_MouseMove"
-                            MouseLeftButtonUp="AnnotationCanvas_MouseLeftButtonUp">
-                        <Ellipse x:Name="CircleAnnotationEllipse"
-                                 Visibility="Collapsed"
-                                 Stroke="#FF3B42"
-                                 StrokeThickness="3"
-                                 Fill="#18FF3B42"
-                                 IsHitTestVisible="False" />
-                        <Polygon x:Name="RectangleAnnotationPolygon"
-                                 Visibility="Collapsed"
-                                 Stroke="#35D5FF"
-                                 StrokeThickness="3"
-                                 Fill="#1835D5FF"
-                                 IsHitTestVisible="False" />
-                    </Canvas>
-                </Grid>
+                        <StackPanel x:Name="PreviewPlaceholder"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsHitTestVisible="False">
+                            <TextBlock Text="USB"
+                                       Foreground="#5C7487"
+                                       FontSize="38"
+                                       FontWeight="Bold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="连接后可点选圆、矩形或正方形"
+                                       Margin="10,10,10,0"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center"
+                                       Foreground="#91A6B7"
+                                       FontSize="11"
+                                       HorizontalAlignment="Center" />
+                        </StackPanel>
 
-                <StackPanel x:Name="PreviewPlaceholder"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False">
-                    <TextBlock Text="USB"
-                               Foreground="#5C7487"
-                               FontSize="38"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Center" />
-                    <TextBlock Text="请选择显微镜设备并点击“连接显微镜”"
-                               Margin="0,10,0,0"
-                               Foreground="#91A6B7"
-                               FontSize="14"
-                               HorizontalAlignment="Center" />
-                </StackPanel>
+                        <Border HorizontalAlignment="Left"
+                                VerticalAlignment="Bottom"
+                                Margin="8,8,72,8"
+                                Padding="10,5"
+                                Background="#B8071D2F"
+                                CornerRadius="3">
+                            <TextBlock x:Name="FrameStatusText"
+                                       Text="尚未接收画面"
+                                       TextTrimming="CharacterEllipsis"
+                                       Foreground="#D8E4EC"
+                                       FontSize="10" />
+                        </Border>
 
-                <Border HorizontalAlignment="Left"
-                        VerticalAlignment="Bottom"
-                        Margin="12"
-                        Padding="10,5"
-                        Background="#B8071D2F"
-                        CornerRadius="3">
-                    <TextBlock x:Name="FrameStatusText"
-                               Text="尚未接收画面"
-                               Foreground="#D8E4EC"
-                               FontSize="12" />
+                        <Button x:Name="ResetZoomButton"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom"
+                                Margin="0,0,12,12"
+                                Padding="10,5"
+                                Content="100%"
+                                ToolTip="点击恢复 100% 显示"
+                                Foreground="#DCEAF3"
+                                Background="#B21A2D3B"
+                                BorderBrush="#60798C"
+                                Cursor="Hand"
+                                IsEnabled="False"
+                                Click="ResetZoom_Click" />
+                    </Grid>
                 </Border>
-
-                <Button x:Name="ResetZoomButton"
-                        HorizontalAlignment="Right"
-                        VerticalAlignment="Bottom"
-                        Margin="0,0,12,12"
-                        Padding="10,5"
-                        Content="100%"
-                        ToolTip="点击恢复 100% 显示"
-                        Foreground="#DCEAF3"
-                        Background="#B21A2D3B"
-                        BorderBrush="#60798C"
-                        Cursor="Hand"
-                        IsEnabled="False"
-                        Click="ResetZoom_Click" />
             </Grid>
-        </Border>
+        </ContentControl>
     </Grid>
 </UserControl>

@@ -21,6 +21,8 @@ public partial class UsbMicroscopePage : UserControl
     private readonly CaptureDevices _captureDevices = new();
     private CaptureDevice? _captureDevice;
     private HomePage? _homeController;
+    private ContentControl? _homePreviewHost;
+    private ContentControl _activePreviewHost;
     private BitmapSource? _latestFrame;
     private bool _refreshing;
     private bool _connecting;
@@ -54,6 +56,7 @@ public partial class UsbMicroscopePage : UserControl
     public UsbMicroscopePage()
     {
         InitializeComponent();
+        _activePreviewHost = DefaultPreviewHost;
     }
 
     public event EventHandler? PreviewChanged;
@@ -81,12 +84,30 @@ public partial class UsbMicroscopePage : UserControl
         }
     }
 
-    public async Task DeactivateAsync()
+    public void AttachHomePreviewHost(ContentControl previewHost)
     {
-        if (_captureDevice is not null)
+        _homePreviewHost = previewHost ?? throw new ArgumentNullException(nameof(previewHost));
+        UseHomePreview();
+    }
+
+    public void UseHomePreview() => MovePreviewTo(_homePreviewHost ?? DefaultPreviewHost);
+
+    public void UseDefaultPreview() => MovePreviewTo(DefaultPreviewHost);
+
+    private void MovePreviewTo(ContentControl host)
+    {
+        if (ReferenceEquals(_activePreviewHost, host))
         {
-            await DisconnectAsync("已断开显微镜");
+            return;
         }
+
+        // 两个页面共用同一个预览和标注工作区；切换页面不改变采集连接。
+        _circleMoveActive = false;
+        _rectangleMoveActive = false;
+        AnnotationCanvas.ReleaseMouseCapture();
+        _activePreviewHost.Content = null;
+        host.Content = MicroscopeWorkspace;
+        _activePreviewHost = host;
     }
 
     public void Shutdown()
@@ -1637,6 +1658,7 @@ public partial class UsbMicroscopePage : UserControl
     private void SetStatus(string message, MicroscopeStatus status)
     {
         ConnectionStatusText.Text = message;
+        AnnotationStatusText.Text = message;
         ConnectionStatusIndicator.Fill = new SolidColorBrush(status switch
         {
             MicroscopeStatus.Connected => Color.FromRgb(57, 197, 107),
