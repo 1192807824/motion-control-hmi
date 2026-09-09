@@ -70,6 +70,15 @@ public sealed class HomePageSettings
     // 调试选项：旧配置和新配置均默认不等待。
     public bool LowerCameraRotationDelayEnabled { get; set; }
 
+    // 统一观测位：仅在吸嘴1下相机纠偏成功后叠加。旧配置默认关闭、补偿为0。
+    public bool ObservationCompensationEnabled { get; set; }
+
+    public double ObservationCompensationXPulses { get; set; }
+
+    public double ObservationCompensationYPulses { get; set; }
+
+    public double ObservationCompensationRDegrees { get; set; }
+
     public double? FirstSetTeachingCenterX { get; set; }
 
     public double? FirstSetTeachingCenterY { get; set; }

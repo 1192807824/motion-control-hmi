@@ -400,6 +400,7 @@ public partial class HomePage : UserControl
 
     public HomePageSettings CaptureRecipeSettings()
     {
+        SaveObservationCompensationFromInputs(throwOnInvalid: true);
         SaveVisionPickupCountFromInput();
         SaveFirstSetTeachingPositionsFromInputs();
         SavePresetPositionsFromInputs();
@@ -2070,6 +2071,8 @@ public partial class HomePage : UserControl
             var upperCameraCorrectionEnabled = _homeSettings.UpperCameraCorrectionEnabled ?? true;
             var lowerCameraCorrectionEnabled = _homeSettings.LowerCameraCorrectionEnabled ?? true;
             var lowerCameraRotationDelayEnabled = _homeSettings.LowerCameraRotationDelayEnabled;
+            // 固定补偿在启动时锁定，运行中不重新读取界面或配方。
+            var observationCompensation = ReadObservationCompensationFromInputs();
             _productionXyLinearInterpolationEnabled =
                 _homeSettings.XyLinearInterpolationEnabled ?? false;
             _lowerCameraPhotoPositions = lowerCameraCorrectionEnabled
@@ -2639,6 +2642,13 @@ public partial class HomePage : UserControl
                             nozzle2Correction,
                             GetLowerCameraRotationSign(2));
                     }
+                }
+
+                position1Target = ApplyObservationCompensation(
+                    position1Target, 1, nozzle1OriginalR.HasValue, observationCompensation);
+                if (nozzle1OriginalR.HasValue && observationCompensation.Enabled)
+                {
+                    position1TargetDescription += "＋统一观测位补偿";
                 }
 
                 async Task WaitForCarouselBeforePlacementAsync(string placementName)
@@ -5806,6 +5816,7 @@ public partial class HomePage : UserControl
             _homeSettings.LowerCameraCorrectionEnabled ?? true;
         LowerCameraRotationDelayCheckBox.IsChecked =
             _homeSettings.LowerCameraRotationDelayEnabled;
+        LoadObservationCompensationInputs();
         var visionPickupCount = _homeSettings.VisionPickupCount ?? DefaultVisionPickupCount;
         _homeSettings.VisionPickupCount = visionPickupCount;
         VisionPickupCountTextBox.Text = visionPickupCount.ToString(CultureInfo.CurrentCulture);
@@ -7331,6 +7342,7 @@ public partial class HomePage : UserControl
             !_oneKeyResetRunning &&
             !_presetPositionMoveRunning &&
             !_startSequenceRunning;
+        UpdateObservationCompensationCommandState(commandsIdle && !_oneKeyCollectRunning);
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
         var ddAxisParametersValid = ProductionAxisParametersValid(0);
         var allTestStationParametersValid = AllTestStationParametersValid();
@@ -7413,6 +7425,7 @@ public partial class HomePage : UserControl
             allSecondSetXyPositionsValid &&
             allLowerCameraPhotoPositionsValid &&
             allLowerCameraRotationCentersValid &&
+            ObservationCompensationInputsValid() &&
             allBinDropPositionsValid &&
             (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
         StartProductionTitleText.Text = _startSequenceRunning
