@@ -608,6 +608,10 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <TextBlock x:Name="LowerCameraCorrectionResultText"
                                            Text="下相机纠偏：等待吸嘴1/2取料"
                                            Foreground="#9FB1BF"
@@ -637,6 +641,16 @@
                                               Checked="UpperCameraCorrectionCheckBox_Changed"
                                               Unchecked="UpperCameraCorrectionCheckBox_Changed" />
                                 </StackPanel>
+                                <CheckBox x:Name="LowerCameraRotationDelayCheckBox"
+                                          Grid.Row="1" Grid.ColumnSpan="2"
+                                          Content="下相机纠偏后等待3秒再动（调试）"
+                                          Margin="0,6,0,0"
+                                          HorizontalAlignment="Right"
+                                          Foreground="#F4C95D"
+                                          FontSize="11"
+                                          ToolTip="勾选后，每批下相机纠偏完成先等待3秒，再执行XY移动和R轴角度纠偏；启动时生效"
+                                          Checked="LowerCameraRotationDelayCheckBox_Changed"
+                                          Unchecked="LowerCameraRotationDelayCheckBox_Changed" />
                             </Grid>
                         </Border>
                     </Grid>

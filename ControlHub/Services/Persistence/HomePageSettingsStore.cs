@@ -67,6 +67,9 @@ public sealed class HomePageSettings
     // 可空用于兼容旧配置：旧配置没有该字段时，界面和生产流程按启用处理。
     public bool? LowerCameraCorrectionEnabled { get; set; }
 
+    // 调试选项：旧配置和新配置均默认不等待。
+    public bool LowerCameraRotationDelayEnabled { get; set; }
+
     public double? FirstSetTeachingCenterX { get; set; }
 
     public double? FirstSetTeachingCenterY { get; set; }

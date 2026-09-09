@@ -2069,6 +2069,7 @@ public partial class HomePage : UserControl
                 "单次视觉抓取颗数");
             var upperCameraCorrectionEnabled = _homeSettings.UpperCameraCorrectionEnabled ?? true;
             var lowerCameraCorrectionEnabled = _homeSettings.LowerCameraCorrectionEnabled ?? true;
+            var lowerCameraRotationDelayEnabled = _homeSettings.LowerCameraRotationDelayEnabled;
             _productionXyLinearInterpolationEnabled =
                 _homeSettings.XyLinearInterpolationEnabled ?? false;
             _lowerCameraPhotoPositions = lowerCameraCorrectionEnabled
@@ -2591,6 +2592,15 @@ public partial class HomePage : UserControl
                     }
 
                     correctionResults = SkipLowerCameraCorrections(assignedTargets);
+                }
+                if (lowerCameraCorrectionEnabled &&
+                    lowerCameraRotationDelayEnabled &&
+                    correctionResults.HasAnySuccess)
+                {
+                    SetStartProductionStatus(
+                        $"第{cycleNumber}轮：下相机纠偏完成，调试等待3秒后再执行XY移动和R轴角度纠偏…",
+                        Color.FromRgb(242, 181, 68));
+                    await Task.Delay(3000, _productionCancellation.Token);
                 }
                 await WaitIfProductionPausedAsync(_productionCancellation.Token);
 
@@ -5697,6 +5707,24 @@ public partial class HomePage : UserControl
         UpdateHomeCommandState();
     }
 
+    private void LowerCameraRotationDelayCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingPresetPositions || LowerCameraRotationDelayCheckBox is null)
+        {
+            return;
+        }
+
+        _homeSettings.LowerCameraRotationDelayEnabled =
+            LowerCameraRotationDelayCheckBox.IsChecked == true;
+        _homeSettingsStore.Save(_homeSettings);
+        SetLowerCameraPhotoPositionStatus(
+            _homeSettings.LowerCameraRotationDelayEnabled
+                ? "调试等待已启用：每批下相机纠偏完成后等待3秒，再移动XY和旋转R轴。"
+                : "调试等待已关闭：下相机纠偏完成后按正常节拍运动。",
+            true);
+        UpdateHomeCommandState();
+    }
+
     private void XyLinearInterpolationCheckBox_Changed(object sender, RoutedEventArgs e)
     {
         if (_loadingPresetPositions || XyLinearInterpolationCheckBox is null)
@@ -5776,6 +5804,8 @@ public partial class HomePage : UserControl
             _homeSettings.UpperCameraCorrectionEnabled ?? true;
         LowerCameraCorrection1CheckBox.IsChecked =
             _homeSettings.LowerCameraCorrectionEnabled ?? true;
+        LowerCameraRotationDelayCheckBox.IsChecked =
+            _homeSettings.LowerCameraRotationDelayEnabled;
         var visionPickupCount = _homeSettings.VisionPickupCount ?? DefaultVisionPickupCount;
         _homeSettings.VisionPickupCount = visionPickupCount;
         VisionPickupCountTextBox.Text = visionPickupCount.ToString(CultureInfo.CurrentCulture);
@@ -7236,6 +7266,7 @@ public partial class HomePage : UserControl
             XyLinearInterpolationCheckBox is null ||
             UpperCameraCorrectionCheckBox is null ||
             LowerCameraCorrection1CheckBox is null ||
+            LowerCameraRotationDelayCheckBox is null ||
             LowerCameraPhotoPosition1XTextBox is null ||
             LowerCameraPhotoPosition1YTextBox is null ||
             LowerCameraPhotoPosition2XTextBox is null ||
@@ -7442,6 +7473,7 @@ public partial class HomePage : UserControl
         PresetPosition2YTextBox.IsEnabled = commandsIdle;
         UpperCameraCorrectionCheckBox.IsEnabled = commandsIdle;
         LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
+        LowerCameraRotationDelayCheckBox.IsEnabled = commandsIdle;
         XyLinearInterpolationCheckBox.IsEnabled = commandsIdle;
         VisionPickupCountTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
