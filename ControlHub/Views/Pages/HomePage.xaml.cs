@@ -2267,7 +2267,7 @@ public partial class HomePage : UserControl
                 if (pendingPickupBatches.Count == 0)
                 {
                     // 把“等待震动结束、最终停振、开灯及相机返回”整体作为独立任务启动。
-                    // 主流程等待它期间持续调度下方的DD、测试站和第二套下料流水线。
+                    // 主流程等待结果；上一批已启动的DD、测试和第二套下料任务继续完成。
                     var inspectionTask = RunProductionUpperCameraInspectionAsync(
                         visualCalibrationController,
                         actual,
@@ -2279,60 +2279,8 @@ public partial class HomePage : UserControl
                     VisionRectangleBlobResult blobResult;
                     try
                     {
-                        // 上相机等待可能明显慢于一次DD双工位节拍。不能只等上一段后台任务结束后
-                        // 就让下游空闲；只要转盘仍有在制品且下一次推进不会把15/16工位的
-                        // 产品回卷到1/2上料位，就持续调度DD、测试站和第二套下料。
-                        while (!inspectionTask.IsCompleted)
-                        {
-                            if (activeCarouselAdvanceTask is null)
-                            {
-                                if (!CanAdvanceCarouselWhileWaitingForInspection(carouselStations))
-                                {
-                                    break;
-                                }
-
-                                var inspectionWaitFinalTestTask = activeFinalTestTask;
-                                activeFinalTestTask = Task.FromResult(0);
-                                var inspectionWaitSecondSetPickupTask = activeSecondSetPickupTask;
-                                activeSecondSetPickupTask = Task.CompletedTask;
-                                var inspectionWaitPreviousSecondSetUnloadTask = activeSecondSetUnloadTask;
-                                activeSecondSetUnloadTask = Task.CompletedTask;
-                                activeCarouselAdvanceTask = StartCarouselAfterSafetyBarrierAsync(
-                                    inspectionWaitFinalTestTask,
-                                    inspectionWaitSecondSetPickupTask,
-                                    inspectionWaitPreviousSecondSetUnloadTask,
-                                    Task.CompletedTask,
-                                    carouselStations,
-                                    axis0PulseDistance,
-                                    ProductionHandlingAxisNos,
-                                    _productionCancellation.Token);
-                                SetFirstSetPositionStatus(
-                                    $"第{cycleNumber}轮正在等待相机结果；转盘、测试和第二套下料继续独立推进。",
-                                    true);
-                            }
-
-                            var completedTask = await Task.WhenAny(
-                                inspectionTask,
-                                activeCarouselAdvanceTask);
-                            if (ReferenceEquals(completedTask, inspectionTask))
-                            {
-                                break;
-                            }
-
-                            // 异常仍由原有放料安全门在相机返回后统一处理，避免相机任务和光源
-                            // 在后台失去跟踪；正常完成则立即接管并尝试调度下一段下游节拍。
-                            if (!activeCarouselAdvanceTask.IsCompletedSuccessfully)
-                            {
-                                break;
-                            }
-
-                            var carouselAdvanceResult = await activeCarouselAdvanceTask;
-                            activeCarouselAdvanceTask = null;
-                            activeFinalTestTask = carouselAdvanceResult.FinalTestTask;
-                            activeSecondSetUnloadTask = carouselAdvanceResult.SecondSetUnloadTask;
-                            activeSecondSetPickupTask = carouselAdvanceResult.SecondSetPickupTask;
-                        }
-
+                        // 等待本轮拍照时，上一批已启动的DD/测试/下料任务可以自行完成。
+                        // 不追加新的DD节拍；正常生产只有本批放料完成后才允许再次转动。
                         blobResult = await inspectionTask;
                     }
                     finally
@@ -4400,21 +4348,6 @@ public partial class HomePage : UserControl
     {
         return Enumerable.Range(1, Math.Min(CarouselStationCount, carouselStations.Count - 1))
             .Count(station => carouselStations[station].Occupied);
-    }
-
-    private static bool CanAdvanceCarouselWhileWaitingForInspection(
-        IReadOnlyList<CarouselStationState> carouselStations)
-    {
-        if (carouselStations.Count <= CarouselStationCount ||
-            CountOccupiedCarouselStations(carouselStations) == 0)
-        {
-            return false;
-        }
-
-        // 一段后台节拍固定推进两格：原15号会到1号、原16号会到2号。
-        // 拍照完成后第一套还要向1/2上料，因此这两个来源工位必须为空。
-        return !carouselStations[CarouselStationCount - 1].Occupied &&
-               !carouselStations[CarouselStationCount].Occupied;
     }
 
     private (string FilePath, bool WasSelected) GetOrSelectFirstSetCalibrationFile()
