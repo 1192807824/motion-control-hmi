@@ -6,7 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../ControlHub/Services/Production/SecondSetUnloadSequence.cs" Link="SecondSetUnloadSequence.cs" />
     <Compile Include="../../ControlHub/Services/Motion/MotionCardOptions.cs" Link="MotionCardOptions.cs" />
   </ItemGroup>
 </Project>
