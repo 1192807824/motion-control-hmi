@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../ControlHub/Services/Motion/MotionCardOptions.cs" Link="MotionCardOptions.cs" />
+    <Compile Include="../../ControlHub/Services/Motion/ProductionUnloadSequence.cs" Link="ProductionUnloadSequence.cs" />
   </ItemGroup>
 </Project>

@@ -3437,30 +3437,21 @@ public partial class HomePage : UserControl
             allowedMovingAxisNos,
             cancellationToken);
 
-        // 13/14工位状态在DD停稳的这一刻已经更新。这里直接启动第二套收料，
-        // 不经过主循环，因此不等待第一套下一轮的拍照、取料或放料动作。
-        // 若上一批第二套仍在向BIN位放料，只等待它释放轴3/4，避免同一轴组冲突。
+        // 13/14工位状态已更新。把上一批BIN放料及回程的等待交给第二套，
+        // 本任务在DD停稳后即可返回，允许第一套下压放料。
+        // 第二套下一批仍须串行等待自己的轴释放；其取料完成信号约束下一次DD。
         if (!requiredPreviousSecondSetUnloadTask.IsCompleted)
         {
             SetFirstSetPositionStatus(
-                "DD已停稳且13/14工位已更新；等待第二套完成上一批BIN放料后立即取料。",
+                "DD已停稳，第一套可放料；第二套独立等待上一批BIN放料及回程完成后取料。",
                 true);
         }
 
-        await requiredPreviousSecondSetUnloadTask;
-        await WaitIfProductionPausedAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-
         var secondSetUnloadTask = StartSecondSetUnloadIfReadyAsync(
+            requiredPreviousSecondSetUnloadTask,
             carouselStations,
             cancellationToken,
             out var secondSetPickupTask);
-        if (!secondSetPickupTask.IsCompleted)
-        {
-            SetFirstSetPositionStatus(
-                "DD已停稳，13/14工位存在待收料产品；第二套已立即启动取料，不等待第一套上料。",
-                true);
-        }
 
         return carouselAdvanceResult with
         {
@@ -3531,35 +3522,45 @@ public partial class HomePage : UserControl
     }
 
     private Task StartSecondSetUnloadIfReadyAsync(
+        Task previousUnloadTask,
         CarouselStationState[] carouselStations,
         CancellationToken cancellationToken,
         out Task pickupCompletedTask)
     {
-        // DD每次转动后会同步更新工位缓存。13、14任一工位有料即启动对应吸嘴收料，
-        // 这样奇数批次的最后1颗也能独立完成下料。
-        if (carouselStations.Length <= SecondSetNozzle1UnloadStation ||
-            (!carouselStations[SecondSetNozzle2UnloadStation].Occupied &&
-             !carouselStations[SecondSetNozzle1UnloadStation].Occupied))
-        {
-            pickupCompletedTask = Task.CompletedTask;
-            return Task.CompletedTask;
-        }
+        var sequence = ProductionUnloadSequence.StartAfter(
+            previousUnloadTask,
+            async pickupCompletion =>
+            {
+                await WaitIfProductionPausedAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
 
-        if (_productionAxisSet != VisionCalibrationAxisSet.First)
-        {
-            throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行13/14工位收料。");
-        }
+                // 下一次DD仍被本批pickup信号拦住，13/14工位不会在等待期间推进。
+                // 任一工位有料即启动对应吸嘴，保留奇数批次收尾行为。
+                if (carouselStations.Length <= SecondSetNozzle1UnloadStation ||
+                    (!carouselStations[SecondSetNozzle2UnloadStation].Occupied &&
+                     !carouselStations[SecondSetNozzle1UnloadStation].Occupied))
+                {
+                    return;
+                }
 
-        var pickupCompletion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        pickupCompletedTask = pickupCompletion.Task;
-        var unloadTask = RunSecondSetUnloadAsync(
-            carouselStations,
-            pickupCompletion,
+                if (_productionAxisSet != VisionCalibrationAxisSet.First)
+                {
+                    throw new InvalidOperationException("第二套XY正在被主页上料流程占用，不能同时执行13/14工位收料。");
+                }
+
+                SetFirstSetPositionStatus(
+                    "DD已停稳，第二套轴已释放，立即取13/14工位产品；第一套可独立上料。",
+                    true);
+                await RunSecondSetUnloadAsync(
+                    carouselStations,
+                    pickupCompletion,
+                    cancellationToken);
+            },
             cancellationToken);
-        _productionDiagnostics?.Track("second-set-unload", unloadTask);
+        pickupCompletedTask = sequence.PickupTask;
+        _productionDiagnostics?.Track("second-set-unload", sequence.UnloadTask);
         _productionDiagnostics?.Track("second-set-pickup", pickupCompletedTask);
-        return unloadTask;
+        return sequence.UnloadTask;
     }
 
     private async Task RunSecondSetUnloadAsync(
