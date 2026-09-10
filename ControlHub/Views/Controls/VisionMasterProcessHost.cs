@@ -8,6 +8,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 using ControlHub.Services.Persistence;
+using ControlHub.Services.Vision;
 
 namespace ControlHub.Views.Controls;
 
@@ -52,6 +53,7 @@ public sealed class VisionMasterProcessHost : HwndHost
     private IntPtr _hostWindow;
     private IntPtr _visionWindow;
     private IntPtr _activeDisplayWindow;
+    private readonly EmbeddedVisionWindowLayout _visionWindowLayout = new();
     private bool _disposed;
     private string? _solutionPath;
     private VisionProcedureNames _procedureNames = new();
@@ -1239,6 +1241,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
 
         _visionWindow = windowHandle;
+        _visionWindowLayout.Invalidate();
         _ = ShowWindow(windowHandle, SwShow);
         ResizeVisionWindow(throwOnFailure: true);
     }
@@ -1246,6 +1249,14 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void ResizeVisionWindow(bool throwOnFailure = false)
     {
         var displayHostWindow = GetActiveDisplayWindow();
+        if (!throwOnFailure)
+        {
+            // Layout/WM_SIZE callbacks run on the same dispatcher as production.
+            // The vision thread may be inside Run(true); never wait for it here.
+            _ = _visionWindowLayout.RequestResize(_visionWindow, displayHostWindow);
+            return;
+        }
+
         if (displayHostWindow == IntPtr.Zero || _visionWindow == IntPtr.Zero)
         {
             if (throwOnFailure)
@@ -1299,6 +1310,12 @@ public sealed class VisionMasterProcessHost : HwndHost
             throw new Win32Exception("VisionMaster 窗口句柄已经失效。");
         }
 
+        if (GetParent(_visionWindow) == displayHostWindow)
+        {
+            return;
+        }
+
+        _visionWindowLayout.Invalidate();
         Marshal.SetLastPInvokeError(0);
         var previousParent = SetParent(_visionWindow, displayHostWindow);
         var setParentError = Marshal.GetLastPInvokeError();

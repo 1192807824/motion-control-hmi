@@ -199,6 +199,7 @@ public partial class HomePage : UserControl
     private TaskCompletionSource<bool>? _productionResumeSignal;
     private readonly Stopwatch _uphStopwatch = new();
     private readonly DispatcherTimer _uphRefreshTimer;
+    private ProductionDiagnosticSession? _productionDiagnostics;
     private long _uphCompletedUnitCount;
     private volatile bool _preserveIoOnEmergencyStop;
     private VisionCalibrationAxisSet? _productionAxisSet;
@@ -1134,6 +1135,8 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin($"Z-{axisSet}-{nozzleNumber}",
+            $"{positionName} target={targetPosition}");
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
@@ -1664,6 +1667,7 @@ public partial class HomePage : UserControl
         int nozzleNumber,
         CancellationToken cancellationToken)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin($"valve-{axisSet}-{nozzleNumber}", "break vacuum");
         cancellationToken.ThrowIfCancellationRequested();
         var dwellTimes = GetProductionZDwellTimes();
         var breakPulseMilliseconds = dwellTimes.BreakVacuumMilliseconds;
@@ -2141,6 +2145,9 @@ public partial class HomePage : UserControl
 
             // 标记连续生产已进入运行状态。
             _startSequenceRunning = true;
+            _productionDiagnostics = new ProductionDiagnosticSession(Dispatcher, () =>
+                $"paused={_productionPauseRequested};stop={_productionStopRequested};" +
+                (_motionController?.CaptureProductionDiagnosticState() ?? "no motion controller"));
             ResetUphTracking();
 
             // 刷新主页按钮状态，把“开始运行”切成“停止循环”，并锁住其它会冲突的操作。
@@ -2275,6 +2282,7 @@ public partial class HomePage : UserControl
                         activeFeederLightOnTask,
                         cycleNumber,
                         _productionCancellation.Token);
+                    _productionDiagnostics?.Track("upper-camera", inspectionTask);
                     activeFeederVibrationTask = Task.CompletedTask;
                     VisionRectangleBlobResult blobResult;
                     try
@@ -2853,6 +2861,7 @@ public partial class HomePage : UserControl
                     axis0PulseDistance,
                     ProductionHandlingAxisNos,
                     _productionCancellation.Token);
+                _productionDiagnostics?.Track("carousel-advance", activeCarouselAdvanceTask);
 
                 SetStartProductionStatus(
                     nextCycleNeedsPhoto
@@ -2876,6 +2885,7 @@ public partial class HomePage : UserControl
         catch (Exception exception)
         {
             // 非取消异常统一显示为启动或运行失败，保留底层异常信息方便排查。
+            _productionDiagnostics?.Write("PRODUCTION-FAILED", exception.ToString());
             SetStartProductionStatus(
                 $"开始流程失败：{exception.Message}",
                 Color.FromRgb(242, 122, 128));
@@ -2902,6 +2912,8 @@ public partial class HomePage : UserControl
                 _ = await _connectionConfigController.SetProductionLightAsync(enabled: false);
             }
             await ObserveTaskNoThrowAsync(activeFinalTestTask);
+            _productionDiagnostics?.Dispose();
+            _productionDiagnostics = null;
             StopUphTracking();
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
             // 急停后的 IO 冻结保持到下一次明确启动生产，不能在本轮 finally 收尾时提前解除。
@@ -2998,6 +3010,7 @@ public partial class HomePage : UserControl
         int cycleNumber,
         CancellationToken cancellationToken)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin("upper-camera", $"cycle={cycleNumber}");
         // 最后一批物料取走后，振动已在后续纠偏/上料期间并行执行。
         // 本任务只约束第一套XY继续取料，不约束下方转盘、测试和第二套下料。
         if (!feederVibrationTask.IsCompleted)
@@ -3052,17 +3065,23 @@ public partial class HomePage : UserControl
                 : PrepareBlobInspectionVisionDisplayAsync(visualCalibrationController);
         var lightTurnedOn = false;
         var inspectionCompleted = false;
+        _productionDiagnostics?.Track("feeder-light-on", lightOnTask);
+        _productionDiagnostics?.Track("vision-display-ready", prepareVisionTask);
         try
         {
             await Task.WhenAll(lightOnTask, prepareVisionTask);
+            _productionDiagnostics?.Write("upper-camera", "light and display preparation completed");
             lightTurnedOn = await lightOnTask;
             if (!lightTurnedOn)
             {
                 throw new InvalidOperationException("振动盘拍照光源打开失败，已取消本次拍照。");
             }
 
-            var result = await visualCalibrationController.RunRectangleBlobInspectionAsync(
-                cancellationToken);
+            VisionRectangleBlobResult result;
+            using (_productionDiagnostics?.Begin("vision-result", "await RUN_RECTANGLE_BLOB response"))
+            {
+                result = await visualCalibrationController.RunRectangleBlobInspectionAsync(cancellationToken);
+            }
             inspectionCompleted = true;
             return result;
         }
@@ -3395,6 +3414,7 @@ public partial class HomePage : UserControl
         IReadOnlyCollection<int>? allowedMovingAxisNos,
         CancellationToken cancellationToken)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin("carousel", "safety barrier and two turns");
         if (!requiredFinalTestTask.IsCompleted || !requiredSecondSetPickupTask.IsCompleted)
         {
             SetStartProductionStatus(
@@ -3533,10 +3553,13 @@ public partial class HomePage : UserControl
         var pickupCompletion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         pickupCompletedTask = pickupCompletion.Task;
-        return RunSecondSetUnloadAsync(
+        var unloadTask = RunSecondSetUnloadAsync(
             carouselStations,
             pickupCompletion,
             cancellationToken);
+        _productionDiagnostics?.Track("second-set-unload", unloadTask);
+        _productionDiagnostics?.Track("second-set-pickup", pickupCompletedTask);
+        return unloadTask;
     }
 
     private async Task RunSecondSetUnloadAsync(
@@ -3544,6 +3567,7 @@ public partial class HomePage : UserControl
         TaskCompletionSource<bool> pickupCompletion,
         CancellationToken cancellationToken)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin("second-set", "pickup and BIN placement");
         try
         {
             var pickWithNozzle2 = carouselStations[SecondSetNozzle2UnloadStation].Occupied;
@@ -3729,6 +3753,7 @@ public partial class HomePage : UserControl
         CancellationToken cancellationToken,
         IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin("second-set-XY", $"{actionName} target=({targetX},{targetY})");
         var motionController = _motionController
             ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
         ApplyCurrentProductionAxisMotionSettings(motionController);
@@ -3927,6 +3952,7 @@ public partial class HomePage : UserControl
         CarouselStationState[] carouselStations,
         CancellationToken cancellationToken)
     {
+        using var diagnosticStep = _productionDiagnostics?.Begin("test-stations", "press, measure, return");
         await WaitIfProductionPausedAsync(cancellationToken);
         var enabledTestStations = GetEnabledTestStationAxisByStation();
         var activeStationParameters = enabledTestStations

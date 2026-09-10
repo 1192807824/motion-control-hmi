@@ -105,6 +105,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\ControlHub\Services\Vision\EmbeddedVisionWindowLayout.cs"
+             Link="EmbeddedVisionWindowLayout.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="$(VisionMasterAssemblyDirectory)\myLibs\**\*">
       <Link>myLibs\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

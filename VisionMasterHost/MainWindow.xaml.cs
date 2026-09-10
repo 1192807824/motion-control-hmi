@@ -7,9 +7,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using CalculatorModuleCs;
+using ControlHub.Services.Vision;
 using GlobalVariableModuleCs;
 using IMVSBlobFindModuCs;
 using IMVSCalibTransformModuCs;
@@ -165,6 +167,16 @@ public partial class MainWindow : Window
         else
         {
             CalibrationToolbarPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (_embedded)
+        {
+            HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)
+                ?.AddHook(EmbeddedVisionWindowLayout.HandleMessage);
         }
     }
 
