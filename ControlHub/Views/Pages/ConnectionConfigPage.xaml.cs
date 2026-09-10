@@ -1676,15 +1676,18 @@ public partial class ConnectionConfigPage : UserControl
             return;
         }
 
-        foreach (var command in commands)
-        {
-            await SendSerialMeterCommandAsync(command, cancellationToken);
-        }
+        _sm7110SettingsApplied = false;
+        _sm7110AppliedSetupSignature = null;
+        await SM7110Protocol.ApplySetupCommandsAsync(
+            commands,
+            SendSerialMeterCommandAsync,
+            QuerySerialMeterAsync,
+            cancellationToken);
 
         _sm7110AppliedSetupSignature = setupSignature;
         _sm7110SettingsApplied = true;
         AddSerialLog(
-            $"SM7110测试参数下发完成，共{commands.Count}条命令；后续单次测量直接触发，不再重复下发");
+            $"SM7110测试参数下发完成，共{commands.Count}条命令，逐条错误检查通过；后续单次测量直接触发，不再重复下发");
     }
 
     private async Task RunSerialMeterOperationAsync(string actionName, Func<Task> operation)

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../ControlHub/Services/Devices/SM7110Protocol.cs" Link="SM7110Protocol.cs" />
+    <Compile Include="../../ControlHub/Services/Devices/SerialConnectionSettings.cs" Link="SerialConnectionSettings.cs" />
+  </ItemGroup>
+</Project>

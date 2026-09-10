@@ -88,6 +88,39 @@ public static class SM7110Protocol
         return commands;
     }
 
+    public static async Task ApplySetupCommandsAsync(
+        IReadOnlyList<string> commands,
+        Func<string, CancellationToken, Task> sendCommand,
+        Func<string, CancellationToken, Task<string>> query,
+        CancellationToken cancellationToken)
+    {
+        foreach (var command in commands)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await sendCommand(command, cancellationToken);
+
+            // Query separately: an erroneous command can discard the remainder of a compound line.
+            var response = await query("*ESR?", cancellationToken);
+            if (!int.TryParse(response.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture,
+                    out var status) || status is < 0 or > 255)
+            {
+                throw new InvalidOperationException(
+                    $"SM7110/SM7120无法确认参数执行结果：命令【{command}】，*ESR? 返回【{response}】。参数未确认生效，已停止下发。");
+            }
+
+            var errors = new List<string>();
+            if ((status & 32) != 0) errors.Add("命令或数据格式错误");
+            if ((status & 16) != 0) errors.Add("执行错误（参数值或当前仪表状态不允许）");
+            if ((status & 8) != 0) errors.Add("设备相关错误");
+            if ((status & 4) != 0) errors.Add("查询错误");
+            if (errors.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"SM7110/SM7120参数下发失败：命令【{command}】，*ESR?={status}，{string.Join("、", errors)}。已停止下发，未开始测量。");
+            }
+        }
+    }
+
     public static SM7110MeasurementResult ParseMeasurementResult(string response, string measurementMode)
     {
         if (string.IsNullOrWhiteSpace(response))
