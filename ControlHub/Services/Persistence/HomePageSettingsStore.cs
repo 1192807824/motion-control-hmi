@@ -205,6 +205,9 @@ public sealed class HomePageSettings
     public Dictionary<int, ProductionAxisMotionSettings> ProductionAxisMotionSettings { get; set; } = [];
 
     public Dictionary<int, TestStationSettings> TestStationSettings { get; set; } = [];
+
+    // 所有测试站下压到位后的接触稳定时间；旧配置缺少此项时使用200 ms。
+    public int TestStationDwellMilliseconds { get; set; } = 200;
 }
 
 public sealed class ProductionAxisMotionSettings

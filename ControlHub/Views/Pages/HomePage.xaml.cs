@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Xml.Linq;
+using ControlHub.Services.Devices;
 using ControlHub.Services.Motion;
 using ControlHub.Services.Persistence;
 using ControlHub.Services.Vision;
@@ -93,7 +94,6 @@ public partial class HomePage : UserControl
     private const double TestStationPressVelocity = 800_000d;
     private const int CarouselStationCount = 16;
     private const int CarouselVacuumSprayPulseMilliseconds = 30;
-    private const int DefaultTestStationDwellMilliseconds = 20;
     private const int MoveAwayBeforeDdMilliseconds = 50;
     private const string CarouselStatusLoaded = "有料";
     private const string CarouselStatusPressing = "下压";
@@ -210,11 +210,11 @@ public partial class HomePage : UserControl
     private LowerCameraPhotoPositions? _lowerCameraPhotoPositions;
     private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
     private IReadOnlyDictionary<int, TestStationSettings>? _testStationSettings;
+    private int _testStationDwellMilliseconds = 200;
     private readonly Dictionary<int, ProductionAxisMotionEditors> _productionAxisMotionEditors = [];
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
     private VisionMotionTarget? _blob2Nozzle2Target;
-    private int _carouselVisualStepOffset;
     private CarouselStationState[] _carouselStations = CreateCarouselStationStates();
     private bool _loadingPresetPositions = true;
     private bool _updatingTestStationConfiguration;
@@ -2051,6 +2051,7 @@ public partial class HomePage : UserControl
                 motionController,
                 _productionAxisMotionSettings);
             _testStationSettings = ReadTestStationSettings();
+            _testStationDwellMilliseconds = ReadTestStationDwellMilliseconds();
             EnsureAssignedTestInstrumentsConnected();
             var velocity = GetProductionAxisMotionSettings(
                 VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
@@ -2186,7 +2187,6 @@ public partial class HomePage : UserControl
             // 转盘工位占料状态。启动时按空盘处理；放料到 1/2 后，后续每次 DD 转动推进一个工位。
             _carouselStations = CreateCarouselStationStates();
             var carouselStations = _carouselStations;
-            _carouselVisualStepOffset = 0;
             UpdateCarouselStationDisplay(carouselStations);
             var pendingPickupBatches = new Queue<NozzlePickupBatch>();
             var vibrateAfterPickupCachePlaced = false;
@@ -4015,10 +4015,10 @@ public partial class HomePage : UserControl
                 stationNumber,
                 "下压到位",
                 "准备测试",
-                "接触稳定中…",
+                $"保持下压，接触稳定等待 {_testStationDwellMilliseconds} ms…",
                 Color.FromRgb(98, 181, 255));
         }
-        await Task.Delay(DefaultTestStationDwellMilliseconds, cancellationToken);
+        await Task.Delay(_testStationDwellMilliseconds, cancellationToken);
 
         var measurementTasks = enabledTestStations.Keys
             .Where(station => carouselStations[station].Occupied)
@@ -4152,23 +4152,7 @@ public partial class HomePage : UserControl
                 case TestStationInstrument.E4981A:
                 {
                     var result = await connectionController.MeasureE4981AAsync(cancellationToken);
-                    if (result.Bin is null)
-                    {
-                        throw new InvalidOperationException(
-                            "E4981A未返回比较器BIN，请在连接配置页启用仪表比较器并配置BIN范围。");
-                    }
-
-                    var bin = !result.IsSuccessful
-                        ? "BIN0"
-                        : result.Bin is >= 0 and <= 3
-                            ? $"BIN{result.Bin}"
-                            : "BIN0";
-                    return new TestStationMeasurementResult(
-                        bin,
-                        $"C={result.CapacitancePf:0.######}pF · D={result.DissipationFactor:G6} · {bin}",
-                        result.StatusDescription,
-                        result.IsSuccessful &&
-                        !string.Equals(bin, "BIN0", StringComparison.OrdinalIgnoreCase));
+                    return ClassifyE4981AMeasurement(result);
                 }
                 case TestStationInstrument.SM7110:
                 {
@@ -4204,6 +4188,27 @@ public partial class HomePage : UserControl
         }
     }
 
+    private static TestStationMeasurementResult ClassifyE4981AMeasurement(
+        E4981AMeasurementResult result)
+    {
+        // 仪表已明确返回测量失败时按不良品流转，即使该次结果不含比较器BIN。
+        // 正常测量缺少BIN仍属于配置异常，不能把未分档的产品当作正常生产结果。
+        if (result.IsSuccessful && result.Bin is null)
+        {
+            throw new InvalidOperationException(
+                "E4981A未返回比较器BIN，请在连接配置页启用仪表比较器并配置BIN范围。");
+        }
+
+        var bin = result.IsSuccessful && result.Bin is >= 1 and <= 3
+            ? $"BIN{result.Bin}"
+            : "BIN0";
+        return new TestStationMeasurementResult(
+            bin,
+            $"C={result.CapacitancePf:0.######}pF · D={result.DissipationFactor:G6} · {bin}",
+            result.StatusDescription,
+            bin != "BIN0");
+    }
+
     private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
     {
         var station16 = carouselStations[CarouselStationCount];
@@ -4213,7 +4218,6 @@ public partial class HomePage : UserControl
         }
 
         carouselStations[1] = station16;
-        _carouselVisualStepOffset = (_carouselVisualStepOffset + 1) % CarouselStationCount;
     }
 
     private void UpdateCarouselStationDisplay(
@@ -4242,7 +4246,8 @@ public partial class HomePage : UserControl
             var occupied = state.Occupied;
             var isActive = activeStations.Contains(station);
             var card = cards[index];
-            var slot = CarouselStationCardSlots[(index + _carouselVisualStepOffset) % CarouselStationCount];
+            // 卡片表示固定机械工位；产品状态已在DD到位后推进，不能再把卡片偏移一次。
+            var slot = CarouselStationCardSlots[index];
             Canvas.SetLeft(card, slot.X);
             Canvas.SetTop(card, slot.Y);
             var textBlocks = ((StackPanel)card.Child).Children.OfType<TextBlock>().ToArray();
@@ -5927,6 +5932,8 @@ public partial class HomePage : UserControl
     private void LoadTestStationPositionEditors()
     {
         _homeSettings.TestStationSettings ??= [];
+        TestStationDwellTextBox.Text = _homeSettings.TestStationDwellMilliseconds
+            .ToString(CultureInfo.CurrentCulture);
         _updatingTestStationConfiguration = true;
         try
         {
@@ -6474,6 +6481,7 @@ public partial class HomePage : UserControl
 
     private IReadOnlyDictionary<int, TestStationSettings> ReadTestStationSettings()
     {
+        _ = ReadTestStationDwellMilliseconds();
         var settingsByStation = new Dictionary<int, TestStationSettings>();
         foreach (var definition in TestStationDefinitions)
         {
@@ -6494,6 +6502,9 @@ public partial class HomePage : UserControl
 
         return settingsByStation;
     }
+
+    private int ReadTestStationDwellMilliseconds() =>
+        ParseMilliseconds(TestStationDwellTextBox.Text, "测试站下压稳定等待");
 
     private TestStationSettings GetTestStationSettings(int stationNumber)
     {
@@ -6658,6 +6669,7 @@ public partial class HomePage : UserControl
         try
         {
             var stationSettings = ReadTestStationSettings();
+            _homeSettings.TestStationDwellMilliseconds = ReadTestStationDwellMilliseconds();
             _homeSettings.TestStationSettings = stationSettings.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value);
@@ -7463,6 +7475,7 @@ public partial class HomePage : UserControl
             editors.SetEnabled(commandsIdle);
         }
 
+        TestStationDwellTextBox.IsEnabled = commandsIdle;
         foreach (var definition in TestStationDefinitions)
         {
             var editors = GetTestStationPositionEditors(definition.StationNumber);

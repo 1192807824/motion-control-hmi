@@ -2453,6 +2453,18 @@
                                              Background="#F7FAFC"
                                              TextChanged="ProductionZPositionTextBox_TextChanged" />
                                 </StackPanel>
+                                        <StackPanel Margin="0,2,8,2">
+                                            <TextBlock Text="测试站 · 下压稳定等待（ms）" Foreground="#9FB1BF" FontSize="9" />
+                                            <TextBox x:Name="TestStationDwellTextBox"
+                                             Height="25"
+                                             Text="200"
+                                             TextAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             Foreground="#10263A"
+                                             Background="#F7FAFC"
+                                             ToolTip="所有测试站共用。下压到位后保持不动，等待此时长再发送测试指令；自动保存，下次启动生产生效。范围0～60000 ms。"
+                                             TextChanged="TestStationPositionTextBox_TextChanged" />
+                                        </StackPanel>
                                 <StackPanel Margin="0,2,8,2">
                                     <TextBlock Text="测试站01 · 下压位" Foreground="#9FB1BF" FontSize="9" />
                                     <TextBox x:Name="TestStation1PressPositionTextBox"
