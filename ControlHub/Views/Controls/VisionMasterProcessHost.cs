@@ -68,7 +68,7 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     public event EventHandler<VisionClickTargetFailedEventArgs>? ClickTargetFailed;
 
-    public event EventHandler<VisionManualNozzleCirclesEventArgs>? ManualNozzleCirclesReceived;
+    public event EventHandler<VisionManualNozzleCircleEventArgs>? ManualNozzleCircleReceived;
 
     public event EventHandler<CalibrationToolbarActionEventArgs>? CalibrationToolbarActionRequested;
 
@@ -392,6 +392,11 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public Task<string> ClearNozzleTeachingDraftAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("CLEAR_NOZZLE_TEACHING_DRAFT", cancellationToken);
+    }
+
     public Task<string> ImportCalibrationFileAsync(
         string calibrationFilePath,
         CancellationToken cancellationToken)
@@ -491,7 +496,8 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.RotationCenterStatus),
                 state.LowerCameraCorrectionTestEnabled ? "1" : "0",
                 state.LowerCameraCorrectionTestRunning ? "1" : "0",
-                Encode(state.LowerCameraCorrectionTestStatus)),
+                Encode(state.LowerCameraCorrectionTestStatus),
+                state.Nozzle2SaveEnabled ? "1" : "0"),
             cancellationToken);
     }
 
@@ -954,33 +960,28 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void DispatchHostEvent(string message)
     {
         var parts = message.Split('\t');
-        if (parts.Length == 7 &&
-            string.Equals(parts[0], "MANUAL_NOZZLE_CIRCLES", StringComparison.Ordinal) &&
-            double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle1X) &&
-            double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle1Y) &&
-            double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle1Radius) &&
-            double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle2X) &&
-            double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle2Y) &&
-            double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var nozzle2Radius) &&
-            double.IsFinite(nozzle1X) &&
-            double.IsFinite(nozzle1Y) &&
-            double.IsFinite(nozzle1Radius) &&
-            nozzle1Radius > 0 &&
-            double.IsFinite(nozzle2X) &&
-            double.IsFinite(nozzle2Y) &&
-            double.IsFinite(nozzle2Radius) &&
-            nozzle2Radius > 0)
+        if ((parts.Length == 3 || parts.Length == 5) &&
+            parts[0] == "MANUAL_NOZZLE_CIRCLE" &&
+            int.TryParse(parts[1], out var nozzleNumber) && nozzleNumber is 1 or 2)
         {
-            _ = Dispatcher.BeginInvoke(
-                () => ManualNozzleCirclesReceived?.Invoke(
-                    this,
-                    new VisionManualNozzleCirclesEventArgs(
-                        nozzle1X,
-                        nozzle1Y,
-                        nozzle1Radius,
-                        nozzle2X,
-                        nozzle2Y,
-                        nozzle2Radius)));
+            VisionManualNozzleCircleEventArgs? result = null;
+            if (parts.Length == 3 && parts[2] == "CLEAR")
+            {
+                result = new(nozzleNumber, null);
+            }
+            else if (parts.Length == 5 &&
+                     double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) &&
+                     double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) &&
+                     double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var radius) &&
+                     double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(radius) &&
+                     x >= 0 && y >= 0 && radius > 0)
+            {
+                result = new(nozzleNumber, new VisionBlobRectangle(x, y, 0, x - radius, y - radius, radius * 2, radius * 2));
+            }
+            if (result is not null)
+            {
+                _ = Dispatcher.BeginInvoke(() => ManualNozzleCircleReceived?.Invoke(this, result));
+            }
             return;
         }
 
@@ -1679,25 +1680,10 @@ public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
     public string Message { get; } = message;
 }
 
-public sealed class VisionManualNozzleCirclesEventArgs(
-    double nozzle1X,
-    double nozzle1Y,
-    double nozzle1Radius,
-    double nozzle2X,
-    double nozzle2Y,
-    double nozzle2Radius) : EventArgs
+public sealed class VisionManualNozzleCircleEventArgs(int nozzleNumber, VisionBlobRectangle? circle) : EventArgs
 {
-    public double Nozzle1X { get; } = nozzle1X;
-
-    public double Nozzle1Y { get; } = nozzle1Y;
-
-    public double Nozzle1Radius { get; } = nozzle1Radius;
-
-    public double Nozzle2X { get; } = nozzle2X;
-
-    public double Nozzle2Y { get; } = nozzle2Y;
-
-    public double Nozzle2Radius { get; } = nozzle2Radius;
+    public int NozzleNumber { get; } = nozzleNumber;
+    public VisionBlobRectangle? Circle { get; } = circle;
 }
 
 public enum CalibrationToolbarAction
@@ -1758,7 +1744,8 @@ public sealed record CalibrationSidebarState(
     string RotationCenterStatus,
     bool LowerCameraCorrectionTestEnabled,
     bool LowerCameraCorrectionTestRunning,
-    string LowerCameraCorrectionTestStatus);
+    string LowerCameraCorrectionTestStatus,
+    bool Nozzle2SaveEnabled);
 
 public sealed record VisionRotationPoint(double X, double Y);
 

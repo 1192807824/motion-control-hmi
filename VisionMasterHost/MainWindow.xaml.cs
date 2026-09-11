@@ -99,6 +99,8 @@ public partial class MainWindow : Window
     private bool _showingCalibrationRender;
     private bool _showingSplitRender;
     private bool _nozzleTeachingResultsDisplayed;
+    private IMVSCircleFindModuTool? _retainedNozzle1ResultModule;
+    private IMVSCircleFindModuTool? _retainedNozzle2ResultModule;
     private bool _manualNozzleCircleMode;
     private readonly List<Point> _manualNozzle1CirclePoints = [];
     private readonly List<Point> _manualNozzle2CirclePoints = [];
@@ -353,6 +355,7 @@ public partial class MainWindow : Window
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             "RUN_NOZZLE_POINTS" => RunNozzlePointInspection(parts),
+            "CLEAR_NOZZLE_TEACHING_DRAFT" => ClearNozzleTeachingDraft(),
             "RUN_ROTATION_CENTER_CAPTURE" => RunRotationCenterCapture(parts),
             "CALCULATE_ROTATION_CENTER" => CalculateRotationCenter(parts),
             "RUN_LOWER_CAMERA_CORRECTION" => RunLowerCameraCorrection(parts),
@@ -416,6 +419,23 @@ public partial class MainWindow : Window
         PreviewProcedureComboBox.SelectedItem = procedureName;
         PopulateImageSteps(procedureName, procedure);
         ApplyCalibrationShellLayout();
+        if (string.Equals(procedureName, _calibrationProcedureName, StringComparison.Ordinal) &&
+            _retainedNozzle1ResultModule is not null && _retainedNozzle2ResultModule is not null)
+        {
+            ApplyNozzleTeachingRenderLayout();
+            _nozzleTeachingResultsDisplayed = true;
+            VisionRenderControl.ModuleSource = _retainedNozzle1ResultModule;
+            CalibrationRenderControl.ModuleSource = _retainedNozzle2ResultModule;
+            _manualNozzleCircleMode = _manualNozzle1Circle is null || _manualNozzle2Circle is null;
+            SidebarManualCircleButton.IsEnabled = true;
+            SidebarClearManualCircleButton.IsEnabled = true;
+            await RefreshRenderLayoutAsync();
+            RefreshNozzleTeachingDisplaysNoThrow();
+            RestoreAndRedrawManualNozzleCircles();
+            UpdateManualNozzleCircleStatus();
+            UpdateCommandState();
+            return;
+        }
         ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
         ClearCalibrationRenderer();
@@ -468,6 +488,7 @@ public partial class MainWindow : Window
         }
 
         var fullPath = DecodeAndValidateCalibrationFilePath(parts[1]);
+        ClearNozzleTeachingDraft();
         var transformModule = GetCalibrationTransformModule();
         transformModule.ModuParams.LoadCalibPath = fullPath;
         SetStatus($"已导入标定文件：{Path.GetFileName(fullPath)}", StatusKind.Success);
@@ -1194,7 +1215,7 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 39)
+        if (parts.Count != 40)
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -1284,7 +1305,7 @@ public partial class MainWindow : Window
             SidebarSettleTextBox.IsEnabled = parameterInputsEnabled;
             SidebarRecordCameraButton.IsEnabled = parts[20] == "1";
             SidebarRecordNozzleButton.IsEnabled = parts[21] == "1";
-            SidebarAssignPoint1Nozzle2Button.IsEnabled = parts[21] == "1";
+            SidebarAssignPoint1Nozzle2Button.IsEnabled = parts[39] == "1";
             SidebarClickTargetComboBox.IsEnabled = parts[22] == "1";
             SidebarEnableClickMoveCheckBox.IsEnabled = parts[23] == "1";
             SidebarReturnCameraCenterButton.IsEnabled = parts[24] == "1";
@@ -1295,6 +1316,9 @@ public partial class MainWindow : Window
             SidebarStartCalibrationButton.ToolTip = Decode(parts[29]);
             SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
             var simplifiedMode = parts[31] == "1";
+            var canDraw = _nozzleTeachingResultsDisplayed && !simplifiedMode && parts[20] == "1" && parts[13] != "1";
+            SidebarManualCircleButton.IsEnabled = canDraw;
+            SidebarClearManualCircleButton.IsEnabled = canDraw;
             var lowerCameraNozzleName = Decode(parts[32]);
             SidebarCenterTitleText.Text = simplifiedMode ? "记录中心" : "移动中心";
             SidebarRecordCenterButton.Content = simplifiedMode ? "记录当前中心" : "移动中心";
@@ -1386,6 +1410,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private string ClearNozzleTeachingDraft()
+    {
+        ClearNozzleTeachingResultRenderersNoThrow();
+        _retainedNozzle1ResultModule = null;
+        _retainedNozzle2ResultModule = null;
+        _manualNozzle1CirclePoints.Clear();
+        _manualNozzle2CirclePoints.Clear();
+        _manualNozzle1Circle = null;
+        _manualNozzle2Circle = null;
+        return "旧示教画面草稿已释放，已保存的吸嘴偏移保持不变。";
+    }
+
     private void PrepareNozzleTeachingRenderersForCameraAcquisition()
     {
         _automaticNozzle1Center = null;
@@ -1417,6 +1453,8 @@ public partial class MainWindow : Window
         _nozzleTeachingResultsDisplayed = true;
         VisionRenderControl.ModuleSource = nozzle1ResultModule;
         CalibrationRenderControl.ModuleSource = nozzle2ResultModule;
+        _retainedNozzle1ResultModule = nozzle1ResultModule;
+        _retainedNozzle2ResultModule = nozzle2ResultModule;
         BeginManualNozzleCircleSelection(restoreRender: false);
     }
 
@@ -1479,7 +1517,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ManualNozzleCircleButton_Click(object sender, RoutedEventArgs e)
+    private async void ManualNozzleCircleButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_nozzleTeachingResultsDisplayed)
         {
@@ -1487,17 +1525,35 @@ public partial class MainWindow : Window
             return;
         }
 
-        BeginManualNozzleCircleSelection(restoreRender: true);
+        await RestartManualNozzleCircleAsync(1);
     }
 
-    private void ClearManualNozzleCirclesButton_Click(object sender, RoutedEventArgs e)
+    private async void ClearManualNozzleCirclesButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_nozzleTeachingResultsDisplayed)
         {
             return;
         }
 
-        BeginManualNozzleCircleSelection(restoreRender: true);
+        await RestartManualNozzleCircleAsync(2);
+    }
+
+    private async Task RestartManualNozzleCircleAsync(int nozzleNumber)
+    {
+        if (nozzleNumber == 1)
+        {
+            _manualNozzle1CirclePoints.Clear();
+            _manualNozzle1Circle = null;
+        }
+        else
+        {
+            _manualNozzle2CirclePoints.Clear();
+            _manualNozzle2Circle = null;
+        }
+        _manualNozzleCircleMode = true;
+        RestoreAndRedrawManualNozzleCircles();
+        UpdateManualNozzleCircleStatus();
+        await SendHostEventAsync($"MANUAL_NOZZLE_CIRCLE\t{nozzleNumber}\tCLEAR");
     }
 
     private void BeginManualNozzleCircleSelection(bool restoreRender)
@@ -1508,34 +1564,30 @@ public partial class MainWindow : Window
         _manualNozzle2Circle = null;
         _manualNozzleCircleMode = true;
         SidebarManualCircleButton.IsEnabled = true;
-        SidebarManualCircleButton.Content = "重新画圆";
+        SidebarManualCircleButton.Content = "Z1 三点重画";
         SidebarClearManualCircleButton.IsEnabled = true;
-        SidebarManualCircleStatusText.Text = "吸嘴1：0/2　吸嘴2：0/2\n每张图先点圆心、再点圆边";
+        SidebarManualCircleStatusText.Text = "Z1：0/3　Z2：0/3\n在圆边上选取三个不共线的点";
         if (restoreRender)
         {
             RestoreNozzleTeachingResultImagesNoThrow();
         }
 
-        SetStatus("手动画圆已开启：每张图第一下点圆心，第二下点圆边。", StatusKind.Ready);
+        SetStatus("三点画圆已开启：在各自画面的圆边上选取三个不共线的点。", StatusKind.Ready);
     }
 
     private void ResetManualNozzleCircleSelection(bool disableControls)
     {
         _manualNozzleCircleMode = false;
-        _manualNozzle1CirclePoints.Clear();
-        _manualNozzle2CirclePoints.Clear();
-        _manualNozzle1Circle = null;
-        _manualNozzle2Circle = null;
         if (SidebarManualCircleButton is null || SidebarClearManualCircleButton is null ||
             SidebarManualCircleStatusText is null)
         {
             return;
         }
 
-        SidebarManualCircleButton.Content = "手动画圆";
+        SidebarManualCircleButton.Content = "Z1 三点重画";
         SidebarManualCircleButton.IsEnabled = !disableControls && _nozzleTeachingResultsDisplayed;
         SidebarClearManualCircleButton.IsEnabled = !disableControls && _nozzleTeachingResultsDisplayed;
-        SidebarManualCircleStatusText.Text = "采集画面后，每张图先点圆心、再点圆边";
+        SidebarManualCircleStatusText.Text = "在各自画面的圆边上选 3 点，可单独重画和保存";
     }
 
     private void RestoreNozzleTeachingResultImagesNoThrow()
@@ -1559,7 +1611,8 @@ public partial class MainWindow : Window
 
     private async Task HandleManualNozzleCircleClickAsync(int nozzleNumber, int pixelX, int pixelY)
     {
-        if (!_manualNozzleCircleMode || !_nozzleTeachingResultsDisplayed || _closed)
+        if (!_manualNozzleCircleMode || !_nozzleTeachingResultsDisplayed || _closed ||
+            !SidebarManualCircleButton.IsEnabled)
         {
             return;
         }
@@ -1570,29 +1623,43 @@ public partial class MainWindow : Window
         var existingCircle = nozzleNumber == 1
             ? _manualNozzle1Circle
             : _manualNozzle2Circle;
-        if (existingCircle is not null || points.Count >= 2)
+        if (existingCircle is not null || points.Count >= 3)
         {
             return;
         }
 
         var point = new Point(pixelX, pixelY);
+        var image = (nozzleNumber == 1 ? VisionRenderControl : CalibrationRenderControl).ImageSource;
+        if (image is null || pixelX < 0 || pixelY < 0 || pixelX >= image.Width || pixelY >= image.Height)
+        {
+            SetStatus($"请在 Z{nozzleNumber} 图像范围内选择圆边点。", StatusKind.Error);
+            return;
+        }
+        if (points.Any(existing => (existing - point).Length < 1d))
+        {
+            SetStatus($"Z{nozzleNumber} 选点重复，请选择另一个圆边点。", StatusKind.Error);
+            return;
+        }
         points.Add(point);
         DrawManualCirclePoint(nozzleNumber, point, points.Count);
 
-        if (points.Count == 2)
+        if (points.Count == 3)
         {
-            var deltaX = points[1].X - points[0].X;
-            var deltaY = points[1].Y - points[0].Y;
-            var circle = new ManualNozzleCircle(
-                points[0],
-                Math.Sqrt(deltaX * deltaX + deltaY * deltaY));
+            if (!ThreePointCircle.TryFit(points[0], points[1], points[2], out var center, out var radius))
+            {
+                points.RemoveAt(2);
+                RestoreAndRedrawManualNozzleCircles();
+                UpdateManualNozzleCircleStatus();
+                SetStatus($"Z{nozzleNumber} 三点重复或接近共线，请重新选择第三个圆边点。", StatusKind.Error);
+                return;
+            }
+            var circle = new ManualNozzleCircle(center, radius);
             if (!TryValidateManualNozzleCircle(nozzleNumber, circle, out var validationError))
             {
-                points.RemoveAt(1);
+                points.RemoveAt(2);
                 RestoreAndRedrawManualNozzleCircles();
-                SidebarManualCircleStatusText.Text =
-                    $"吸嘴{nozzleNumber}：{validationError}\n请保留圆心，重新点击圆边。";
-                SetStatus($"吸嘴{nozzleNumber}画圆未通过检查：{validationError}", StatusKind.Error);
+                UpdateManualNozzleCircleStatus();
+                SetStatus($"Z{nozzleNumber}：{validationError}，请重选第三点或单独重画。", StatusKind.Error);
                 return;
             }
 
@@ -1606,41 +1673,27 @@ public partial class MainWindow : Window
             }
 
             DrawManualCircle(nozzleNumber, circle);
+            await SendHostEventAsync(string.Join("\t", "MANUAL_NOZZLE_CIRCLE",
+                nozzleNumber.ToString(CultureInfo.InvariantCulture),
+                circle.Center.X.ToString("R", CultureInfo.InvariantCulture),
+                circle.Center.Y.ToString("R", CultureInfo.InvariantCulture),
+                circle.Radius.ToString("R", CultureInfo.InvariantCulture)));
         }
 
         UpdateManualNozzleCircleStatus();
-        if (_manualNozzle1Circle is null || _manualNozzle2Circle is null)
-        {
-            return;
-        }
-
-        _manualNozzleCircleMode = false;
-        SidebarManualCircleButton.Content = "重新画圆";
-        SidebarManualCircleStatusText.Text =
-            $"完成：吸嘴1 ({_manualNozzle1Circle.Center.X:0.##}, {_manualNozzle1Circle.Center.Y:0.##})　" +
-            $"吸嘴2 ({_manualNozzle2Circle.Center.X:0.##}, {_manualNozzle2Circle.Center.Y:0.##})";
-        SetStatus("两个手动画圆均已完成，可以保存双吸嘴结果。", StatusKind.Success);
-        await SendHostEventAsync(string.Join(
-            "\t",
-            "MANUAL_NOZZLE_CIRCLES",
-            _manualNozzle1Circle.Center.X.ToString("R", CultureInfo.InvariantCulture),
-            _manualNozzle1Circle.Center.Y.ToString("R", CultureInfo.InvariantCulture),
-            _manualNozzle1Circle.Radius.ToString("R", CultureInfo.InvariantCulture),
-            _manualNozzle2Circle.Center.X.ToString("R", CultureInfo.InvariantCulture),
-            _manualNozzle2Circle.Center.Y.ToString("R", CultureInfo.InvariantCulture),
-            _manualNozzle2Circle.Radius.ToString("R", CultureInfo.InvariantCulture)));
+        _manualNozzleCircleMode = _manualNozzle1Circle is null || _manualNozzle2Circle is null;
     }
 
     private void UpdateManualNozzleCircleStatus()
     {
         var nozzle1Status = _manualNozzle1Circle is null
-            ? $"{_manualNozzle1CirclePoints.Count}/2"
+            ? $"{_manualNozzle1CirclePoints.Count}/3"
             : "完成";
         var nozzle2Status = _manualNozzle2Circle is null
-            ? $"{_manualNozzle2CirclePoints.Count}/2"
+            ? $"{_manualNozzle2CirclePoints.Count}/3"
             : "完成";
         SidebarManualCircleStatusText.Text =
-            $"吸嘴1：{nozzle1Status}　吸嘴2：{nozzle2Status}\n第一下点圆心，第二下点圆边";
+            $"Z1：{nozzle1Status}　Z2：{nozzle2Status}\n圆边三点定圆；各自重画、各自保存";
     }
 
     private void RestoreAndRedrawManualNozzleCircles()
@@ -2457,6 +2510,10 @@ public partial class MainWindow : Window
         var calibrationDirectory = Path.GetDirectoryName(calibrationPath)
             ?? throw new InvalidDataException("无法确定标定文件的保存目录。");
 
+        if (string.Equals(_activeCalibrationProcedureName, _calibrationProcedureName, StringComparison.Ordinal))
+        {
+            ClearNozzleTeachingDraft();
+        }
         StopAllContinuousExecutionNoThrow();
         ApplyCalibrationRenderLayout();
         await RefreshRenderLayoutAsync();
@@ -3496,9 +3553,9 @@ public partial class MainWindow : Window
     {
         ApplySplitRenderLayout();
         SetRenderPanelLabels(
-            "吸嘴1粗定位 · 圆查找2",
+            "Z1（吸嘴1）粗定位 · 圆查找2",
             "等待吸嘴1粗定位结果",
-            "吸嘴2粗定位 · 圆查找1",
+            "Z2（吸嘴2）粗定位 · 圆查找1",
             "等待吸嘴2粗定位结果");
     }
 
@@ -4103,6 +4160,8 @@ public partial class MainWindow : Window
         _calibrationProcedure = null;
         _calibrationViewActive = false;
         _loadedSolutionPath = "";
+        _retainedNozzle1ResultModule = null;
+        _retainedNozzle2ResultModule = null;
         _solutionLoaded = false;
         PreviewProcedureComboBox.ItemsSource = null;
         CalibrationProcedureComboBox.ItemsSource = null;
@@ -4130,6 +4189,8 @@ public partial class MainWindow : Window
         _calibrationProcedure = null;
         _calibrationViewActive = false;
         _loadedSolutionPath = "";
+        _retainedNozzle1ResultModule = null;
+        _retainedNozzle2ResultModule = null;
         _solutionLoaded = false;
         PreviewProcedureComboBox.ItemsSource = null;
         CalibrationProcedureComboBox.ItemsSource = null;

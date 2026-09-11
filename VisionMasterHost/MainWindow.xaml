@@ -593,7 +593,7 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="SidebarManualCircleButton"
-                                        Content="手动画圆"
+                                        Content="Z1 三点重画"
                                         Style="{StaticResource SidebarButton}"
                                         Background="#6B3FD6"
                                         BorderBrush="#8A63E8"
@@ -601,7 +601,7 @@
                                         Click="ManualNozzleCircleButton_Click" />
                                 <Button Grid.Column="2"
                                         x:Name="SidebarClearManualCircleButton"
-                                        Content="清除重画"
+                                        Content="Z2 三点重画"
                                         Style="{StaticResource SidebarButton}"
                                         Background="#102A3E"
                                         BorderBrush="#35546B"
@@ -610,7 +610,7 @@
                             </Grid>
                             <TextBlock x:Name="SidebarManualCircleStatusText"
                                        Margin="26,0,0,6"
-                                       Text="采集画面后，每张图先点圆心、再点圆边"
+                                       Text="在各自画面的圆边上选 3 点，可单独重画和保存"
                                        Foreground="#D5C5FF"
                                        FontSize="11"
                                        LineHeight="18"
@@ -623,13 +623,12 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="SidebarRecordNozzleButton" Tag="AssignPoint1Nozzle1"
-                                        Grid.ColumnSpan="3" Content="保存双吸嘴结果" Style="{StaticResource SidebarButton}"
+                                        Content="保存 Z1 结果" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
                                 <Button Grid.Column="2" x:Name="SidebarAssignPoint1Nozzle2Button" Tag="AssignPoint1Nozzle2"
-                                        Content="点1 = 吸嘴2" Style="{StaticResource SidebarButton}"
+                                        Content="保存 Z2 结果" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
-                                        Visibility="Collapsed"
                                         Click="CalibrationSidebarButton_Click" />
                             </Grid>
                             <TextBlock x:Name="SidebarNozzleStatusText"

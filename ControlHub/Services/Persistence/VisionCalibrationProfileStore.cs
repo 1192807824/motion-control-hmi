@@ -60,8 +60,7 @@ public sealed class VisionCalibrationProfileStore
              !string.Equals(profile.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)) ||
             (profile.NozzleDotPositionRecorded &&
              !AreFinite(profile.NozzleDotPositionXPulses, profile.NozzleDotPositionYPulses)) ||
-            !profile.Nozzle1Calibrated ||
-            !profile.Nozzle2Calibrated ||
+            (!profile.Nozzle1Calibrated && !profile.Nozzle2Calibrated) ||
             !AreFinite(
                 profile.Nozzle1OffsetXPulses,
                 profile.Nozzle1OffsetYPulses,

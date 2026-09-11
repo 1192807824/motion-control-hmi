@@ -1,0 +1,137 @@
+using System.IO;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using ControlHub.Services.Persistence;
+using ControlHub.Services.Vision;
+using ControlHub.Views.Controls;
+using ControlHub.Views.Pages;
+using VisionMasterHost;
+
+internal static class Program
+{
+    private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+
+    [STAThread]
+    private static void Main()
+    {
+        CheckCircleGeometry();
+        var directory = Path.Combine(Path.GetTempPath(), "nozzle-teaching-checks-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        CheckIndependentResults(directory);
+        Console.WriteLine("PASS: three-point circle, invalid points, Z1/Z2 independent drafts and offsets, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
+        Console.WriteLine("Test artifacts: " + directory);
+    }
+
+    private static void CheckCircleGeometry()
+    {
+        var random = new Random(3107);
+        for (var i = 0; i < 100; i++)
+        {
+            var expected = new Point(random.Next(300, 3000), random.Next(300, 2000));
+            var radius = random.Next(20, 250);
+            var angle = random.NextDouble() * Math.PI;
+            Point OnCircle(double delta) => new(expected.X + radius * Math.Cos(angle + delta), expected.Y + radius * Math.Sin(angle + delta));
+            var a = OnCircle(0);
+            var b = OnCircle(1.2);
+            var c = OnCircle(3.4);
+            foreach (var points in new[] { new[] { a, b, c }, new[] { c, b, a }, new[] { b, a, c } })
+            {
+                Require(ThreePointCircle.TryFit(points[0], points[1], points[2], out var actual, out var actualRadius), "Valid edge points fit");
+                Require((actual - expected).Length < 1e-7 && Math.Abs(actualRadius - radius) < 1e-7, "Center and radius match");
+            }
+        }
+        Require(!ThreePointCircle.TryFit(new(1, 1), new(1, 1), new(2, 3), out _, out _), "Duplicate points rejected");
+        Require(!ThreePointCircle.TryFit(new(1, 1), new(2, 2), new(3, 3), out _, out _), "Collinear points rejected");
+        Require(!ThreePointCircle.TryFit(new(0, 0), new(100, 100), new(200, 200.000001), out _, out _), "Nearly collinear points rejected");
+        Require(!ThreePointCircle.TryFit(new(double.NaN, 1), new(2, 2), new(3, 3), out _, out _), "Nonfinite points rejected");
+    }
+
+    private static void CheckIndependentResults(string directory)
+    {
+        // Isolated state containers bypass view startup, camera initialization and the shared settings singleton.
+        var settings = new VisualCalibrationSettings { ActiveAxisSet = "First", ActiveCalibrationMode = "First" };
+        var service = (VisionCalibrationService)RuntimeHelpers.GetUninitializedObject(typeof(VisionCalibrationService));
+        Set(service, "<Settings>k__BackingField", settings);
+        Set(service, "_store", new VisualCalibrationSettingsStore(Path.Combine(directory, "settings.json")));
+        var page = (VisualCalibrationPage)RuntimeHelpers.GetUninitializedObject(typeof(VisualCalibrationPage));
+        Set(page, "_visionCalibration", service);
+        Set(page, "_uiSettings", settings);
+        Set(page, "_profileStore", new VisionCalibrationProfileStore());
+        var pending = new VisionBlobRectangle?[2];
+        Set(page, "_pendingNozzlePoints", pending);
+        Set(page, "NozzleCalibrationStatusText", new TextBlock());
+        Set(page, "NozzleTeachStepText", new TextBlock());
+        var xmlPath = Path.Combine(directory, "calibration.xml");
+        File.WriteAllText(xmlPath, "<calibration />");
+        Set(page, "CalibrationFilePathTextBox", new TextBox { Text = xmlPath });
+        Set(page, "StepXPulsesTextBox", new TextBox { Text = "100000" });
+        Set(page, "StepYPulsesTextBox", new TextBox { Text = "100000" });
+        Set(page, "VelocityTextBox", new TextBox { Text = "200000" });
+        Set(page, "SettleMillisecondsTextBox", new TextBox { Text = "300" });
+        Set(page, "MovePriorityComboBox", new ComboBox());
+
+        Invoke(page, "SetActiveNozzleOffset", VisionTargetTool.Nozzle2, 222d, -333d);
+        var saved = ((string FilePath, string? BackupFilePath))Invoke(page, "SaveCurrentCalibrationProfile")!;
+        var store = new VisionCalibrationProfileStore();
+        var onlyZ2 = store.Load(saved.FilePath);
+        Require(!onlyZ2.Nozzle1Calibrated && onlyZ2.Nozzle2Calibrated, "Z2 can be saved before Z1");
+        Invoke(page, "SetActiveNozzleOffset", VisionTargetTool.Nozzle1, 111d, 444d);
+        Require(settings.Nozzle2OffsetCalibrated && settings.Nozzle2OffsetXPulses == 222 && settings.Nozzle2OffsetYPulses == -333, "Saving Z1 preserves Z2");
+        Invoke(page, "SaveCurrentCalibrationProfile");
+        var both = store.Load(saved.FilePath);
+        Require(both.Nozzle1Calibrated && both.Nozzle2Calibrated && both.Nozzle1OffsetXPulses == 111 && both.Nozzle2OffsetXPulses == 222, "Profile keeps both results");
+
+        using var host = new VisionMasterProcessHost();
+        var eventCount = 0;
+        host.ManualNozzleCircleReceived += (_, e) =>
+        {
+            eventCount++;
+            Invoke(page, "VisionHost_ManualNozzleCircleReceived", host, e);
+        };
+        void Send(string message)
+        {
+            Invoke(host, "DispatchHostEvent", message);
+            Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        }
+        Send("MANUAL_NOZZLE_CIRCLE\t1\t100\t200\t30");
+        Send("MANUAL_NOZZLE_CIRCLE\t2\t300\t400\t50");
+        Require(pending[0]?.X == 100 && pending[1]?.X == 300, "Separate events populate both drafts");
+        var z2 = pending[1];
+        Send("MANUAL_NOZZLE_CIRCLE\t1\tCLEAR");
+        Require(pending[0] is null && ReferenceEquals(pending[1], z2), "Redrawing Z1 keeps Z2 draft");
+        Require(settings.NozzleOffsetCalibrated && settings.Nozzle2OffsetCalibrated, "Redraw keeps previously saved results");
+        Send("MANUAL_NOZZLE_CIRCLE\t1\t120\t220\t35");
+        var z1 = pending[0];
+        Send("MANUAL_NOZZLE_CIRCLE\t2\tCLEAR");
+        Require(ReferenceEquals(pending[0], z1) && pending[1] is null, "Redrawing Z2 keeps Z1 draft");
+        var validCount = eventCount;
+        Send("MANUAL_NOZZLE_CIRCLE\t3\t100\t200\t30");
+        Send("MANUAL_NOZZLE_CIRCLE\t1\tNaN\t200\t30");
+        Send("MANUAL_NOZZLE_CIRCLE\t1\t100\t200\t-1");
+        Require(eventCount == validCount, "Malformed host events are ignored");
+
+        Invoke(page, "SetActiveNozzleOffset", VisionTargetTool.Nozzle2, -900d, 800d);
+        Require(settings.NozzleOffsetCalibrated && settings.NozzleOffsetXPulses == 111 && settings.NozzleOffsetYPulses == 444, "Saving Z2 preserves Z1");
+        Invoke(page, "SaveCurrentCalibrationProfile");
+        var restartedSettings = new VisualCalibrationSettingsStore(Path.Combine(directory, "settings.json")).Load();
+        Require(restartedSettings.NozzleOffsetCalibrated && restartedSettings.Nozzle2OffsetCalibrated && restartedSettings.NozzleOffsetXPulses == 111 && restartedSettings.Nozzle2OffsetXPulses == -900, "Saved settings reload independently");
+        settings.NozzleOffsetCalibrated = false;
+        settings.Nozzle2OffsetCalibrated = false;
+        try
+        {
+            Invoke(page, "SaveCurrentCalibrationProfile");
+            throw new Exception("Empty profile should fail");
+        }
+        catch (TargetInvocationException e) when (e.InnerException is InvalidOperationException) { }
+    }
+
+    private static void Set(object target, string name, object value) => target.GetType().GetField(name, Private)!.SetValue(target, value);
+    private static object? Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, Private)!.Invoke(target, args);
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
+    }
+}

@@ -544,8 +544,7 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <Button x:Name="AssignPoint1ToNozzle1Button"
-                                            Grid.ColumnSpan="3"
-                                            Content="保存双吸嘴结果"
+                                            Content="保存 Z1 结果"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
@@ -554,13 +553,12 @@
                                             Click="AssignPoint1ToNozzle1_Click" />
                                     <Button Grid.Column="2"
                                             x:Name="AssignPoint1ToNozzle2Button"
-                                            Content="点1 = 吸嘴2"
+                                            Content="保存 Z2 结果"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             FontSize="11"
                                             IsEnabled="False"
-                                            Visibility="Collapsed"
                                             Click="AssignPoint1ToNozzle2_Click" />
                                 </Grid>
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
@@ -645,7 +643,7 @@
                                                       Exited="VisionHost_Exited"
                                                       CalibrationToolbarActionRequested="VisionHost_CalibrationToolbarActionRequested"
                                                       CalibrationSidebarActionRequested="VisionHost_CalibrationSidebarActionRequested"
-                                                      ManualNozzleCirclesReceived="VisionHost_ManualNozzleCirclesReceived"
+                                                      ManualNozzleCircleReceived="VisionHost_ManualNozzleCircleReceived"
                                                       ClickTargetReceived="VisionHost_ClickTargetReceived"
                                                       ClickTargetFailed="VisionHost_ClickTargetFailed" />
                     <StackPanel x:Name="HostPlaceholder"
