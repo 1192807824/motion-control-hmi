@@ -192,6 +192,7 @@ public partial class HomePage : UserControl
     private bool _startSequenceRunning;
     private bool _productionXyLinearInterpolationEnabled;
     private bool _oneKeyCollectRunning;
+    private readonly SemaphoreSlim _testStationRetryMotionLock = new(1, 1);
     private CancellationTokenSource? _productionCancellation;
     private TaskCompletionSource<bool>? _productionCompletion;
     private bool _productionStopRequested;
@@ -4167,24 +4168,40 @@ public partial class HomePage : UserControl
                 "测试中",
                 "等待仪表返回…",
                 Color.FromRgb(98, 181, 255));
-            // 电阻模式的一次测试覆盖整个加电时限，超时NG不能被外层重试重新启动加电。
-            if (settings.Instrument == TestStationInstrument.SM7110 && _sm7110AcceptanceRange?.MeasurementMode == "R")
-                return await MeasureOnceAsync(cancellationToken);
             return await TestMeasurementRetry.ExecuteAsync(
                 MeasureOnceAsync,
                 result => result.Passed,
                 _testRetryCount,
                 async (retryNumber, token) =>
                 {
-                    SetTestStationRuntimeDisplay(
-                        stationNumber,
-                        $"{instrumentName} 测试失败，重试 {retryNumber}/{_testRetryCount}",
-                        "重试中",
-                        $"保持下压，等待 {_testStationDwellMilliseconds} ms 后重新测试…",
-                        Color.FromRgb(242, 181, 68));
-                    await Task.Delay(_testStationDwellMilliseconds, token);
+                    var motionController = _motionController
+                        ?? throw new InvalidOperationException("主页尚未连接运动控制组件，不能执行机械复测。");
+                    var axisNo = TestStationAxisByStation[stationNumber];
+                    var velocities = GetProductionAxisVelocities([axisNo]);
+                    // 复测动作只移动失败站；串行使用运动控制组件，其它站的仪表测量仍可继续。
+                    await _testStationRetryMotionLock.WaitAsync(token);
+                    try
+                    {
+                        await TestStationRetestSequence.RunAsync(axisNo, settings.WaitPosition, settings.PressPosition,
+                            _testStationDwellMilliseconds,
+                            async (axis, target, movementToken) =>
+                            {
+                                await WaitIfProductionPausedAsync(movementToken);
+                                await motionController.MoveAxesAbsoluteAsync(
+                                    new Dictionary<int, double> { [axis] = target }, movementToken,
+                                    TestStationMoveTimeoutMilliseconds, ProductionHandlingAxisNos,
+                                    HomePageCompletionTolerance, velocityOverrides: velocities);
+                            },
+                            (milliseconds, delayToken) => Task.Delay(milliseconds, delayToken),
+                            phase => SetTestStationRuntimeDisplay(stationNumber,
+                                $"重试 {retryNumber}/{_testRetryCount} · {phase}", "机械复测",
+                                $"{instrumentName} · 轴{axisNo} · {phase}", Color.FromRgb(242, 181, 68)), token);
+                        await WaitIfProductionPausedAsync(token);
+                    }
+                    finally { _testStationRetryMotionLock.Release(); }
                 },
-                cancellationToken);
+                cancellationToken,
+                canRetryException: exception => !SM7110TimedTest.HasStopFailure(exception));
 
             async Task<TestStationMeasurementResult> MeasureOnceAsync(CancellationToken token)
             {
@@ -4233,7 +4250,7 @@ public partial class HomePage : UserControl
         {
             SetTestStationRuntimeDisplay(
                 stationNumber,
-                "仪表通讯异常",
+                "测试流程异常",
                 "异常",
                 exception.Message,
                 Color.FromRgb(242, 122, 128));
@@ -6409,7 +6426,7 @@ public partial class HomePage : UserControl
             {
                 _ = ReadSM7110AcceptanceRange();
                 SM7110RangeStatusText.Text = threshold
-                    ? "限时达标已启用：整个时限内保持加电，达标或超时后停止并放电；超时NG不重新加电重试。"
+                    ? "每轮保持加电至达标或超时，再停止并放电；失败按重试次数执行回等待位、下压、稳定等待后复测。"
                     : "双站判定已启用：区间包含上下限；参数自动保存，下次启动生产生效。";
             }
             else

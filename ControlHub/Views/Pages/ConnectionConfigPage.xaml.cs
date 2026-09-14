@@ -224,9 +224,9 @@ public partial class ConnectionConfigPage : UserControl
                 AddSerialLog($"持续测试结束：{SerialMeterResultStatusText.Text}，耗时{result.TestElapsedSeconds:0.###}秒，已发送停止输出/放电命令");
                 return result;
             }
-            await SendSerialMeterCommandAsync(":STARt", cancellationToken);
             try
             {
+                await SendSerialMeterCommandAsync(":STARt", cancellationToken);
                 var response = await _sm7110Session.QueryMeasurementAsync(
                     "*TRG;*WAI;:MEASure:RESult? 3",
                     QuerySerialMeterAsync,
@@ -241,13 +241,13 @@ public partial class ConnectionConfigPage : UserControl
             {
                 try
                 {
-                    await SendSerialMeterCommandAsync(":STOP", CancellationToken.None);
+                    await SendSerialMeterCommandAsync(":STOP", CancellationToken.None, useLifetimeCancellation: false);
                     AddSerialLog("自动测试结束，已停止输出并进入放电状态");
                 }
                 catch (Exception ex) when (ex is IOException or TimeoutException or
                                            InvalidOperationException or ObjectDisposedException)
                 {
-                    AddSerialLog($"警告：自动测试结束后停止放电命令发送失败：{ex.Message}");
+                    throw new SM7110StopOutputException("SM7110停止输出/放电命令失败，禁止机械复测或继续流转。", ex);
                 }
             }
         }

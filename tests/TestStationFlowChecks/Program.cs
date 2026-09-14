@@ -78,6 +78,7 @@ internal static partial class Program
         CheckSM7110RangeAndRouting(page);
         CheckSM7110RangeRetriesAsync().GetAwaiter().GetResult();
         CheckSM7110TimedTestsAsync().GetAwaiter().GetResult();
+        CheckMechanicalRetestsAsync().GetAwaiter().GetResult();
         Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestStationDwellMilliseconds == 200,
             "Old settings must default to 200 ms.");
         var settingsPath = Path.Combine(Path.GetTempPath(), "test-station-dwell-" + Guid.NewGuid().ToString("N") + ".json");
@@ -593,14 +594,15 @@ internal static partial class Program
         Func<CancellationToken, Task<bool>> measure,
         int count,
         Func<int, CancellationToken, Task>? beforeRetry = null,
-        CancellationToken token = default) =>
+        CancellationToken token = default,
+        Func<Exception, bool>? canRetryException = null) =>
         (Task<bool>)typeof(HomePage).Assembly
             .GetType("ControlHub.Services.Devices.TestMeasurementRetry")!
             .GetMethod("ExecuteAsync")!.MakeGenericMethod(typeof(bool))
             .Invoke(null, new object[]
             {
                 measure, (Func<bool, bool>)(passed => passed), count,
-                beforeRetry ?? ((_, _) => Task.CompletedTask), token
+                beforeRetry ?? ((_, _) => Task.CompletedTask), token, canRetryException!
             })!;
 
     private static object? Invoke(object? target, string name, params object?[] args) =>

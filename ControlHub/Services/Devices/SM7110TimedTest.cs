@@ -53,7 +53,7 @@ public static class SM7110TimedTest
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
         {
-            // 达到总时限，不把最后一个低值当成可重试的单次测量。
+            // 达到本轮总时限，由外层决定是否先执行机械复测再开始下一轮。
         }
         finally
         {

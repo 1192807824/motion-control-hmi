@@ -2618,7 +2618,7 @@
                                              VerticalContentAlignment="Center"
                                              Foreground="#10263A"
                                              Background="#F7FAFC"
-                                             ToolTip="E4981A和SM7110共用，各自测试失败后保持下压重试，成功即结束。首次测试不计入重试次数；0为不重试，范围0～10次。自动保存，下次启动生产生效。"
+                                             ToolTip="E4981A和SM7110共用。失败站先回等待位，再到下压位，等待设置的毫秒数后重新测试。SM7110每轮内持续加电采样，整轮失败后才执行机械复测。首次不计入重试次数；0为不重试，范围0～10次。"
                                              TextChanged="TestStationPositionTextBox_TextChanged" />
                                         </StackPanel>
                                         <StackPanel Margin="0,2,8,2">
@@ -2732,10 +2732,10 @@
                                  ToolTip="按所选单位输入，必须大于或等于下限，包含上限。电阻R模式不使用上限。" />
                     </StackPanel>
                     <StackPanel x:Name="SM7110MaximumTimePanel">
-                        <TextBlock Text="最长测试时间（秒）" Foreground="#9FB1BF" FontSize="12" />
+                        <TextBlock Text="每轮最长测试时间（秒）" Foreground="#9FB1BF" FontSize="12" />
                         <TextBox x:Name="SM7110MaximumTimeTextBox" Height="32"
                                  TextChanged="SM7110LimitTextBox_TextChanged"
-                                 ToolTip="按工艺填写，从开始加电计时；大于0且不超过3600秒。超时未达标判NG，不重新加电重试。" />
+                                 ToolTip="每轮从开始加电计时，大于0且不超过3600秒。超时停止并放电；有剩余重试次数时先回等待位、再下压、等待后开始新一轮。" />
                     </StackPanel>
                 </UniformGrid>
                 <TextBlock x:Name="SM7110RangeStatusText" Foreground="#9FB1BF" FontSize="11"

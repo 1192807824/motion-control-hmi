@@ -10,7 +10,8 @@ internal static class TestMeasurementRetry
         Func<T, bool> isSuccessful,
         int retryCount,
         Func<int, CancellationToken, Task> beforeRetry,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<Exception, bool>? canRetryException = null)
     {
         if (retryCount is < 0 or > MaximumRetryCount)
             throw new ArgumentOutOfRangeException(nameof(retryCount));
@@ -27,7 +28,8 @@ internal static class TestMeasurementRetry
             }
             catch (Exception exception) when (
                 exception is not OperationCanceledException &&
-                !cancellationToken.IsCancellationRequested && attempt < retryCount)
+                !cancellationToken.IsCancellationRequested && attempt < retryCount &&
+                (canRetryException?.Invoke(exception) ?? true))
             {
                 // Preserve the final exception for the station's existing safe-return/stop path.
             }
