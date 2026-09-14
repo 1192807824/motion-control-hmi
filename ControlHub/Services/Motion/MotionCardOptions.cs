@@ -5,7 +5,7 @@ namespace ControlHub.Services.Motion;
 
 public sealed class MotionCardOptions
 {
-    public const int DefaultPollIntervalMilliseconds = 10;
+    public const int DefaultPollIntervalMilliseconds = 5;
 
     public int ConfigurationVersion { get; set; }
 
@@ -65,7 +65,7 @@ public sealed class MotionCardOptions
 
     public void ApplyMigrations()
     {
-        if (ConfigurationVersion >= 5)
+        if (ConfigurationVersion >= 6)
         {
             return;
         }
@@ -122,7 +122,7 @@ public sealed class MotionCardOptions
         }
 
         PollIntervalMilliseconds = DefaultPollIntervalMilliseconds;
-        ConfigurationVersion = 5;
+        ConfigurationVersion = 6;
     }
 
     private void ApplyOneKeyResetHomeModes()
@@ -210,7 +210,7 @@ public sealed class MotionCardOptions
 
         if (PollIntervalMilliseconds is < DefaultPollIntervalMilliseconds or > 5000)
         {
-            throw new InvalidDataException("PollIntervalMilliseconds 必须在 10 到 5000 之间。");
+            throw new InvalidDataException("PollIntervalMilliseconds 必须在 5 到 5000 之间。");
         }
 
         if (DigitalInputPort is < 0 or > ushort.MaxValue)

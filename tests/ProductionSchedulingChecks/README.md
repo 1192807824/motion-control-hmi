@@ -9,7 +9,7 @@ dotnet run --project tests/ProductionSchedulingChecks/ProductionSchedulingChecks
 The checks compile the motion configuration and unload sequencing sources directly.
 They do not open the motion card, start the WPF application, or send hardware commands.
 
-Coverage includes migration from existing polling settings to 10 ms while preserving
+Coverage includes migration from version 4/5 polling settings to 5 ms while preserving
 commissioned axis profiles, and polling validation. Unload sequencing checks cover:
 
 - Returning queued task handles while previous BIN placement/return is still pending.

@@ -2,8 +2,8 @@ using ControlHub.Services.Motion;
 
 var checks = new (string Name, Func<Task> Run)[]
 {
-    ("Legacy polling migrates to 10 ms without changing commissioned motion profiles", CheckMigration),
-    ("10 ms validates and sub-10 ms is rejected", CheckValidation),
+    ("Legacy polling migrates to 5 ms without changing commissioned motion profiles", CheckMigration),
+    ("5 ms validates and sub-5 ms is rejected", CheckValidation),
     ("Slow BIN placement does not block scheduling or release the next pickup gate", CheckDeferredUnload),
     ("A queued batch cannot reuse axes when only the previous pickup has completed", CheckAxisOwnership),
     ("Previous BIN failure reaches both queued tasks without starting motion", CheckPreviousFailure),
@@ -28,34 +28,37 @@ static void Require(bool condition, string message)
 
 static Task CheckMigration()
 {
-    var profile = new MotionMoveProfile { AccelerationSeconds = 0.023, StopVelocity = 17 };
-    var home = new MotionHomeProfile { Mode = 33, HighVelocity = 12345 };
-    var options = new MotionCardOptions
+    foreach (var version in new[] { 4, 5 })
     {
-        ConfigurationVersion = 4,
-        PollIntervalMilliseconds = 50,
-        AxisMoveProfiles = new() { [1] = profile },
-        AxisHomeProfiles = new() { [1] = home }
-    };
-    options.ApplyMigrations();
-    options.Validate();
-    Require(options.PollIntervalMilliseconds == 10 && options.ConfigurationVersion == 5, "Migration did not select 10 ms.");
-    Require(ReferenceEquals(profile, options.AxisMoveProfiles[1]) && profile.AccelerationSeconds == 0.023,
-        "Migration changed the commissioned move profile.");
-    Require(ReferenceEquals(home, options.AxisHomeProfiles[1]) && home.HighVelocity == 12345,
-        "Migration changed the commissioned homing profile.");
-    options.ApplyMigrations();
-    Require(options.PollIntervalMilliseconds == 10, "Migration is not idempotent.");
+        var profile = new MotionMoveProfile { AccelerationSeconds = 0.023, StopVelocity = 17 };
+        var home = new MotionHomeProfile { Mode = 33, HighVelocity = 12345 };
+        var options = new MotionCardOptions
+        {
+            ConfigurationVersion = version,
+            PollIntervalMilliseconds = version == 5 ? 10 : 50,
+            AxisMoveProfiles = new() { [1] = profile },
+            AxisHomeProfiles = new() { [1] = home }
+        };
+        options.ApplyMigrations();
+        options.Validate();
+        Require(options.PollIntervalMilliseconds == 5 && options.ConfigurationVersion == 6, "Migration did not select 5 ms.");
+        Require(ReferenceEquals(profile, options.AxisMoveProfiles[1]) && profile.AccelerationSeconds == 0.023,
+            "Migration changed the commissioned move profile.");
+        Require(ReferenceEquals(home, options.AxisHomeProfiles[1]) && home.HighVelocity == 12345,
+            "Migration changed the commissioned homing profile.");
+        options.ApplyMigrations();
+        Require(options.PollIntervalMilliseconds == 5, "Migration is not idempotent.");
+    }
     return Task.CompletedTask;
 }
 
 static Task CheckValidation()
 {
     new MotionCardOptions().Validate();
-    Require(new MotionCardOptions().PollIntervalMilliseconds == 10, "Incorrect polling default.");
-    try { new MotionCardOptions { PollIntervalMilliseconds = 9 }.Validate(); }
+    Require(new MotionCardOptions().PollIntervalMilliseconds == 5, "Incorrect polling default.");
+    try { new MotionCardOptions { PollIntervalMilliseconds = 4 }.Validate(); }
     catch (InvalidDataException) { return Task.CompletedTask; }
-    throw new InvalidOperationException("Polling below 10 ms was accepted.");
+    throw new InvalidOperationException("Polling below 5 ms was accepted.");
 }
 
 static TaskCompletionSource<bool> Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
