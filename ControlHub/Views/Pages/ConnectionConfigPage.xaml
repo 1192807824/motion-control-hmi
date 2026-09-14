@@ -1204,33 +1204,6 @@
                                 </Grid>
                             </Border>
 
-                            <Border Style="{StaticResource Panel}" Margin="0,0,0,10" Padding="14,12">
-                                <StackPanel>
-                                    <TextBlock Text="E4981A 连续稳定测试" Style="{StaticResource PanelTitle}" Margin="0,0,0,12" />
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="150" /><ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="24" /><ColumnDefinition Width="150" /><ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="44" /></Grid.RowDefinitions>
-                                        <TextBlock Text="每轮最大测试次数" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Grid.Column="1" Style="{StaticResource ConfigInput}" ToolTip="包含本轮所有测试，过载、无接触也计数。必须不小于连续稳定次数，最多1000次；达到上限仍不稳定则机械重试。"
-                                                 Text="{Binding TcpConnectionSettings.StabilityMaximumTestCount, UpdateSourceTrigger=LostFocus}" />
-                                        <TextBlock Grid.Column="3" Text="连续稳定次数" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Grid.Column="4" Style="{StaticResource ConfigInput}" ToolTip="2～20次；填2表示连续两次有效读数的电容和损耗误差符合设置即可稳定。过载或无接触会清空连续读数。"
-                                                 Text="{Binding TcpConnectionSettings.StabilitySampleCount, UpdateSourceTrigger=LostFocus}" />
-                                        <TextBlock Grid.Row="1" Text="电容稳定误差(%)" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Grid.Row="1" Grid.Column="1" Style="{StaticResource ConfigInput}" ToolTip="连续窗口内，电容最大值减最小值，不超过最大绝对值的此百分比。"
-                                                 Text="{Binding TcpConnectionSettings.StabilityCapacitancePercent, UpdateSourceTrigger=LostFocus}" />
-                                        <TextBlock Grid.Row="1" Grid.Column="3" Text="损耗D稳定误差" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Grid.Row="1" Grid.Column="4" Style="{StaticResource ConfigInput}" ToolTip="连续窗口内D的最大值减最小值；按D原始值填写，例如0.005。"
-                                                 Text="{Binding TcpConnectionSettings.StabilityDissipationTolerance, UpdateSourceTrigger=LostFocus}" />
-                                    </Grid>
-                                    <TextBlock Margin="0,8,0,0" Foreground="#AAB9C6" FontSize="12" TextWrapping="Wrap"
-                                               Text="下压并完成接触等待后连续测试，间隔由程序控制。连续读数的电容、损耗误差合格且分档一致后判定；达到最大测试次数仍不稳定则机械重试，重试耗尽放NG盒（BIN0）。稳定的超限读数仍判NG。" />
-                                </StackPanel>
-                            </Border>
-
                             <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -1248,7 +1221,7 @@
                                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="14,10,6,8">
                                         <Button Content="读取型号" Style="{StaticResource SecondaryButton}" Click="IdentifyMeter_Click" />
                                         <Button Content="下发测试参数" Style="{StaticResource PrimaryButton}" Click="ApplyMeterSettings_Click" />
-                                        <Button Content="稳定采样测试" Style="{StaticResource PrimaryButton}"
+                                        <Button Content="单次测试" Style="{StaticResource PrimaryButton}"
                                                 Background="{StaticResource AccentGreen}" BorderBrush="#16723F"
                                                 Click="TriggerMeterTest_Click" />
                                         <Button Content="读取错误" Style="{StaticResource SecondaryButton}" Click="ReadMeterError_Click" />

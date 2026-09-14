@@ -147,8 +147,6 @@ internal static partial class Program
         Console.WriteLine("PASS: complete carousel revolution, enabled/empty stations, test-axis highlight, fixed station positions and BIN0 tracking. No hardware opened.");
         CheckSM7110SettingsView();
         CheckE4981ASetupChanges();
-        CheckE4981AStableSamplingAsync().GetAwaiter().GetResult();
-        CheckE4981ALateResponseAsync().GetAwaiter().GetResult();
         CheckE4981ANanofaradUnits();
         CheckSM7110GigohmUnits();
         CheckDdTestStationInterlock();

@@ -19,10 +19,6 @@ public sealed class TcpConnectionSettings : INotifyPropertyChanged
     private int _cableLengthMeters;
     private bool _averagingEnabled = true;
     private int _averagingCount = 3;
-    private int _stabilityMaximumTestCount = 10;
-    private int _stabilitySampleCount = 2;
-    private double _stabilityCapacitancePercent = 1;
-    private double _stabilityDissipationTolerance = 0.005;
     private bool _comparatorEnabled;
     private bool _bin1Enabled = true;
     private double _bin1LowerPf;
@@ -122,30 +118,6 @@ public sealed class TcpConnectionSettings : INotifyPropertyChanged
     {
         get => _comparatorEnabled;
         set => SetField(ref _comparatorEnabled, value);
-    }
-
-    public int StabilityMaximumTestCount
-    {
-        get => _stabilityMaximumTestCount;
-        set => SetField(ref _stabilityMaximumTestCount, value);
-    }
-
-    public int StabilitySampleCount
-    {
-        get => _stabilitySampleCount;
-        set => SetField(ref _stabilitySampleCount, value);
-    }
-
-    public double StabilityCapacitancePercent
-    {
-        get => _stabilityCapacitancePercent;
-        set => SetField(ref _stabilityCapacitancePercent, value);
-    }
-
-    public double StabilityDissipationTolerance
-    {
-        get => _stabilityDissipationTolerance;
-        set => SetField(ref _stabilityDissipationTolerance, value);
     }
 
     public bool Bin1Enabled

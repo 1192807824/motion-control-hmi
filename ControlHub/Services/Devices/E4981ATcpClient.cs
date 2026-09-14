@@ -13,7 +13,6 @@ public sealed class E4981ATcpClient : IDisposable
     private readonly List<byte> _receiveBuffer = [];
     private TcpClient? _client;
     private NetworkStream? _stream;
-    private bool _responsePending;
 
     public event Action<Exception?>? ConnectionClosed;
 
@@ -52,7 +51,6 @@ public sealed class E4981ATcpClient : IDisposable
                 _client = client;
                 _stream = client.GetStream();
                 _receiveBuffer.Clear();
-                _responsePending = false;
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -128,34 +126,9 @@ public sealed class E4981ATcpClient : IDisposable
             var payload = Encoding.ASCII.GetBytes(command.TrimEnd('\r', '\n') + "\n");
             try
             {
-                if (_responsePending)
-                {
-                    // 总采样时限可能中断上一查询。先用IDN屏障排空迟到读数，防止上一颗料的结果判给下一颗。
-                    try
-                    {
-                        await stream.WriteAsync(Encoding.ASCII.GetBytes("*IDN?\n"), timeout.Token);
-                        while (true)
-                        {
-                            var identity = (await ReadLineAsync(stream, timeout.Token)).Split(',');
-                            if (identity.Length >= 4 && string.Equals(identity[1].Trim(), "E4981A", StringComparison.OrdinalIgnoreCase))
-                                break;
-                        }
-                        _responsePending = false;
-                    }
-                    catch
-                    {
-                        // 屏障自身中断后不能再可靠区分其迟到回复；断开后须重新连接。
-                        Close();
-                        ConnectionClosed?.Invoke(new IOException("E4981A中断响应同步失败，请重新连接仪表。"));
-                        throw;
-                    }
-                }
-                if (expectResponse) _responsePending = true;
                 await stream.WriteAsync(payload, timeout.Token);
                 await stream.FlushAsync(timeout.Token);
-                var response = expectResponse ? await ReadLineAsync(stream, timeout.Token) : null;
-                _responsePending = false;
-                return response;
+                return expectResponse ? await ReadLineAsync(stream, timeout.Token) : null;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {

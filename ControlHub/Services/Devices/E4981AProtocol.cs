@@ -10,18 +10,14 @@ public sealed record E4981AMeasurementResult(
     string RawResponse,
     string? LossFailureReason = null)
 {
-    public bool StabilityAttemptsExhausted { get; init; }
-    public int SampleCount { get; init; }
-    public double SamplingElapsedMilliseconds { get; init; }
-
     public bool LossRejected => LossFailureReason is not null;
 
     public double CapacitanceNf => CapacitanceFarads * 1e9;
 
     // 比较器也会通过BIN11报告过载/无接触，不能仅凭状态码为0认定测量成功。
-    public bool IsSuccessful => !StabilityAttemptsExhausted && Status == 0 && Bin != 11 && double.IsFinite(CapacitanceFarads);
+    public bool IsSuccessful => Status == 0 && Bin != 11 && double.IsFinite(CapacitanceFarads);
 
-    public string StatusDescription => StabilityAttemptsExhausted ? $"已达最大测试次数（{SampleCount}次），读数未稳定" : Status switch
+    public string StatusDescription => Status switch
     {
         0 when Bin == 11 => "过载或无接触（BIN11）",
         0 => "测量正常",
@@ -180,7 +176,6 @@ public static class E4981AProtocol
 
     private static void ValidateSettings(TcpConnectionSettings settings)
     {
-        E4981AStableSampling.Validate(settings);
         var frequency = NormalizeFrequency(settings.Frequency);
         if (!AllowedFrequencies.Contains(frequency, StringComparer.OrdinalIgnoreCase))
         {
