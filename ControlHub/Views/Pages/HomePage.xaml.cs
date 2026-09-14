@@ -211,6 +211,8 @@ public partial class HomePage : UserControl
     private IReadOnlyDictionary<int, ProductionAxisMotionSettings>? _productionAxisMotionSettings;
     private IReadOnlyDictionary<int, TestStationSettings>? _testStationSettings;
     private int _testStationDwellMilliseconds = 200;
+    private int _testRetryCount = 1;
+    private SM7110AcceptanceRange? _sm7110AcceptanceRange;
     private readonly Dictionary<int, ProductionAxisMotionEditors> _productionAxisMotionEditors = [];
     private readonly bool[,] _nozzleVacuumEnabledBySet = new bool[2, 3];
     private VisionMotionTarget? _blob1Nozzle1Target;
@@ -400,6 +402,7 @@ public partial class HomePage : UserControl
 
     public HomePageSettings CaptureRecipeSettings()
     {
+        SaveSM7110RangeFromInputs(throwOnInvalid: true);
         SaveObservationCompensationFromInputs(throwOnInvalid: true);
         SaveVisionPickupCountFromInput();
         SaveFirstSetTeachingPositionsFromInputs();
@@ -2052,6 +2055,8 @@ public partial class HomePage : UserControl
                 _productionAxisMotionSettings);
             _testStationSettings = ReadTestStationSettings();
             _testStationDwellMilliseconds = ReadTestStationDwellMilliseconds();
+            _testRetryCount = ReadTestRetryCount();
+            _sm7110AcceptanceRange = IsSM7110TestEnabled() ? ReadSM7110AcceptanceRange() : null;
             EnsureAssignedTestInstrumentsConnected();
             var velocity = GetProductionAxisMotionSettings(
                 VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
@@ -2926,6 +2931,7 @@ public partial class HomePage : UserControl
             _lowerCameraPhotoPositions = null;
             _productionAxisMotionSettings = null;
             _testStationSettings = null;
+            _sm7110AcceptanceRange = null;
             _productionXyLinearInterpolationEnabled = false;
             // 无论正常停止、异常退出还是中途 return，都要退出运行状态。
             _startSequenceRunning = false;
@@ -3578,11 +3584,12 @@ public partial class HomePage : UserControl
             var nozzle2ZPositions = zPositions.Resolve(VisionCalibrationAxisSet.Second, 2);
             var xyPositions = GetSecondSetXyPositions();
             var binDropPositions = GetBinDropPositions();
+            var sm7110Enabled = IsSM7110TestEnabled();
             var nozzle2Bin = pickWithNozzle2
-                ? carouselStations[SecondSetNozzle2UnloadStation].Bin
+                ? carouselStations[SecondSetNozzle2UnloadStation].GetUnloadDestination(sm7110Enabled)
                 : null;
             var nozzle1Bin = pickWithNozzle1
-                ? carouselStations[SecondSetNozzle1UnloadStation].Bin
+                ? carouselStations[SecondSetNozzle1UnloadStation].GetUnloadDestination(sm7110Enabled)
                 : null;
             var nozzle2BinCenter = pickWithNozzle2
                 ? binDropPositions.Resolve(nozzle2Bin, SecondSetNozzle2UnloadStation)
@@ -4107,17 +4114,13 @@ public partial class HomePage : UserControl
             throw measurementFailure;
         }
 
-        SetStartProductionStatus(
-            $"{string.Join("，", stations)} 已收到有效返回并上抬到等待位，DD可继续下一步。",
-            Color.FromRgb(73, 209, 125));
-
         foreach (var measurementResult in measurementResults)
         {
-            carouselStations[measurementResult.Key].SetTested(measurementResult.Value.Bin);
+            carouselStations[measurementResult.Key].SetMeasurement(measurementResult.Value);
             SetTestStationRuntimeDisplay(
                 measurementResult.Key,
                 $"测试完成 · {measurementResult.Value.StatusDescription}",
-                measurementResult.Value.Bin,
+                measurementResult.Value.ResultLabel,
                 measurementResult.Value.DisplayText,
                 measurementResult.Value.Passed
                     ? Color.FromRgb(73, 209, 125)
@@ -4125,6 +4128,22 @@ public partial class HomePage : UserControl
         }
 
         UpdateCarouselStationDisplay(carouselStations);
+        // 判定和下料资格分开处理；BIN0且OK不能混入NG盒，且必须先完成测试轴安全上抬。
+        foreach (var measurement in measurementResults.Where(pair => pair.Value.SM7110Passed == true))
+        {
+            if (measurement.Value.Bin == "BIN0")
+            {
+                const string message = "E4981A为BIN0但SM7110为OK：产品未分档，请人工处理；禁止放入NG盒。";
+                SetTestStationRuntimeDisplay(measurement.Key, "未分档，流程停止", "待处理", message,
+                    Color.FromRgb(242, 122, 128));
+                SetStartProductionStatus(message, Color.FromRgb(242, 122, 128));
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        SetStartProductionStatus(
+            $"{string.Join("，", stations)} 已收到有效返回并上抬到等待位，DD可继续下一步。",
+            Color.FromRgb(73, 209, 125));
         await WaitIfProductionPausedAsync(cancellationToken);
         return axisTargets.Count;
     }
@@ -4147,31 +4166,49 @@ public partial class HomePage : UserControl
                 "测试中",
                 "等待仪表返回…",
                 Color.FromRgb(98, 181, 255));
-            switch (settings.Instrument)
-            {
-                case TestStationInstrument.E4981A:
+            return await TestMeasurementRetry.ExecuteAsync(
+                MeasureOnceAsync,
+                result => result.Passed,
+                _testRetryCount,
+                async (retryNumber, token) =>
                 {
-                    var result = await connectionController.MeasureE4981AAsync(cancellationToken);
-                    return ClassifyE4981AMeasurement(result);
-                }
-                case TestStationInstrument.SM7110:
-                {
-                    var result = await connectionController.MeasureSM7110Async(cancellationToken);
-                    var bin = stationState.Bin;
-                    if (string.IsNullOrWhiteSpace(bin))
-                    {
-                        throw new InvalidOperationException(
-                            "产品尚无E4981A分BIN结果，SM7110不能生成或替代分BIN结果。");
-                    }
+                    SetTestStationRuntimeDisplay(
+                        stationNumber,
+                        $"{instrumentName} 测试失败，重试 {retryNumber}/{_testRetryCount}",
+                        "重试中",
+                        $"保持下压，等待 {_testStationDwellMilliseconds} ms 后重新测试…",
+                        Color.FromRgb(242, 181, 68));
+                    await Task.Delay(_testStationDwellMilliseconds, token);
+                },
+                cancellationToken);
 
-                    return new TestStationMeasurementResult(
-                        bin,
-                        $"{result.MeasurementMode}={result.Value:G9}{result.Unit} · E4981A:{bin}",
-                        result.StatusDescription,
-                        result.IsSuccessful);
+            async Task<TestStationMeasurementResult> MeasureOnceAsync(CancellationToken token)
+            {
+                switch (settings.Instrument)
+                {
+                    case TestStationInstrument.E4981A:
+                    {
+                        var result = await connectionController.MeasureE4981AAsync(token);
+                        return ClassifyE4981AMeasurement(result);
+                    }
+                    case TestStationInstrument.SM7110:
+                    {
+                        var bin = stationState.Bin;
+                        if (string.IsNullOrWhiteSpace(bin))
+                        {
+                            throw new InvalidOperationException(
+                                "产品尚无E4981A分BIN结果，SM7110不能生成或替代分BIN结果。");
+                        }
+
+                        var range = _sm7110AcceptanceRange
+                            ?? throw new InvalidOperationException("本轮生产尚未锁定SM7110合格区间。");
+                        range.ValidateMeasurementMode(connectionController.SM7110MeasurementMode);
+                        var result = await connectionController.MeasureSM7110Async(token);
+                        return ClassifySM7110Measurement(result, bin, range);
+                    }
+                    default:
+                        throw new InvalidOperationException($"{stationNumber}号工位未分配仪表。");
                 }
-                default:
-                    throw new InvalidOperationException($"{stationNumber}号工位未分配仪表。");
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -4206,7 +4243,23 @@ public partial class HomePage : UserControl
             bin,
             $"C={result.CapacitancePf:0.######}pF · D={result.DissipationFactor:G6} · {bin}",
             result.StatusDescription,
-            bin != "BIN0");
+            result.IsSuccessful);
+    }
+
+    private static TestStationMeasurementResult ClassifySM7110Measurement(
+        SM7110MeasurementResult result, string bin, SM7110AcceptanceRange range)
+    {
+        range.ValidateMeasurementMode(result.MeasurementMode);
+        var passed = result.IsSuccessful && result.Value >= range.Lower && result.Value <= range.Upper;
+        var status = passed ? "OK · 区间内"
+            : result.IsSuccessful ? "NG · 超出合格区间" : $"NG · {result.StatusDescription}";
+        return new TestStationMeasurementResult(
+            bin,
+            $"{result.MeasurementMode}={result.Value:G9}{result.Unit} · 合格区间[{range.Lower:G9}, {range.Upper:G9}] · {status} · E4981A:{bin}",
+            status,
+            passed,
+            passed,
+            result.Value);
     }
 
     private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
@@ -4275,24 +4328,29 @@ public partial class HomePage : UserControl
 
             if (occupied)
             {
+                var waitingForSM7110 = state.Tested && IsSM7110TestEnabled() && state.SM7110Passed is null;
+                var rejected = state.SM7110Passed == false;
+                var unclassified = state.SM7110Passed == true && state.Bin == "BIN0";
+                var complete = state.Tested && !waitingForSM7110;
+                var stateColor = rejected || unclassified ? Color.FromRgb(242, 122, 128)
+                    : complete ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68);
                 card.Background = new SolidColorBrush(
-                    state.Tested ? Color.FromRgb(21, 61, 47) : Color.FromRgb(53, 45, 24));
-                card.BorderBrush = new SolidColorBrush(
-                    state.Tested ? Color.FromRgb(54, 196, 106) : Color.FromRgb(231, 163, 43));
+                    rejected || unclassified ? Color.FromRgb(61, 31, 35)
+                    : complete ? Color.FromRgb(21, 61, 47) : Color.FromRgb(53, 45, 24));
+                card.BorderBrush = new SolidColorBrush(stateColor);
                 if (resultText is not null)
                 {
-                    resultText.Text = state.Tested ? "已测试" : CarouselStatusLoaded;
-                    resultText.Foreground = new SolidColorBrush(
-                        state.Tested ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68));
+                    resultText.Text = rejected ? "NG → 0号盒" : unclassified ? "未分档 · 待处理"
+                        : waitingForSM7110 ? "待SM判定" : complete ? "已测试" : CarouselStatusLoaded;
+                    resultText.Foreground = new SolidColorBrush(stateColor);
                 }
 
                 if (objectText is not null)
                 {
                     objectText.Text = state.Tested
-                        ? state.Bin ?? "BIN?"
+                        ? state.SM7110Passed == true ? $"OK · {state.Bin}" : state.Bin ?? "BIN?"
                         : TestStationAxisByStation.ContainsKey(station) ? "待测试" : "有物体";
-                    objectText.Foreground = new SolidColorBrush(
-                        state.Tested ? Color.FromRgb(194, 246, 214) : Color.FromRgb(229, 214, 175));
+                    objectText.Foreground = new SolidColorBrush(stateColor);
                 }
             }
             else
@@ -4350,6 +4408,10 @@ public partial class HomePage : UserControl
 
         public string? Bin { get; private set; }
 
+        public bool? SM7110Passed { get; private set; }
+
+        public double? SM7110Value { get; private set; }
+
         public static CarouselStationState Empty() => new();
 
         public void SetLoaded()
@@ -4357,6 +4419,8 @@ public partial class HomePage : UserControl
             Occupied = true;
             Tested = false;
             Bin = null;
+            SM7110Passed = null;
+            SM7110Value = null;
         }
 
         public void SetTested(string bin)
@@ -4364,6 +4428,31 @@ public partial class HomePage : UserControl
             Occupied = true;
             Tested = true;
             Bin = bin;
+        }
+
+        public void SetMeasurement(TestStationMeasurementResult result)
+        {
+            SetTested(result.Bin);
+            if (result.SM7110Passed.HasValue)
+            {
+                SM7110Passed = result.SM7110Passed;
+                SM7110Value = result.SM7110Value;
+            }
+        }
+
+        public string GetUnloadDestination(bool sm7110Enabled)
+        {
+            if (!Occupied || !Tested || Bin is not ("BIN0" or "BIN1" or "BIN2" or "BIN3"))
+                throw new InvalidOperationException("产品尚无有效E4981A分档结果，禁止下料。");
+            if (!sm7110Enabled)
+                return Bin;
+            if (SM7110Passed is null)
+                throw new InvalidOperationException("产品尚未完成SM7110判定，禁止下料。");
+            if (SM7110Passed == false)
+                return "NG";
+            if (Bin == "BIN0")
+                throw new InvalidOperationException("产品BIN0且SM7110为OK，未分档，请人工处理；禁止放入NG盒。");
+            return Bin;
         }
     }
 
@@ -5934,6 +6023,10 @@ public partial class HomePage : UserControl
         _homeSettings.TestStationSettings ??= [];
         TestStationDwellTextBox.Text = _homeSettings.TestStationDwellMilliseconds
             .ToString(CultureInfo.CurrentCulture);
+        TestRetryCountTextBox.Text = _homeSettings.TestRetryCount.ToString(CultureInfo.CurrentCulture);
+        SM7110LowerLimitTextBox.Text = _homeSettings.SM7110LowerLimit?.ToString("R", CultureInfo.CurrentCulture) ?? "";
+        SM7110UpperLimitTextBox.Text = _homeSettings.SM7110UpperLimit?.ToString("R", CultureInfo.CurrentCulture) ?? "";
+        SM7110LimitModeComboBox.SelectedValue = _homeSettings.SM7110LimitMeasurementMode;
         _updatingTestStationConfiguration = true;
         try
         {
@@ -6169,6 +6262,100 @@ public partial class HomePage : UserControl
             : Color.FromRgb(242, 181, 68);
         EnabledStationSummaryText.Foreground = new SolidColorBrush(summaryColor);
         EnabledStationSummaryIndicator.Fill = new SolidColorBrush(summaryColor);
+        var sm7110Enabled = IsSM7110TestEnabled();
+        BinRoutingSummaryText.Text = sm7110Enabled ? "双站 · NG + BIN1～BIN3" : "单站 · BIN0～BIN3";
+        Bin0PositionLabel.Text = sm7110Enabled ? "0号盒 · NG" : "0号盒 · BIN0";
+        Bin1PositionLabel.Text = sm7110Enabled ? "1号盒 · OK · BIN1" : "1号盒 · BIN1";
+        Bin2PositionLabel.Text = sm7110Enabled ? "2号盒 · OK · BIN2" : "2号盒 · BIN2";
+        Bin3PositionLabel.Text = sm7110Enabled ? "3号盒 · OK · BIN3" : "3号盒 · BIN3";
+        UpdateSM7110RangeDisplay();
+    }
+
+    private bool IsSM7110TestEnabled()
+    {
+        if (_testStationSettings is { } settings)
+            return settings.Values.Any(value => value.Enabled == true && value.Instrument == TestStationInstrument.SM7110);
+        return TestStationDefinitions.Any(definition =>
+        {
+            var controls = GetTestStationConfigurationControls(definition.StationNumber);
+            return controls.EnabledToggle.IsChecked == true &&
+                   GetSelectedTestStationInstrument(controls.InstrumentComboBox) == TestStationInstrument.SM7110;
+        });
+    }
+
+    private SM7110AcceptanceRange ReadSM7110AcceptanceRange()
+    {
+        var lower = ParseFiniteCoordinate(SM7110LowerLimitTextBox.Text, "SM7110合格下限");
+        var upper = ParseFiniteCoordinate(SM7110UpperLimitTextBox.Text, "SM7110合格上限");
+        if (lower > upper)
+            throw new ArgumentException("SM7110合格下限不能大于上限。");
+        var mode = SM7110LimitModeComboBox.SelectedValue as string;
+        if (mode is not ("R" or "A" or "RS" or "RV" or "RL"))
+            throw new ArgumentException("请选择SM7110合格区间的单位和测量模式。");
+        return new SM7110AcceptanceRange(lower, upper, mode);
+    }
+
+    private void SaveSM7110RangeFromInputs(bool throwOnInvalid = false)
+    {
+        if (_loadingPresetPositions)
+            return;
+        try
+        {
+            if (!TryParseOptionalCoordinate(SM7110LowerLimitTextBox.Text, out var lower) ||
+                !TryParseOptionalCoordinate(SM7110UpperLimitTextBox.Text, out var upper) ||
+                lower > upper)
+                throw new ArgumentException("SM7110上下限必须为有限数值，且下限不能大于上限。");
+            var mode = SM7110LimitModeComboBox.SelectedValue as string
+                ?? throw new ArgumentException("请选择SM7110合格区间的测量模式。");
+            if (throwOnInvalid && IsSM7110TestEnabled())
+                _ = ReadSM7110AcceptanceRange();
+            _homeSettings.SM7110LowerLimit = lower;
+            _homeSettings.SM7110UpperLimit = upper;
+            _homeSettings.SM7110LimitMeasurementMode = mode;
+            _homeSettingsStore.Save(_homeSettings);
+        }
+        catch (Exception exception) when (!throwOnInvalid)
+        {
+            SM7110RangeStatusText.Text = exception.Message;
+            SM7110RangeStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        }
+    }
+
+    private void SM7110LimitTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        SM7110RangeInputChanged();
+
+    private void SM7110LimitModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        SM7110RangeInputChanged();
+
+    private void SM7110RangeInputChanged()
+    {
+        if (_loadingPresetPositions)
+            return;
+        UpdateSM7110RangeDisplay();
+        SaveSM7110RangeFromInputs();
+        UpdateHomeCommandState();
+    }
+
+    private void UpdateSM7110RangeDisplay()
+    {
+        try
+        {
+            if (IsSM7110TestEnabled())
+            {
+                _ = ReadSM7110AcceptanceRange();
+                SM7110RangeStatusText.Text = "双站判定已启用：区间包含上下限；参数自动保存，下次启动生产生效。";
+            }
+            else
+            {
+                SM7110RangeStatusText.Text = "SM7110未启用：只按E4981A分BIN，不判OK/NG。";
+            }
+            SM7110RangeStatusText.Foreground = new SolidColorBrush(Color.FromRgb(159, 177, 191));
+        }
+        catch (ArgumentException exception)
+        {
+            SM7110RangeStatusText.Text = $"双站生产前请完成配置：{exception.Message}";
+            SM7110RangeStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        }
     }
 
     private static string FormatTestStationInstrument(TestStationInstrument instrument)
@@ -6482,6 +6669,7 @@ public partial class HomePage : UserControl
     private IReadOnlyDictionary<int, TestStationSettings> ReadTestStationSettings()
     {
         _ = ReadTestStationDwellMilliseconds();
+        _ = ReadTestRetryCount();
         var settingsByStation = new Dictionary<int, TestStationSettings>();
         foreach (var definition in TestStationDefinitions)
         {
@@ -6506,6 +6694,18 @@ public partial class HomePage : UserControl
     private int ReadTestStationDwellMilliseconds() =>
         ParseMilliseconds(TestStationDwellTextBox.Text, "测试站下压稳定等待");
 
+    private int ReadTestRetryCount()
+    {
+        if (!int.TryParse(TestRetryCountTextBox.Text, NumberStyles.Integer,
+                CultureInfo.CurrentCulture, out var count) ||
+            count is < 0 or > TestMeasurementRetry.MaximumRetryCount)
+        {
+            throw new ArgumentException($"测试重试次数必须是0～{TestMeasurementRetry.MaximumRetryCount}之间的整数。");
+        }
+
+        return count;
+    }
+
     private TestStationSettings GetTestStationSettings(int stationNumber)
     {
         var current = _testStationSettings ?? ReadTestStationSettings();
@@ -6515,6 +6715,11 @@ public partial class HomePage : UserControl
 
     private void EnsureAssignedTestInstrumentsConnected()
     {
+        if (IsSM7110TestEnabled())
+        {
+            var range = _sm7110AcceptanceRange ?? ReadSM7110AcceptanceRange();
+            range.ValidateMeasurementMode(_connectionConfigController?.SM7110MeasurementMode ?? "");
+        }
         var connectionController = _connectionConfigController
             ?? throw new InvalidOperationException("主页尚未连接仪表控制组件。");
         var testStationSettings = _testStationSettings ?? ReadTestStationSettings();
@@ -6650,6 +6855,8 @@ public partial class HomePage : UserControl
             }
 
             ValidateTestStationInstrumentFlow(settings);
+            if (settings.Values.Any(value => value.Enabled == true && value.Instrument == TestStationInstrument.SM7110))
+                _ = ReadSM7110AcceptanceRange();
             return true;
         }
         catch (Exception exception) when (
@@ -6670,6 +6877,7 @@ public partial class HomePage : UserControl
         {
             var stationSettings = ReadTestStationSettings();
             _homeSettings.TestStationDwellMilliseconds = ReadTestStationDwellMilliseconds();
+            _homeSettings.TestRetryCount = ReadTestRetryCount();
             _homeSettings.TestStationSettings = stationSettings.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value);
@@ -7476,6 +7684,10 @@ public partial class HomePage : UserControl
         }
 
         TestStationDwellTextBox.IsEnabled = commandsIdle;
+        TestRetryCountTextBox.IsEnabled = commandsIdle;
+        SM7110LowerLimitTextBox.IsEnabled = commandsIdle;
+        SM7110UpperLimitTextBox.IsEnabled = commandsIdle;
+        SM7110LimitModeComboBox.IsEnabled = commandsIdle;
         foreach (var definition in TestStationDefinitions)
         {
             var editors = GetTestStationPositionEditors(definition.StationNumber);
@@ -8250,7 +8462,27 @@ public partial class HomePage : UserControl
         string Bin,
         string DisplayText,
         string StatusDescription,
-        bool Passed);
+        bool Passed,
+        bool? SM7110Passed = null,
+        double? SM7110Value = null)
+    {
+        public string ResultLabel => SM7110Passed switch
+        {
+            true => $"OK · {Bin}",
+            false => $"NG · {Bin}",
+            null => Bin
+        };
+    }
+
+    private sealed record SM7110AcceptanceRange(double Lower, double Upper, string MeasurementMode)
+    {
+        public void ValidateMeasurementMode(string mode)
+        {
+            if (!string.Equals(mode?.Trim(), MeasurementMode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"SM7110区间模式为{MeasurementMode}，仪表模式为{mode}，单位不一致，请检查参数设置。");
+        }
+    }
 
     private sealed record BinDropPositions(
         BinDropPosition Bin0,
@@ -8262,7 +8494,7 @@ public partial class HomePage : UserControl
         {
             return bin?.Trim().ToUpperInvariant() switch
             {
-                "BIN0" => Bin0,
+                "BIN0" or "NG" => Bin0,
                 "BIN1" => Bin1,
                 "BIN2" => Bin2,
                 "BIN3" => Bin3,

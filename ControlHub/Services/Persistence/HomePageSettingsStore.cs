@@ -208,6 +208,16 @@ public sealed class HomePageSettings
 
     // 所有测试站下压到位后的接触稳定时间；旧配置缺少此项时使用200 ms。
     public int TestStationDwellMilliseconds { get; set; } = 200;
+
+    // 两个仪表共用的追加测试次数；0表示不重试，旧配置默认重试1次。
+    public int TestRetryCount { get; set; } = 1;
+
+    // 留空表示尚未配置；双站生产必须设置合格区间，不能默认为全部合格。
+    public double? SM7110LowerLimit { get; set; }
+
+    public double? SM7110UpperLimit { get; set; }
+
+    public string SM7110LimitMeasurementMode { get; set; } = "R";
 }
 
 public sealed class ProductionAxisMotionSettings

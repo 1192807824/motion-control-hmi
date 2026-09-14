@@ -102,6 +102,8 @@ public partial class ConnectionConfigPage : UserControl
 
     private SerialConnectionSettings? SerialSettings => ViewModel?.SerialConnectionSettings;
 
+    public string SM7110MeasurementMode => SerialSettings?.MeasurementMode ?? string.Empty;
+
     public bool IsE4981AConnected => _generalTcpClient.IsConnected;
 
     public bool IsSM7110Connected => _serialClient.IsConnected;

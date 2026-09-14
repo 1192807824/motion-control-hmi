@@ -4,6 +4,8 @@ using System.Text.Json;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ControlHub.Services.Devices;
 using ControlHub.Services.Persistence;
 using ControlHub.Views.Pages;
@@ -19,7 +21,7 @@ internal static class Program
         foreach (int? bin in new int?[] { null, 0, 1, 11 })
             CheckResult(new(status, 1e-10, 0.01, bin, ""), "BIN0", false);
         foreach (var bin in new[] { 0, 1, 2, 3, 4, 10, 11 })
-            CheckResult(new(0, 1e-10, 0.01, bin, ""), bin is >= 1 and <= 3 ? $"BIN{bin}" : "BIN0", bin is >= 1 and <= 3);
+            CheckResult(new(0, 1e-10, 0.01, bin, ""), bin is >= 1 and <= 3 ? $"BIN{bin}" : "BIN0", true);
         CheckResult(new(0, double.NaN, 0.01, null, ""), "BIN0", false);
         try
         {
@@ -50,16 +52,50 @@ internal static class Program
             catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException) { }
         }
         dwellInput.Text = "200";
+        var retryInput = new TextBox { Text = "1" };
+        Set(page, "TestRetryCountTextBox", retryInput);
+        foreach (var value in new[] { "0", "1", "3", "10" })
+        {
+            retryInput.Text = value;
+            Require((int)Invoke(page, "ReadTestRetryCount")! == int.Parse(value), "Retry count not read.");
+        }
+        foreach (var value in new[] { "", "-1", "11", "1.5", "abc", "2147483648" })
+        {
+            retryInput.Text = value;
+            try
+            {
+                Invoke(page, "ReadTestRetryCount");
+                throw new Exception("Invalid retry count was accepted.");
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException is ArgumentException) { }
+        }
+        retryInput.Text = "1";
+        Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestRetryCount == 1,
+            "Old settings must default to one retry.");
+        CheckRetriesAsync().GetAwaiter().GetResult();
+        CheckSM7110RangeAndRouting(page);
+        CheckSM7110RangeRetriesAsync().GetAwaiter().GetResult();
         Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestStationDwellMilliseconds == 200,
             "Old settings must default to 200 ms.");
         var settingsPath = Path.Combine(Path.GetTempPath(), "test-station-dwell-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
             var store = new HomePageSettingsStore(settingsPath);
-            store.Save(new HomePageSettings { TestStationDwellMilliseconds = 350 });
+            store.Save(new HomePageSettings
+            {
+                TestStationDwellMilliseconds = 350, TestRetryCount = 3,
+                SM7110LowerLimit = -1e-12, SM7110UpperLimit = 2e-9, SM7110LimitMeasurementMode = "A"
+            });
             Require(store.Load().TestStationDwellMilliseconds == 350, "Custom dwell not persisted.");
-            store.Save(new HomePageSettings { TestStationDwellMilliseconds = 0 });
+            Require(store.Load().TestRetryCount == 3, "Custom retry count not persisted.");
+            Require(ProductRecipeStore.Clone(new ProductRecipe { Production = store.Load() })
+                .Production.TestRetryCount == 3, "Recipe clone lost retry count.");
+            var recipeSettings = ProductRecipeStore.Clone(new ProductRecipe { Production = store.Load() }).Production;
+            Require(recipeSettings.SM7110LowerLimit == -1e-12 && recipeSettings.SM7110UpperLimit == 2e-9 &&
+                    recipeSettings.SM7110LimitMeasurementMode == "A", "Range/units lost precision during save/load or recipe clone.");
+            store.Save(new HomePageSettings { TestStationDwellMilliseconds = 0, TestRetryCount = 0 });
             Require(store.Load().TestStationDwellMilliseconds == 0, "Zero dwell must be preserved.");
+            Require(store.Load().TestRetryCount == 0, "Disabled retries must be preserved.");
         }
         finally { File.Delete(settingsPath); }
         Console.WriteLine("PASS: dwell setting validation, old-file 200 ms default and save/load.");
@@ -105,6 +141,7 @@ internal static class Program
         }
         Require((string?)product.GetType().GetProperty("Bin")!.GetValue(product) == "BIN0", "Reject BIN lost during rotation.");
         Console.WriteLine("PASS: complete carousel revolution, enabled/empty stations, test-axis highlight, fixed station positions and BIN0 tracking. No hardware opened.");
+        CheckSM7110SettingsView();
     }
 
     private static void CheckResult(E4981AMeasurementResult input, string bin, bool passed)
@@ -113,6 +150,320 @@ internal static class Program
         Require((string?)result.GetType().GetProperty("Bin")!.GetValue(result) == bin, "Wrong destination BIN.");
         Require((bool)result.GetType().GetProperty("Passed")!.GetValue(result)! == passed, "Wrong pass/fail result.");
     }
+
+    private static async Task CheckRetriesAsync()
+    {
+        foreach (var limit in new[] { 0, 1, 3, 10 })
+        {
+            var attempts = 0;
+            var retries = new List<int>();
+            var passed = await Retry(_ => { attempts++; return Task.FromResult(false); }, limit,
+                (number, _) => { retries.Add(number); return Task.CompletedTask; });
+            Require(!passed && attempts == limit + 1, "Failed results must exhaust exactly N extra attempts.");
+            Require(retries.SequenceEqual(Enumerable.Range(1, limit)), "Wrong retry progress numbers.");
+        }
+
+        foreach (var successAt in new[] { 1, 2, 4 })
+        {
+            var attempts = 0;
+            var passed = await Retry(_ => Task.FromResult(++attempts == successAt), 3);
+            Require(passed && attempts == successAt, "Successful measurement must stop retrying immediately.");
+        }
+
+        var calls = 0;
+        Require(await Retry(_ => ++calls == 1
+                ? Task.FromException<bool>(new TimeoutException("transient")) : Task.FromResult(true), 2)
+            && calls == 2, "Transient communication failure was not retried.");
+        calls = 0;
+        var failure = new IOException("disconnected");
+        try
+        {
+            await Retry(_ => { calls++; return Task.FromException<bool>(failure); }, 2);
+            throw new Exception("Exhausted communication failure must propagate.");
+        }
+        catch (IOException ex) when (ReferenceEquals(ex, failure)) { }
+        Require(calls == 3, "Communication retries exceeded limit.");
+
+        using var cancellation = new CancellationTokenSource();
+        calls = 0;
+        try
+        {
+            await Retry(_ => { calls++; return Task.FromResult(false); }, 3,
+                (_, token) => { cancellation.Cancel(); return Task.Delay(100, token); }, cancellation.Token);
+            throw new Exception("Cancellation during retry wait must propagate.");
+        }
+        catch (OperationCanceledException) { }
+        Require(calls == 1, "Cancellation started another instrument measurement.");
+        try
+        {
+            await Retry(_ => { calls++; return Task.FromResult(true); }, 3, token: cancellation.Token);
+            throw new Exception("Already canceled measurement must not run.");
+        }
+        catch (OperationCanceledException) { }
+        Require(calls == 1, "Already canceled token triggered an instrument.");
+        calls = 0;
+        try
+        {
+            await Retry(_ => { calls++; return Task.FromException<bool>(new OperationCanceledException()); }, 3);
+            throw new Exception("Instrument cancellation must propagate.");
+        }
+        catch (OperationCanceledException) { }
+        Require(calls == 1, "Instrument cancellation was retried.");
+
+        var capacitanceResults = new Queue<E4981AMeasurementResult>(new[]
+        {
+            new E4981AMeasurementResult(2, 1e-10, 0.01, null, ""),
+            new E4981AMeasurementResult(1, 1e-10, 0.01, 0, ""),
+            new E4981AMeasurementResult(0, 1e-10, 0.01, 2, "")
+        });
+        var resistanceCalls = 0;
+        object? finalCapacitanceResult = null;
+        var results = await Task.WhenAll(
+            Retry(_ =>
+            {
+                finalCapacitanceResult = Invoke(null, "ClassifyE4981AMeasurement", capacitanceResults.Dequeue())!;
+                return Task.FromResult((bool)finalCapacitanceResult.GetType().GetProperty("Passed")!
+                    .GetValue(finalCapacitanceResult)!);
+            }, 3, async (_, _) => await Task.Yield()),
+            Retry(_ =>
+            {
+                resistanceCalls++;
+                return Task.FromResult(new SM7110MeasurementResult(1e9, 0, "R", "").IsSuccessful);
+            }, 3));
+        Require(results.All(passed => passed) && capacitanceResults.Count == 0 && resistanceCalls == 1,
+            "A failed E4981A must retry independently without retesting a successful SM7110.");
+        Require((string?)finalCapacitanceResult!.GetType().GetProperty("Bin")!
+            .GetValue(finalCapacitanceResult) == "BIN2", "Recovered E4981A must use the final successful BIN.");
+        resistanceCalls = 0;
+        Require(await Retry(_ => Task.FromResult(new SM7110MeasurementResult(
+                1e9, ++resistanceCalls == 1 ? 5 : 0, "R", "").IsSuccessful), 2)
+            && resistanceCalls == 2, "SM7110 contact failure must retry and stop on recovery.");
+        calls = 0;
+        Require(await Retry(_ =>
+        {
+            calls++;
+            return Task.FromResult((bool)Property(Invoke(null, "ClassifyE4981AMeasurement",
+                new E4981AMeasurementResult(0, 1e-10, 0.01, 0, ""))!, "Passed")!);
+        }, 3) && calls == 1, "A valid BIN0 is a classification, not a reason to retry.");
+        Console.WriteLine("PASS: retry limits, early success, communication recovery/exhaustion, cancellation and settings validation.");
+    }
+
+    private static void CheckSM7110RangeAndRouting(HomePage page)
+    {
+        var lower = new TextBox { Text = "1e9" };
+        var upper = new TextBox { Text = "2e9" };
+        var mode = new ComboBox { ItemsSource = new[] { "R", "A", "RS", "RV", "RL" }, SelectedItem = "R" };
+        Set(page, "SM7110LowerLimitTextBox", lower);
+        Set(page, "SM7110UpperLimitTextBox", upper);
+        Set(page, "SM7110LimitModeComboBox", mode);
+        var range = Invoke(page, "ReadSM7110AcceptanceRange")!;
+        foreach (var values in new[] { ("", "2"), ("1", ""), ("NaN", "2"), ("1", "Infinity"), ("3", "2"), ("abc", "2") })
+        {
+            lower.Text = values.Item1;
+            upper.Text = values.Item2;
+            ExpectFailure<ArgumentException>(() => Invoke(page, "ReadSM7110AcceptanceRange"));
+        }
+        lower.Text = "0";
+        upper.Text = "0";
+        _ = Invoke(page, "ReadSM7110AcceptanceRange");
+        lower.Text = "-1e-12";
+        upper.Text = "1e-12";
+        mode.SelectedItem = "A";
+        var currentRange = Invoke(page, "ReadSM7110AcceptanceRange")!;
+        Require((double)Property(currentRange, "Lower")! == -1e-12, "Scientific notation lost precision.");
+        ExpectFailure<InvalidOperationException>(() => Invoke(null, "ClassifySM7110Measurement",
+            new SM7110MeasurementResult(0, 0, "R", ""), "BIN1", currentRange));
+        var oldSettings = JsonSerializer.Deserialize<HomePageSettings>("{}")!;
+        Require(oldSettings.SM7110LowerLimit is null && oldSettings.SM7110UpperLimit is null,
+            "Old files must require range configuration before dual-station operation.");
+
+        foreach (var value in new[] { 1e9 - 1, 1e9, 1.5e9, 2e9, 2e9 + 1, double.NaN, double.PositiveInfinity })
+        {
+            var result = Invoke(null, "ClassifySM7110Measurement", new SM7110MeasurementResult(value, 0, "R", ""), "BIN2", range)!;
+            Require((bool)Property(result, "Passed")! == (value >= 1e9 && value <= 2e9), "Wrong inclusive range decision.");
+        }
+        foreach (var status in new[] { 1, 3, 5, 7, 9 })
+        {
+            var result = Invoke(null, "ClassifySM7110Measurement", new SM7110MeasurementResult(1.5e9, status, "R", ""), "BIN2", range)!;
+            Require(!(bool)Property(result, "Passed")!, "Instrument failure must not pass even when value lies within range.");
+        }
+
+        var positions = CreateNested("BinDropPositions",
+            CreateNested("BinDropPosition", 100d, 200d), CreateNested("BinDropPosition", 300d, 400d),
+            CreateNested("BinDropPosition", 500d, 600d), CreateNested("BinDropPosition", 700d, 800d));
+        foreach (var bin in new[] { "BIN0", "BIN1", "BIN2", "BIN3" })
+        {
+            var product = ((Array)Invoke(null, "CreateCarouselStationStates")!).GetValue(1)!;
+            Call(product, "SetLoaded");
+            ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", false));
+            Call(product, "SetTested", bin);
+            Require((string)Call(product, "GetUnloadDestination", false)! == bin, "Single station must retain all four BIN destinations.");
+            ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
+            foreach (var passed in new[] { false, true })
+            {
+                var result = Invoke(null, "ClassifySM7110Measurement",
+                    new SM7110MeasurementResult(passed ? 1.5e9 : 3e9, 0, "R", ""), bin, range)!;
+                Call(product, "SetMeasurement", result);
+                Require((string?)Property(product, "Bin") == bin, "SM7110 must retain the original E4981A BIN.");
+                Require((bool)Property(product, "SM7110Passed")! == passed, "Final SM7110 judgement lost.");
+                if (passed && bin == "BIN0")
+                {
+                    ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
+                    continue;
+                }
+                var destination = (string)Call(product, "GetUnloadDestination", true)!;
+                Require(destination == (passed ? bin : "NG"), "NG must override every original BIN.");
+                var target = Call(positions, "Resolve", destination, 13)!;
+                var expected = Property(positions, passed ? "Bin" + bin[^1] : "Bin0");
+                Require(target.Equals(expected), "Logical destination mapped to the wrong physical box coordinates.");
+            }
+            Call(product, "SetLoaded");
+            Require(Property(product, "Bin") is null && Property(product, "SM7110Passed") is null &&
+                    Property(product, "SM7110Value") is null, "New product inherited a prior measurement.");
+        }
+        Console.WriteLine("PASS: inclusive SM7110 range, invalid/missing limits, units, four-box routing, pending results and BIN0/OK interlock.");
+    }
+
+    private static async Task CheckSM7110RangeRetriesAsync()
+    {
+        var range = CreateNested("SM7110AcceptanceRange", 100d, 200d, "R");
+        foreach (var recovery in new[] { false, true })
+        {
+            object? finalResult = null;
+            var attempts = 0;
+            var passed = await Retry(_ =>
+            {
+                attempts++;
+                finalResult = Invoke(null, "ClassifySM7110Measurement",
+                    new SM7110MeasurementResult(recovery && attempts == 2 ? 150 : 250, 0, "R", ""), "BIN3", range)!;
+                return Task.FromResult((bool)Property(finalResult, "Passed")!);
+            }, 2);
+            var product = ((Array)Invoke(null, "CreateCarouselStationStates")!).GetValue(1)!;
+            Call(product, "SetMeasurement", finalResult!);
+            Require(passed == recovery && attempts == (recovery ? 2 : 3), "Range failure retry outcome/count incorrect.");
+            Require((string)Call(product, "GetUnloadDestination", true)! == (recovery ? "BIN3" : "NG"),
+                "Final range retry result did not determine physical routing.");
+        }
+        Console.WriteLine("PASS: out-of-range retries recover to original BIN or exhaust to NG.");
+    }
+
+    private static object CreateNested(string name, params object[] args) =>
+        Activator.CreateInstance(typeof(HomePage).GetNestedType(name, BindingFlags.NonPublic)!, args)!;
+
+    private static object? Property(object target, string name) => target.GetType().GetProperty(name)!.GetValue(target);
+
+    private static object? Call(object target, string name, params object[] args) =>
+        target.GetType().GetMethod(name)!.Invoke(target, args);
+
+    private static void ExpectFailure<T>(Action action) where T : Exception
+    {
+        try { action(); }
+        catch (TargetInvocationException ex) when (ex.InnerException is T) { return; }
+        throw new Exception($"Expected {typeof(T).Name} was not raised.");
+    }
+
+    private static void CheckSM7110SettingsView()
+    {
+        _ = new Application();
+        // Views only, with every subsequent save redirected away from the machine's settings.
+        var home = new HomePage();
+        var directory = Path.Combine(AppContext.BaseDirectory, "ui-checks");
+        Directory.CreateDirectory(directory);
+        var store = new HomePageSettingsStore(Path.Combine(directory, "home.json"));
+        Set(home, "_homeSettingsStore", store);
+        var single = new HomePageSettings
+        {
+            Bin0PositionX = 100, Bin0PositionY = 200,
+            TestStationSettings = new()
+            {
+                [5] = new() { Enabled = true, Instrument = TestStationInstrument.E4981A },
+                [6] = new() { Enabled = false, Instrument = TestStationInstrument.None },
+                [7] = new() { Enabled = false, Instrument = TestStationInstrument.None }
+            }
+        };
+        home.ApplyRecipeSettings(single);
+        Require(((TextBlock)home.FindName("Bin0PositionLabel")).Text == "0号盒 · BIN0", "Single-station box label incorrect.");
+        Require(!(bool)Invoke(home, "IsSM7110TestEnabled")!, "Single-station configuration unexpectedly enabled SM7110.");
+        var savedSingle = home.CaptureRecipeSettings();
+        Require(savedSingle.SM7110LowerLimit is null, "Single-station recipe must not require SM7110 limits.");
+
+        var dual = ProductRecipeStore.Clone(savedSingle);
+        dual.TestStationSettings[6] = new() { Enabled = true, Instrument = TestStationInstrument.SM7110 };
+        home.ApplyRecipeSettings(dual);
+        Require(((TextBlock)home.FindName("Bin0PositionLabel")).Text == "0号盒 · NG", "Dual-station box label incorrect.");
+        Require(((TextBlock)home.FindName("Bin3PositionLabel")).Text == "3号盒 · OK · BIN3", "Good-bin label incorrect.");
+        Require(!(bool)Invoke(home, "AllTestStationParametersValid")!, "Dual mode with missing limits must block start.");
+
+        var mode = (ComboBox)home.FindName("SM7110LimitModeComboBox");
+        var lower = (TextBox)home.FindName("SM7110LowerLimitTextBox");
+        var upper = (TextBox)home.FindName("SM7110UpperLimitTextBox");
+        mode.SelectedValue = "A";
+        lower.Text = "-1e-12";
+        upper.Text = "2e-9";
+        Require((bool)Invoke(home, "AllTestStationParametersValid")!, "Valid dual mode range must pass validation.");
+        Require(store.Load().SM7110LowerLimit == -1e-12 && store.Load().SM7110UpperLimit == 2e-9 &&
+                store.Load().SM7110LimitMeasurementMode == "A", "Real input events failed to auto-save range and units.");
+        var snapshot = Invoke(home, "ReadSM7110AcceptanceRange")!;
+        var savedDual = home.CaptureRecipeSettings();
+        lower.Text = "3e-9";
+        Require(!(bool)Invoke(home, "AllTestStationParametersValid")!, "Inverted limits must block start.");
+        try { home.CaptureRecipeSettings(); throw new Exception("Invalid range was silently captured."); }
+        catch (ArgumentException) { }
+        Require(store.Load().SM7110LowerLimit == -1e-12, "Invalid input overwrote valid saved limits.");
+        home.ApplyRecipeSettings(savedSingle);
+        home.ApplyRecipeSettings(savedDual);
+        Require((double)Property(Invoke(home, "ReadSM7110AcceptanceRange")!, "Lower")! == -1e-12,
+            "Recipe switch rounded a small limit to zero.");
+        Require(store.Load().Bin0PositionX == 100 && store.Load().Bin0PositionY == 200,
+            "Switching modes changed physical box coordinates.");
+        upper.Text = "3e-9";
+        Require((double)Property(snapshot, "Upper")! == 2e-9, "Production snapshot changed after editing parameters.");
+
+        var parameters = new ParameterSettingsPage();
+        parameters.AttachSettingsContent(home.DetachParameterSettingsPanel());
+        parameters.Measure(new Size(1440, 900));
+        parameters.Arrange(new Rect(0, 0, 1440, 900));
+        parameters.UpdateLayout();
+        RenderCard(lower, Path.Combine(directory, "sm7110-range.png"));
+        RenderCard((TextBlock)home.FindName("Bin0PositionLabel"), Path.Combine(directory, "dual-mode-boxes.png"));
+        Require(lower.ActualWidth > 150 && lower.ActualHeight >= 30, "Range inputs are too small in the parameter layout.");
+        Console.WriteLine("PASS: real WPF controls, mode labels, start validation, auto-save, recipe reload, frozen limits and parameter layout. No hardware attached.");
+        Console.WriteLine("UI artifacts: " + directory);
+    }
+
+    private static void RenderCard(FrameworkElement input, string path)
+    {
+        DependencyObject? parent = input;
+        while (parent is not Border && parent is not null)
+            parent = LogicalTreeHelper.GetParent(parent);
+        var card = (Border)parent!;
+        ((Panel)card.Parent).Children.Remove(card);
+        card.Margin = new Thickness(0);
+        var preview = new Border { Child = card, Width = 630, Background = Brushes.Black };
+        preview.Measure(new Size(630, double.PositiveInfinity));
+        preview.Arrange(new Rect(0, 0, 630, preview.DesiredSize.Height));
+        preview.UpdateLayout();
+        var bitmap = new RenderTargetBitmap(630, (int)Math.Ceiling(preview.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(preview);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
+    }
+
+    private static Task<bool> Retry(
+        Func<CancellationToken, Task<bool>> measure,
+        int count,
+        Func<int, CancellationToken, Task>? beforeRetry = null,
+        CancellationToken token = default) =>
+        (Task<bool>)typeof(HomePage).Assembly
+            .GetType("ControlHub.Services.Devices.TestMeasurementRetry")!
+            .GetMethod("ExecuteAsync")!.MakeGenericMethod(typeof(bool))
+            .Invoke(null, new object[]
+            {
+                measure, (Func<bool, bool>)(passed => passed), count,
+                beforeRetry ?? ((_, _) => Task.CompletedTask), token
+            })!;
 
     private static object? Invoke(object? target, string name, params object?[] args) =>
         typeof(HomePage).GetMethod(name, Private)!.Invoke(target, args);

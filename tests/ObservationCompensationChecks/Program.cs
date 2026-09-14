@@ -25,7 +25,8 @@ internal static class Program
         _home = new HomePage();
         var store = new HomePageSettingsStore(Path.Combine(directory, "home.json"));
         typeof(HomePage).GetField("_homeSettingsStore", Instance)!.SetValue(_home, store);
-        _home.ApplyRecipeSettings(new HomePageSettings());
+        // Default station assignments include SM7110, whose acceptance range is now required for recipe capture.
+        _home.ApplyRecipeSettings(new HomePageSettings { SM7110LowerLimit = 0, SM7110UpperLimit = 1e12 });
         Require(!Toggle().IsChecked!.Value && X().Text == "0" && Y().Text == "0" && R().Text == "0", "Old/default settings stay disabled with zero offsets");
 
         var normal = typeof(HomePage).GetMethod("CalculateLowerCameraPlacementTarget", Static)!.Invoke(null,
@@ -59,7 +60,7 @@ internal static class Program
         recipe.Production = _home.CaptureRecipeSettings();
         var recipeStore = new ProductRecipeStore(Path.Combine(directory, "recipes"));
         recipeStore.Save(recipe);
-        _home.ApplyRecipeSettings(new HomePageSettings());
+        _home.ApplyRecipeSettings(new HomePageSettings { SM7110LowerLimit = 0, SM7110UpperLimit = 1e12 });
         _home.ApplyRecipeSettings(recipeStore.LoadAll().Single().Production);
         Require(Toggle().IsChecked == true && X().Text == "200.5" && Y().Text == "-300.25" && R().Text == "-0.5", "Recipe save and switch restore enable state and all offsets");
 
