@@ -4260,7 +4260,7 @@ public partial class HomePage : UserControl
             : result.IsSuccessful ? "NG · 超出合格区间" : $"NG · {result.StatusDescription}";
         return new TestStationMeasurementResult(
             bin,
-            $"{result.MeasurementMode}={result.Value:G9}{result.Unit} · 合格区间[{range.Lower:G9}, {range.Upper:G9}] · {status} · E4981A:{bin}",
+            $"{result.MeasurementMode}={result.DisplayValue:G9}{result.DisplayUnit} · 合格区间[{SM7110Protocol.ToDisplayValue(range.Lower, range.MeasurementMode):G9}, {SM7110Protocol.ToDisplayValue(range.Upper, range.MeasurementMode):G9}]{result.DisplayUnit} · {status} · E4981A:{bin}",
             passed && bin == "BIN0" ? "整体NG · E4981A为BIN0" : status,
             passed,
             passed,
@@ -6037,8 +6037,10 @@ public partial class HomePage : UserControl
         TestStationDwellTextBox.Text = _homeSettings.TestStationDwellMilliseconds
             .ToString(CultureInfo.CurrentCulture);
         TestRetryCountTextBox.Text = _homeSettings.TestRetryCount.ToString(CultureInfo.CurrentCulture);
-        SM7110LowerLimitTextBox.Text = _homeSettings.SM7110LowerLimit?.ToString("R", CultureInfo.CurrentCulture) ?? "";
-        SM7110UpperLimitTextBox.Text = _homeSettings.SM7110UpperLimit?.ToString("R", CultureInfo.CurrentCulture) ?? "";
+        SM7110LowerLimitTextBox.Text = _homeSettings.SM7110LowerLimit is { } lower
+            ? SM7110Protocol.ToDisplayValue(lower, _homeSettings.SM7110LimitMeasurementMode).ToString("R", CultureInfo.CurrentCulture) : "";
+        SM7110UpperLimitTextBox.Text = _homeSettings.SM7110UpperLimit is { } upper
+            ? SM7110Protocol.ToDisplayValue(upper, _homeSettings.SM7110LimitMeasurementMode).ToString("R", CultureInfo.CurrentCulture) : "";
         SM7110LimitModeComboBox.SelectedValue = _homeSettings.SM7110LimitMeasurementMode;
         _updatingTestStationConfiguration = true;
         try
@@ -6305,7 +6307,8 @@ public partial class HomePage : UserControl
         var mode = SM7110LimitModeComboBox.SelectedValue as string;
         if (mode is not ("R" or "A" or "RS" or "RV" or "RL"))
             throw new ArgumentException("请选择SM7110合格区间的单位和测量模式。");
-        return new SM7110AcceptanceRange(lower, upper, mode);
+        return new SM7110AcceptanceRange(
+            SM7110Protocol.FromDisplayValue(lower, mode), SM7110Protocol.FromDisplayValue(upper, mode), mode);
     }
 
     private void SaveSM7110RangeFromInputs(bool throwOnInvalid = false)
@@ -6322,8 +6325,10 @@ public partial class HomePage : UserControl
                 ?? throw new ArgumentException("请选择SM7110合格区间的测量模式。");
             if (throwOnInvalid && IsSM7110TestEnabled())
                 _ = ReadSM7110AcceptanceRange();
-            _homeSettings.SM7110LowerLimit = lower;
-            _homeSettings.SM7110UpperLimit = upper;
+            var baseLower = lower.HasValue ? SM7110Protocol.FromDisplayValue(lower.Value, mode) : (double?)null;
+            var baseUpper = upper.HasValue ? SM7110Protocol.FromDisplayValue(upper.Value, mode) : (double?)null;
+            _homeSettings.SM7110LowerLimit = baseLower;
+            _homeSettings.SM7110UpperLimit = baseUpper;
             _homeSettings.SM7110LimitMeasurementMode = mode;
             _homeSettingsStore.Save(_homeSettings);
         }

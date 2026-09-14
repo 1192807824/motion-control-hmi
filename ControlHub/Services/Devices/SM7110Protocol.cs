@@ -10,6 +10,10 @@ public sealed record SM7110MeasurementResult(
 {
     public bool IsSuccessful => Status == 0 && double.IsFinite(Value);
 
+    public double DisplayValue => SM7110Protocol.ToDisplayValue(Value, MeasurementMode);
+
+    public string DisplayUnit => MeasurementMode.Equals("R", StringComparison.OrdinalIgnoreCase) ? "GΩ" : Unit;
+
     public string StatusDescription => Status switch
     {
         0 => "测量正常",
@@ -34,6 +38,18 @@ public sealed record SM7110MeasurementResult(
 
 public static class SM7110Protocol
 {
+    // 通讯、保存和判定继续使用基础单位；电阻模式在输入/显示边界换算为GΩ。
+    public static double ToDisplayValue(double value, string mode) =>
+        mode.Equals("R", StringComparison.OrdinalIgnoreCase) ? value / 1e9 : value;
+
+    public static double FromDisplayValue(double value, string mode)
+    {
+        var baseValue = mode.Equals("R", StringComparison.OrdinalIgnoreCase) ? value * 1e9 : value;
+        if (!double.IsFinite(baseValue))
+            throw new ArgumentException("SM7110上下限换算后必须为有限数值，请检查输入范围。");
+        return baseValue;
+    }
+
     private static readonly string[] AllowedModes = ["R", "A", "RS", "RV", "RL"];
     private static readonly string[] AllowedSpeeds = ["SLOW2", "SLOW", "MED", "FAST2", "FAST"];
     private static readonly string[] AllowedRanges =

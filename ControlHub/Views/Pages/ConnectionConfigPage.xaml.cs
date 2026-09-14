@@ -1795,11 +1795,11 @@ public partial class ConnectionConfigPage : UserControl
         SerialMeterResultStatusText.Text = result.StatusDescription;
         SerialMeterResultStatusText.Foreground = new SolidColorBrush(
             result.IsSuccessful ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
-        SerialMeterValueText.Text = result.Value.ToString("G9");
-        SerialMeterUnitText.Text = result.Unit;
+        SerialMeterValueText.Text = result.DisplayValue.ToString("G9");
+        SerialMeterUnitText.Text = result.DisplayUnit;
         SerialMeterRawResultText.Text = result.RawResponse;
         SerialMeterRawResultText.ToolTip = result.RawResponse;
-        AddSerialLog($"测试结果：{result.StatusDescription}，数值={result.Value:G9} {result.Unit}");
+        AddSerialLog($"测试结果：{result.StatusDescription}，数值={result.DisplayValue:G9} {result.DisplayUnit}");
     }
 
     private async Task SendMeterCommandAsync(

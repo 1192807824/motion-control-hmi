@@ -146,6 +146,7 @@ internal static partial class Program
         CheckSM7110SettingsView();
         CheckE4981ASetupChanges();
         CheckE4981ANanofaradUnits();
+        CheckSM7110GigohmUnits();
     }
 
     private static void CheckResult(E4981AMeasurementResult input, string bin, bool passed)
@@ -364,8 +365,8 @@ internal static partial class Program
 
     private static void CheckSM7110RangeAndRouting(HomePage page)
     {
-        var lower = new TextBox { Text = "1e9" };
-        var upper = new TextBox { Text = "2e9" };
+        var lower = new TextBox { Text = "1" };
+        var upper = new TextBox { Text = "2" };
         var mode = new ComboBox { ItemsSource = new[] { "R", "A", "RS", "RV", "RL" }, SelectedItem = "R" };
         Set(page, "SM7110LowerLimitTextBox", lower);
         Set(page, "SM7110UpperLimitTextBox", upper);
