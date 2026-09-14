@@ -66,7 +66,7 @@ internal static partial class Program
             var property = typeof(TcpConnectionSettings).GetProperty(binding.ParentBinding.Path.Path.Split('.').Last())!;
             var value = property.Name switch
             {
-                nameof(TcpConnectionSettings.StabilityTimeoutMilliseconds) => 3500d,
+                nameof(TcpConnectionSettings.StabilityMaximumTestCount) => 15d,
                 nameof(TcpConnectionSettings.StabilitySampleCount) => 4d,
                 nameof(TcpConnectionSettings.StabilityCapacitancePercent) => 0.5d,
                 _ => 0.003d

@@ -19,8 +19,8 @@ public sealed class TcpConnectionSettings : INotifyPropertyChanged
     private int _cableLengthMeters;
     private bool _averagingEnabled = true;
     private int _averagingCount = 3;
-    private int _stabilityTimeoutMilliseconds = 2000;
-    private int _stabilitySampleCount = 3;
+    private int _stabilityMaximumTestCount = 10;
+    private int _stabilitySampleCount = 2;
     private double _stabilityCapacitancePercent = 1;
     private double _stabilityDissipationTolerance = 0.005;
     private bool _comparatorEnabled;
@@ -124,10 +124,10 @@ public sealed class TcpConnectionSettings : INotifyPropertyChanged
         set => SetField(ref _comparatorEnabled, value);
     }
 
-    public int StabilityTimeoutMilliseconds
+    public int StabilityMaximumTestCount
     {
-        get => _stabilityTimeoutMilliseconds;
-        set => SetField(ref _stabilityTimeoutMilliseconds, value);
+        get => _stabilityMaximumTestCount;
+        set => SetField(ref _stabilityMaximumTestCount, value);
     }
 
     public int StabilitySampleCount

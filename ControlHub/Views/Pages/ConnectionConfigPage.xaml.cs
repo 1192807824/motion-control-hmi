@@ -565,7 +565,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         // 采样参数不属于SCPI命令签名；每轮重新取快照，确保修改立即生效。
         var settings = ProductRecipeStore.Clone(_e4981AAppliedSettings!);
-        settings.StabilityTimeoutMilliseconds = TcpSettings!.StabilityTimeoutMilliseconds;
+        settings.StabilityMaximumTestCount = TcpSettings!.StabilityMaximumTestCount;
         settings.StabilitySampleCount = TcpSettings.StabilitySampleCount;
         settings.StabilityCapacitancePercent = TcpSettings.StabilityCapacitancePercent;
         settings.StabilityDissipationTolerance = TcpSettings.StabilityDissipationTolerance;

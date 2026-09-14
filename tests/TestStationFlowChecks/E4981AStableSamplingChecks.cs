@@ -10,7 +10,7 @@ internal static partial class Program
 {
     private static async Task CheckE4981AStableSamplingAsync()
     {
-        var settings = new TcpConnectionSettings { StabilityTimeoutMilliseconds = 2000 };
+        var settings = new TcpConnectionSettings { StabilitySampleCount = 3 };
         E4981AMeasurementResult Reading(double nf = 100, double d = 0.1, int bin = 2, int status = 0)
             => new(status, nf * 1e-9, d, bin, "test");
         async Task<E4981AMeasurementResult> Sequence(params E4981AMeasurementResult[] readings)
@@ -42,14 +42,24 @@ internal static partial class Program
         var lossNg = await Sequence(Reading(), Reading(), Reading());
         Require(lossNg.LossRejected && lossNg.SampleCount == 3, "Stable loss rejection must end sampling.");
 
-        settings.StabilityTimeoutMilliseconds = 160;
-        var timedOut = await E4981AStableSampling.RunAsync(settings,
-            _ => Task.FromResult(Reading(status: 1)), CancellationToken.None);
-        Require(timedOut.StabilityTimedOut && !timedOut.IsSuccessful && timedOut.Status == 1,
-            "Persistent OVLD must time out while retaining its raw status.");
-        var classified = Invoke(null, "ClassifyE4981AMeasurement", timedOut)!;
+        settings.StabilitySampleCount = 2;
+        settings.StabilityMaximumTestCount = 4;
+        var two = await Sequence(Reading(), Reading(100.2));
+        Require(two.SampleCount == 2 && two.IsSuccessful, "Two stable readings must finish without requesting a third.");
+        var lastAllowed = await Sequence(Reading(status: 1), Reading(status: 2), Reading(), Reading());
+        Require(lastAllowed.IsSuccessful && lastAllowed.SampleCount == 4,
+            "Stability on the last allowed test must be accepted.");
+        var calls = 0;
+        var exhausted = await E4981AStableSampling.RunAsync(settings,
+            _ => { calls++; return Task.FromResult(Reading(status: 1)); }, CancellationToken.None);
+        Require(exhausted.StabilityAttemptsExhausted && !exhausted.IsSuccessful && exhausted.Status == 1 && calls == 4 && exhausted.SampleCount == 4,
+            "Persistent OVLD must exhaust exactly the maximum tests while retaining its raw status.");
+        var unstable = await Sequence(Reading(100), Reading(120), Reading(100), Reading(120));
+        Require(unstable.StabilityAttemptsExhausted && !unstable.IsSuccessful && unstable.SampleCount == 4,
+            "Valid but fluctuating measurements must exhaust the count as NG.");
+        var classified = Invoke(null, "ClassifyE4981AMeasurement", exhausted)!;
         Require(!(bool)Property(classified, "Passed")! && (string?)Property(classified, "Bin") == "BIN0",
-            "Stable sampling timeout must feed existing failure/retest and NG routing.");
+            "Exhausted stable sampling must feed existing failure/retest and NG routing.");
         var round = 0;
         var motion = new List<string>();
         var passed = await Retry(async token =>
@@ -63,22 +73,36 @@ internal static partial class Program
             (_, position, _) => { motion.Add(position == -100 ? "wait" : "press"); return Task.CompletedTask; },
             (_, _) => { motion.Add("dwell"); return Task.CompletedTask; }, _ => { }, token));
         Require(passed && motion.SequenceEqual(new[] { "sample", "wait", "press", "dwell", "sample" }),
-            "Timed-out stable sampling must complete one mechanical retry before the next complete sampling window.");
-        var calls = 0;
-        var silent = await E4981AStableSampling.RunAsync(settings, async token =>
+            "Count exhaustion must complete one mechanical retry before the next complete sampling window.");
+        foreach (var retries in new[] { 0, 1, 2 })
         {
-            calls++;
-            await Task.Delay(Timeout.Infinite, token);
+            var totalTests = 0;
+            var preparations = 0;
+            E4981AMeasurementResult? final = null;
+            var accepted = await Retry(async token =>
+            {
+                final = await E4981AStableSampling.RunAsync(settings,
+                    _ => { totalTests++; return Task.FromResult(Reading(status: 2)); }, token);
+                return (bool)Property(Invoke(null, "ClassifyE4981AMeasurement", final)!, "Passed")!;
+            }, retries, (_, _) => { preparations++; return Task.CompletedTask; });
+            Require(!accepted && preparations == retries && totalTests == (retries + 1) * 4 &&
+                    (string?)Property(Invoke(null, "ClassifyE4981AMeasurement", final!)!, "Bin") == "BIN0",
+                "Every retry must reset the test count; retry exhaustion must route to NG without extra tests.");
+        }
+        var slow = await E4981AStableSampling.RunAsync(settings, async token =>
+        {
+            await Task.Delay(1100, token);
             return Reading();
         }, CancellationToken.None);
-        Require(silent.StabilityTimedOut && silent.SampleCount == 0 && calls == 1,
-            "Deadline must interrupt an in-flight read even without any response.");
-        var late = await E4981AStableSampling.RunAsync(settings, async _ =>
+        Require(slow.IsSuccessful && slow.SampleCount == 2 && slow.SamplingElapsedMilliseconds > 2000,
+            "The old two-second sampling deadline must no longer reject slow but stable readings.");
+        try
         {
-            await Task.Delay(200);
-            return Reading();
-        }, CancellationToken.None);
-        Require(late.StabilityTimedOut && late.SampleCount == 0, "A late response must never be accepted.");
+            await E4981AStableSampling.RunAsync(settings,
+                _ => Task.FromException<E4981AMeasurementResult>(new TimeoutException("command timeout")), CancellationToken.None);
+            throw new Exception("Communication timeout must propagate to the existing retry path.");
+        }
+        catch (TimeoutException) { }
         using var cancel = new CancellationTokenSource(40);
         try
         {
@@ -91,20 +115,26 @@ internal static partial class Program
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
 
-        var defaults = JsonSerializer.Deserialize<TcpConnectionSettings>("{}")!;
-        Require(defaults.StabilityTimeoutMilliseconds == 2000 && defaults.StabilitySampleCount == 3,
-            "Legacy settings must receive stable sampling defaults.");
+        var defaults = JsonSerializer.Deserialize<TcpConnectionSettings>("{\"StabilityTimeoutMilliseconds\":100}")!;
+        Require(defaults.StabilityMaximumTestCount == 10 && defaults.StabilitySampleCount == 2 &&
+                !JsonSerializer.Serialize(defaults).Contains("StabilityTimeoutMilliseconds"),
+            "Legacy time limits must be ignored; defaults are two stable readings and ten maximum tests.");
         settings.StabilitySampleCount = 5;
+        settings.StabilityMaximumTestCount = 15;
         settings.StabilityCapacitancePercent = 0.3;
         settings.StabilityDissipationTolerance = 0.002;
         var restored = ProductRecipeStore.Clone(new ProductRecipe { E4981A = settings }).E4981A;
         Require(restored.StabilitySampleCount == 5 && restored.StabilityCapacitancePercent == 0.3 &&
-                restored.StabilityDissipationTolerance == 0.002 && restored.StabilityTimeoutMilliseconds == 160,
+                restored.StabilityDissipationTolerance == 0.002 && restored.StabilityMaximumTestCount == 15,
             "All stability parameters must survive recipe round-trip.");
         settings.StabilitySampleCount = 1;
         try { E4981AProtocol.BuildSetupCommands(settings); throw new Exception("Invalid stability settings accepted."); }
         catch (InvalidOperationException) { }
-        Console.WriteLine("PASS: E4981A stable C/D window, invalid reset, BIN consistency, stable NG, deadline, cancellation, late result, retry routing and recipe persistence.");
+        settings.StabilitySampleCount = 5;
+        settings.StabilityMaximumTestCount = 4;
+        try { E4981AProtocol.BuildSetupCommands(settings); throw new Exception("Impossible test count accepted."); }
+        catch (InvalidOperationException) { }
+        Console.WriteLine("PASS: E4981A consecutive stability, exact maximum attempts, final-attempt success, slow samples, mechanical retries/NG exhaustion, cancellation and recipe persistence.");
     }
 
     private static async Task CheckE4981ALateResponseAsync()
