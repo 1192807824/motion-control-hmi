@@ -8,5 +8,7 @@
   <ItemGroup>
     <Compile Include="../../ControlHub/Services/Devices/SM7110Protocol.cs" Link="SM7110Protocol.cs" />
     <Compile Include="../../ControlHub/Services/Devices/SerialConnectionSettings.cs" Link="SerialConnectionSettings.cs" />
+    <Compile Include="../../ControlHub/Services/Devices/SM7110Session.cs" Link="SM7110Session.cs" />
+    <Compile Include="../../ControlHub/Services/Devices/SM7110TimedTest.cs" Link="SM7110TimedTest.cs" />
   </ItemGroup>
 </Project>

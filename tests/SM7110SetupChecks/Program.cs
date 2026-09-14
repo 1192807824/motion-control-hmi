@@ -87,6 +87,8 @@ catch (OperationCanceledException) { }
 
 Console.WriteLine("SM7110 setup checks passed: exact failure attribution, stop on errors, invalid responses, success, cancellation.");
 
+await SM7110SessionChecks.RunAsync();
+
 static void Require(bool condition, string message)
 {
     if (!condition) throw new Exception(message);

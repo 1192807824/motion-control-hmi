@@ -71,8 +71,7 @@ public partial class ConnectionConfigPage : UserControl
     private TcpConnectionSettings? _e4981AAppliedSettings;
     private bool _serialConnecting;
     private bool _serialMeterOperationRunning;
-    private bool _sm7110SettingsApplied;
-    private string? _sm7110AppliedSetupSignature;
+    private readonly SM7110Session _sm7110Session = new();
     private bool _loaded;
     private bool _vibrationSequenceRunning;
     private bool _vibrationFeederLightEnabled;
@@ -108,7 +107,6 @@ public partial class ConnectionConfigPage : UserControl
 
     private Func<SM7110TimedTestSettings>? _readSM7110TimedTestSettings;
     private CancellationTokenSource? _sm7110MeasurementCancellation;
-    private bool _sm7110NeedsResponseSync;
 
     public void AttachSM7110RangeEditor(
         FrameworkElement editor, TextBox lowerLimit, TextBox upperLimit, ComboBox mode,
@@ -193,25 +191,22 @@ public partial class ConnectionConfigPage : UserControl
         _serialMeterOperationRunning = true;
         try
         {
-            if (_sm7110NeedsResponseSync)
+            if (_sm7110Session.NeedsResponseSync)
             {
                 // 上次总时限/停止可能中断了查询；用有筛选条件的IDN屏障排空旧响应，避免旧值判定新产品。
-                var identity = await _serialClient.QueryAsync("*IDN?", SM7110Protocol.DecodeNewLine(settings.NewLine),
-                    settings.CommandTimeoutMilliseconds, cancellationToken, SM7110Protocol.IsSupportedIdentity);
-                UpdateSerialMeterIdentity(identity);
-                _sm7110NeedsResponseSync = false;
-                _sm7110SettingsApplied = false;
+                AddSerialLog("同步上次中断的测量响应，保留已下发参数");
+                var identity = await _sm7110Session.SynchronizeResponseAsync(
+                    token => _serialClient.QueryAsync("*IDN?", SM7110Protocol.DecodeNewLine(settings.NewLine),
+                        settings.CommandTimeoutMilliseconds, token, SM7110Protocol.IsSupportedIdentity),
+                    cancellationToken);
+                if (identity is not null) UpdateSerialMeterIdentity(identity);
             }
             await EnsureSM7110SettingsAppliedAsync(cancellationToken);
             if (timedTest is not null)
             {
                 var result = await SM7110TimedTest.RunAsync(timedTest,
                     (command, token) => SendSerialMeterCommandAsync(command, token, command != ":STOP"),
-                    async (command, token) =>
-                    {
-                        try { return await QuerySerialMeterAsync(command, token); }
-                        catch { _sm7110NeedsResponseSync = true; throw; }
-                    },
+                    (command, token) => _sm7110Session.QueryMeasurementAsync(command, QuerySerialMeterAsync, token),
                     reading =>
                     {
                         UpdateSerialMeterResult(reading);
@@ -232,8 +227,9 @@ public partial class ConnectionConfigPage : UserControl
             await SendSerialMeterCommandAsync(":STARt", cancellationToken);
             try
             {
-                var response = await QuerySerialMeterAsync(
+                var response = await _sm7110Session.QueryMeasurementAsync(
                     "*TRG;*WAI;:MEASure:RESult? 3",
+                    QuerySerialMeterAsync,
                     cancellationToken);
                 var result = SM7110Protocol.ParseMeasurementResult(
                     response,
@@ -611,8 +607,7 @@ public partial class ConnectionConfigPage : UserControl
         try
         {
             SM7110Protocol.ValidateSettings(settings);
-            _sm7110SettingsApplied = false;
-            _sm7110AppliedSetupSignature = null;
+            _sm7110Session.ResetConnection();
             _serialClient.Connect(settings);
             AddSerialLog($"串口已打开 {settings.PortName}，{settings.BaudRate} bps，正在识别仪表");
             var identity = await QuerySerialMeterAsync("*IDN?");
@@ -645,8 +640,7 @@ public partial class ConnectionConfigPage : UserControl
     private void DisconnectSerial_Click(object sender, RoutedEventArgs e)
     {
         _serialClient.Close();
-        _sm7110SettingsApplied = false;
-        _sm7110AppliedSetupSignature = null;
+        _sm7110Session.ResetConnection();
         SetSerialStatus("未连接");
         AddSerialLog("已断开SM7110串口连接");
     }
@@ -704,8 +698,7 @@ public partial class ConnectionConfigPage : UserControl
         SaveSerialSettings(writeLog: false);
         await RunSerialMeterOperationAsync("下发测试参数", async () =>
         {
-            _sm7110SettingsApplied = false;
-            _sm7110AppliedSetupSignature = null;
+            _sm7110Session.InvalidateSettings();
             await EnsureSM7110SettingsAppliedAsync(CancellationToken.None);
         });
     }
@@ -1745,26 +1738,13 @@ public partial class ConnectionConfigPage : UserControl
         var settings = SerialSettings
             ?? throw new InvalidOperationException("SM7110串口参数未加载。");
         var commands = SM7110Protocol.BuildSetupCommands(settings);
-        var setupSignature = string.Join('\n', commands);
-        if (_sm7110SettingsApplied &&
-            string.Equals(
-                _sm7110AppliedSetupSignature,
-                setupSignature,
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _sm7110SettingsApplied = false;
-        _sm7110AppliedSetupSignature = null;
-        await SM7110Protocol.ApplySetupCommandsAsync(
+        var applied = await _sm7110Session.ApplySettingsIfChangedAsync(
             commands,
             (command, token) => SendSerialMeterCommandAsync(command, token),
             QuerySerialMeterAsync,
             cancellationToken);
 
-        _sm7110AppliedSetupSignature = setupSignature;
-        _sm7110SettingsApplied = true;
+        if (!applied) return;
         AddSerialLog(
             $"SM7110测试参数下发完成，共{commands.Count}条命令，逐条错误检查通过；后续单次测量直接触发，不再重复下发");
     }
@@ -1960,8 +1940,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            _sm7110SettingsApplied = false;
-            _sm7110AppliedSetupSignature = null;
+            _sm7110Session.ResetConnection();
             SetSerialStatus("未连接");
             AddSerialLog(exception is null
                 ? "SM7110串口连接已关闭"
