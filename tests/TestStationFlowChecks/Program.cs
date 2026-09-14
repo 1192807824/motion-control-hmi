@@ -21,7 +21,7 @@ internal static class Program
         foreach (int? bin in new int?[] { null, 0, 1, 11 })
             CheckResult(new(status, 1e-10, 0.01, bin, ""), "BIN0", false);
         foreach (var bin in new[] { 0, 1, 2, 3, 4, 10, 11 })
-            CheckResult(new(0, 1e-10, 0.01, bin, ""), bin is >= 1 and <= 3 ? $"BIN{bin}" : "BIN0", true);
+            CheckResult(new(0, 1e-10, 0.01, bin, ""), bin is >= 1 and <= 3 ? $"BIN{bin}" : "BIN0", bin != 11);
         CheckResult(new(0, double.NaN, 0.01, null, ""), "BIN0", false);
         try
         {
@@ -73,6 +73,7 @@ internal static class Program
         Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestRetryCount == 1,
             "Old settings must default to one retry.");
         CheckRetriesAsync().GetAwaiter().GetResult();
+        CheckE4981AFaultRetriesAsync().GetAwaiter().GetResult();
         CheckSM7110RangeAndRouting(page);
         CheckSM7110RangeRetriesAsync().GetAwaiter().GetResult();
         Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestStationDwellMilliseconds == 200,
@@ -246,6 +247,44 @@ internal static class Program
                 new E4981AMeasurementResult(0, 1e-10, 0.01, 0, ""))!, "Passed")!);
         }, 3) && calls == 1, "A valid BIN0 is a classification, not a reason to retry.");
         Console.WriteLine("PASS: retry limits, early success, communication recovery/exhaustion, cancellation and settings validation.");
+    }
+
+    private static async Task CheckE4981AFaultRetriesAsync()
+    {
+        // Exercise the wire parser, production classification and retry runner together.
+        foreach (var response in new[]
+        {
+            "1,+9.9E37,+9.9E37",       // OVLD without comparator result
+            "1,+9.9E37,+9.9E37,1",     // Failure status overrides an apparent good BIN
+            "2,+1.0E-10,+0.01,0",      // Low C / NC
+            "2,+1.0E-10,+0.01,11",
+            "0,+9.9E37,+9.9E37,11",    // Fault reported by comparator only
+            "0,+1.0E-10,+0.01,11"      // BIN11 is a fault even with finite, plausible numbers
+        })
+        {
+            var failed = E4981AProtocol.ParseMeasurement(response);
+            Require(!failed.IsSuccessful && failed.StatusDescription != "测量正常",
+                "Overload/no-contact must not be reported as a normal measurement.");
+            foreach (var retryCount in new[] { 0, 1, 3 })
+            foreach (var recover in new[] { false, true })
+            {
+                var attempts = 0;
+                object? finalResult = null;
+                var success = await Retry(_ =>
+                {
+                    attempts++;
+                    var raw = recover && attempts == 2 ? "0,+1.0E-10,+0.01,2" : response;
+                    finalResult = Invoke(null, "ClassifyE4981AMeasurement", E4981AProtocol.ParseMeasurement(raw))!;
+                    return Task.FromResult((bool)Property(finalResult, "Passed")!);
+                }, retryCount);
+                var recovered = recover && retryCount > 0;
+                Require(success == recovered && attempts == (recovered ? 2 : retryCount + 1),
+                    $"Wrong overload/no-contact retry outcome or count for {response}.");
+                Require((string?)Property(finalResult!, "Bin") == (recovered ? "BIN2" : "BIN0"),
+                    "Final overload/no-contact result did not follow existing BIN handling.");
+            }
+        }
+        Console.WriteLine("PASS: E4981A OVLD, Low C/NC and status-0 BIN11 retry through wire parsing; recovery, exhaustion and retries disabled.");
     }
 
     private static void CheckSM7110RangeAndRouting(HomePage page)

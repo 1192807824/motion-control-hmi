@@ -11,10 +11,12 @@ public sealed record E4981AMeasurementResult(
 {
     public double CapacitancePf => CapacitanceFarads * 1e12;
 
-    public bool IsSuccessful => Status == 0 && double.IsFinite(CapacitanceFarads);
+    // 比较器也会通过BIN11报告过载/无接触，不能仅凭状态码为0认定测量成功。
+    public bool IsSuccessful => Status == 0 && Bin != 11 && double.IsFinite(CapacitanceFarads);
 
     public string StatusDescription => Status switch
     {
+        0 when Bin == 11 => "过载或无接触（BIN11）",
         0 => "测量正常",
         1 => "过载（OVLD）",
         2 => "低电容或无接触（Low C / NC）",
