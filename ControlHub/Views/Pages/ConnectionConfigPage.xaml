@@ -1204,6 +1204,33 @@
                                 </Grid>
                             </Border>
 
+                            <Border Style="{StaticResource Panel}" Margin="0,0,0,10" Padding="14,12">
+                                <StackPanel>
+                                    <TextBlock Text="E4981A 有限时间稳定采样" Style="{StaticResource PanelTitle}" Margin="0,0,0,12" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150" /><ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="24" /><ColumnDefinition Width="150" /><ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="44" /><RowDefinition Height="44" /></Grid.RowDefinitions>
+                                        <TextBlock Text="每轮采样时限(ms)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Column="1" Style="{StaticResource ConfigInput}" ToolTip="100～60000毫秒；从开始连续采样计时，不包含下压后的接触等待。"
+                                                 Text="{Binding TcpConnectionSettings.StabilityTimeoutMilliseconds, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBlock Grid.Column="3" Text="连续稳定次数" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Column="4" Style="{StaticResource ConfigInput}" ToolTip="2～20次；过载或无接触会清空连续读数。"
+                                                 Text="{Binding TcpConnectionSettings.StabilitySampleCount, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBlock Grid.Row="1" Text="电容波动上限(%)" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Row="1" Grid.Column="1" Style="{StaticResource ConfigInput}" ToolTip="连续窗口内，电容最大值减最小值，不超过最大绝对值的此百分比。"
+                                                 Text="{Binding TcpConnectionSettings.StabilityCapacitancePercent, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="3" Text="损耗D波动上限" Style="{StaticResource FieldLabel}" />
+                                        <TextBox Grid.Row="1" Grid.Column="4" Style="{StaticResource ConfigInput}" ToolTip="连续窗口内D的最大值减最小值；按D原始值填写，例如0.005。"
+                                                 Text="{Binding TcpConnectionSettings.StabilityDissipationTolerance, UpdateSourceTrigger=LostFocus}" />
+                                    </Grid>
+                                    <TextBlock Margin="0,8,0,0" Foreground="#AAB9C6" FontSize="12" TextWrapping="Wrap"
+                                               Text="保持下压连续采样，每次返回后间隔50 ms。电容、损耗均稳定且分档一致后取最后一次读数判定；超时按失败进入机械重试。稳定的超限读数仍判NG。" />
+                                </StackPanel>
+                            </Border>
+
                             <Border Style="{StaticResource Panel}" Margin="0,0,0,10">
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -1221,7 +1248,7 @@
                                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="14,10,6,8">
                                         <Button Content="读取型号" Style="{StaticResource SecondaryButton}" Click="IdentifyMeter_Click" />
                                         <Button Content="下发测试参数" Style="{StaticResource PrimaryButton}" Click="ApplyMeterSettings_Click" />
-                                        <Button Content="单次测试" Style="{StaticResource PrimaryButton}"
+                                        <Button Content="稳定采样测试" Style="{StaticResource PrimaryButton}"
                                                 Background="{StaticResource AccentGreen}" BorderBrush="#16723F"
                                                 Click="TriggerMeterTest_Click" />
                                         <Button Content="读取错误" Style="{StaticResource SecondaryButton}" Click="ReadMeterError_Click" />

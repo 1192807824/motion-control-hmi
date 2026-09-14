@@ -53,6 +53,30 @@ internal static partial class Program
             Require(changed.Contains(name), "Recipe updates must notify the displayed nF property.");
         }
 
+        var stabilityInputs = Descendants(page).OfType<TextBox>()
+            .Where(input => BindingOperations.GetBinding(input, TextBox.TextProperty)?.Path.Path
+                is string path && path.StartsWith("TcpConnectionSettings.Stability"))
+            .ToArray();
+        Require(stabilityInputs.Length == 4, "All four stability settings must be editable on the connection page.");
+        foreach (var input in stabilityInputs)
+        {
+            input.DataContext = viewModel;
+            input.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            var binding = input.GetBindingExpression(TextBox.TextProperty)!;
+            var property = typeof(TcpConnectionSettings).GetProperty(binding.ParentBinding.Path.Path.Split('.').Last())!;
+            var value = property.Name switch
+            {
+                nameof(TcpConnectionSettings.StabilityTimeoutMilliseconds) => 3500d,
+                nameof(TcpConnectionSettings.StabilitySampleCount) => 4d,
+                nameof(TcpConnectionSettings.StabilityCapacitancePercent) => 0.5d,
+                _ => 0.003d
+            };
+            input.Text = value.ToString(System.Globalization.CultureInfo.CurrentCulture);
+            binding.UpdateSource();
+            Require(Convert.ToDouble(property.GetValue(viewModel.TcpConnectionSettings)) == value,
+                "Edited stability input was not applied to instrument settings.");
+        }
+
         settings.Bin2UpperNf = 450;
         var restored = ProductRecipeStore.Clone(settings);
         Require(restored.Bin2UpperNf == 450 && restored.Bin2UpperPf == 450000,

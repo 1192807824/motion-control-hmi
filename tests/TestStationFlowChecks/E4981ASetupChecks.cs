@@ -96,9 +96,15 @@ internal static partial class Program
                 throw new Exception("Rejected setup must not trigger a measurement.");
             }
             catch (InvalidOperationException) { }
-            Require(commands.Count(command => command == "*TRG") == 4, "Instrument was triggered after failed setup.");
+            Require(commands.Count(command => command == "*TRG") == 12, "Instrument was triggered after failed setup.");
             await page.MeasureE4981AAsync(cancellation.Token);
             Require(commands.Count(command => command == "*CLS") == 4, "A failed setup must be resent on the next attempt.");
+            settings.StabilitySampleCount = 2;
+            var triggerCount = commands.Count(command => command == "*TRG");
+            var resampled = await page.MeasureE4981AAsync(cancellation.Token);
+            Require(resampled.SampleCount == 2 && commands.Count(command => command == "*TRG") == triggerCount + 2 &&
+                    commands.Count(command => command == "*CLS") == 4,
+                "Changing software stability settings must apply immediately without resending SCPI setup.");
         }
         finally
         {

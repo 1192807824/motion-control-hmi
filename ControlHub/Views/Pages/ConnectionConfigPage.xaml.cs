@@ -148,9 +148,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             cancellationToken.ThrowIfCancellationRequested();
             await EnsureE4981ASettingsAppliedAsync(cancellationToken);
-            var response = await QueryMeterAsync("*TRG", cancellationToken);
-            var result = E4981AProtocol.ApplyLossLimit(
-                E4981AProtocol.ParseMeasurement(response), _e4981AAppliedSettings!);
+            var result = await SampleStableE4981AAsync(cancellationToken);
             UpdateMeterResult(result);
             return result;
         }
@@ -556,13 +554,26 @@ public partial class ConnectionConfigPage : UserControl
     private async void TriggerMeterTest_Click(object sender, RoutedEventArgs e)
     {
         CommitInputBindings(this);
-        await RunMeterOperationAsync("单次测试", async () =>
+        await RunMeterOperationAsync("稳定采样测试", async () =>
         {
             await EnsureE4981ASettingsAppliedAsync(CancellationToken.None);
-            var response = await QueryMeterAsync("*TRG");
-            UpdateMeterResult(E4981AProtocol.ApplyLossLimit(
-                E4981AProtocol.ParseMeasurement(response), _e4981AAppliedSettings!));
+            UpdateMeterResult(await SampleStableE4981AAsync(_lifetimeCancellation.Token));
         });
+    }
+
+    private async Task<E4981AMeasurementResult> SampleStableE4981AAsync(CancellationToken cancellationToken)
+    {
+        // 采样参数不属于SCPI命令签名；每轮重新取快照，确保修改立即生效。
+        var settings = ProductRecipeStore.Clone(_e4981AAppliedSettings!);
+        settings.StabilityTimeoutMilliseconds = TcpSettings!.StabilityTimeoutMilliseconds;
+        settings.StabilitySampleCount = TcpSettings.StabilitySampleCount;
+        settings.StabilityCapacitancePercent = TcpSettings.StabilityCapacitancePercent;
+        settings.StabilityDissipationTolerance = TcpSettings.StabilityDissipationTolerance;
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeCancellation.Token);
+        MeterResultStatusText.Text = "正在连续采样，等待读数稳定…";
+        return await E4981AStableSampling.RunAsync(settings,
+            async token => E4981AProtocol.ParseMeasurement(await QueryMeterAsync("*TRG", token)),
+            lifetime.Token, AddTcpLog);
     }
 
     private async void ReadMeterError_Click(object sender, RoutedEventArgs e)
