@@ -104,6 +104,15 @@ public partial class ConnectionConfigPage : UserControl
 
     public string SM7110MeasurementMode => SerialSettings?.MeasurementMode ?? string.Empty;
 
+    public void AttachSM7110RangeEditor(
+        FrameworkElement editor, TextBox lowerLimit, TextBox upperLimit, ComboBox mode)
+    {
+        lowerLimit.Style = upperLimit.Style = (Style)FindResource("ConfigInput");
+        mode.Style = (Style)FindResource("ConfigComboBox");
+        SM7110AcceptanceRangeHost.Content = editor;
+        editor.Visibility = Visibility.Visible;
+    }
+
     public bool IsE4981AConnected => _generalTcpClient.IsConnected;
 
     public bool IsSM7110Connected => _serialClient.IsConnected;

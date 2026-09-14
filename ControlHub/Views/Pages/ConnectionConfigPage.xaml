@@ -1592,6 +1592,8 @@
                             </Grid>
                         </Border>
 
+                        <ContentControl x:Name="SM7110AcceptanceRangeHost" />
+
                         <Border Style="{StaticResource Panel}">
                             <Grid>
                                 <Grid.RowDefinitions>

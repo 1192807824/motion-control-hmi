@@ -2329,42 +2329,6 @@
                                 </Grid>
                             </Border>
 
-                            <Border Margin="0,8,0,0" Background="#12283A" BorderBrush="#2D4A61"
-                                    BorderThickness="1" CornerRadius="3" Padding="9,7">
-                                <StackPanel>
-                                    <TextBlock Text="SM7110 合格区间" Foreground="#EAF2F7" FontSize="12" FontWeight="Bold" />
-                                    <TextBlock Text="下限 ≤ 测量值 ≤ 上限为OK；超出区间按测试重试次数重测。"
-                                               Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8" />
-                                    <TextBlock Text="区间单位（须与仪表测量模式一致）" Foreground="#9FB1BF" FontSize="10" />
-                                    <ComboBox x:Name="SM7110LimitModeComboBox" SelectedValuePath="Tag" SelectedValue="R"
-                                              Margin="0,3,0,8" SelectionChanged="SM7110LimitModeComboBox_SelectionChanged">
-                                        <ComboBoxItem Tag="R" Content="电阻 R（Ω）" />
-                                        <ComboBoxItem Tag="A" Content="电流 A（A）" />
-                                        <ComboBoxItem Tag="RS" Content="表面电阻率 RS（Ω）" />
-                                        <ComboBoxItem Tag="RV" Content="体积电阻率 RV（Ω·m）" />
-                                        <ComboBoxItem Tag="RL" Content="RL（Ω·m）" />
-                                    </ComboBox>
-                                    <UniformGrid Columns="2">
-                                        <StackPanel Margin="0,0,8,0">
-                                            <TextBlock Text="合格下限" Foreground="#9FB1BF" FontSize="10" />
-                                            <TextBox x:Name="SM7110LowerLimitTextBox" Height="25"
-                                                     TextChanged="SM7110LimitTextBox_TextChanged"
-                                                     ToolTip="按所选基础单位输入，支持科学计数法，例如1e9 Ω或1e-6 A；包含下限。" />
-                                        </StackPanel>
-                                        <StackPanel>
-                                            <TextBlock Text="合格上限" Foreground="#9FB1BF" FontSize="10" />
-                                            <TextBox x:Name="SM7110UpperLimitTextBox" Height="25"
-                                                     TextChanged="SM7110LimitTextBox_TextChanged"
-                                                     ToolTip="按所选基础单位输入，必须大于或等于下限；包含上限。" />
-                                        </StackPanel>
-                                    </UniformGrid>
-                                    <TextBlock x:Name="SM7110RangeStatusText" Foreground="#9FB1BF" FontSize="11"
-                                               TextWrapping="Wrap" Margin="0,8,0,0" />
-                                    <TextBlock Text="双站：NG→0号盒；OK按BIN1～BIN3分料。BIN0且OK时停机提示未分档。"
-                                               Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
-                                </StackPanel>
-                            </Border>
-
                             <Border
                             Tag="FullWidth"
                             Background="#12283A"
@@ -2738,5 +2702,41 @@
                 </Grid>
             </Border>
         </Grid>
+        <!-- 与主页共用保存和生产快照，显示入口挂接到SM7110连接配置页。 -->
+        <Border x:Name="SM7110RangeCard" Visibility="Collapsed" Margin="0,0,0,10" Background="#12283A" BorderBrush="#2D4A61"
+                BorderThickness="1" CornerRadius="6" Padding="14,12">
+            <StackPanel>
+                <TextBlock Text="SM7110 合格区间" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
+                <TextBlock Text="下限 ≤ 测量值 ≤ 上限为OK；超出区间按测试重试次数重测。"
+                           Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8" />
+                <TextBlock Text="区间单位（须与仪表测量模式一致）" Foreground="#9FB1BF" FontSize="12" />
+                <ComboBox x:Name="SM7110LimitModeComboBox" SelectedValuePath="Tag" SelectedValue="R"
+                          Margin="0,3,0,8" SelectionChanged="SM7110LimitModeComboBox_SelectionChanged">
+                    <ComboBoxItem Tag="R" Content="电阻 R（Ω）" />
+                    <ComboBoxItem Tag="A" Content="电流 A（A）" />
+                    <ComboBoxItem Tag="RS" Content="表面电阻率 RS（Ω）" />
+                    <ComboBoxItem Tag="RV" Content="体积电阻率 RV（Ω·m）" />
+                    <ComboBoxItem Tag="RL" Content="RL（Ω·m）" />
+                </ComboBox>
+                <UniformGrid Columns="2">
+                    <StackPanel Margin="0,0,8,0">
+                        <TextBlock Text="合格下限" Foreground="#9FB1BF" FontSize="12" />
+                        <TextBox x:Name="SM7110LowerLimitTextBox" Height="32"
+                                 TextChanged="SM7110LimitTextBox_TextChanged"
+                                 ToolTip="按所选基础单位输入，支持科学计数法，例如1e9 Ω或1e-6 A；包含下限。" />
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="合格上限" Foreground="#9FB1BF" FontSize="12" />
+                        <TextBox x:Name="SM7110UpperLimitTextBox" Height="32"
+                                 TextChanged="SM7110LimitTextBox_TextChanged"
+                                 ToolTip="按所选基础单位输入，必须大于或等于下限；包含上限。" />
+                    </StackPanel>
+                </UniformGrid>
+                <TextBlock x:Name="SM7110RangeStatusText" Foreground="#9FB1BF" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,8,0,0" />
+                <TextBlock Text="双站：NG→0号盒；OK按BIN1～BIN3分料。BIN0且OK时停机提示未分档。"
+                           Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+            </StackPanel>
+        </Border>
     </Grid>
 </UserControl>

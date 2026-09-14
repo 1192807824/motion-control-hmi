@@ -589,6 +589,10 @@ public partial class HomePage : UserControl
     {
         _connectionConfigController = connectionConfigController
             ?? throw new ArgumentNullException(nameof(connectionConfigController));
+        if (SM7110RangeCard.Parent is Panel parent)
+            parent.Children.Remove(SM7110RangeCard);
+        connectionConfigController.AttachSM7110RangeEditor(
+            SM7110RangeCard, SM7110LowerLimitTextBox, SM7110UpperLimitTextBox, SM7110LimitModeComboBox);
     }
 
     public void AttachUsbMicroscopeController(UsbMicroscopePage usbMicroscopeController)

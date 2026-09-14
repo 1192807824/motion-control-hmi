@@ -367,6 +367,12 @@ internal static class Program
         _ = new Application();
         // Views only, with every subsequent save redirected away from the machine's settings.
         var home = new HomePage();
+        var connection = new ConnectionConfigPage();
+        home.AttachConnectionConfigController(connection);
+        var rangeCard = (Border)home.FindName("SM7110RangeCard");
+        Require(ReferenceEquals(((ContentControl)connection.FindName("SM7110AcceptanceRangeHost")).Content, rangeCard),
+            "Acceptance range must be hosted by the SM7110 connection page.");
+        Require(rangeCard.Visibility == Visibility.Visible, "Acceptance range is hidden in the connection page.");
         var directory = Path.Combine(AppContext.BaseDirectory, "ui-checks");
         Directory.CreateDirectory(directory);
         var store = new HomePageSettingsStore(Path.Combine(directory, "home.json"));
@@ -421,13 +427,15 @@ internal static class Program
 
         var parameters = new ParameterSettingsPage();
         parameters.AttachSettingsContent(home.DetachParameterSettingsPanel());
+        Require(!IsLogicalDescendant(rangeCard, parameters) && IsLogicalDescendant(rangeCard, connection),
+            "Acceptance range must appear only in instrument connection settings.");
         parameters.Measure(new Size(1440, 900));
         parameters.Arrange(new Rect(0, 0, 1440, 900));
         parameters.UpdateLayout();
         RenderCard(lower, Path.Combine(directory, "sm7110-range.png"));
         RenderCard((TextBlock)home.FindName("Bin0PositionLabel"), Path.Combine(directory, "dual-mode-boxes.png"));
-        Require(lower.ActualWidth > 150 && lower.ActualHeight >= 30, "Range inputs are too small in the parameter layout.");
-        Console.WriteLine("PASS: real WPF controls, mode labels, start validation, auto-save, recipe reload, frozen limits and parameter layout. No hardware attached.");
+        Require(lower.ActualWidth > 150 && lower.ActualHeight >= 30, "Range inputs are too small in the connection layout.");
+        Console.WriteLine("PASS: connection-only range editor, real WPF controls, mode labels, start validation, auto-save, recipe reload and frozen limits. No hardware attached.");
         Console.WriteLine("UI artifacts: " + directory);
     }
 
@@ -437,7 +445,10 @@ internal static class Program
         while (parent is not Border && parent is not null)
             parent = LogicalTreeHelper.GetParent(parent);
         var card = (Border)parent!;
-        ((Panel)card.Parent).Children.Remove(card);
+        if (card.Parent is Panel panel)
+            panel.Children.Remove(card);
+        else if (card.Parent is ContentControl host)
+            host.Content = null;
         card.Margin = new Thickness(0);
         var preview = new Border { Child = card, Width = 630, Background = Brushes.Black };
         preview.Measure(new Size(630, double.PositiveInfinity));
@@ -449,6 +460,13 @@ internal static class Program
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    private static bool IsLogicalDescendant(DependencyObject child, DependencyObject ancestor)
+    {
+        for (var parent = LogicalTreeHelper.GetParent(child); parent is not null; parent = LogicalTreeHelper.GetParent(parent))
+            if (ReferenceEquals(parent, ancestor)) return true;
+        return false;
     }
 
     private static Task<bool> Retry(
