@@ -195,6 +195,19 @@ public static class SM7110Protocol
         {
             throw new InvalidOperationException("SM7110施加电压必须在0.1V到1000V之间。");
         }
+        // SM7110/SM7120 instruction manual, section 4.9 (p. 66): limits depend on voltage.
+        // Keep legacy 1.8mA settings readable, but never silently increase a saved current limit.
+        if (string.Equals(settings.CurrentLimit?.Trim(), "1.8mA", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"当前施加电压为{FormatNumber(settings.AppliedVoltageVolts)}V，不能选择1.8mA限流档。1.8mA仅适用于SM7120的1000.1～2000V；当前软件支持0.1～1000V，请根据工艺要求重新选择5mA或10mA（250V及以下也可选50mA）。");
+        }
+        if (settings.AppliedVoltageVolts > 250 &&
+            string.Equals(settings.CurrentLimit?.Trim(), "50mA", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"当前施加电压为{FormatNumber(settings.AppliedVoltageVolts)}V，不能选择50mA限流档。50mA仅适用于0.1～250V，请根据工艺要求重新选择5mA或10mA。");
+        }
         if (string.Equals(settings.AverageMode?.Trim(), "HOLD", StringComparison.OrdinalIgnoreCase) &&
             settings.AverageCount is < 2 or > 255)
         {

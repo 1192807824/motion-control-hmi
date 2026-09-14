@@ -1,6 +1,33 @@
 using ControlHub.Services.Devices;
 
 var commands = SM7110Protocol.BuildSetupCommands(new SerialConnectionSettings());
+Require(commands.Contains(":CHARge:LIMit:CURRent 5mA"), "Default 100V setup must use a supported limit.");
+foreach (var voltage in new[] { 0.1, 100.0, 250.0, 250.1, 1000.0 })
+{
+    foreach (var limit in new[] { "1.8mA", "5mA", "10mA", "50mA" })
+    {
+        foreach (var chargeEnabled in new[] { false, true })
+        {
+            var settings = new SerialConnectionSettings
+            {
+                AppliedVoltageVolts = voltage,
+                CurrentLimit = limit,
+                CurrentLimitEnabled = chargeEnabled
+            };
+            var supported = limit != "1.8mA" && (limit != "50mA" || voltage <= 250);
+            try
+            {
+                SM7110Protocol.BuildSetupCommands(settings);
+                Require(supported, $"Unsupported {voltage}V / {limit} was accepted.");
+            }
+            catch (InvalidOperationException error)
+            {
+                Require(!supported && error.Message.Contains(limit), "Unexpected validation failure.");
+                Require(settings.CurrentLimit == limit, "Must not silently increase saved current limits.");
+            }
+        }
+    }
+}
 foreach (var rejected in commands.Skip(1))
 {
     var sent = new List<string>();

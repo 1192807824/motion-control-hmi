@@ -22,7 +22,7 @@ public sealed class SerialConnectionSettings : INotifyPropertyChanged
     private int _averageCount = 5;
     private bool _interlockEnabled = true;
     private bool _currentLimitEnabled = true;
-    private string _currentLimit = "1.8mA";
+    private string _currentLimit = "5mA";
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
