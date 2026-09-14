@@ -76,6 +76,32 @@ public partial class MotionControlPage : UserControl
 
     public event EventHandler? EmergencyStopIssued;
 
+    private Func<IReadOnlyDictionary<int, double>>? _ddTestStationWaitPositions;
+
+    public void AttachDdTestStationInterlock(Func<IReadOnlyDictionary<int, double>> readWaitPositions) =>
+        _ddTestStationWaitPositions = readWaitPositions ?? throw new ArgumentNullException(nameof(readWaitPositions));
+
+    public void EnsureDdTestStationsSafe()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(EnsureDdTestStationsSafe);
+            return;
+        }
+        try
+        {
+            var waitPositions = _ddTestStationWaitPositions?.Invoke()
+                ?? throw new InvalidOperationException("测试站等待位尚未加载，禁止启动DD马达。");
+            DdTestStationInterlock.EnsureSafe(waitPositions, _motionCard.ReadAxis);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(Window.GetWindow(this), exception.Message, "DD马达启动警告",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            throw;
+        }
+    }
+
     public IReadOnlyDictionary<int, AxisSettings> CaptureRecipeAxisSettings()
     {
         if (Axes is not { Count: > 0 } axes)
@@ -227,7 +253,7 @@ public partial class MotionControlPage : UserControl
         RelativeModeRadio.IsChecked = !Tuning.AbsolutePositionMode;
         AbsoluteModeRadio.IsChecked = Tuning.AbsolutePositionMode;
 
-        _motionCard = MotionCardFactory.Create(_motionOptions);
+        _motionCard = new DdInterlockedMotionCard(MotionCardFactory.Create(_motionOptions), EnsureDdTestStationsSafe);
         _pollTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(_motionOptions.PollIntervalMilliseconds)

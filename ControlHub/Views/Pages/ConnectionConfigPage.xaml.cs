@@ -106,10 +106,17 @@ public partial class ConnectionConfigPage : UserControl
 
     public string SM7110MeasurementMode => SerialSettings?.MeasurementMode ?? string.Empty;
 
+    private Func<SM7110TimedTestSettings>? _readSM7110TimedTestSettings;
+    private CancellationTokenSource? _sm7110MeasurementCancellation;
+    private bool _sm7110NeedsResponseSync;
+
     public void AttachSM7110RangeEditor(
-        FrameworkElement editor, TextBox lowerLimit, TextBox upperLimit, ComboBox mode)
+        FrameworkElement editor, TextBox lowerLimit, TextBox upperLimit, ComboBox mode,
+        TextBox maximumTime, Func<SM7110TimedTestSettings> readTimedTestSettings)
     {
         lowerLimit.Style = upperLimit.Style = (Style)FindResource("ConfigInput");
+        maximumTime.Style = (Style)FindResource("ConfigInput");
+        _readSM7110TimedTestSettings = readTimedTestSettings;
         mode.Style = (Style)FindResource("ConfigComboBox");
         SM7110AcceptanceRangeHost.Content = editor;
         editor.Visibility = Visibility.Visible;
@@ -156,7 +163,8 @@ public partial class ConnectionConfigPage : UserControl
     }
 
     public async Task<SM7110MeasurementResult> MeasureSM7110Async(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SM7110TimedTestSettings? timedTest = null,
+        Action<SM7110MeasurementResult>? progress = null)
     {
         if (_closed)
         {
@@ -173,10 +181,54 @@ public partial class ConnectionConfigPage : UserControl
 
         var settings = SerialSettings
             ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        if (timedTest is not null)
+        {
+            timedTest.Validate();
+            if (!string.Equals(settings.MeasurementMode, "R", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("持续加电达标测试需要选择电阻R模式。");
+        }
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeCancellation.Token);
+        _sm7110MeasurementCancellation = operationCancellation;
+        cancellationToken = operationCancellation.Token;
         _serialMeterOperationRunning = true;
         try
         {
+            if (_sm7110NeedsResponseSync)
+            {
+                // 上次总时限/停止可能中断了查询；用有筛选条件的IDN屏障排空旧响应，避免旧值判定新产品。
+                var identity = await _serialClient.QueryAsync("*IDN?", SM7110Protocol.DecodeNewLine(settings.NewLine),
+                    settings.CommandTimeoutMilliseconds, cancellationToken, SM7110Protocol.IsSupportedIdentity);
+                UpdateSerialMeterIdentity(identity);
+                _sm7110NeedsResponseSync = false;
+                _sm7110SettingsApplied = false;
+            }
             await EnsureSM7110SettingsAppliedAsync(cancellationToken);
+            if (timedTest is not null)
+            {
+                var result = await SM7110TimedTest.RunAsync(timedTest,
+                    (command, token) => SendSerialMeterCommandAsync(command, token, command != ":STOP"),
+                    async (command, token) =>
+                    {
+                        try { return await QuerySerialMeterAsync(command, token); }
+                        catch { _sm7110NeedsResponseSync = true; throw; }
+                    },
+                    reading =>
+                    {
+                        UpdateSerialMeterResult(reading);
+                        SerialMeterResultStatusText.Text = reading.IsSuccessful && reading.Value >= timedTest.MinimumResistanceOhms
+                            ? "OK · 已达标" : "持续加电 · 等待达标";
+                        SerialMeterResultStatusText.Foreground = new SolidColorBrush(
+                            reading.IsSuccessful && reading.Value >= timedTest.MinimumResistanceOhms
+                                ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68));
+                        progress?.Invoke(reading);
+                    }, cancellationToken);
+                UpdateSerialMeterResult(result);
+                SerialMeterResultStatusText.Text = result.TimedOut ? "NG · 超时未达标" : "OK · 已达标";
+                SerialMeterResultStatusText.Foreground = new SolidColorBrush(result.TimedOut
+                    ? Color.FromRgb(242, 122, 128) : Color.FromRgb(73, 209, 125));
+                AddSerialLog($"持续测试结束：{SerialMeterResultStatusText.Text}，耗时{result.TestElapsedSeconds:0.###}秒，已发送停止输出/放电命令");
+                return result;
+            }
             await SendSerialMeterCommandAsync(":STARt", cancellationToken);
             try
             {
@@ -205,6 +257,7 @@ public partial class ConnectionConfigPage : UserControl
         }
         finally
         {
+            _sm7110MeasurementCancellation = null;
             _serialMeterOperationRunning = false;
         }
     }
@@ -666,32 +719,34 @@ public partial class ConnectionConfigPage : UserControl
 
         CommitInputBindings(this);
         SaveSerialSettings(writeLog: false);
-        await RunSerialMeterOperationAsync("单次测量", async () =>
+        try
         {
-            await EnsureSM7110SettingsAppliedAsync(CancellationToken.None);
-            await SendSerialMeterCommandAsync(":STARt");
-            try
-            {
-                var response = await QuerySerialMeterAsync("*TRG;*WAI;:MEASure:RESult? 3");
-                UpdateSerialMeterResult(SM7110Protocol.ParseMeasurementResult(response, settings.MeasurementMode));
-            }
-            finally
-            {
-                try
-                {
-                    await SendSerialMeterCommandAsync(":STOP");
-                    AddSerialLog("测量结束，已停止输出并进入放电状态");
-                }
-                catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException or ObjectDisposedException)
-                {
-                    AddSerialLog($"警告：测量结束后停止放电命令发送失败：{ex.Message}");
-                }
-            }
-        });
+            var timedTest = settings.MeasurementMode == "R"
+                ? _readSM7110TimedTestSettings?.Invoke()
+                    ?? throw new ArgumentException("请先配置SM7110达标门限和最长测试时间。")
+                : null;
+            await MeasureSM7110Async(CancellationToken.None, timedTest);
+        }
+        catch (OperationCanceledException)
+        {
+            SerialMeterResultStatusText.Text = "测试已停止";
+        }
+        catch (Exception exception)
+        {
+            AddSerialLog($"测试失败：{exception.Message}");
+            SerialMeterResultStatusText.Text = exception.Message;
+            SerialMeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        }
     }
 
     private async void StopSerialMeter_Click(object sender, RoutedEventArgs e)
     {
+        if (_sm7110MeasurementCancellation is { } cancellation)
+        {
+            cancellation.Cancel();
+            AddSerialLog("已请求停止测试，正在停止输出并放电");
+            return;
+        }
         await RunSerialMeterOperationAsync("停止并放电", async () =>
         {
             await SendSerialMeterCommandAsync(":STOP");
@@ -1704,7 +1759,7 @@ public partial class ConnectionConfigPage : UserControl
         _sm7110AppliedSetupSignature = null;
         await SM7110Protocol.ApplySetupCommandsAsync(
             commands,
-            SendSerialMeterCommandAsync,
+            (command, token) => SendSerialMeterCommandAsync(command, token),
             QuerySerialMeterAsync,
             cancellationToken);
 
@@ -1752,13 +1807,14 @@ public partial class ConnectionConfigPage : UserControl
 
     private async Task SendSerialMeterCommandAsync(
         string command,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool useLifetimeCancellation = true)
     {
         var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
         var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
         AddSerialLog($"TX [SCPI]  {command}");
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            _lifetimeCancellation.Token,
+            useLifetimeCancellation ? _lifetimeCancellation.Token : CancellationToken.None,
             cancellationToken);
         await _serialClient.SendCommandAsync(
             command,

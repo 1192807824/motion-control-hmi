@@ -218,6 +218,8 @@ public sealed class HomePageSettings
     public double? SM7110UpperLimit { get; set; }
 
     public string SM7110LimitMeasurementMode { get; set; } = "R";
+
+    public double? SM7110MaximumTestSeconds { get; set; }
 }
 
 public sealed class ProductionAxisMotionSettings

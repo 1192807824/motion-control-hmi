@@ -8,6 +8,8 @@ public sealed record SM7110MeasurementResult(
     string MeasurementMode,
     string RawResponse)
 {
+    public bool TimedOut { get; init; }
+    public double? TestElapsedSeconds { get; init; }
     public bool IsSuccessful => Status == 0 && double.IsFinite(Value);
 
     public double DisplayValue => SM7110Protocol.ToDisplayValue(Value, MeasurementMode);
@@ -73,6 +75,7 @@ public static class SM7110Protocol
             ":HEADer OFF",
             ":STOP",
             ":STOP:CONDition DISCharge",
+            ":SEQuence:STATe OFF",
             $":MEASure:MODE {mode}",
             ":MEASure:FORMat EXP",
             ":MEASure:DIGit 6",

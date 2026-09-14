@@ -77,6 +77,7 @@ internal static partial class Program
         CheckE4981ALossRoutingAsync().GetAwaiter().GetResult();
         CheckSM7110RangeAndRouting(page);
         CheckSM7110RangeRetriesAsync().GetAwaiter().GetResult();
+        CheckSM7110TimedTestsAsync().GetAwaiter().GetResult();
         Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestStationDwellMilliseconds == 200,
             "Old settings must default to 200 ms.");
         var settingsPath = Path.Combine(Path.GetTempPath(), "test-station-dwell-" + Guid.NewGuid().ToString("N") + ".json");
@@ -147,6 +148,7 @@ internal static partial class Program
         CheckE4981ASetupChanges();
         CheckE4981ANanofaradUnits();
         CheckSM7110GigohmUnits();
+        CheckDdTestStationInterlock();
     }
 
     private static void CheckResult(E4981AMeasurementResult input, string bin, bool passed)
@@ -365,9 +367,9 @@ internal static partial class Program
 
     private static void CheckSM7110RangeAndRouting(HomePage page)
     {
-        var lower = new TextBox { Text = "1" };
-        var upper = new TextBox { Text = "2" };
-        var mode = new ComboBox { ItemsSource = new[] { "R", "A", "RS", "RV", "RL" }, SelectedItem = "R" };
+        var lower = new TextBox { Text = "1e9" };
+        var upper = new TextBox { Text = "2e9" };
+        var mode = new ComboBox { ItemsSource = new[] { "R", "A", "RS", "RV", "RL" }, SelectedItem = "A" };
         Set(page, "SM7110LowerLimitTextBox", lower);
         Set(page, "SM7110UpperLimitTextBox", upper);
         Set(page, "SM7110LimitModeComboBox", mode);
@@ -394,12 +396,12 @@ internal static partial class Program
 
         foreach (var value in new[] { 1e9 - 1, 1e9, 1.5e9, 2e9, 2e9 + 1, double.NaN, double.PositiveInfinity })
         {
-            var result = Invoke(null, "ClassifySM7110Measurement", new SM7110MeasurementResult(value, 0, "R", ""), "BIN2", range)!;
+            var result = Invoke(null, "ClassifySM7110Measurement", new SM7110MeasurementResult(value, 0, "A", ""), "BIN2", range)!;
             Require((bool)Property(result, "Passed")! == (value >= 1e9 && value <= 2e9), "Wrong inclusive range decision.");
         }
         foreach (var status in new[] { 1, 3, 5, 7, 9 })
         {
-            var result = Invoke(null, "ClassifySM7110Measurement", new SM7110MeasurementResult(1.5e9, status, "R", ""), "BIN2", range)!;
+            var result = Invoke(null, "ClassifySM7110Measurement", new SM7110MeasurementResult(1.5e9, status, "A", ""), "BIN2", range)!;
             Require(!(bool)Property(result, "Passed")!, "Instrument failure must not pass even when value lies within range.");
         }
 
@@ -418,7 +420,7 @@ internal static partial class Program
             foreach (var passed in new[] { false, true })
             {
                 var result = Invoke(null, "ClassifySM7110Measurement",
-                    new SM7110MeasurementResult(passed ? 1.5e9 : 3e9, 0, "R", ""), bin, range)!;
+                    new SM7110MeasurementResult(passed ? 1.5e9 : 3e9, 0, "A", ""), bin, range)!;
                 Call(product, "SetMeasurement", result);
                 Require((string?)Property(product, "Bin") == bin, "SM7110 must retain the original E4981A BIN.");
                 Require((bool)Property(product, "SM7110Passed")! == passed, "Final SM7110 judgement lost.");
@@ -444,7 +446,7 @@ internal static partial class Program
 
     private static async Task CheckSM7110RangeRetriesAsync()
     {
-        var range = CreateNested("SM7110AcceptanceRange", 100d, 200d, "R");
+        var range = CreateNested("SM7110AcceptanceRange", 100d, 200d, "A");
         foreach (var recovery in new[] { false, true })
         {
             object? finalResult = null;
@@ -453,7 +455,7 @@ internal static partial class Program
             {
                 attempts++;
                 finalResult = Invoke(null, "ClassifySM7110Measurement",
-                    new SM7110MeasurementResult(recovery && attempts == 2 ? 150 : 250, 0, "R", ""), "BIN3", range)!;
+                    new SM7110MeasurementResult(recovery && attempts == 2 ? 150 : 250, 0, "A", ""), "BIN3", range)!;
                 return Task.FromResult((bool)Property(finalResult, "Passed")!);
             }, 2);
             var product = ((Array)Invoke(null, "CreateCarouselStationStates")!).GetValue(1)!;

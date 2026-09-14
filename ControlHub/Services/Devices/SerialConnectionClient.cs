@@ -13,6 +13,7 @@ public sealed class SerialConnectionClient : IDisposable
     private readonly List<byte> _receiveBuffer = [];
     private SerialPort? _serialPort;
     private TaskCompletionSource<string>? _pendingResponse;
+    private Func<string, bool>? _pendingResponseFilter;
 
     public event Action<byte[]>? DataReceived;
     public event Action<string>? ResponseReceived;
@@ -107,9 +108,10 @@ public sealed class SerialConnectionClient : IDisposable
         string command,
         string terminator,
         int timeoutMilliseconds,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<string, bool>? responseFilter = null)
     {
-        return await SendCoreAsync(command, terminator, expectResponse: true, timeoutMilliseconds, cancellationToken)
+        return await SendCoreAsync(command, terminator, expectResponse: true, timeoutMilliseconds, cancellationToken, responseFilter)
             ?? string.Empty;
     }
 
@@ -192,7 +194,8 @@ public sealed class SerialConnectionClient : IDisposable
         string terminator,
         bool expectResponse,
         int timeoutMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, bool>? responseFilter = null)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
@@ -224,6 +227,7 @@ public sealed class SerialConnectionClient : IDisposable
                 {
                     _receiveBuffer.Clear();
                     _pendingResponse = responseSource;
+                    _pendingResponseFilter = responseFilter;
                 }
             }
 
@@ -285,7 +289,10 @@ public sealed class SerialConnectionClient : IDisposable
                     }
 
                     var responseSource = _pendingResponse;
-                    _pendingResponse = null;
+                    if (responseSource is not null && _pendingResponseFilter is not null && !_pendingResponseFilter(line))
+                        responseSource = null;
+                    else
+                        _pendingResponse = null;
                     completedLines.Add((line, responseSource));
                 }
             }

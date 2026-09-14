@@ -1570,7 +1570,7 @@
                                               Content="启用仪表联锁"
                                               IsChecked="{Binding SerialConnectionSettings.InterlockEnabled}" />
                                     <TextBlock Grid.Row="4" Grid.Column="3" Grid.ColumnSpan="2"
-                                               Text="单次测量结束后自动停止并放电"
+                                               Text="电阻R持续加电至达标或超时，结束后停止并放电"
                                                Foreground="#73D9A2"
                                                FontWeight="SemiBold"
                                                VerticalAlignment="Center" />
@@ -1582,7 +1582,7 @@
                                         <Button Content="下发测试参数"
                                                 Style="{StaticResource SecondaryButton}"
                                                 Click="ApplySerialMeterSettings_Click" />
-                                        <Button Content="单次测量"
+                                        <Button Content="开始测试"
                                                 Style="{StaticResource PrimaryButton}"
                                                 Background="{StaticResource AccentGreen}"
                                                 BorderBrush="#16723F"

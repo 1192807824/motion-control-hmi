@@ -2706,10 +2706,10 @@
         <Border x:Name="SM7110RangeCard" Visibility="Collapsed" Margin="0,0,0,10" Background="#12283A" BorderBrush="#2D4A61"
                 BorderThickness="1" CornerRadius="6" Padding="14,12">
             <StackPanel>
-                <TextBlock Text="SM7110 合格区间" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
-                <TextBlock Text="下限 ≤ 测量值 ≤ 上限为OK；超出区间按测试重试次数重测。"
+                <TextBlock Text="SM7110 测试判定" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
+                <TextBlock x:Name="SM7110CriteriaDescription" Text="持续加电并反复采样，电阻≥门限即OK；到最长测试时间仍未达标则NG。"
                            Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8" />
-                <TextBlock Text="区间单位（须与仪表测量模式一致）" Foreground="#9FB1BF" FontSize="12" />
+                <TextBlock Text="测量模式与单位（须与仪表一致）" Foreground="#9FB1BF" FontSize="12" />
                 <ComboBox x:Name="SM7110LimitModeComboBox" SelectedValuePath="Tag" SelectedValue="R"
                           Margin="0,3,0,8" SelectionChanged="SM7110LimitModeComboBox_SelectionChanged">
                     <ComboBoxItem Tag="R" Content="电阻 R（GΩ）" />
@@ -2720,16 +2720,22 @@
                 </ComboBox>
                 <UniformGrid Columns="2">
                     <StackPanel Margin="0,0,8,0">
-                        <TextBlock Text="合格下限" Foreground="#9FB1BF" FontSize="12" />
+                        <TextBlock x:Name="SM7110LowerLimitLabel" Text="达标门限（GΩ）" Foreground="#9FB1BF" FontSize="12" />
                         <TextBox x:Name="SM7110LowerLimitTextBox" Height="32"
                                  TextChanged="SM7110LimitTextBox_TextChanged"
                                  ToolTip="按所选单位输入：电阻R用GΩ，例如填50表示50 GΩ；电流A仍用A。支持科学计数法，包含下限。" />
                     </StackPanel>
-                    <StackPanel>
+                    <StackPanel x:Name="SM7110UpperLimitPanel" Visibility="Collapsed">
                         <TextBlock Text="合格上限" Foreground="#9FB1BF" FontSize="12" />
                         <TextBox x:Name="SM7110UpperLimitTextBox" Height="32"
                                  TextChanged="SM7110LimitTextBox_TextChanged"
-                                 ToolTip="按所选单位输入：电阻R用GΩ，例如填100表示100 GΩ；必须大于或等于下限，包含上限。" />
+                                 ToolTip="按所选单位输入，必须大于或等于下限，包含上限。电阻R模式不使用上限。" />
+                    </StackPanel>
+                    <StackPanel x:Name="SM7110MaximumTimePanel">
+                        <TextBlock Text="最长测试时间（秒）" Foreground="#9FB1BF" FontSize="12" />
+                        <TextBox x:Name="SM7110MaximumTimeTextBox" Height="32"
+                                 TextChanged="SM7110LimitTextBox_TextChanged"
+                                 ToolTip="按工艺填写，从开始加电计时；大于0且不超过3600秒。超时未达标判NG，不重新加电重试。" />
                     </StackPanel>
                 </UniformGrid>
                 <TextBlock x:Name="SM7110RangeStatusText" Foreground="#9FB1BF" FontSize="11"

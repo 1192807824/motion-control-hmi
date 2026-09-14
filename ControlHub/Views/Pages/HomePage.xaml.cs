@@ -558,6 +558,7 @@ public partial class HomePage : UserControl
         }
 
         _motionController = motionController;
+        _motionController.AttachDdTestStationInterlock(ReadDdTestStationWaitPositions);
         _motionController.EmergencyStopIssued += MotionController_EmergencyStopIssued;
         UpdateHomeCommandState();
     }
@@ -592,7 +593,8 @@ public partial class HomePage : UserControl
         if (SM7110RangeCard.Parent is Panel parent)
             parent.Children.Remove(SM7110RangeCard);
         connectionConfigController.AttachSM7110RangeEditor(
-            SM7110RangeCard, SM7110LowerLimitTextBox, SM7110UpperLimitTextBox, SM7110LimitModeComboBox);
+            SM7110RangeCard, SM7110LowerLimitTextBox, SM7110UpperLimitTextBox, SM7110LimitModeComboBox,
+            SM7110MaximumTimeTextBox, ReadSM7110TimedTestSettings);
     }
 
     public void AttachUsbMicroscopeController(UsbMicroscopePage usbMicroscopeController)
@@ -4055,6 +4057,13 @@ public partial class HomePage : UserControl
             measurementFailure = exception;
         }
 
+        if (measurementTasks.Values.Any(task => task.Exception is { } exception && SM7110TimedTest.HasStopFailure(exception)))
+        {
+            const string message = "SM7110停止输出/放电失败：测试轴保持下压，禁止上抬和DD流转，请检查仪表。";
+            SetStartProductionStatus(message, Color.FromRgb(242, 122, 128));
+            throw new InvalidOperationException(message, measurementFailure);
+        }
+
         foreach (var stationNumber in activeStationNumbers)
         {
             var controls = GetTestStationConfigurationControls(stationNumber);
@@ -4158,6 +4167,9 @@ public partial class HomePage : UserControl
                 "测试中",
                 "等待仪表返回…",
                 Color.FromRgb(98, 181, 255));
+            // 电阻模式的一次测试覆盖整个加电时限，超时NG不能被外层重试重新启动加电。
+            if (settings.Instrument == TestStationInstrument.SM7110 && _sm7110AcceptanceRange?.MeasurementMode == "R")
+                return await MeasureOnceAsync(cancellationToken);
             return await TestMeasurementRetry.ExecuteAsync(
                 MeasureOnceAsync,
                 result => result.Passed,
@@ -4195,7 +4207,12 @@ public partial class HomePage : UserControl
                         var range = _sm7110AcceptanceRange
                             ?? throw new InvalidOperationException("本轮生产尚未锁定SM7110合格区间。");
                         range.ValidateMeasurementMode(connectionController.SM7110MeasurementMode);
-                        var result = await connectionController.MeasureSM7110Async(token);
+                        var timedTest = range.MeasurementMode == "R" ? range.ToTimedTestSettings() : null;
+                        var result = await connectionController.MeasureSM7110Async(token, timedTest, reading =>
+                            SetTestStationRuntimeDisplay(stationNumber,
+                                $"持续加电 · {reading.TestElapsedSeconds:0.###}秒", "测试中",
+                                $"R={reading.DisplayValue:G9}GΩ · 达标门限≥{SM7110Protocol.ToDisplayValue(range.Lower, "R"):G9}GΩ · {reading.StatusDescription}",
+                                Color.FromRgb(242, 181, 68)));
                         var measurement = ClassifySM7110Measurement(result, bin, range);
                         return stationState.E4981ALossRejected
                             ? measurement with
@@ -4255,12 +4272,17 @@ public partial class HomePage : UserControl
         SM7110MeasurementResult result, string bin, SM7110AcceptanceRange range)
     {
         range.ValidateMeasurementMode(result.MeasurementMode);
-        var passed = result.IsSuccessful && result.Value >= range.Lower && result.Value <= range.Upper;
-        var status = passed ? "OK · 区间内"
-            : result.IsSuccessful ? "NG · 超出合格区间" : $"NG · {result.StatusDescription}";
+        var isThreshold = range.MeasurementMode == "R";
+        var passed = !result.TimedOut && result.IsSuccessful && result.Value >= range.Lower && (isThreshold || result.Value <= range.Upper);
+        var status = result.TimedOut ? "NG · 超时未达标"
+            : passed ? isThreshold ? "OK · 已达标" : "OK · 区间内"
+            : result.IsSuccessful ? isThreshold ? "NG · 未达门限" : "NG · 超出合格区间" : $"NG · {result.StatusDescription}";
+        var criterion = isThreshold
+            ? $"达标门限≥{SM7110Protocol.ToDisplayValue(range.Lower, range.MeasurementMode):G9}{result.DisplayUnit}"
+            : $"合格区间[{SM7110Protocol.ToDisplayValue(range.Lower, range.MeasurementMode):G9}, {SM7110Protocol.ToDisplayValue(range.Upper, range.MeasurementMode):G9}]{result.DisplayUnit}";
         return new TestStationMeasurementResult(
             bin,
-            $"{result.MeasurementMode}={result.DisplayValue:G9}{result.DisplayUnit} · 合格区间[{SM7110Protocol.ToDisplayValue(range.Lower, range.MeasurementMode):G9}, {SM7110Protocol.ToDisplayValue(range.Upper, range.MeasurementMode):G9}]{result.DisplayUnit} · {status} · E4981A:{bin}",
+            $"{result.MeasurementMode}={result.DisplayValue:G9}{result.DisplayUnit} · {criterion} · {status} · E4981A:{bin}",
             passed && bin == "BIN0" ? "整体NG · E4981A为BIN0" : status,
             passed,
             passed,
@@ -6042,6 +6064,7 @@ public partial class HomePage : UserControl
         SM7110UpperLimitTextBox.Text = _homeSettings.SM7110UpperLimit is { } upper
             ? SM7110Protocol.ToDisplayValue(upper, _homeSettings.SM7110LimitMeasurementMode).ToString("R", CultureInfo.CurrentCulture) : "";
         SM7110LimitModeComboBox.SelectedValue = _homeSettings.SM7110LimitMeasurementMode;
+        SM7110MaximumTimeTextBox.Text = _homeSettings.SM7110MaximumTestSeconds?.ToString("R", CultureInfo.CurrentCulture) ?? "";
         _updatingTestStationConfiguration = true;
         try
         {
@@ -6301,15 +6324,26 @@ public partial class HomePage : UserControl
     private SM7110AcceptanceRange ReadSM7110AcceptanceRange()
     {
         var lower = ParseFiniteCoordinate(SM7110LowerLimitTextBox.Text, "SM7110合格下限");
-        var upper = ParseFiniteCoordinate(SM7110UpperLimitTextBox.Text, "SM7110合格上限");
-        if (lower > upper)
-            throw new ArgumentException("SM7110合格下限不能大于上限。");
         var mode = SM7110LimitModeComboBox.SelectedValue as string;
         if (mode is not ("R" or "A" or "RS" or "RV" or "RL"))
             throw new ArgumentException("请选择SM7110合格区间的单位和测量模式。");
+        if (mode == "R")
+        {
+            var range = new SM7110AcceptanceRange(SM7110Protocol.FromDisplayValue(lower, mode), double.PositiveInfinity, mode)
+            {
+                MaximumTestSeconds = ParseFiniteCoordinate(SM7110MaximumTimeTextBox.Text, "SM7110最长测试时间（秒）")
+            };
+            _ = range.ToTimedTestSettings();
+            return range;
+        }
+        var upper = ParseFiniteCoordinate(SM7110UpperLimitTextBox.Text, "SM7110合格上限");
+        if (lower > upper)
+            throw new ArgumentException("SM7110合格下限不能大于上限。");
         return new SM7110AcceptanceRange(
             SM7110Protocol.FromDisplayValue(lower, mode), SM7110Protocol.FromDisplayValue(upper, mode), mode);
     }
+
+    private SM7110TimedTestSettings ReadSM7110TimedTestSettings() => ReadSM7110AcceptanceRange().ToTimedTestSettings();
 
     private void SaveSM7110RangeFromInputs(bool throwOnInvalid = false)
     {
@@ -6317,18 +6351,23 @@ public partial class HomePage : UserControl
             return;
         try
         {
-            if (!TryParseOptionalCoordinate(SM7110LowerLimitTextBox.Text, out var lower) ||
-                !TryParseOptionalCoordinate(SM7110UpperLimitTextBox.Text, out var upper) ||
-                lower > upper)
-                throw new ArgumentException("SM7110上下限必须为有限数值，且下限不能大于上限。");
             var mode = SM7110LimitModeComboBox.SelectedValue as string
                 ?? throw new ArgumentException("请选择SM7110合格区间的测量模式。");
+            if (!TryParseOptionalCoordinate(SM7110LowerLimitTextBox.Text, out var lower))
+                throw new ArgumentException("SM7110门限必须为有限数值。");
+            double? upper = null;
+            if (mode != "R" && (!TryParseOptionalCoordinate(SM7110UpperLimitTextBox.Text, out upper) || lower > upper))
+                throw new ArgumentException("SM7110上下限必须为有限数值，且下限不能大于上限。");
+            if (!TryParseOptionalCoordinate(SM7110MaximumTimeTextBox.Text, out var maximumTime) ||
+                maximumTime is <= 0 or > 3600 || (mode == "R" && lower is <= 0))
+                throw new ArgumentException("SM7110门限必须大于0；最长测试时间须大于0且不超过3600秒。");
             if (throwOnInvalid && IsSM7110TestEnabled())
                 _ = ReadSM7110AcceptanceRange();
             var baseLower = lower.HasValue ? SM7110Protocol.FromDisplayValue(lower.Value, mode) : (double?)null;
             var baseUpper = upper.HasValue ? SM7110Protocol.FromDisplayValue(upper.Value, mode) : (double?)null;
             _homeSettings.SM7110LowerLimit = baseLower;
-            _homeSettings.SM7110UpperLimit = baseUpper;
+            if (mode != "R") _homeSettings.SM7110UpperLimit = baseUpper;
+            _homeSettings.SM7110MaximumTestSeconds = maximumTime;
             _homeSettings.SM7110LimitMeasurementMode = mode;
             _homeSettingsStore.Save(_homeSettings);
         }
@@ -6356,12 +6395,22 @@ public partial class HomePage : UserControl
 
     private void UpdateSM7110RangeDisplay()
     {
+        if (SM7110MaximumTimePanel is null) return;
+        var threshold = SM7110LimitModeComboBox.SelectedValue as string == "R";
+        SM7110UpperLimitPanel.Visibility = threshold ? Visibility.Collapsed : Visibility.Visible;
+        SM7110MaximumTimePanel.Visibility = threshold ? Visibility.Visible : Visibility.Collapsed;
+        SM7110LowerLimitLabel.Text = threshold ? "达标门限（GΩ）" : "合格下限";
+        SM7110CriteriaDescription.Text = threshold
+            ? "持续加电并反复采样，电阻≥门限即OK；到最长测试时间仍未达标则NG，上限不参与判定。"
+            : "下限 ≤ 测量值 ≤ 上限为OK；超出区间按测试重试次数重测。";
         try
         {
             if (IsSM7110TestEnabled())
             {
                 _ = ReadSM7110AcceptanceRange();
-                SM7110RangeStatusText.Text = "双站判定已启用：区间包含上下限；参数自动保存，下次启动生产生效。";
+                SM7110RangeStatusText.Text = threshold
+                    ? "限时达标已启用：整个时限内保持加电，达标或超时后停止并放电；超时NG不重新加电重试。"
+                    : "双站判定已启用：区间包含上下限；参数自动保存，下次启动生产生效。";
             }
             else
             {
@@ -6682,6 +6731,17 @@ public partial class HomePage : UserControl
         };
         ValidateProductionAxisMotionSettings(definition, settings);
         return settings;
+    }
+
+    private IReadOnlyDictionary<int, double> ReadDdTestStationWaitPositions()
+    {
+        return TestStationDefinitions.ToDictionary(definition => definition.AxisNo, definition =>
+            _startSequenceRunning && !_oneKeyCollectRunning && _testStationSettings is { } snapshot
+                ? snapshot.TryGetValue(definition.StationNumber, out var settings)
+                    ? settings.WaitPosition
+                    : throw new InvalidOperationException($"{definition.DisplayName}等待位未配置，禁止启动DD马达。")
+                : ParseFiniteCoordinate(GetTestStationPositionEditors(definition.StationNumber).WaitPosition.Text,
+                    $"{definition.DisplayName}等待位"));
     }
 
     private IReadOnlyDictionary<int, TestStationSettings> ReadTestStationSettings()
@@ -7267,6 +7327,17 @@ public partial class HomePage : UserControl
             return;
         }
 
+        try
+        {
+            (_motionController ?? throw new InvalidOperationException("主页尚未连接运动控制组件。"))
+                .EnsureDdTestStationsSafe();
+        }
+        catch (Exception exception)
+        {
+            SetOneKeyCollectStatus($"一键收料未启动：{exception.Message}", Color.FromRgb(242, 122, 128));
+            return;
+        }
+
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
             "一键收料只转动DD：每次转一个工位，停稳后执行与生产流程完全相同的" +
@@ -7705,6 +7776,7 @@ public partial class HomePage : UserControl
         TestRetryCountTextBox.IsEnabled = commandsIdle;
         SM7110LowerLimitTextBox.IsEnabled = commandsIdle;
         SM7110UpperLimitTextBox.IsEnabled = commandsIdle;
+        SM7110MaximumTimeTextBox.IsEnabled = commandsIdle;
         SM7110LimitModeComboBox.IsEnabled = commandsIdle;
         foreach (var definition in TestStationDefinitions)
         {
@@ -8499,6 +8571,14 @@ public partial class HomePage : UserControl
 
     private sealed record SM7110AcceptanceRange(double Lower, double Upper, string MeasurementMode)
     {
+        public double? MaximumTestSeconds { get; init; }
+
+        public SM7110TimedTestSettings ToTimedTestSettings()
+        {
+            var settings = new SM7110TimedTestSettings(Lower, MaximumTestSeconds ?? double.NaN);
+            settings.Validate();
+            return settings;
+        }
         public void ValidateMeasurementMode(string mode)
         {
             if (!string.Equals(mode?.Trim(), MeasurementMode, StringComparison.OrdinalIgnoreCase))
