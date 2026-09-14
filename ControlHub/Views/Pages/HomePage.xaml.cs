@@ -4075,7 +4075,7 @@ public partial class HomePage : UserControl
                     "已收到结果，正在上抬",
                     "上抬",
                     measurement.DisplayText,
-                    measurement.Passed
+                    measurement.Passed && !measurement.IsNg
                         ? Color.FromRgb(73, 209, 125)
                         : Color.FromRgb(242, 122, 128));
             }
@@ -4126,24 +4126,12 @@ public partial class HomePage : UserControl
                 $"测试完成 · {measurementResult.Value.StatusDescription}",
                 measurementResult.Value.ResultLabel,
                 measurementResult.Value.DisplayText,
-                measurementResult.Value.Passed
+                measurementResult.Value.Passed && !measurementResult.Value.IsNg
                     ? Color.FromRgb(73, 209, 125)
                     : Color.FromRgb(242, 122, 128));
         }
 
         UpdateCarouselStationDisplay(carouselStations);
-        // 判定和下料资格分开处理；BIN0且OK不能混入NG盒，且必须先完成测试轴安全上抬。
-        foreach (var measurement in measurementResults.Where(pair => pair.Value.SM7110Passed == true))
-        {
-            if (measurement.Value.Bin == "BIN0")
-            {
-                const string message = "E4981A为BIN0但SM7110为OK：产品未分档，请人工处理；禁止放入NG盒。";
-                SetTestStationRuntimeDisplay(measurement.Key, "未分档，流程停止", "待处理", message,
-                    Color.FromRgb(242, 122, 128));
-                SetStartProductionStatus(message, Color.FromRgb(242, 122, 128));
-                throw new InvalidOperationException(message);
-            }
-        }
 
         SetStartProductionStatus(
             $"{string.Join("，", stations)} 已收到有效返回并上抬到等待位，DD可继续下一步。",
@@ -4208,7 +4196,16 @@ public partial class HomePage : UserControl
                             ?? throw new InvalidOperationException("本轮生产尚未锁定SM7110合格区间。");
                         range.ValidateMeasurementMode(connectionController.SM7110MeasurementMode);
                         var result = await connectionController.MeasureSM7110Async(token);
-                        return ClassifySM7110Measurement(result, bin, range);
+                        var measurement = ClassifySM7110Measurement(result, bin, range);
+                        return stationState.E4981ALossRejected
+                            ? measurement with
+                            {
+                                E4981ALossRejected = true,
+                                E4981ALossFailureReason = stationState.E4981ALossFailureReason,
+                                StatusDescription = "整体NG · 损耗超限",
+                                DisplayText = $"{measurement.DisplayText} · {stationState.E4981ALossFailureReason} · NG→BIN0"
+                            }
+                            : measurement;
                     }
                     default:
                         throw new InvalidOperationException($"{stationNumber}号工位未分配仪表。");
@@ -4245,9 +4242,13 @@ public partial class HomePage : UserControl
             : "BIN0";
         return new TestStationMeasurementResult(
             bin,
-            $"C={result.CapacitancePf:0.######}pF · D={result.DissipationFactor:G6} · {bin}",
-            result.StatusDescription,
-            result.IsSuccessful);
+            $"C={result.CapacitanceNf:0.######}nF · D={result.DissipationFactor:G6} · " +
+            (result.LossRejected ? $"{result.LossFailureReason} · NG→BIN0" : $"{bin}（仪表：{result.BinDescription}）"),
+            result.LossRejected ? "NG · 损耗超限"
+                : result.IsSuccessful && bin == "BIN0" ? "NG · 未落入BIN1～BIN3" : result.StatusDescription,
+            result.IsSuccessful && !result.LossRejected,
+            E4981ALossRejected: result.LossRejected,
+            E4981ALossFailureReason: result.LossFailureReason);
     }
 
     private static TestStationMeasurementResult ClassifySM7110Measurement(
@@ -4260,7 +4261,7 @@ public partial class HomePage : UserControl
         return new TestStationMeasurementResult(
             bin,
             $"{result.MeasurementMode}={result.Value:G9}{result.Unit} · 合格区间[{range.Lower:G9}, {range.Upper:G9}] · {status} · E4981A:{bin}",
-            status,
+            passed && bin == "BIN0" ? "整体NG · E4981A为BIN0" : status,
             passed,
             passed,
             result.Value);
@@ -4333,18 +4334,17 @@ public partial class HomePage : UserControl
             if (occupied)
             {
                 var waitingForSM7110 = state.Tested && IsSM7110TestEnabled() && state.SM7110Passed is null;
-                var rejected = state.SM7110Passed == false;
-                var unclassified = state.SM7110Passed == true && state.Bin == "BIN0";
+                var rejected = state.Bin == "BIN0" || state.E4981ALossRejected || state.SM7110Passed == false;
                 var complete = state.Tested && !waitingForSM7110;
-                var stateColor = rejected || unclassified ? Color.FromRgb(242, 122, 128)
+                var stateColor = rejected ? Color.FromRgb(242, 122, 128)
                     : complete ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68);
                 card.Background = new SolidColorBrush(
-                    rejected || unclassified ? Color.FromRgb(61, 31, 35)
+                    rejected ? Color.FromRgb(61, 31, 35)
                     : complete ? Color.FromRgb(21, 61, 47) : Color.FromRgb(53, 45, 24));
                 card.BorderBrush = new SolidColorBrush(stateColor);
                 if (resultText is not null)
                 {
-                    resultText.Text = rejected ? "NG → 0号盒" : unclassified ? "未分档 · 待处理"
+                    resultText.Text = rejected ? "NG → 0号盒"
                         : waitingForSM7110 ? "待SM判定" : complete ? "已测试" : CarouselStatusLoaded;
                     resultText.Foreground = new SolidColorBrush(stateColor);
                 }
@@ -4352,7 +4352,8 @@ public partial class HomePage : UserControl
                 if (objectText is not null)
                 {
                     objectText.Text = state.Tested
-                        ? state.SM7110Passed == true ? $"OK · {state.Bin}" : state.Bin ?? "BIN?"
+                        ? state.E4981ALossRejected ? "损耗超限" : rejected ? "NG · BIN0"
+                            : state.SM7110Passed == true ? $"OK · {state.Bin}" : state.Bin ?? "BIN?"
                         : TestStationAxisByStation.ContainsKey(station) ? "待测试" : "有物体";
                     objectText.Foreground = new SolidColorBrush(stateColor);
                 }
@@ -4416,6 +4417,10 @@ public partial class HomePage : UserControl
 
         public double? SM7110Value { get; private set; }
 
+        public bool E4981ALossRejected { get; private set; }
+
+        public string? E4981ALossFailureReason { get; private set; }
+
         public static CarouselStationState Empty() => new();
 
         public void SetLoaded()
@@ -4425,6 +4430,8 @@ public partial class HomePage : UserControl
             Bin = null;
             SM7110Passed = null;
             SM7110Value = null;
+            E4981ALossRejected = false;
+            E4981ALossFailureReason = null;
         }
 
         public void SetTested(string bin)
@@ -4437,6 +4444,12 @@ public partial class HomePage : UserControl
         public void SetMeasurement(TestStationMeasurementResult result)
         {
             SetTested(result.Bin);
+            // 只有第一站的最终结果可以更新损耗判定；后续SM7110合格不能清除NG。
+            if (result.SM7110Passed is null)
+            {
+                E4981ALossRejected = result.E4981ALossRejected;
+                E4981ALossFailureReason = result.E4981ALossFailureReason;
+            }
             if (result.SM7110Passed.HasValue)
             {
                 SM7110Passed = result.SM7110Passed;
@@ -4448,14 +4461,10 @@ public partial class HomePage : UserControl
         {
             if (!Occupied || !Tested || Bin is not ("BIN0" or "BIN1" or "BIN2" or "BIN3"))
                 throw new InvalidOperationException("产品尚无有效E4981A分档结果，禁止下料。");
-            if (!sm7110Enabled)
-                return Bin;
-            if (SM7110Passed is null)
+            if (sm7110Enabled && SM7110Passed is null)
                 throw new InvalidOperationException("产品尚未完成SM7110判定，禁止下料。");
-            if (SM7110Passed == false)
+            if (Bin == "BIN0" || E4981ALossRejected || (sm7110Enabled && SM7110Passed == false))
                 return "NG";
-            if (Bin == "BIN0")
-                throw new InvalidOperationException("产品BIN0且SM7110为OK，未分档，请人工处理；禁止放入NG盒。");
             return Bin;
         }
     }
@@ -6267,8 +6276,8 @@ public partial class HomePage : UserControl
         EnabledStationSummaryText.Foreground = new SolidColorBrush(summaryColor);
         EnabledStationSummaryIndicator.Fill = new SolidColorBrush(summaryColor);
         var sm7110Enabled = IsSM7110TestEnabled();
-        BinRoutingSummaryText.Text = sm7110Enabled ? "双站 · NG + BIN1～BIN3" : "单站 · BIN0～BIN3";
-        Bin0PositionLabel.Text = sm7110Enabled ? "0号盒 · NG" : "0号盒 · BIN0";
+        BinRoutingSummaryText.Text = sm7110Enabled ? "双站 · NG + BIN1～BIN3" : "单站 · NG + BIN1～BIN3";
+        Bin0PositionLabel.Text = "0号盒 · NG（BIN0）";
         Bin1PositionLabel.Text = sm7110Enabled ? "1号盒 · OK · BIN1" : "1号盒 · BIN1";
         Bin2PositionLabel.Text = sm7110Enabled ? "2号盒 · OK · BIN2" : "2号盒 · BIN2";
         Bin3PositionLabel.Text = sm7110Enabled ? "3号盒 · OK · BIN3" : "3号盒 · BIN3";
@@ -6351,7 +6360,7 @@ public partial class HomePage : UserControl
             }
             else
             {
-                SM7110RangeStatusText.Text = "SM7110未启用：只按E4981A分BIN，不判OK/NG。";
+                SM7110RangeStatusText.Text = "SM7110未启用：由E4981A分BIN；电容未落入BIN1～BIN3或启用的损耗限制超限，均判NG进入0号盒。";
             }
             SM7110RangeStatusText.Foreground = new SolidColorBrush(Color.FromRgb(159, 177, 191));
         }
@@ -8468,9 +8477,14 @@ public partial class HomePage : UserControl
         string StatusDescription,
         bool Passed,
         bool? SM7110Passed = null,
-        double? SM7110Value = null)
+        double? SM7110Value = null,
+        bool E4981ALossRejected = false,
+        string? E4981ALossFailureReason = null)
     {
-        public string ResultLabel => SM7110Passed switch
+        // 产品分料判定独立于当前仪表的重试判定；SM7110合格不能覆盖E4981A的NG。
+        public bool IsNg => Bin == "BIN0" || E4981ALossRejected || SM7110Passed == false;
+
+        public string ResultLabel => IsNg ? "NG · BIN0" : SM7110Passed switch
         {
             true => $"OK · {Bin}",
             false => $"NG · {Bin}",

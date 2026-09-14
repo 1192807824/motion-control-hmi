@@ -67,6 +67,8 @@ public partial class ConnectionConfigPage : UserControl
     private bool _tcpConnecting;
     private bool _meterOperationRunning;
     private bool _e4981ASettingsApplied;
+    private string? _e4981AAppliedSetupSignature;
+    private TcpConnectionSettings? _e4981AAppliedSettings;
     private bool _serialConnecting;
     private bool _serialMeterOperationRunning;
     private bool _sm7110SettingsApplied;
@@ -142,7 +144,8 @@ public partial class ConnectionConfigPage : UserControl
             cancellationToken.ThrowIfCancellationRequested();
             await EnsureE4981ASettingsAppliedAsync(cancellationToken);
             var response = await QueryMeterAsync("*TRG", cancellationToken);
-            var result = E4981AProtocol.ParseMeasurement(response);
+            var result = E4981AProtocol.ApplyLossLimit(
+                E4981AProtocol.ParseMeasurement(response), _e4981AAppliedSettings!);
             UpdateMeterResult(result);
             return result;
         }
@@ -503,10 +506,13 @@ public partial class ConnectionConfigPage : UserControl
 
     private async void TriggerMeterTest_Click(object sender, RoutedEventArgs e)
     {
+        CommitInputBindings(this);
         await RunMeterOperationAsync("单次测试", async () =>
         {
+            await EnsureE4981ASettingsAppliedAsync(CancellationToken.None);
             var response = await QueryMeterAsync("*TRG");
-            UpdateMeterResult(E4981AProtocol.ParseMeasurement(response));
+            UpdateMeterResult(E4981AProtocol.ApplyLossLimit(
+                E4981AProtocol.ParseMeasurement(response), _e4981AAppliedSettings!));
         });
     }
 
@@ -1648,14 +1654,19 @@ public partial class ConnectionConfigPage : UserControl
 
     private async Task EnsureE4981ASettingsAppliedAsync(CancellationToken cancellationToken)
     {
-        if (_e4981ASettingsApplied)
-        {
-            return;
-        }
-
         var settings = TcpSettings
             ?? throw new InvalidOperationException("E4981A连接参数未加载。");
         var commands = E4981AProtocol.BuildSetupCommands(settings);
+        var setupSignature = string.Join('\n', commands);
+        if (_e4981ASettingsApplied &&
+            string.Equals(_e4981AAppliedSetupSignature, setupSignature, StringComparison.Ordinal))
+            return;
+
+        // 切配方或编辑上下限后重新下发；判定使用本次实际下发的快照。
+        var appliedSettings = ProductRecipeStore.Clone(settings);
+        _e4981ASettingsApplied = false;
+        _e4981AAppliedSetupSignature = null;
+        _e4981AAppliedSettings = null;
         foreach (var command in commands)
         {
             await SendMeterCommandAsync(command, cancellationToken);
@@ -1668,6 +1679,8 @@ public partial class ConnectionConfigPage : UserControl
             throw new InvalidOperationException($"仪表参数错误：{instrumentError}");
         }
 
+        _e4981AAppliedSettings = appliedSettings;
+        _e4981AAppliedSetupSignature = setupSignature;
         _e4981ASettingsApplied = true;
         AddTcpLog($"E4981A测试参数下发完成，共{commands.Count}条命令");
     }
@@ -1823,17 +1836,22 @@ public partial class ConnectionConfigPage : UserControl
 
     private void UpdateMeterResult(E4981AMeasurementResult result)
     {
-        MeterResultStatusText.Text = result.StatusDescription;
+        var outsideProductionBins = result.Bin is not null && result.Bin is not (>= 1 and <= 3);
+        var rejected = result.LossRejected || outsideProductionBins || !result.IsSuccessful;
+        MeterResultStatusText.Text = result.LossRejected
+            ? $"NG · {result.LossFailureReason}"
+            : result.IsSuccessful && outsideProductionBins ? "NG · 未落入BIN1～BIN3" : result.StatusDescription;
         MeterResultStatusText.Foreground = new SolidColorBrush(
-            result.IsSuccessful ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
-        MeterCapacitanceText.Text = $"{result.CapacitancePf:0.######} pF";
+            !rejected ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
+        MeterCapacitanceText.Text = $"{result.CapacitanceNf:0.######} nF";
         MeterDissipationText.Text = result.DissipationFactor.ToString("G9");
-        MeterBinText.Text = result.BinDescription;
+        MeterBinText.Text = rejected ? $"NG → BIN0（仪表：{result.BinDescription}）" : result.BinDescription;
         MeterRawResultText.Text = result.RawResponse;
         MeterRawResultText.ToolTip = result.RawResponse;
         AddTcpLog(
-            $"测试结果：{result.StatusDescription}，C={result.CapacitancePf:0.######} pF，" +
-            $"D={result.DissipationFactor:G9}，{result.BinDescription}");
+            $"测试结果：{result.StatusDescription}，C={result.CapacitanceNf:0.######} nF，" +
+            $"D={result.DissipationFactor:G9}，{result.BinDescription}" +
+            (result.LossRejected ? $"；{result.LossFailureReason}，NG→BIN0" : ""));
     }
 
     private void TcpClient_DataReceived(byte[] payload)

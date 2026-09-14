@@ -10,7 +10,7 @@ using ControlHub.Services.Devices;
 using ControlHub.Services.Persistence;
 using ControlHub.Views.Pages;
 
-internal static class Program
+internal static partial class Program
 {
     private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
@@ -74,6 +74,7 @@ internal static class Program
             "Old settings must default to one retry.");
         CheckRetriesAsync().GetAwaiter().GetResult();
         CheckE4981AFaultRetriesAsync().GetAwaiter().GetResult();
+        CheckE4981ALossRoutingAsync().GetAwaiter().GetResult();
         CheckSM7110RangeAndRouting(page);
         CheckSM7110RangeRetriesAsync().GetAwaiter().GetResult();
         Require(JsonSerializer.Deserialize<HomePageSettings>("{}")!.TestStationDwellMilliseconds == 200,
@@ -143,6 +144,8 @@ internal static class Program
         Require((string?)product.GetType().GetProperty("Bin")!.GetValue(product) == "BIN0", "Reject BIN lost during rotation.");
         Console.WriteLine("PASS: complete carousel revolution, enabled/empty stations, test-axis highlight, fixed station positions and BIN0 tracking. No hardware opened.");
         CheckSM7110SettingsView();
+        CheckE4981ASetupChanges();
+        CheckE4981ANanofaradUnits();
     }
 
     private static void CheckResult(E4981AMeasurementResult input, string bin, bool passed)
@@ -150,6 +153,8 @@ internal static class Program
         var result = Invoke(null, "ClassifyE4981AMeasurement", input)!;
         Require((string?)result.GetType().GetProperty("Bin")!.GetValue(result) == bin, "Wrong destination BIN.");
         Require((bool)result.GetType().GetProperty("Passed")!.GetValue(result)! == passed, "Wrong pass/fail result.");
+        Require((bool)Property(result, "IsNg")! == (bin == "BIN0"), "BIN0 must be NG independently of measurement validity.");
+        Require((string)Property(result, "ResultLabel")! == (bin == "BIN0" ? "NG · BIN0" : bin), "E4981A badge must label BIN0 as NG.");
     }
 
     private static async Task CheckRetriesAsync()
@@ -287,6 +292,76 @@ internal static class Program
         Console.WriteLine("PASS: E4981A OVLD, Low C/NC and status-0 BIN11 retry through wire parsing; recovery, exhaustion and retries disabled.");
     }
 
+    private static async Task CheckE4981ALossRoutingAsync()
+    {
+        var settings = new TcpConnectionSettings
+        {
+            ComparatorEnabled = true, LossLimitEnabled = true, LossLower = 50, LossUpper = 750,
+            Bin1LowerPf = -9999, Bin1UpperPf = 0, Bin2LowerPf = 0, Bin2UpperPf = 600000,
+            Bin3LowerPf = 600000, Bin3UpperPf = 1200000
+        };
+        var screenshot = new E4981AMeasurementResult(0, 408873e-12, 0.126388, 10, "");
+        var judged = E4981AProtocol.ApplyLossLimit(screenshot, settings);
+        Require(judged.IsSuccessful && judged.LossRejected && judged.LossFailureReason!.Contains("低于下限50"),
+            "Screenshot: valid measurement can still be NG because 0.126388 < 50.");
+        Require(E4981AProtocol.BuildSetupCommands(settings).Contains("CALC1:COMP:SEC:LIM 50,750"),
+            "Loss limits must use raw D units without hidden percent conversion.");
+        foreach (var d in new[] { 49.9, 50, 100, 750, 750.1, double.NaN, double.PositiveInfinity })
+        {
+            var result = E4981AProtocol.ApplyLossLimit(screenshot with { DissipationFactor = d, Bin = 2 }, settings);
+            Require(result.LossRejected == !(d >= 50 && d <= 750), "Loss range boundaries/invalid values handled incorrectly.");
+        }
+        var range = CreateNested("SM7110AcceptanceRange", 100d, 200d, "R");
+        foreach (var instrumentBin in new[] { 0, 1, 2, 3, 10 })
+        {
+            var e4981a = Invoke(null, "ClassifyE4981AMeasurement",
+                E4981AProtocol.ApplyLossLimit(screenshot with { Bin = instrumentBin }, settings))!;
+            var product = ((Array)Invoke(null, "CreateCarouselStationStates")!).GetValue(1)!;
+            Call(product, "SetMeasurement", e4981a);
+            Require((string)Call(product, "GetUnloadDestination", false)! == "NG",
+                "E4981A loss failure must go to box0 even without SM7110.");
+            ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
+            var originalBin = (string)Property(product, "Bin")!;
+            var sm7110 = Invoke(null, "ClassifySM7110Measurement",
+                new SM7110MeasurementResult(150, 0, "R", ""), originalBin, range)!;
+            Call(product, "SetMeasurement", sm7110);
+            Require((bool)Property(product, "E4981ALossRejected")! &&
+                    (string)Call(product, "GetUnloadDestination", true)! == "NG",
+                "SM7110 OK must never erase an earlier E4981A loss failure or stop BIN0 NG as unclassified.");
+            Call(product, "SetLoaded");
+            Require(!(bool)Property(product, "E4981ALossRejected")! && Property(product, "E4981ALossFailureReason") is null,
+                "Loss failure leaked into a new product.");
+        }
+        settings.LossLimitEnabled = false;
+        var disabled = E4981AProtocol.ApplyLossLimit(screenshot with { Bin = 2 }, settings);
+        Require(!disabled.LossRejected && (bool)Property(Invoke(null, "ClassifyE4981AMeasurement", disabled)!, "Passed")!,
+            "Disabled loss filter must preserve valid BIN2.");
+        settings.LossLimitEnabled = true;
+        settings.LossLower = 0.05;
+        settings.LossUpper = 0.75;
+        var valid = E4981AProtocol.ApplyLossLimit(screenshot with { Bin = 2 }, settings);
+        Require(!valid.LossRejected && (string?)Property(Invoke(null, "ClassifyE4981AMeasurement", valid)!, "Bin") == "BIN2",
+            "Screenshot capacitance and D must pass BIN2 when both configured ranges contain the values.");
+        foreach (var recover in new[] { false, true })
+        {
+            var attempts = 0;
+            object? final = null;
+            await Retry(_ =>
+            {
+                attempts++;
+                final = Invoke(null, "ClassifyE4981AMeasurement", E4981AProtocol.ApplyLossLimit(
+                    screenshot with { Bin = 2, DissipationFactor = recover && attempts == 2 ? 0.126388 : 0.9 }, settings))!;
+                return Task.FromResult((bool)Property(final, "Passed")!);
+            }, 2);
+            var product = ((Array)Invoke(null, "CreateCarouselStationStates")!).GetValue(1)!;
+            Call(product, "SetMeasurement", final!);
+            Require(attempts == (recover ? 2 : 3) &&
+                    (string)Call(product, "GetUnloadDestination", false)! == (recover ? "BIN2" : "NG"),
+                "Final loss retry result must determine BIN2 versus box0 NG.");
+        }
+        Console.WriteLine("PASS: screenshot loss diagnosis, raw D units, inclusive limits, disabled filter, loss retries and sticky NG across both stations.");
+    }
+
     private static void CheckSM7110RangeAndRouting(HomePage page)
     {
         var lower = new TextBox { Text = "1e9" };
@@ -336,7 +411,8 @@ internal static class Program
             Call(product, "SetLoaded");
             ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", false));
             Call(product, "SetTested", bin);
-            Require((string)Call(product, "GetUnloadDestination", false)! == bin, "Single station must retain all four BIN destinations.");
+            Require((string)Call(product, "GetUnloadDestination", false)! == (bin == "BIN0" ? "NG" : bin),
+                "Single station must route out-of-bin capacitance to NG and preserve BIN1-3.");
             ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
             foreach (var passed in new[] { false, true })
             {
@@ -345,22 +421,24 @@ internal static class Program
                 Call(product, "SetMeasurement", result);
                 Require((string?)Property(product, "Bin") == bin, "SM7110 must retain the original E4981A BIN.");
                 Require((bool)Property(product, "SM7110Passed")! == passed, "Final SM7110 judgement lost.");
+                var rejected = !passed || bin == "BIN0";
+                Require((bool)Property(result, "IsNg")! == rejected, "BIN0 must remain NG even when SM7110 passes.");
+                Require((string)Property(result, "ResultLabel")! == (rejected ? "NG · BIN0" : $"OK · {bin}"),
+                    "Result badge must identify the actual NG box and never show OK BIN0.");
+                Require((bool)Property(result, "Passed")! == passed, "Prior BIN0 must not cause a successful SM7110 reading to retry.");
                 if (passed && bin == "BIN0")
-                {
-                    ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
-                    continue;
-                }
+                    Require(((string)Property(result, "StatusDescription")!).Contains("整体NG"), "BIN0 status must show overall NG.");
                 var destination = (string)Call(product, "GetUnloadDestination", true)!;
-                Require(destination == (passed ? bin : "NG"), "NG must override every original BIN.");
+                Require(destination == (rejected ? "NG" : bin), "NG must override every original BIN.");
                 var target = Call(positions, "Resolve", destination, 13)!;
-                var expected = Property(positions, passed ? "Bin" + bin[^1] : "Bin0");
+                var expected = Property(positions, rejected ? "Bin0" : "Bin" + bin[^1]);
                 Require(target.Equals(expected), "Logical destination mapped to the wrong physical box coordinates.");
             }
             Call(product, "SetLoaded");
             Require(Property(product, "Bin") is null && Property(product, "SM7110Passed") is null &&
                     Property(product, "SM7110Value") is null, "New product inherited a prior measurement.");
         }
-        Console.WriteLine("PASS: inclusive SM7110 range, invalid/missing limits, units, four-box routing, pending results and BIN0/OK interlock.");
+        Console.WriteLine("PASS: inclusive SM7110 range, invalid/missing limits, units, four-box routing, pending results and BIN0 NG precedence.");
     }
 
     private static async Task CheckSM7110RangeRetriesAsync()
@@ -427,7 +505,7 @@ internal static class Program
             }
         };
         home.ApplyRecipeSettings(single);
-        Require(((TextBlock)home.FindName("Bin0PositionLabel")).Text == "0号盒 · BIN0", "Single-station box label incorrect.");
+        Require(((TextBlock)home.FindName("Bin0PositionLabel")).Text == "0号盒 · NG（BIN0）", "Single-station box label incorrect.");
         Require(!(bool)Invoke(home, "IsSM7110TestEnabled")!, "Single-station configuration unexpectedly enabled SM7110.");
         var savedSingle = home.CaptureRecipeSettings();
         Require(savedSingle.SM7110LowerLimit is null, "Single-station recipe must not require SM7110 limits.");
@@ -435,7 +513,7 @@ internal static class Program
         var dual = ProductRecipeStore.Clone(savedSingle);
         dual.TestStationSettings[6] = new() { Enabled = true, Instrument = TestStationInstrument.SM7110 };
         home.ApplyRecipeSettings(dual);
-        Require(((TextBlock)home.FindName("Bin0PositionLabel")).Text == "0号盒 · NG", "Dual-station box label incorrect.");
+        Require(((TextBlock)home.FindName("Bin0PositionLabel")).Text == "0号盒 · NG（BIN0）", "Dual-station box label incorrect.");
         Require(((TextBlock)home.FindName("Bin3PositionLabel")).Text == "3号盒 · OK · BIN3", "Good-bin label incorrect.");
         Require(!(bool)Invoke(home, "AllTestStationParametersValid")!, "Dual mode with missing limits must block start.");
 

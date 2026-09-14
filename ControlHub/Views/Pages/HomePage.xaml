@@ -2170,7 +2170,7 @@
                                            FontSize="12"
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
-                                        <TextBlock x:Name="BinRoutingSummaryText" Text="单站 · BIN0～BIN3"
+                                        <TextBlock x:Name="BinRoutingSummaryText" Text="单站 · NG + BIN1～BIN3"
                                            Foreground="#49D17D"
                                            FontSize="10"
                                            HorizontalAlignment="Right"
@@ -2178,7 +2178,7 @@
                                     </Grid>
                                     <UniformGrid Grid.Row="1" Rows="2" Columns="2">
                                         <StackPanel Margin="0,3,10,3">
-                                            <TextBlock x:Name="Bin0PositionLabel" Text="0号盒 · BIN0" Foreground="#9FB1BF" FontSize="9" />
+                                            <TextBlock x:Name="Bin0PositionLabel" Text="0号盒 · NG（BIN0）" Foreground="#9FB1BF" FontSize="9" />
                                             <Grid Margin="0,2,0,0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -2734,7 +2734,7 @@
                 </UniformGrid>
                 <TextBlock x:Name="SM7110RangeStatusText" Foreground="#9FB1BF" FontSize="11"
                            TextWrapping="Wrap" Margin="0,8,0,0" />
-                <TextBlock Text="双站：NG→0号盒；OK按BIN1～BIN3分料。BIN0且OK时停机提示未分档。"
+                <TextBlock Text="电容未落入BIN1～BIN3或损耗超限→NG（0号盒）；双站时SM7110不合格也进入NG盒，全部合格才按BIN1～BIN3分料。"
                            Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
             </StackPanel>
         </Border>

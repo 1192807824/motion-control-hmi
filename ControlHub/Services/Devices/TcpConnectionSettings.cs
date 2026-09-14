@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 namespace ControlHub.Services.Devices;
 
@@ -125,6 +126,25 @@ public sealed class TcpConnectionSettings : INotifyPropertyChanged
         set => SetField(ref _bin1Enabled, value);
     }
 
+    // 保留历史配置/配方的pF存储字段，界面统一通过nF属性读写，避免旧范围被放大1000倍。
+    [JsonIgnore]
+    public double Bin1LowerNf { get => Bin1LowerPf / 1000; set => Bin1LowerPf = value * 1000; }
+
+    [JsonIgnore]
+    public double Bin1UpperNf { get => Bin1UpperPf / 1000; set => Bin1UpperPf = value * 1000; }
+
+    [JsonIgnore]
+    public double Bin2LowerNf { get => Bin2LowerPf / 1000; set => Bin2LowerPf = value * 1000; }
+
+    [JsonIgnore]
+    public double Bin2UpperNf { get => Bin2UpperPf / 1000; set => Bin2UpperPf = value * 1000; }
+
+    [JsonIgnore]
+    public double Bin3LowerNf { get => Bin3LowerPf / 1000; set => Bin3LowerPf = value * 1000; }
+
+    [JsonIgnore]
+    public double Bin3UpperNf { get => Bin3UpperPf / 1000; set => Bin3UpperPf = value * 1000; }
+
     public double Bin1LowerPf
     {
         get => _bin1LowerPf;
@@ -206,5 +226,17 @@ public sealed class TcpConnectionSettings : INotifyPropertyChanged
 
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        var nfPropertyName = propertyName switch
+        {
+            nameof(Bin1LowerPf) => nameof(Bin1LowerNf),
+            nameof(Bin1UpperPf) => nameof(Bin1UpperNf),
+            nameof(Bin2LowerPf) => nameof(Bin2LowerNf),
+            nameof(Bin2UpperPf) => nameof(Bin2UpperNf),
+            nameof(Bin3LowerPf) => nameof(Bin3LowerNf),
+            nameof(Bin3UpperPf) => nameof(Bin3UpperNf),
+            _ => null
+        };
+        if (nfPropertyName is not null)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nfPropertyName));
     }
 }

@@ -1135,7 +1135,7 @@
                                             CornerRadius="6,6,0,0"
                                             Padding="14,0">
                                         <Grid>
-                                            <TextBlock Text="电容分BIN与损耗限制（电容单位：pF）" Style="{StaticResource PanelTitle}" />
+                                            <TextBlock Text="电容分BIN与损耗限制（电容单位：nF）" Style="{StaticResource PanelTitle}" />
                                             <CheckBox HorizontalAlignment="Right" Content="启用仪表比较器"
                                                       Style="{StaticResource ConfigCheckBox}"
                                                       IsChecked="{Binding TcpConnectionSettings.ComparatorEnabled}" />
@@ -1158,6 +1158,7 @@
                                             <RowDefinition Height="40" />
                                             <RowDefinition Height="40" />
                                             <RowDefinition Height="40" />
+                                            <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <TextBlock Grid.Column="1" Text="启用" Style="{StaticResource FieldLabel}" />
                                         <TextBlock Grid.Column="3" Text="下限" Style="{StaticResource FieldLabel}" />
@@ -1167,33 +1168,38 @@
                                         <CheckBox Grid.Row="1" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
                                                   IsChecked="{Binding TcpConnectionSettings.Bin1Enabled}" />
                                         <TextBox Grid.Row="1" Grid.Column="4" Style="{StaticResource ConfigInput}"
-                                                 Text="{Binding TcpConnectionSettings.Bin1LowerPf, UpdateSourceTrigger=LostFocus}" />
+                                                 Text="{Binding TcpConnectionSettings.Bin1LowerNf, UpdateSourceTrigger=LostFocus}" />
                                         <TextBox Grid.Row="1" Grid.Column="7" Style="{StaticResource ConfigInput}"
-                                                 Text="{Binding TcpConnectionSettings.Bin1UpperPf, UpdateSourceTrigger=LostFocus}" />
+                                                 Text="{Binding TcpConnectionSettings.Bin1UpperNf, UpdateSourceTrigger=LostFocus}" />
 
                                         <TextBlock Grid.Row="2" Text="BIN2" Style="{StaticResource FieldLabel}" />
                                         <CheckBox Grid.Row="2" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
                                                   IsChecked="{Binding TcpConnectionSettings.Bin2Enabled}" />
                                         <TextBox Grid.Row="2" Grid.Column="4" Style="{StaticResource ConfigInput}"
-                                                 Text="{Binding TcpConnectionSettings.Bin2LowerPf, UpdateSourceTrigger=LostFocus}" />
+                                                 Text="{Binding TcpConnectionSettings.Bin2LowerNf, UpdateSourceTrigger=LostFocus}" />
                                         <TextBox Grid.Row="2" Grid.Column="7" Style="{StaticResource ConfigInput}"
-                                                 Text="{Binding TcpConnectionSettings.Bin2UpperPf, UpdateSourceTrigger=LostFocus}" />
+                                                 Text="{Binding TcpConnectionSettings.Bin2UpperNf, UpdateSourceTrigger=LostFocus}" />
 
                                         <TextBlock Grid.Row="3" Text="BIN3" Style="{StaticResource FieldLabel}" />
                                         <CheckBox Grid.Row="3" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
                                                   IsChecked="{Binding TcpConnectionSettings.Bin3Enabled}" />
                                         <TextBox Grid.Row="3" Grid.Column="4" Style="{StaticResource ConfigInput}"
-                                                 Text="{Binding TcpConnectionSettings.Bin3LowerPf, UpdateSourceTrigger=LostFocus}" />
+                                                 Text="{Binding TcpConnectionSettings.Bin3LowerNf, UpdateSourceTrigger=LostFocus}" />
                                         <TextBox Grid.Row="3" Grid.Column="7" Style="{StaticResource ConfigInput}"
-                                                 Text="{Binding TcpConnectionSettings.Bin3UpperPf, UpdateSourceTrigger=LostFocus}" />
+                                                 Text="{Binding TcpConnectionSettings.Bin3UpperNf, UpdateSourceTrigger=LostFocus}" />
 
                                         <TextBlock Grid.Row="4" Text="损耗 D" Style="{StaticResource FieldLabel}" />
                                         <CheckBox Grid.Row="4" Grid.Column="1" Style="{StaticResource ConfigCheckBox}"
                                                   IsChecked="{Binding TcpConnectionSettings.LossLimitEnabled}" />
                                         <TextBox Grid.Row="4" Grid.Column="4" Style="{StaticResource ConfigInput}"
+                                                 ToolTip="损耗D原始值，不是百分数。例如0.1表示10%。"
                                                  Text="{Binding TcpConnectionSettings.LossLower, UpdateSourceTrigger=LostFocus}" />
                                         <TextBox Grid.Row="4" Grid.Column="7" Style="{StaticResource ConfigInput}"
+                                                 ToolTip="损耗D原始值；低于下限或高于上限均判NG并放入0号盒。"
                                                  Text="{Binding TcpConnectionSettings.LossUpper, UpdateSourceTrigger=LostFocus}" />
+                                        <TextBlock Grid.Row="5" Grid.ColumnSpan="8" Margin="0,8,0,0"
+                                                   Foreground="#AAB9C6" FontSize="12" TextWrapping="Wrap"
+                                                   Text="损耗D按原始值填写（0.1 = 10%）；超出上下限时判NG，放入0号盒（BIN0），单站和双站均生效。" />
                                     </Grid>
                                 </Grid>
                             </Border>
@@ -1244,7 +1250,7 @@
                                                    Text="--" Style="{StaticResource MetricValue}" />
                                         <TextBlock Grid.Row="2" Text="电容值" Style="{StaticResource FieldLabel}" />
                                         <TextBlock x:Name="MeterCapacitanceText" Grid.Row="2" Grid.Column="1"
-                                                   Text="-- pF" Style="{StaticResource MetricValue}" />
+                                                   Text="-- nF" Style="{StaticResource MetricValue}" />
                                         <TextBlock Grid.Row="2" Grid.Column="2" Text="损耗 D" Style="{StaticResource FieldLabel}" />
                                         <TextBlock x:Name="MeterDissipationText" Grid.Row="2" Grid.Column="3"
                                                    Text="--" Style="{StaticResource MetricValue}" />

@@ -7,9 +7,12 @@ public sealed record E4981AMeasurementResult(
     double CapacitanceFarads,
     double DissipationFactor,
     int? Bin,
-    string RawResponse)
+    string RawResponse,
+    string? LossFailureReason = null)
 {
-    public double CapacitancePf => CapacitanceFarads * 1e12;
+    public bool LossRejected => LossFailureReason is not null;
+
+    public double CapacitanceNf => CapacitanceFarads * 1e9;
 
     // 比较器也会通过BIN11报告过载/无接触，不能仅凭状态码为0认定测量成功。
     public bool IsSuccessful => Status == 0 && Bin != 11 && double.IsFinite(CapacitanceFarads);
@@ -142,6 +145,26 @@ public static class E4981AProtocol
         }
 
         return new E4981AMeasurementResult(status, capacitance, dissipation, bin, response.Trim());
+    }
+
+    public static E4981AMeasurementResult ApplyLossLimit(
+        E4981AMeasurementResult result, TcpConnectionSettings settings)
+    {
+        string? reason = null;
+        if (result.IsSuccessful && settings.ComparatorEnabled && settings.LossLimitEnabled)
+        {
+            if (!double.IsFinite(settings.LossLower) || !double.IsFinite(settings.LossUpper) ||
+                settings.LossLower >= settings.LossUpper)
+                throw new InvalidOperationException("损耗D下限必须小于上限，且必须是有限数值。");
+            var value = result.DissipationFactor;
+            if (!double.IsFinite(value))
+                reason = "损耗D测量值无效";
+            else if (value < settings.LossLower)
+                reason = $"损耗D={value:G9}低于下限{settings.LossLower:G9}";
+            else if (value > settings.LossUpper)
+                reason = $"损耗D={value:G9}高于上限{settings.LossUpper:G9}";
+        }
+        return result with { LossFailureReason = reason };
     }
 
     public static bool ExpectsResponse(string command)
