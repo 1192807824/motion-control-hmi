@@ -34,38 +34,48 @@ internal static partial class Program
             start();
             Require(recorder.Commands.Count == count + 1, "Equality at each wait position must allow DD motion.");
             foreach (var axis in waits.Keys)
+            foreach (var offset in new[] { -1000d, -100.001d, 100.001d, 1000d })
             {
                 Reset();
-                recorder.States[axis] = DdSnapshot(axis, waits[axis] + 0.001);
+                recorder.States[axis] = DdSnapshot(axis, waits[axis] + offset);
                 count = recorder.Commands.Count;
                 var message = DdExpectBlocked(start);
                 Require(recorder.Commands.Count == count, "Unsafe DD action reached the motion card.");
-                Require(message.Contains($"轴{axis}") && message.Contains("当前位置") && message.Contains("实时位置均≤各自等待位"),
+                Require(message.Contains($"轴{axis}") && message.Contains("当前位置") && message.Contains("各自等待位±100 pulse范围内"),
                     "Warning must identify the unsafe station, current position and wait position.");
             }
-            Reset();
-            foreach (var axis in waits.Keys) recorder.States[axis] = DdSnapshot(axis, waits[axis] - 10);
-            count = recorder.Commands.Count;
-            start();
-            Require(recorder.Commands.Count == count + 1, "Feedback coordinates smaller than the wait positions must allow DD motion.");
+            foreach (var offset in new[] { -100d, -99.999d, -10d, 0d, 0.001d, 99.999d, 100d })
+            {
+                Reset();
+                foreach (var axis in waits.Keys) recorder.States[axis] = DdSnapshot(axis, waits[axis] + offset);
+                count = recorder.Commands.Count;
+                start();
+                Require(recorder.Commands.Count == count + 1,
+                    "Positions within the inclusive +/-100 pulse tolerance must allow DD motion.");
+            }
         }
+        foreach (var axis in waits.Keys)
+        foreach (var boundary in new[] { -100d, 100d })
         foreach (var invalid in new[]
         {
-            DdSnapshot(13, double.NaN), DdSnapshot(13, double.PositiveInfinity),
-            DdSnapshot(13, -100) with { IsMoving = true }, DdSnapshot(13, -100) with { Alarm = true },
-            DdSnapshot(13, -100) with { EmergencyInput = true }, DdSnapshot(14, -100)
+            DdSnapshot(axis, double.NaN), DdSnapshot(axis, double.PositiveInfinity), DdSnapshot(axis, double.NegativeInfinity),
+            DdSnapshot(axis, waits[axis] + boundary) with { IsMoving = true },
+            DdSnapshot(axis, waits[axis] + boundary) with { Alarm = true },
+            DdSnapshot(axis, waits[axis] + boundary) with { EmergencyInput = true }, DdSnapshot(axis + 1, waits[axis])
         })
         {
             Reset();
-            recorder.States[13] = invalid;
+            recorder.States[axis] = invalid;
+            var count = recorder.Commands.Count;
             DdExpectBlocked(() => card.Jog(0, 100));
+            Require(recorder.Commands.Count == count, "Tolerance must never bypass invalid feedback, motion, alarm or emergency states.");
         }
         Reset();
         recorder.States.Remove(14);
         Require(DdExpectBlocked(() => card.Home(0)).Contains("无法读取实时位置"), "Read failures must fail closed.");
         DdExpectBlocked(() => DdTestStationInterlock.EnsureSafe(new Dictionary<int, double>(), raw.ReadAxis));
         Reset();
-        recorder.States[15] = DdSnapshot(15, 101);
+        recorder.States[15] = DdSnapshot(15, waits[15] + 101);
         var checksBeforeRecovery = guardCalls;
         card.MoveAbsolute(15, 100, 100);
         card.Jog(13, 100);
@@ -97,7 +107,7 @@ internal static partial class Program
         Set(home, "_oneKeyCollectRunning", true);
         settings = (IReadOnlyDictionary<int, double>)Invoke(home, "ReadDdTestStationWaitPositions")!;
         Require(settings[15] == 70, "One-key collect must use current waits, not stale production settings.");
-        Console.WriteLine("PASS: every DD motion API, all three station thresholds, fresh encoder checks, invalid/moving states, recovery/stop bypass and production/collect settings.");
+        Console.WriteLine("PASS: every DD motion API, all three stations, inclusive +/-100 pulse tolerance, +/-100.001 rejection, invalid/moving/alarm/emergency states at both boundaries, recovery/stop bypass and production/collect settings. No hardware opened.");
     }
 
     private static MotionAxisSnapshot DdSnapshot(int axis, double feedback) =>

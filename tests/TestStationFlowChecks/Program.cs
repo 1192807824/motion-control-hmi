@@ -15,8 +15,15 @@ internal static partial class Program
     private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (args is ["--dd-interlock-only"])
+        {
+            _ = new Application();
+            CheckDdTestStationInterlock();
+            return;
+        }
+
         foreach (var status in new[] { 1, 2 })
         foreach (int? bin in new int?[] { null, 0, 1, 11 })
             CheckResult(new(status, 1e-10, 0.01, bin, ""), "BIN0", false);
