@@ -403,18 +403,18 @@ public partial class HomePage : UserControl
 
     public HomePageSettings CaptureRecipeSettings()
     {
+        SaveVisionPickupCountFromInput(throwOnInvalid: true);
         SaveSM7110RangeFromInputs(throwOnInvalid: true);
         SaveObservationCompensationFromInputs(throwOnInvalid: true);
-        SaveVisionPickupCountFromInput();
-        SaveFirstSetTeachingPositionsFromInputs();
-        SavePresetPositionsFromInputs();
-        SaveLowerCameraPhotoPositionsFromInputs();
-        SaveLowerCameraRotationCentersFromInputs();
-        SaveProductionAxisParametersFromInputs();
-        SaveTestStationParametersFromInputs();
-        SaveProductionZPositionsFromInputs();
-        SaveSecondSetXyPositionsFromInputs();
-        SaveBinPositionsFromInputs();
+        SaveFirstSetTeachingPositionsFromInputs(throwOnInvalid: true);
+        SavePresetPositionsFromInputs(throwOnInvalid: true);
+        SaveLowerCameraPhotoPositionsFromInputs(throwOnInvalid: true);
+        SaveLowerCameraRotationCentersFromInputs(throwOnInvalid: true);
+        SaveProductionAxisParametersFromInputs(throwOnInvalid: true);
+        SaveTestStationParametersFromInputs(throwOnInvalid: true);
+        SaveProductionZPositionsFromInputs(throwOnInvalid: true);
+        SaveSecondSetXyPositionsFromInputs(throwOnInvalid: true);
+        SaveBinPositionsFromInputs(throwOnInvalid: true);
         return ProductRecipeStore.Clone(_homeSettings);
     }
 
@@ -6961,7 +6961,7 @@ public partial class HomePage : UserControl
         }
     }
 
-    private void SaveTestStationParametersFromInputs()
+    private void SaveTestStationParametersFromInputs(bool throwOnInvalid = false)
     {
         if (_loadingPresetPositions)
         {
@@ -6978,17 +6978,17 @@ public partial class HomePage : UserControl
                 pair => pair.Value);
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (ArgumentException)
+        catch (ArgumentException) when (!throwOnInvalid)
         {
             // 输入尚未完成时等待用户继续编辑。
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存测试站位置失败：{exception.Message}", false);
         }
     }
 
-    private void SaveProductionAxisParametersFromInputs()
+    private void SaveProductionAxisParametersFromInputs(bool throwOnInvalid = false)
     {
         if (_loadingPresetPositions)
         {
@@ -7003,22 +7003,30 @@ public partial class HomePage : UserControl
                     pair => pair.Value);
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (ArgumentException)
+        catch (ArgumentException) when (!throwOnInvalid)
         {
             // 输入尚未完成时只保持按钮禁用，等待用户继续编辑。
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存生产轴参数失败：{exception.Message}", false);
         }
     }
 
-    private void SaveVisionPickupCountFromInput()
+    private void SaveVisionPickupCountFromInput(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            VisionPickupCountTextBox is null ||
-            !TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out var pickupCount))
+        if (_loadingPresetPositions || VisionPickupCountTextBox is null)
         {
+            return;
+        }
+
+        if (!TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out var pickupCount))
+        {
+            // Typing may temporarily leave an invalid draft, but an explicit recipe save must reject it.
+            if (throwOnInvalid)
+            {
+                _ = ParseVisionPickupCount(VisionPickupCountTextBox.Text, "抓取颗数");
+            }
             return;
         }
 
@@ -7027,7 +7035,7 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存视觉抓取颗数失败：{exception.Message}", false);
         }
@@ -7080,10 +7088,14 @@ public partial class HomePage : UserControl
                 axisNo => GetProductionAxisMotionSettings(axisNo).RunVelocity);
     }
 
-    private void SaveProductionZPositionsFromInputs()
+    private void SaveProductionZPositionsFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            FirstSetNozzle1PickupZPositionTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (FirstSetNozzle1PickupZPositionTextBox is null ||
             FirstSetNozzle1DropZPositionTextBox is null ||
             FirstSetNozzle1SafeZPositionTextBox is null ||
             FirstSetNozzle2PickupZPositionTextBox is null ||
@@ -7139,6 +7151,10 @@ public partial class HomePage : UserControl
              (secondSetNozzle1Pickup <= secondSetNozzle1Safe ||
               secondSetNozzle1PreDropPulses > secondSetNozzle1Pickup - secondSetNozzle1Safe)))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("Z轴高度、真空时间或预下降参数无效：高度须为有限数值，时间须为0–60000整数毫秒，提前量须非负且预下降量不能超过对应行程。");
+            }
             return;
         }
 
@@ -7165,16 +7181,20 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存Z轴高度或停留时间失败：{exception.Message}", false);
         }
     }
 
-    private void SaveSecondSetXyPositionsFromInputs()
+    private void SaveSecondSetXyPositionsFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            SecondSetPosition1XTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (SecondSetPosition1XTextBox is null ||
             SecondSetPosition1YTextBox is null ||
             SecondSetPosition2XTextBox is null ||
             SecondSetPosition2YTextBox is null ||
@@ -7183,6 +7203,10 @@ public partial class HomePage : UserControl
             !TryParseCoordinate(SecondSetPosition2XTextBox.Text, out var position2X) ||
             !TryParseCoordinate(SecondSetPosition2YTextBox.Text, out var position2Y))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("第二套XY下料位置未保存：位置1、位置2的X/Y必须为有限数值。");
+            }
             return;
         }
 
@@ -7194,16 +7218,20 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存第二套XY下料位置失败：{exception.Message}", false);
         }
     }
 
-    private void SaveBinPositionsFromInputs()
+    private void SaveBinPositionsFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            Bin0PositionXTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (Bin0PositionXTextBox is null ||
             Bin0PositionYTextBox is null ||
             Bin1PositionXTextBox is null ||
             Bin1PositionYTextBox is null ||
@@ -7220,6 +7248,10 @@ public partial class HomePage : UserControl
             !TryParseOptionalCoordinate(Bin3PositionXTextBox.Text, out var bin3PositionX) ||
             !TryParseOptionalCoordinate(Bin3PositionYTextBox.Text, out var bin3PositionY))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("BIN分料位置未保存：各料盒X/Y须为有限数值，未配置的位置可留空。");
+            }
             return;
         }
 
@@ -7235,16 +7267,20 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存BIN分料位置失败：{exception.Message}", false);
         }
     }
 
-    private void SavePresetPositionsFromInputs()
+    private void SavePresetPositionsFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            PresetPosition1XTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (PresetPosition1XTextBox is null ||
             PresetPosition1YTextBox is null ||
             PresetPosition2XTextBox is null ||
             PresetPosition2YTextBox is null ||
@@ -7253,6 +7289,10 @@ public partial class HomePage : UserControl
             !TryParseOptionalCoordinate(PresetPosition2XTextBox.Text, out var position2X) ||
             !TryParseOptionalCoordinate(PresetPosition2YTextBox.Text, out var position2Y))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("绝对位置未保存：位置1、位置2的X/Y须为有限数值，未配置的位置可留空。");
+            }
             return;
         }
 
@@ -7264,16 +7304,20 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetPositionStatus($"保存绝对位置失败：{exception.Message}", false);
         }
     }
 
-    private void SaveFirstSetTeachingPositionsFromInputs()
+    private void SaveFirstSetTeachingPositionsFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            FirstSetTeachingCenterXTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (FirstSetTeachingCenterXTextBox is null ||
             FirstSetTeachingCenterYTextBox is null ||
             FirstSetTeachingPressPositionXTextBox is null ||
             FirstSetTeachingPressPositionYTextBox is null ||
@@ -7290,6 +7334,10 @@ public partial class HomePage : UserControl
                 FirstSetTeachingPressPositionYTextBox.Text,
                 out var pressPositionY))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("第一套XY示教位置未保存：中心及下压位置的X/Y须为有限数值，未配置的位置可留空。");
+            }
             return;
         }
 
@@ -7301,7 +7349,7 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetFirstSetTeachingPositionStatus($"保存第一套XY示教位置失败：{exception.Message}", false);
         }
@@ -7901,10 +7949,14 @@ public partial class HomePage : UserControl
         OneKeyCollectHintText.Foreground = new SolidColorBrush(color);
     }
 
-    private void SaveLowerCameraPhotoPositionsFromInputs()
+    private void SaveLowerCameraPhotoPositionsFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            LowerCameraPhotoPosition1XTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (LowerCameraPhotoPosition1XTextBox is null ||
             LowerCameraPhotoPosition1YTextBox is null ||
             LowerCameraPhotoPosition2XTextBox is null ||
             LowerCameraPhotoPosition2YTextBox is null ||
@@ -7913,6 +7965,10 @@ public partial class HomePage : UserControl
             !TryParseOptionalCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out var position2X) ||
             !TryParseOptionalCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out var position2Y))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("下相机拍照位未保存：两个拍照位的X/Y须为有限数值，未配置的位置可留空。");
+            }
             return;
         }
 
@@ -7924,7 +7980,7 @@ public partial class HomePage : UserControl
         {
             _homeSettingsStore.Save(_homeSettings);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetLowerCameraPhotoPositionStatus(
                 $"保存下相机拍照位失败：{exception.Message}",
@@ -7932,10 +7988,14 @@ public partial class HomePage : UserControl
         }
     }
 
-    private void SaveLowerCameraRotationCentersFromInputs()
+    private void SaveLowerCameraRotationCentersFromInputs(bool throwOnInvalid = false)
     {
-        if (_loadingPresetPositions ||
-            LowerCameraNozzle1RotationCenterXTextBox is null ||
+        if (_loadingPresetPositions)
+        {
+            return;
+        }
+
+        if (LowerCameraNozzle1RotationCenterXTextBox is null ||
             LowerCameraNozzle1RotationCenterYTextBox is null ||
             LowerCameraNozzle2RotationCenterXTextBox is null ||
             LowerCameraNozzle2RotationCenterYTextBox is null ||
@@ -7952,6 +8012,10 @@ public partial class HomePage : UserControl
                 LowerCameraNozzle2RotationCenterYTextBox.Text,
                 out var nozzle2CenterY))
         {
+            if (throwOnInvalid)
+            {
+                throw new ArgumentException("下相机旋转中心未保存：两个吸嘴的X/Y须为有限数值，未配置的中心可留空。");
+            }
             return;
         }
 
@@ -7966,7 +8030,7 @@ public partial class HomePage : UserControl
                 "下相机旋转中心参数已更新；计算流程会自动回填对应吸嘴的X/Y。",
                 true);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!throwOnInvalid)
         {
             SetLowerCameraPhotoPositionStatus(
                 $"保存下相机旋转中心参数失败：{exception.Message}",
@@ -8432,7 +8496,7 @@ public partial class HomePage : UserControl
     private static string FormatPresetCoordinate(double? value)
     {
         return value is { } coordinate && double.IsFinite(coordinate)
-            ? coordinate.ToString("0.###", CultureInfo.CurrentCulture)
+            ? coordinate.ToString("R", CultureInfo.CurrentCulture)
             : string.Empty;
     }
 

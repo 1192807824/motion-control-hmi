@@ -76,6 +76,7 @@ public partial class ParameterSettingsPage : UserControl
 
     private void CreateRecipe_Click(object sender, RoutedEventArgs e)
     {
+        CommitPendingInput();
         RunRecipeOperation(() =>
         {
             var recipe = _recipeStore.Create(RecipeNameTextBox.Text);
@@ -285,7 +286,9 @@ public partial class ParameterSettingsPage : UserControl
             pair => pair.Value);
         recipe.Motion = _motionPage.CaptureRecipeMotionSettings();
         recipe.VisionCalibration = VisionCalibrationService.Shared.CaptureRecipeSettings();
-        recipe.VisionProcedureNames = _visualCalibrationPage!.GetCurrentVisionProcedureNames();
+        recipe.VisionProcedureNames = SelectedRecipe is not null
+            ? ReadVisionProcedureNames()
+            : _visualCalibrationPage!.GetCurrentVisionProcedureNames();
         recipe.E4981A = ProductRecipeStore.Clone(_viewModel!.TcpConnectionSettings);
         recipe.SM7110 = ProductRecipeStore.Clone(_viewModel.SerialConnectionSettings);
         recipe.VibrationFeeder = ProductRecipeStore.Clone(_viewModel.FeederSettings);
