@@ -34,34 +34,34 @@ internal static partial class Program
             start();
             Require(recorder.Commands.Count == count + 1, "Equality at each wait position must allow DD motion.");
             foreach (var axis in waits.Keys)
-            foreach (var offset in new[] { -1000d, -100.001d, 100.001d, 1000d })
+            foreach (var offset in new[] { 100.001d, 1000d })
             {
                 Reset();
                 recorder.States[axis] = DdSnapshot(axis, waits[axis] + offset);
                 count = recorder.Commands.Count;
                 var message = DdExpectBlocked(start);
                 Require(recorder.Commands.Count == count, "Unsafe DD action reached the motion card.");
-                Require(message.Contains($"轴{axis}") && message.Contains("当前位置") && message.Contains("各自等待位±100 pulse范围内"),
+                Require(message.Contains($"轴{axis}") && message.Contains("当前位置") && message.Contains("实时位置均≤各自等待位+100 pulse"),
                     "Warning must identify the unsafe station, current position and wait position.");
             }
-            foreach (var offset in new[] { -100d, -99.999d, -10d, 0d, 0.001d, 99.999d, 100d })
+            foreach (var offset in new[] { -100000d, -1000d, -100.001d, -100d, -99.999d, -10d, 0d, 0.001d, 99.999d, 100d })
             {
                 Reset();
                 foreach (var axis in waits.Keys) recorder.States[axis] = DdSnapshot(axis, waits[axis] + offset);
                 count = recorder.Commands.Count;
                 start();
                 Require(recorder.Commands.Count == count + 1,
-                    "Positions within the inclusive +/-100 pulse tolerance must allow DD motion.");
+                    "Feedback <= wait + 100 must allow DD, including coordinates far below wait - 100.");
             }
         }
         foreach (var axis in waits.Keys)
-        foreach (var boundary in new[] { -100d, 100d })
+        foreach (var offset in new[] { -1000d, -100d, 100d })
         foreach (var invalid in new[]
         {
             DdSnapshot(axis, double.NaN), DdSnapshot(axis, double.PositiveInfinity), DdSnapshot(axis, double.NegativeInfinity),
-            DdSnapshot(axis, waits[axis] + boundary) with { IsMoving = true },
-            DdSnapshot(axis, waits[axis] + boundary) with { Alarm = true },
-            DdSnapshot(axis, waits[axis] + boundary) with { EmergencyInput = true }, DdSnapshot(axis + 1, waits[axis])
+            DdSnapshot(axis, waits[axis] + offset) with { IsMoving = true },
+            DdSnapshot(axis, waits[axis] + offset) with { Alarm = true },
+            DdSnapshot(axis, waits[axis] + offset) with { EmergencyInput = true }, DdSnapshot(axis + 1, waits[axis])
         })
         {
             Reset();
@@ -107,7 +107,7 @@ internal static partial class Program
         Set(home, "_oneKeyCollectRunning", true);
         settings = (IReadOnlyDictionary<int, double>)Invoke(home, "ReadDdTestStationWaitPositions")!;
         Require(settings[15] == 70, "One-key collect must use current waits, not stale production settings.");
-        Console.WriteLine("PASS: every DD motion API, all three stations, inclusive +/-100 pulse tolerance, +/-100.001 rejection, invalid/moving/alarm/emergency states at both boundaries, recovery/stop bypass and production/collect settings. No hardware opened.");
+        Console.WriteLine("PASS: every DD motion API, all three stations, feedback <= wait + 100, no lower bound, +100.001 rejection, invalid/moving/alarm/emergency states, recovery/stop bypass and production/collect settings. No hardware opened.");
     }
 
     private static MotionAxisSnapshot DdSnapshot(int axis, double feedback) =>
