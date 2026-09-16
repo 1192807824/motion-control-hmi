@@ -421,22 +421,17 @@ public partial class HomePage : UserControl
     public HomePageSettings GetCurrentParameterSettings()
     {
         var settings = ProductRecipeStore.Clone(_homeSettings);
-        settings.FirstSetTeachingCenterX =
-            TryParseCoordinate(FirstSetTeachingCenterXTextBox.Text, out var centerX)
-                ? centerX
-                : null;
-        settings.FirstSetTeachingCenterY =
-            TryParseCoordinate(FirstSetTeachingCenterYTextBox.Text, out var centerY)
-                ? centerY
-                : null;
-        settings.FirstSetTeachingPressPositionX =
-            TryParseCoordinate(FirstSetTeachingPressPositionXTextBox.Text, out var pressPositionX)
-                ? pressPositionX
-                : null;
-        settings.FirstSetTeachingPressPositionY =
-            TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out var pressPositionY)
-                ? pressPositionY
-                : null;
+        // 文本框刷新期间可能短暂为空或处于未完成输入状态；此时保留已保存值，
+        // 避免视觉标定把有效的中心位/下压位误判成“未配置”。真正清空输入时，
+        // TextChanged 保存逻辑会先把 _homeSettings 对应字段置空。
+        if (TryParseCoordinate(FirstSetTeachingCenterXTextBox.Text, out var centerX))
+            settings.FirstSetTeachingCenterX = centerX;
+        if (TryParseCoordinate(FirstSetTeachingCenterYTextBox.Text, out var centerY))
+            settings.FirstSetTeachingCenterY = centerY;
+        if (TryParseCoordinate(FirstSetTeachingPressPositionXTextBox.Text, out var pressPositionX))
+            settings.FirstSetTeachingPressPositionX = pressPositionX;
+        if (TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out var pressPositionY))
+            settings.FirstSetTeachingPressPositionY = pressPositionY;
         settings.LowerCameraNozzle1RotationCenterX =
             TryParseCoordinate(LowerCameraNozzle1RotationCenterXTextBox.Text, out var nozzle1CenterX)
                 ? nozzle1CenterX

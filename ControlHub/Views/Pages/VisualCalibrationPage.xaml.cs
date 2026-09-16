@@ -1289,9 +1289,9 @@ public partial class VisualCalibrationPage : UserControl
                 if (ActiveAxisSet == VisionCalibrationAxisSet.First)
                 {
                     SetWorkflowStatus(
-                        "上料Z1/Z2正在同步回原，完成后移动到参数配置中心位…",
+                        "上料R1/R2正在同步回原，完成后移动到参数配置中心位…",
                         WorkflowStatus.Running);
-                    await motionController.HomeLoadingZAxesAsync(CancellationToken.None);
+                    await motionController.HomeLoadingRAxesAsync(CancellationToken.None);
                 }
 
                 var current = motionController.CaptureCalibrationCenter(

@@ -1876,16 +1876,16 @@ public partial class MotionControlPage : UserControl
         return true;
     }
 
-    public Task HomeLoadingZAxesAsync(CancellationToken cancellationToken)
+    public Task HomeLoadingRAxesAsync(CancellationToken cancellationToken)
     {
-        // 与一键复位的上料 Z 轴使用相同模式、速度和零偏移；两轴同时启动回原。
+        // 与生产开始流程的上料 R 轴使用相同模式、速度和零偏移；两轴同时启动回原。
         return HomeAxesAsync(
-            [5, 7],
-            MotionCardOptions.GetOneKeyResetHomeMode(5),
+            [6, 8],
+            MotionCardOptions.GetOneKeyResetHomeMode(6),
             0,
             cancellationToken,
-            lowVelocityOverride: OneKeyResetZHomeVelocity,
-            highVelocityOverride: OneKeyResetZHomeVelocity);
+            lowVelocityOverride: OneKeyResetRHomeVelocity,
+            highVelocityOverride: OneKeyResetRHomeVelocity);
     }
 
     public async Task HomeAxesAsync(
