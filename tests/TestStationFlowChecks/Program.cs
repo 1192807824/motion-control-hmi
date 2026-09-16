@@ -17,6 +17,12 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--production-z-start-only"])
+        {
+            CheckProductionZStartInterlock();
+            return;
+        }
+
         if (args is ["--dd-interlock-only"])
         {
             _ = new Application();
@@ -156,6 +162,7 @@ internal static partial class Program
         CheckE4981ASetupChanges();
         CheckE4981ANanofaradUnits();
         CheckSM7110GigohmUnits();
+        CheckProductionZStartInterlock();
         CheckDdTestStationInterlock();
     }
 

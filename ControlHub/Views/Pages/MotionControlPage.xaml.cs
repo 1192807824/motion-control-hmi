@@ -102,6 +102,14 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    public void EnsureProductionZStartSafe(IReadOnlyDictionary<int, double> safePositions)
+    {
+        if (!_motionCard.IsOpen)
+            throw new InvalidOperationException("运动控制卡尚未连接，无法检查四个Z轴安全高度，禁止开始运行。");
+
+        ProductionZStartInterlock.EnsureSafe(safePositions, _motionCard.ReadAxis);
+    }
+
     public IReadOnlyDictionary<int, AxisSettings> CaptureRecipeAxisSettings()
     {
         if (Axes is not { Count: > 0 } axes)

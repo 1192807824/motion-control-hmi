@@ -2039,6 +2039,21 @@ public partial class HomePage : UserControl
             return;
         }
 
+        // 在生产初始化和清理逻辑之外检查，拒绝启动时不改变真空等输出。
+        try
+        {
+            var controller = _motionController
+                ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+            controller.EnsureProductionZStartSafe(ReadProductionZSafePositions());
+        }
+        catch (Exception exception)
+        {
+            SetStartProductionStatus($"开始流程失败：{exception.Message}", Color.FromRgb(242, 122, 128));
+            MessageBox.Show(Window.GetWindow(this), exception.Message, "Z轴启动安全警报",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         try
         {
             // 连续生产必须依赖运动控制页面，未绑定时直接给出明确错误。
@@ -6502,6 +6517,14 @@ public partial class HomePage : UserControl
             DecelerationStopMilliseconds = 100
         };
     }
+
+    private IReadOnlyDictionary<int, double> ReadProductionZSafePositions() => new Dictionary<int, double>
+    {
+        [FirstSetNozzle1ZHardwareAxisNo] = ParseFiniteCoordinate(FirstSetNozzle1SafeZPositionTextBox.Text, "第一套吸嘴1安全Z高度"),
+        [FirstSetNozzle2ZHardwareAxisNo] = ParseFiniteCoordinate(FirstSetNozzle2SafeZPositionTextBox.Text, "第一套吸嘴2安全Z高度"),
+        [SecondSetNozzle1ZHardwareAxisNo] = ParseFiniteCoordinate(SecondSetNozzle1SafeZPositionTextBox.Text, "第二套吸嘴1安全Z高度"),
+        [SecondSetNozzle2ZHardwareAxisNo] = ParseFiniteCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, "第二套吸嘴2安全Z高度")
+    };
 
     private ProductionZPositions ReadProductionZPositions()
     {
