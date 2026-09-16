@@ -1315,6 +1315,13 @@ public partial class MainWindow : Window
             SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[28]), Brushes.LightSteelBlue);
             SidebarStartCalibrationButton.ToolTip = Decode(parts[29]);
             SidebarRecordNozzleDotButton.IsEnabled = parts[30] == "1";
+            SidebarLoadingXServoButton.IsEnabled = parts.Count > 42 && parts[40] == "1";
+            SidebarLoadingZServoButton.IsEnabled = SidebarLoadingXServoButton.IsEnabled;
+            if (parts.Count > 42)
+            {
+                SidebarLoadingXServoButton.Content = Decode(parts[41]);
+                SidebarLoadingZServoButton.Content = Decode(parts[42]);
+            }
             var simplifiedMode = parts[31] == "1";
             var canDraw = _nozzleTeachingResultsDisplayed && !simplifiedMode && parts[20] == "1" && parts[13] != "1";
             SidebarManualCircleButton.IsEnabled = canDraw;

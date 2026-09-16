@@ -565,17 +565,32 @@
                                            Text="等待手动打点" Foreground="#12D879" FontSize="11"
                                            VerticalAlignment="Center" />
                             </Grid>
+                            <Button x:Name="SidebarLoadingXServoButton" Tag="ToggleLoadingXServo"
+                                    Margin="26,0,0,6" Content="上料X轴使能开关"
+                                    IsEnabled="False" Style="{StaticResource SidebarButton}"
+                                    Background="#102A3E" BorderBrush="#35546B"
+                                    Click="CalibrationSidebarButton_Click" />
                             <Grid Margin="26,0,0,6">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Button x:Name="SidebarRecordNozzleDotButton" Tag="RecordNozzleDotPosition"
                                         Content="移动下压位置" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
-                                <Button Grid.Column="2" x:Name="SidebarReturnCameraCenterButton"
+                                <Button Grid.Column="2" x:Name="SidebarLoadingZServoButton"
+                                        Tag="ToggleLoadingZServos" Content="上料双Z使能"
+                                        IsEnabled="False" Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E" BorderBrush="#35546B"
+                                        Click="CalibrationSidebarButton_Click" />
+                                <Button Grid.Row="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                                        x:Name="SidebarReturnCameraCenterButton"
                                         Tag="ReturnCameraCenter" Content="回拍照位"
                                         Style="{StaticResource SidebarButton}"
                                         Background="#0B4CA3" BorderBrush="#0D6EE8"

@@ -497,7 +497,10 @@ public sealed class VisionMasterProcessHost : HwndHost
                 state.LowerCameraCorrectionTestEnabled ? "1" : "0",
                 state.LowerCameraCorrectionTestRunning ? "1" : "0",
                 Encode(state.LowerCameraCorrectionTestStatus),
-                state.Nozzle2SaveEnabled ? "1" : "0"),
+                state.Nozzle2SaveEnabled ? "1" : "0",
+                state.LoadingServoEnabled ? "1" : "0",
+                Encode(state.LoadingXServoText),
+                Encode(state.LoadingZServoText)),
             cancellationToken);
     }
 
@@ -1745,7 +1748,10 @@ public sealed record CalibrationSidebarState(
     bool LowerCameraCorrectionTestEnabled,
     bool LowerCameraCorrectionTestRunning,
     string LowerCameraCorrectionTestStatus,
-    bool Nozzle2SaveEnabled);
+    bool Nozzle2SaveEnabled,
+    bool LoadingServoEnabled = false,
+    string LoadingXServoText = "上料X轴使能开关",
+    string LoadingZServoText = "上料双Z使能开关");
 
 public sealed record VisionRotationPoint(double X, double Y);
 

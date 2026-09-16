@@ -2109,6 +2109,14 @@ public partial class VisualCalibrationPage : UserControl
     {
         switch (e.Action)
         {
+            case "ToggleLoadingXServo":
+                if (LoadingXServoButton.IsEnabled)
+                    LoadingXServo_Click(this, new RoutedEventArgs());
+                break;
+            case "ToggleLoadingZServos":
+                if (LoadingZServoButton.IsEnabled)
+                    LoadingZServo_Click(this, new RoutedEventArgs());
+                break;
             case "RecordCenter":
                 MoveTeachingCenter_Click(this, new RoutedEventArgs());
                 break;
@@ -4066,7 +4074,12 @@ public partial class VisualCalibrationPage : UserControl
                     CanRunLowerCameraCorrectionTest(),
                     _lowerCameraCorrectionTestRunning,
                     _lowerCameraCorrectionTestStatus,
-                    AssignPoint1ToNozzle2Button.IsEnabled);
+                    AssignPoint1ToNozzle2Button.IsEnabled,
+                    LoadingXServoButton.IsEnabled && LoadingZServoButton.IsEnabled,
+                    $"上料X轴：{_motionController?.LoadingXAxis?.ServoText ?? "未连接"}（切换）",
+                    _motionController?.LoadingZ1Axis?.ServoOn == true &&
+                    _motionController?.LoadingZ2Axis?.ServoOn == true
+                        ? "解除上料双Z使能" : "上料双Z使能");
                 try
                 {
                     await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);
