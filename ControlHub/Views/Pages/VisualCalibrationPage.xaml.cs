@@ -3820,11 +3820,14 @@ public partial class VisualCalibrationPage : UserControl
             !_clickMoveConfigurationRunning &&
             !_rotationCenterRunning &&
             !_lowerCameraCorrectionTestRunning;
-        StepXPulsesTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
-        StepYPulsesTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
-        VelocityTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
-        SettleMillisecondsTextBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
-        MovePriorityComboBox.IsEnabled = !_calibrationRunning && !_clickMoveRunning && !_rotationCenterRunning;
+        // 九点参数只在九点标定实际运行期间锁定。移动中心、点击移动和旋转中心
+        // 不读取正在编辑的九点参数，不应阻止操作员提前调整下一次标定设置。
+        var ninePointParametersEnabled = !_calibrationRunning;
+        StepXPulsesTextBox.IsEnabled = ninePointParametersEnabled;
+        StepYPulsesTextBox.IsEnabled = ninePointParametersEnabled;
+        VelocityTextBox.IsEnabled = ninePointParametersEnabled;
+        SettleMillisecondsTextBox.IsEnabled = ninePointParametersEnabled;
+        MovePriorityComboBox.IsEnabled = ninePointParametersEnabled;
         CalibrationFilePathTextBox.IsEnabled =
             !_calibrationRunning &&
             !_calibrationFileImporting &&

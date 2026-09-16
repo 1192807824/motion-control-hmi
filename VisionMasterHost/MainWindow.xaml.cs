@@ -1299,7 +1299,8 @@ public partial class MainWindow : Window
                 calibrationRunning ? Color.FromRgb(117, 18, 28) : Color.FromRgb(0, 169, 101));
             SidebarStartCalibrationButton.BorderBrush = new SolidColorBrush(
                 calibrationRunning ? Color.FromRgb(217, 13, 22) : Color.FromRgb(0, 199, 120));
-            var parameterInputsEnabled = parts[19] == "1";
+            // 九点参数只随九点标定本身锁定，避免其它移动流程或旧状态包误锁输入框。
+            var parameterInputsEnabled = !calibrationRunning;
             SidebarStepXTextBox.IsEnabled = parameterInputsEnabled;
             SidebarStepYTextBox.IsEnabled = parameterInputsEnabled;
             SidebarMovePriorityComboBox.IsEnabled = parameterInputsEnabled;
