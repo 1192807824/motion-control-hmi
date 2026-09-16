@@ -2176,6 +2176,29 @@ public partial class HomePage : UserControl
             // 刷新主页按钮状态，把“开始运行”切成“停止循环”，并锁住其它会冲突的操作。
             UpdateHomeCommandState();
 
+            // 正式启动前先复用一键收料的完整16工位清料节拍，随后让DD重新寻找原点并
+            // 确认编码器回到0。两步严格串行，任一步失败都不会进入原生产启动流程。
+            motionController.EnsureDdTestStationsSafe();
+            SetStartProductionStatus(
+                "启动准备 1/3：正在执行一键收料，DD将转满16个工位…",
+                Color.FromRgb(242, 181, 68));
+            await RunOneKeyCollectCoreAsync(
+                _productionCancellation.Token,
+                SetStartProductionStatus,
+                "启动收料");
+
+            SetStartProductionStatus(
+                "启动准备 2/3：一键收料完成，DD马达正在回0…",
+                Color.FromRgb(242, 181, 68));
+            await motionController.HomeDdAxisAsync(_productionCancellation.Token);
+            SetStartProductionStatus(
+                "启动准备 2/3：DD马达已回0，正在进入原启动准备流程…",
+                Color.FromRgb(73, 209, 125));
+
+            // 收料完成且DD回0后，软件工位状态与空盘物理状态重新对齐。
+            _carouselStations = CreateCarouselStationStates();
+            UpdateCarouselStationDisplay(_carouselStations);
+
             // 先清空旧画面，并在启动轴动作期间并行预热主页视觉显示。
             // 后续每轮XY到拍照位时直接执行找芯片流程，不再重复激活和布局VisionMaster窗口。
             ClearBlobInspectionResult();
@@ -2938,6 +2961,7 @@ public partial class HomePage : UserControl
             _productionDiagnostics = null;
             StopUphTracking();
             CloseAllActiveSetNozzleVacuumOutputsNoThrow();
+            CloseCarouselVacuumSprayOutputsNoThrow();
             // 急停后的 IO 冻结保持到下一次明确启动生产，不能在本轮 finally 收尾时提前解除。
             // 否则尚未退出的取消回调仍可能把低电平有效的真空输出写成相反状态。
             _productionAxisSet = null;
@@ -3316,7 +3340,7 @@ public partial class HomePage : UserControl
             allowedMovingAxisNos: [xHardwareAxisNo, yHardwareAxisNo]);
 
         SetStartProductionStatus(
-            $"启动准备：R1/R2正在回原，XY同时按Y后X移动到位置2({targetX:0.###}, {targetY:0.###})…",
+            $"启动准备 3/3：R1/R2正在回原，XY同时按Y后X移动到位置2({targetX:0.###}, {targetY:0.###})…",
             Color.FromRgb(242, 181, 68));
 
         try
@@ -7458,25 +7482,10 @@ public partial class HomePage : UserControl
             _startSequenceRunning = true;
             UpdateHomeCommandState();
 
-            for (var turn = 1; turn <= CarouselStationCount; turn++)
-            {
-                var cancellationToken = _productionCancellation.Token;
-                cancellationToken.ThrowIfCancellationRequested();
-                SetOneKeyCollectStatus(
-                    $"一键收料 {turn}/{CarouselStationCount}：DD正在转动一个工位…",
-                    Color.FromRgb(242, 181, 68));
-                _ = await MoveAxis0RelativeCoreAsync(
-                    DdMotorPulsePerTurn,
-                    cancellationToken);
-                AdvanceCarouselOccupancy(_carouselStations);
-                UpdateCarouselStationDisplay(_carouselStations);
-
-                SetOneKeyCollectStatus(
-                    $"一键收料 {turn}/{CarouselStationCount}：DD已停稳，" +
-                    $"正在执行流程Y24/Y25 IO {CarouselVacuumSprayPulseMilliseconds} ms…",
-                    Color.FromRgb(242, 181, 68));
-                await PulseCarouselVacuumAndSprayAsync(cancellationToken);
-            }
+            await RunOneKeyCollectCoreAsync(
+                _productionCancellation.Token,
+                SetOneKeyCollectStatus,
+                "一键收料");
 
             SetOneKeyCollectStatus(
                 "一键收料完成：DD已转满一圈，每次停稳后均已执行生产流程Y24/Y25 IO；下料XY全程未动。",
@@ -7510,6 +7519,33 @@ public partial class HomePage : UserControl
             _productionCompletion = null;
             UpdateHomeCommandState();
             productionCompletion?.TrySetResult(true);
+        }
+    }
+
+    private async Task RunOneKeyCollectCoreAsync(
+        CancellationToken cancellationToken,
+        Action<string, Color> setStatus,
+        string statusPrefix)
+    {
+        ArgumentNullException.ThrowIfNull(setStatus);
+        for (var turn = 1; turn <= CarouselStationCount; turn++)
+        {
+            await WaitIfProductionPausedAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            setStatus(
+                $"{statusPrefix} {turn}/{CarouselStationCount}：DD正在转动一个工位…",
+                Color.FromRgb(242, 181, 68));
+            _ = await MoveAxis0RelativeCoreAsync(
+                DdMotorPulsePerTurn,
+                cancellationToken);
+            AdvanceCarouselOccupancy(_carouselStations);
+            UpdateCarouselStationDisplay(_carouselStations);
+
+            setStatus(
+                $"{statusPrefix} {turn}/{CarouselStationCount}：DD已停稳，" +
+                $"正在执行流程Y24/Y25 IO {CarouselVacuumSprayPulseMilliseconds} ms…",
+                Color.FromRgb(242, 181, 68));
+            await PulseCarouselVacuumAndSprayAsync(cancellationToken);
         }
     }
 

@@ -1888,6 +1888,37 @@ public partial class MotionControlPage : UserControl
             highVelocityOverride: OneKeyResetRHomeVelocity);
     }
 
+    public async Task HomeDdAxisAsync(CancellationToken cancellationToken)
+    {
+        const int ddHardwareAxisNo = 0;
+        await HomeAxesAsync(
+            [ddHardwareAxisNo],
+            MotionCardOptions.GetOneKeyResetHomeMode(ddHardwareAxisNo),
+            0,
+            cancellationToken,
+            lowVelocityOverride: OneKeyResetDdHomeVelocity,
+            highVelocityOverride: OneKeyResetDdHomeVelocity);
+
+        var axis = Axes?.FirstOrDefault(item =>
+            item.HardwareAxisNo == ddHardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException("DD马达（轴0）当前不可用。");
+        var snapshot = _motionCard.ReadAxis(ddHardwareAxisNo);
+        ApplySnapshot(axis, snapshot);
+        ProcessSnapshotAlarms(axis, snapshot);
+        var positionError = Math.Abs(snapshot.FeedbackPosition);
+        if (snapshot.IsMoving || !snapshot.Homed || snapshot.Alarm || snapshot.EmergencyInput ||
+            snapshot.StopReason != 0 || positionError > OneKeyResetHomePositionTolerance)
+        {
+            throw new MotionCardException(
+                $"DD马达回0确认失败：位置={snapshot.FeedbackPosition:F0} pulse，" +
+                $"运动={snapshot.IsMoving}，回原完成={snapshot.Homed}，" +
+                $"报警=0x{snapshot.AxisErrorCode:X4}，停止原因={snapshot.StopReason}；" +
+                $"允许误差±{OneKeyResetHomePositionTolerance:F0} pulse。");
+        }
+
+        axis.State = "DD马达回0完成";
+    }
+
     public async Task HomeAxesAsync(
         IReadOnlyCollection<int> hardwareAxisNos,
         int homeMode,
