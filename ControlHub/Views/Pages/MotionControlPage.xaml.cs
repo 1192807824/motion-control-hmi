@@ -1876,6 +1876,18 @@ public partial class MotionControlPage : UserControl
         return true;
     }
 
+    public Task HomeLoadingZAxesAsync(CancellationToken cancellationToken)
+    {
+        // 与一键复位的上料 Z 轴使用相同模式、速度和零偏移；两轴同时启动回原。
+        return HomeAxesAsync(
+            [5, 7],
+            MotionCardOptions.GetOneKeyResetHomeMode(5),
+            0,
+            cancellationToken,
+            lowVelocityOverride: OneKeyResetZHomeVelocity,
+            highVelocityOverride: OneKeyResetZHomeVelocity);
+    }
+
     public async Task HomeAxesAsync(
         IReadOnlyCollection<int> hardwareAxisNos,
         int homeMode,
@@ -4144,6 +4156,79 @@ public partial class MotionControlPage : UserControl
             HomeAllButton.SetCurrentValue(IsEnabledProperty, CanRunHomeSequence());
             PollMotionState();
         }
+    }
+
+    public AxisStatus? LoadingXAxis => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == 1);
+
+    public AxisStatus? LoadingZ1Axis => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == 5);
+
+    public AxisStatus? LoadingZ2Axis => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == 7);
+
+    public bool ToggleLoadingZServos()
+    {
+        if (_closed || !_motionCard.IsOpen || ViewModel?.MotionControlsEnabled != true)
+        {
+            throw new InvalidOperationException("运动控制卡未连接或运动控制不可用。");
+        }
+
+        AxisStatus[] axes =
+        [
+            LoadingZ1Axis ?? throw new InvalidOperationException("上料Z1轴（轴5）不可用。"),
+            LoadingZ2Axis ?? throw new InvalidOperationException("上料Z2轴（轴7）不可用。")
+        ];
+        // 两轴全部检查通过后才下发命令，避免另一轴正在运动时只切换其中一轴。
+        foreach (var axis in axes)
+        {
+            ApplySnapshot(axis, _motionCard.ReadAxis(axis.HardwareAxisNo));
+            if (!axis.IsAvailable || !axis.StatusReadHealthy)
+            {
+                throw new InvalidOperationException($"上料Z轴（轴{axis.HardwareAxisNo}）状态读取异常，不能切换使能。");
+            }
+
+            if (axis.IsMoving || _homeSequenceCancellation is not null ||
+                IsAxisMotionWorkflowActive(axis.HardwareAxisNo))
+            {
+                throw new InvalidOperationException("上料Z轴正在运动、回零或等待停止确认，不能切换双Z使能。");
+            }
+        }
+
+        var enabled = !axes.All(axis => axis.ServoOn);
+        foreach (var axis in axes)
+        {
+            SetServo(axis, enabled);
+            if (!axis.StatusReadHealthy || axis.ServoOn != enabled)
+            {
+                throw new InvalidOperationException(
+                    $"上料双Z使能切换未全部完成：轴{axis.HardwareAxisNo}未确认，请检查两轴状态和报警信息。");
+            }
+        }
+
+        return enabled;
+    }
+
+    public bool ToggleLoadingXServo()
+    {
+        if (_closed || !_motionCard.IsOpen || ViewModel?.MotionControlsEnabled != true)
+        {
+            throw new InvalidOperationException("运动控制卡未连接或运动控制不可用。");
+        }
+
+        var axis = LoadingXAxis
+            ?? throw new InvalidOperationException("上料X轴（轴1）不可用。");
+        ApplySnapshot(axis, _motionCard.ReadAxis(axis.HardwareAxisNo));
+        if (!axis.IsAvailable || !axis.StatusReadHealthy)
+        {
+            throw new InvalidOperationException("上料X轴状态读取异常，不能切换使能。");
+        }
+
+        var enabled = !axis.ServoOn;
+        SetServo(axis, enabled);
+        if (!axis.StatusReadHealthy || axis.ServoOn != enabled)
+        {
+            throw new InvalidOperationException("上料X轴使能切换未完成，请检查运动状态和报警信息。");
+        }
+
+        return enabled;
     }
 
     private void ServoOn_Click(object sender, RoutedEventArgs e)

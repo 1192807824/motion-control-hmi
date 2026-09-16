@@ -249,6 +249,11 @@ public partial class VisualCalibrationPage : UserControl
 
     private bool TryStartManualJog(Button button)
     {
+        if (!IsLowerCameraMode)
+        {
+            return false;
+        }
+
         if (_manualJogAxisNo is not null)
         {
             return true;
@@ -502,6 +507,7 @@ public partial class VisualCalibrationPage : UserControl
             await ConfigureClickMoveModeAsync(false);
         }
 
+        StopManualJog("切换标定模式");
         ActiveCalibrationMode = requestedMode;
         _recordedCenter = null;
         _nozzleDotPosition = null;
@@ -1280,6 +1286,14 @@ public partial class VisualCalibrationPage : UserControl
                 var settleMilliseconds = ParseNonNegativeInt(
                     SettleMillisecondsTextBox.Text,
                     "到位稳定等待");
+                if (ActiveAxisSet == VisionCalibrationAxisSet.First)
+                {
+                    SetWorkflowStatus(
+                        "上料Z1/Z2正在同步回原，完成后移动到参数配置中心位…",
+                        WorkflowStatus.Running);
+                    await motionController.HomeLoadingZAxesAsync(CancellationToken.None);
+                }
+
                 var current = motionController.CaptureCalibrationCenter(
                     ActiveAxisPair.XHardwareAxisNo,
                     ActiveAxisPair.YHardwareAxisNo);
@@ -1363,6 +1377,48 @@ public partial class VisualCalibrationPage : UserControl
         finally
         {
             _centerSyncRunning = false;
+            UpdateCommandState();
+        }
+    }
+
+    private void LoadingZServo_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var controller = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            var enabled = controller.ToggleLoadingZServos();
+            SetWorkflowStatus(
+                enabled ? "上料双Z轴（轴5、7）已使能。" : "上料双Z轴（轴5、7）已解除使能。",
+                WorkflowStatus.Success);
+        }
+        catch (Exception exception)
+        {
+            SetWorkflowStatus($"上料双Z轴使能切换失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
+            UpdateCommandState();
+        }
+    }
+
+    private void LoadingXServo_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var controller = _motionController
+                ?? throw new InvalidOperationException("运动控制组件尚未连接。");
+            var enabled = controller.ToggleLoadingXServo();
+            SetWorkflowStatus(
+                enabled ? "上料X轴（轴1）已使能。" : "上料X轴（轴1）已解除使能。",
+                WorkflowStatus.Success);
+        }
+        catch (Exception exception)
+        {
+            SetWorkflowStatus($"上料X轴使能切换失败：{exception.Message}", WorkflowStatus.Error);
+        }
+        finally
+        {
             UpdateCommandState();
         }
     }
@@ -3732,7 +3788,13 @@ public partial class VisualCalibrationPage : UserControl
             !_lowerCameraCorrectionTestRunning &&
             !_nozzlePointFinding &&
             !_nozzlePointSaving;
-        ManualJogPanel.IsEnabled = manualJogAvailable || _manualJogAxisNo is not null;
+        ManualJogBorder.Visibility = IsLowerCameraMode ? Visibility.Visible : Visibility.Collapsed;
+        ManualJogRow.Height = new GridLength(IsLowerCameraMode ? 156 : 0);
+        ManualJogPanel.IsEnabled = IsLowerCameraMode && (manualJogAvailable || _manualJogAxisNo is not null);
+        LoadingXServoButton.DataContext = _motionController?.LoadingXAxis;
+        LoadingXServoButton.IsEnabled = manualJogAvailable && _manualJogAxisNo is null;
+        LoadingZServoButton.DataContext = _motionController;
+        LoadingZServoButton.IsEnabled = manualJogAvailable && _manualJogAxisNo is null;
         SetManualJogEditorsEnabled(manualJogAvailable && _manualJogAxisNo is null);
         ManualJogStopButton.IsEnabled = _manualJogAxisNo is not null;
         RestartHostButton.IsEnabled =

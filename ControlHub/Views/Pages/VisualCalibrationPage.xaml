@@ -296,7 +296,7 @@
         <Grid Grid.Row="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
-                <RowDefinition Height="156" />
+                <RowDefinition x:Name="ManualJogRow" Height="0" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="0" />
@@ -513,7 +513,22 @@
                                         <ColumnDefinition Width="7" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Button x:Name="RecordNozzleDotPositionButton"
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Button x:Name="LoadingXServoButton"
+                                            Grid.ColumnSpan="3"
+                                            Margin="0,0,0,5"
+                                            Content="{Binding ServoText, StringFormat=上料X轴：{0}（切换）, FallbackValue=上料X轴使能开关}"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            ToolTip="切换上料X轴（轴1）的伺服使能"
+                                            Click="LoadingXServo_Click" />
+                                    <Button Grid.Row="1" x:Name="RecordNozzleDotPositionButton"
                                             Content="移动下压位置"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
@@ -521,6 +536,34 @@
                                             FontSize="11"
                                             Click="MoveTeachingPressPosition_Click" />
                                     <Button Grid.Column="2"
+                                            Grid.Row="1"
+                                            x:Name="LoadingZServoButton"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            ToolTip="统一切换上料Z1、Z2（轴5、7）的使能；状态不一致时统一使能"
+                                            Click="LoadingZServo_Click">
+                                        <TextBlock>
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="上料双Z使能" />
+                                                    <Style.Triggers>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding LoadingZ1Axis.ServoOn}" Value="True" />
+                                                                <Condition Binding="{Binding LoadingZ2Axis.ServoOn}" Value="True" />
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Text" Value="解除上料双Z使能" />
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Button>
+                                    <Button Grid.ColumnSpan="3"
+                                            Grid.Row="2"
+                                            Margin="0,5,0,0"
                                             x:Name="ReturnToPhotoPositionButton"
                                             Content="回拍照位"
                                             Style="{StaticResource PanelButton}"
@@ -658,7 +701,9 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
+            <Border x:Name="ManualJogBorder"
+                    Visibility="Collapsed"
+                    Grid.Row="1"
                     Grid.Column="2"
                     Margin="0,8,0,0"
                     Padding="10,8"
