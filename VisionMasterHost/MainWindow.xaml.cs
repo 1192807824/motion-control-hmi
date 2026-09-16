@@ -1215,7 +1215,9 @@ public partial class MainWindow : Window
 
     private string SetCalibrationSidebarState(IReadOnlyList<string> parts)
     {
-        if (parts.Count != 40)
+        // 旧版侧栏状态包含 40 个字段；加入上料 X/双 Z 使能按钮后为 43 个字段。
+        // 同时兼容两种长度，避免整条状态被拒绝后中心位一直显示默认的“未配置”。
+        if (parts.Count is not (40 or 43))
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
