@@ -35,7 +35,7 @@ public sealed partial class BatchQueryPage
 
         var header = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 12) };
         _export.Style = (Style)FindResource("QueryPrimaryButton"); _export.Margin = new Thickness(14, 0, 0, 0);
-        _export.Content = ButtonContent("\uE896", "导出批次数据");
+        _export.Content = ButtonContent("\uE896", "导出该批次全部数据");
         _export.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(_export, Dock.Right); header.Children.Add(_export);
         var heading = new StackPanel();

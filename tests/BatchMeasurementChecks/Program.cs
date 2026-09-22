@@ -186,6 +186,8 @@ internal static partial class Program
     {
         T QueryField<T>(string name) => (T)typeof(BatchQueryPage).GetField(name, Flags)!.GetValue(page)!;
         Task Query() => (Task)typeof(BatchQueryPage).GetMethod("QueryAsync", Flags)!.Invoke(page, null)!;
+        Task<IReadOnlyList<BatchMeasurement>> ExportRows(string batch) =>
+            (Task<IReadOnlyList<BatchMeasurement>>)typeof(BatchQueryPage).GetMethod("ReadExportRowsAsync", Flags)!.Invoke(page, [batch])!;
         void Update() => typeof(BatchQueryPage).GetMethod("UpdateCommands", Flags)!.Invoke(page, null);
         var input = QueryField<TextBox>("_batch");
         var export = QueryField<Button>("_export");
@@ -193,14 +195,18 @@ internal static partial class Program
             "Query must enable exporting the full captured batch");
         store.Append(captured[0] with { Id = Guid.NewGuid() });
         Require(QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 4, "Query snapshot changed under export");
+        IReadOnlyList<BatchMeasurement>? exportRows = null;
+        Wait(ExportRows("QA-CAPTURE").ContinueWith(task => exportRows = task.GetAwaiter().GetResult(), TaskScheduler.Default));
+        Require(exportRows!.Count == 5, "Batch export did not reload every current row from SQLite");
         Wait(Query());
         Require(QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 5, "Refresh must include newly captured records");
         input.Text = "QA-2"; Update();
-        Require(!export.IsEnabled, "Editing batch must prevent exporting a different batch's previous results");
+        Require(export.IsEnabled, "Entered batch must support direct full export before querying");
         Wait(Query());
         Require(export.IsEnabled && QueryField<IReadOnlyList<BatchMeasurement>>("_records").Single().BatchNumber == "QA-2", "Batch switch failed");
         input.Text = "does-not-exist"; Wait(Query());
-        Require(!export.IsEnabled && QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 0, "Empty query retained stale export");
+        Require(export.IsEnabled && QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 0,
+            "Empty query retained stale rows or disabled direct batch export");
         input.Text = " "; Wait(Query());
         Require(!export.IsEnabled, "Invalid query enabled stale export");
         Wait(page.ActivateAsync("QA-CAPTURE"));

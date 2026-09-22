@@ -16,8 +16,9 @@ public sealed partial class BatchQueryPage : UserControl
     private readonly TextBox _batch = new() { Width = 270, MaxLength = 80, Margin = new Thickness(10, 0, 10, 0),
         ToolTip = "直接输入完整批次号，按 Enter 查询" };
     private readonly Button _query = new() { Content = "查询 / 刷新", Padding = new Thickness(18, 6, 18, 6) };
-    private readonly Button _export = new() { Content = "导出当前批次 CSV", Padding = new Thickness(18, 6, 18, 6),
-        Margin = new Thickness(8, 0, 0, 0), IsEnabled = false, ToolTip = "导出最近一次查询的全部明细，可使用 Excel 打开" };
+    private readonly Button _export = new() { Content = "导出该批次全部数据", Padding = new Thickness(18, 6, 18, 6),
+        Margin = new Thickness(8, 0, 0, 0), IsEnabled = false,
+        ToolTip = "从 SQLite 重新读取输入批次的全部工位和全部测量记录，可使用 Excel 打开" };
     private readonly TextBlock _status = new() { Foreground = Brushes.LightGray, Margin = new Thickness(0, 8, 0, 8), TextWrapping = TextWrapping.Wrap };
     private readonly UniformGrid _charts = new() { Rows = 1 };
     private readonly DataGrid _table = new() { IsReadOnly = true, AutoGenerateColumns = false, CanUserAddRows = false,
@@ -83,23 +84,39 @@ public sealed partial class BatchQueryPage : UserControl
     private void UpdateCommands()
     {
         _query.IsEnabled = !_busy && !string.IsNullOrWhiteSpace(_batch.Text); _batch.IsEnabled = !_busy;
-        _export.IsEnabled = !_busy && _records.Count > 0 && _queriedBatch == _batch.Text.Trim();
+        _export.IsEnabled = !_busy && !string.IsNullOrWhiteSpace(_batch.Text);
     }
 
     private async Task ExportAsync()
     {
-        if (_busy || _records.Count == 0 || _queriedBatch != _batch.Text.Trim()) return;
-        var dialog = new SaveFileDialog { Title = $"导出批次 {_queriedBatch}", Filter = "CSV 文件（Excel 可打开）|*.csv",
-            DefaultExt = ".csv", AddExtension = true, FileName = BatchMeasurementCsvExporter.SuggestedFileName(_queriedBatch), OverwritePrompt = true };
-        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+        if (_busy || string.IsNullOrWhiteSpace(_batch.Text)) return;
+        string batch;
+        try { batch = BatchMeasurementStore.NormalizeBatchNumber(_batch.Text); }
+        catch (Exception exception) { _status.Text = $"无法导出：{exception.Message}"; return; }
         _busy = true; UpdateCommands();
-        var rows = _records.ToArray();
         try
         {
+            _status.Text = $"正在读取批次 {batch} 的全部数据…";
+            var rows = await ReadExportRowsAsync(batch);
+            if (rows.Count == 0)
+            {
+                _status.Text = $"批次 {batch} 暂无可导出的采集记录";
+                return;
+            }
+            var dialog = new SaveFileDialog { Title = $"导出批次 {batch} 的全部数据", Filter = "CSV 文件（Excel 可打开）|*.csv",
+                DefaultExt = ".csv", AddExtension = true, FileName = BatchMeasurementCsvExporter.SuggestedFileName(batch), OverwritePrompt = true };
+            if (dialog.ShowDialog(Window.GetWindow(this)) != true)
+            {
+                _status.Text = $"已取消导出批次 {batch}";
+                return;
+            }
             await Task.Run(() => BatchMeasurementCsvExporter.Export(dialog.FileName, rows));
-            _status.Text = $"批次 {_queriedBatch} · 已导出 {rows.Length} 条记录\n{dialog.FileName}";
+            _status.Text = $"批次 {batch} · 已导出全部 {rows.Count} 条记录\n{dialog.FileName}";
         }
         catch (Exception exception) { _status.Text = $"导出失败：{exception.Message}"; }
         finally { _busy = false; UpdateCommands(); }
     }
+
+    private Task<IReadOnlyList<BatchMeasurement>> ReadExportRowsAsync(string batch) =>
+        Task.Run(() => _store.ReadBatch(batch));
 }
