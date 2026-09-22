@@ -226,7 +226,11 @@
                 </StackPanel>
                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
                     <TextBlock Text="当前批次" Style="{StaticResource MutedLabel}" />
-                    <TextBlock Text="LOT-20260715-A" Foreground="{StaticResource TextPrimary}" FontFamily="Consolas" FontSize="14" FontWeight="Bold" Margin="0,3,0,0" />
+                    <TextBox x:Name="BatchNumberTextBox" MaxLength="80" Height="27" Margin="0,3,14,0"
+                             Background="#10283A" Foreground="{StaticResource TextPrimary}" BorderBrush="#3D6684"
+                             Padding="6,2" FontSize="13" ToolTip="生产前输入批次号；运行和暂停期间锁定，同批次继续累计"
+                             TextChanged="BatchNumberTextBox_TextChanged"
+                             LostFocus="BatchNumberTextBox_LostFocus" />
                 </StackPanel>
                 <StackPanel Grid.Column="3" VerticalAlignment="Center">
                     <TextBlock Text="UPH" Style="{StaticResource MutedLabel}" />
@@ -656,7 +660,26 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="14,12">
+                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="12,10">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="批次查询" Padding="12,4" Click="BatchQuery_Click" />
+                                <TextBlock Text="测试数据 · 正态分布" Style="{StaticResource SectionTitle}" FontSize="14" />
+                            </DockPanel>
+                            <TextBlock x:Name="BatchCollectionStatusText" Grid.Row="1" Text="请输入批次号，启用的工位将自动采集"
+                                       Style="{StaticResource MutedLabel}" Margin="0,6,0,5" TextWrapping="Wrap" />
+                            <UniformGrid x:Name="DistributionChartsPanel" Grid.Row="2" Columns="1" />
+                            <TextBlock Grid.Row="3" Text="每件每站统计最终结果；SM7110电阻达标取首次达标值，超时取最后读数。"
+                                       Style="{StaticResource MutedLabel}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0" />
+                        </Grid>
+                    </Border>
+                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="14,12" Visibility="Collapsed">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="36" />

@@ -1,0 +1,155 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Style x:Key="QueryButton" TargetType="Button">
+        <Setter Property="Foreground" Value="#CBDAE7" />
+        <Setter Property="Background" Value="#1A3044" />
+        <Setter Property="BorderBrush" Value="#334E65" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="18,0" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#70B7EC" /></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="#A1D7FF" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Frame" Property="Opacity" Value="0.75" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Frame" Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="QueryPrimaryButton" TargetType="Button" BasedOn="{StaticResource QueryButton}">
+        <Setter Property="Background" Value="#247DC7" /><Setter Property="Foreground" Value="White" />
+        <Setter Property="BorderBrush" Value="#439DE3" />
+    </Style>
+    <Style x:Key="QueryBatchItem" TargetType="ComboBoxItem">
+        <Setter Property="Foreground" Value="#DCE8F2" /><Setter Property="Background" Value="#132B3F" />
+        <Setter Property="Padding" Value="12,9" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="Item" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="#244C69" /></Trigger>
+                <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#1D4361" /></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="QueryBatchInput" TargetType="ComboBox">
+        <Setter Property="Height" Value="38" /><Setter Property="Foreground" Value="#EDF5FC" />
+        <Setter Property="Background" Value="#0C1E2E" /><Setter Property="BorderBrush" Value="#35546C" />
+        <Setter Property="FontSize" Value="13" /><Setter Property="ItemContainerStyle" Value="{StaticResource QueryBatchItem}" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+            <Grid>
+                <Border x:Name="InputBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" />
+                <TextBox x:Name="PART_EditableTextBox" Margin="12,1,40,1" Foreground="{TemplateBinding Foreground}"
+                         Background="Transparent" BorderThickness="0" VerticalContentAlignment="Center" CaretBrush="#EDF5FC"
+                         IsReadOnly="{TemplateBinding IsReadOnly}">
+                    <TextBox.Template><ControlTemplate TargetType="TextBox"><ScrollViewer x:Name="PART_ContentHost" /></ControlTemplate></TextBox.Template>
+                </TextBox>
+                <ToggleButton Width="34" HorizontalAlignment="Right" Focusable="False"
+                              IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                    <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent"><TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                            Foreground="#8BA9C2" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                    </ControlTemplate></ToggleButton.Template>
+                </ToggleButton>
+                <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                    <Border Background="#132B3F" BorderBrush="#35546C" BorderThickness="1" CornerRadius="6" Margin="0,4,0,0"
+                            MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="300">
+                        <ScrollViewer CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" /></ScrollViewer>
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="InputBorder" Property="BorderBrush" Value="#5CB9FF" /></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ScrollBar">
+        <Setter Property="Background" Value="#0E2030" /><Setter Property="Width" Value="10" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
+            <Grid Background="{TemplateBinding Background}">
+                <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}">
+                    <Track.DecreaseRepeatButton><RepeatButton x:Name="Decrease" Command="ScrollBar.PageUpCommand" Focusable="False" Opacity="0" /></Track.DecreaseRepeatButton>
+                    <Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#3A566B" CornerRadius="4" Margin="2" /></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+                    <Track.IncreaseRepeatButton><RepeatButton x:Name="Increase" Command="ScrollBar.PageDownCommand" Focusable="False" Opacity="0" /></Track.IncreaseRepeatButton>
+                </Track>
+            </Grid>
+            <ControlTemplate.Triggers><Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Height" Value="10" /><Setter Property="Width" Value="Auto" />
+                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False" />
+                <Setter TargetName="Decrease" Property="Command" Value="ScrollBar.PageLeftCommand" />
+                <Setter TargetName="Increase" Property="Command" Value="ScrollBar.PageRightCommand" />
+            </Trigger></ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+        <Setter Property="Background" Value="#1B3349" /><Setter Property="Foreground" Value="#AFC5D7" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" /><Setter Property="BorderBrush" Value="#2A455D" />
+        <Setter Property="Padding" Value="14,0" /><Setter Property="FontSize" Value="12" /><Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="DataGridColumnHeader">
+            <Grid>
+                <Border x:Name="Header" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                    <DockPanel>
+                        <TextBlock x:Name="Sort" DockPanel.Dock="Right" Visibility="Collapsed" Foreground="#7FBDE7"
+                                   FontFamily="Segoe MDL2 Assets" FontSize="9" VerticalAlignment="Center" Margin="5,0,0,0" />
+                        <ContentPresenter VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+                <Thumb x:Name="PART_LeftHeaderGripper" Width="4" HorizontalAlignment="Left" Background="Transparent"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="Transparent" /></ControlTemplate></Thumb.Template></Thumb>
+                <Thumb x:Name="PART_RightHeaderGripper" Width="4" HorizontalAlignment="Right" Background="Transparent"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="Transparent" /></ControlTemplate></Thumb.Template></Thumb>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Header" Property="Background" Value="#23455F" /></Trigger>
+                <Trigger Property="SortDirection" Value="Ascending"><Setter TargetName="Sort" Property="Visibility" Value="Visible" /><Setter TargetName="Sort" Property="Text" Value="&#xE70E;" /></Trigger>
+                <Trigger Property="SortDirection" Value="Descending"><Setter TargetName="Sort" Property="Visibility" Value="Visible" /><Setter TargetName="Sort" Property="Text" Value="&#xE70D;" /></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="DataGridRow">
+        <Setter Property="Background" Value="#112638" /><Setter Property="Foreground" Value="#D7E5F0" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" /><Setter Property="BorderBrush" Value="#20394E" />
+        <Style.Triggers>
+            <Trigger Property="AlternationIndex" Value="1"><Setter Property="Background" Value="#142B3E" /></Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#1C3B53" /></Trigger>
+            <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#204A68" /><Setter Property="Foreground" Value="White" /></Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style TargetType="DataGridCell">
+        <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=DataGridRow}}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="DataGridCell">
+            <Border Background="{TemplateBinding Background}" Padding="14,0"><ContentPresenter VerticalAlignment="Center" /></Border>
+        </ControlTemplate></Setter.Value></Setter>
+        <Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="Transparent" /></Trigger></Style.Triggers>
+    </Style>
+    <DataTemplate x:Key="QueryResultBadge">
+        <Border x:Name="Pill" Background="#143E38" CornerRadius="4" Padding="9,3" HorizontalAlignment="Left">
+            <TextBlock x:Name="Label" Text="OK" Foreground="#65D8AE" FontWeight="SemiBold" FontSize="11" />
+        </Border>
+        <DataTemplate.Triggers>
+            <DataTrigger Binding="{Binding StationPassed}" Value="False"><Setter TargetName="Pill" Property="Background" Value="#482E39" />
+                <Setter TargetName="Label" Property="Foreground" Value="#FF939E" /><Setter TargetName="Label" Property="Text" Value="NG" /></DataTrigger>
+        </DataTemplate.Triggers>
+    </DataTemplate>
+    <DataTemplate x:Key="QueryProductBadge">
+        <TextBlock x:Name="Result" Text="截至本站 OK" Foreground="#72CDB2" FontSize="12" />
+        <DataTemplate.Triggers><DataTrigger Binding="{Binding ProductPassedSoFar}" Value="False">
+            <Setter TargetName="Result" Property="Text" Value="产品 NG" /><Setter TargetName="Result" Property="Foreground" Value="#FF939E" />
+        </DataTrigger></DataTemplate.Triggers>
+    </DataTemplate>
+</ResourceDictionary>

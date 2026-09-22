@@ -229,10 +229,15 @@ public partial class HomePage : UserControl
         {
             Interval = TimeSpan.FromSeconds(1)
         };
-        _uphRefreshTimer.Tick += (_, _) => UpdateUphDisplay();
+        _uphRefreshTimer.Tick += (_, _) =>
+        {
+            UpdateUphDisplay();
+            if (_distributionDirty) RefreshDistributionCharts();
+        };
         InitializeProductionMotionParameterEditors();
         LoadPresetPositions();
         UpdateCarouselStationDisplay(_carouselStations);
+        RefreshDistributionCharts();
     }
 
     private void InitializeProductionMotionParameterEditors()
@@ -2037,6 +2042,7 @@ public partial class HomePage : UserControl
         // 在生产初始化和清理逻辑之外检查，拒绝启动时不改变真空等输出。
         try
         {
+            PrepareProductionBatch();
             var controller = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             controller.EnsureProductionZStartSafe(ReadProductionZSafePositions());
@@ -2044,7 +2050,7 @@ public partial class HomePage : UserControl
         catch (Exception exception)
         {
             SetStartProductionStatus($"开始流程失败：{exception.Message}", Color.FromRgb(242, 122, 128));
-            MessageBox.Show(Window.GetWindow(this), exception.Message, "Z轴启动安全警报",
+            MessageBox.Show(Window.GetWindow(this), exception.Message, "生产启动检查",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -4202,7 +4208,8 @@ public partial class HomePage : UserControl
                 "测试中",
                 "等待仪表返回…",
                 Color.FromRgb(98, 181, 255));
-            return await TestMeasurementRetry.ExecuteAsync(
+            var attempts = 0;
+            var finalResult = await TestMeasurementRetry.ExecuteAsync(
                 MeasureOnceAsync,
                 result => result.Passed,
                 _testRetryCount,
@@ -4237,8 +4244,13 @@ public partial class HomePage : UserControl
                 cancellationToken,
                 canRetryException: exception => !SM7110TimedTest.HasStopFailure(exception));
 
+            // 保存位于重测循环之外；写盘失败不能触发再次测量。另一站失败也不会丢失本站结果。
+            await SaveStationMeasurementAsync(stationNumber, stationState, finalResult, attempts);
+            return finalResult;
+
             async Task<TestStationMeasurementResult> MeasureOnceAsync(CancellationToken token)
             {
+                attempts++;
                 switch (settings.Instrument)
                 {
                     case TestStationInstrument.E4981A:
@@ -4316,7 +4328,8 @@ public partial class HomePage : UserControl
                 : result.IsSuccessful && bin == "BIN0" ? "NG · 未落入BIN1～BIN3" : result.StatusDescription,
             result.IsSuccessful && !result.LossRejected,
             E4981ALossRejected: result.LossRejected,
-            E4981ALossFailureReason: result.LossFailureReason);
+            E4981ALossFailureReason: result.LossFailureReason,
+            E4981AReading: result);
     }
 
     private static TestStationMeasurementResult ClassifySM7110Measurement(
@@ -4337,7 +4350,8 @@ public partial class HomePage : UserControl
             passed && bin == "BIN0" ? "整体NG · E4981A为BIN0" : status,
             passed,
             passed,
-            result.Value);
+            result.Value,
+            SM7110Reading: result);
     }
 
     private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
@@ -4480,6 +4494,8 @@ public partial class HomePage : UserControl
 
     private sealed class CarouselStationState
     {
+        public Guid ProductId { get; private set; }
+
         public bool Occupied { get; private set; }
 
         public bool Tested { get; private set; }
@@ -4498,6 +4514,7 @@ public partial class HomePage : UserControl
 
         public void SetLoaded()
         {
+            ProductId = Guid.NewGuid();
             Occupied = true;
             Tested = false;
             Bin = null;
@@ -6358,6 +6375,7 @@ public partial class HomePage : UserControl
         Bin2PositionLabel.Text = sm7110Enabled ? "2号盒 · OK · BIN2" : "2号盒 · BIN2";
         Bin3PositionLabel.Text = sm7110Enabled ? "3号盒 · OK · BIN3" : "3号盒 · BIN3";
         UpdateSM7110RangeDisplay();
+        RefreshDistributionCharts();
     }
 
     private bool IsSM7110TestEnabled()
@@ -6441,6 +6459,7 @@ public partial class HomePage : UserControl
             return;
         UpdateSM7110RangeDisplay();
         SaveSM7110RangeFromInputs();
+        RefreshDistributionCharts();
         UpdateHomeCommandState();
     }
 
@@ -7892,6 +7911,7 @@ public partial class HomePage : UserControl
         }
 
         TestStationDwellTextBox.IsEnabled = commandsIdle;
+        BatchNumberTextBox.IsEnabled = commandsIdle;
         TestRetryCountTextBox.IsEnabled = commandsIdle;
         SM7110LowerLimitTextBox.IsEnabled = commandsIdle;
         SM7110UpperLimitTextBox.IsEnabled = commandsIdle;
@@ -8121,6 +8141,7 @@ public partial class HomePage : UserControl
 
         _uphRefreshTimer.Stop();
         UpdateUphDisplay();
+        if (_distributionDirty) RefreshDistributionCharts();
     }
 
     private void RecordCompletedUphUnit()
@@ -8691,7 +8712,9 @@ public partial class HomePage : UserControl
         bool? SM7110Passed = null,
         double? SM7110Value = null,
         bool E4981ALossRejected = false,
-        string? E4981ALossFailureReason = null)
+        string? E4981ALossFailureReason = null,
+        E4981AMeasurementResult? E4981AReading = null,
+        SM7110MeasurementResult? SM7110Reading = null)
     {
         // 产品分料判定独立于当前仪表的重试判定；SM7110合格不能覆盖E4981A的NG。
         public bool IsNg => Bin == "BIN0" || E4981ALossRejected || SM7110Passed == false;

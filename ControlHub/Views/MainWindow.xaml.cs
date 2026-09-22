@@ -153,6 +153,35 @@ public partial class MainWindow : Window
         ShowParameterSettingsPage();
     }
 
+    private async void BatchQueryMenu_Click(object sender, RoutedEventArgs e)
+    {
+        await HomeContent.DeactivateProductionAsync();
+        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync()) return;
+        ShowBatchQueryPage();
+        await BatchQueryContent.ActivateAsync(HomeContent.CurrentBatchNumber);
+    }
+
+    private void ShowBatchQueryPage()
+    {
+        foreach (var button in new[] { HomeMenuButton, MotionMenuButton, VisualCalibrationMenuButton,
+                     UsbMicroscopeMenuButton, ConnectionMenuButton, ParameterSettingsMenuButton })
+            button.Style = (Style)Resources["MenuButton"];
+        BatchQueryMenuButton.Style = (Style)Resources["ActiveMenuButton"];
+        HomeContent.Visibility = Visibility.Collapsed;
+        MotionPage.Visibility = Visibility.Collapsed;
+        VisualCalibrationContent.Visibility = Visibility.Collapsed;
+        UsbMicroscopeContent.Visibility = Visibility.Collapsed;
+        ConnectionConfigContent.Visibility = Visibility.Collapsed;
+        ParameterSettingsContent.Visibility = Visibility.Collapsed;
+        BatchQueryContent.Visibility = Visibility.Visible;
+    }
+
+    private void HideBatchQueryPage()
+    {
+        BatchQueryContent.Visibility = Visibility.Collapsed;
+        BatchQueryMenuButton.Style = (Style)Resources["MenuButton"];
+    }
+
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e)
     {
         WindowState = WindowState.Minimized;
@@ -213,6 +242,7 @@ public partial class MainWindow : Window
 
     private void ShowMotionPage()
     {
+        HideBatchQueryPage();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
@@ -229,6 +259,7 @@ public partial class MainWindow : Window
 
     private void ShowHomePage()
     {
+        HideBatchQueryPage();
         UsbMicroscopeContent.UseHomePreview();
         HomeMenuButton.Style = (Style)Resources["ActiveMenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
@@ -247,6 +278,7 @@ public partial class MainWindow : Window
 
     private void ShowVisualCalibrationPage()
     {
+        HideBatchQueryPage();
         VisualCalibrationContent.UseDefaultVisionDisplay();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
@@ -265,6 +297,7 @@ public partial class MainWindow : Window
 
     private void ShowUsbMicroscopePage()
     {
+        HideBatchQueryPage();
         UsbMicroscopeContent.UseDefaultPreview();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
@@ -282,6 +315,7 @@ public partial class MainWindow : Window
 
     private void ShowConnectionConfigPage()
     {
+        HideBatchQueryPage();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];
@@ -298,6 +332,7 @@ public partial class MainWindow : Window
 
     private void ShowParameterSettingsPage()
     {
+        HideBatchQueryPage();
         HomeMenuButton.Style = (Style)Resources["MenuButton"];
         MotionMenuButton.Style = (Style)Resources["MenuButton"];
         VisualCalibrationMenuButton.Style = (Style)Resources["MenuButton"];

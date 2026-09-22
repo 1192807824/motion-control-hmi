@@ -209,6 +209,8 @@
                             <TextBlock Text="参数设置" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    <Button x:Name="BatchQueryMenuButton" Style="{StaticResource MenuButton}" Content="数据查询" Click="BatchQueryMenu_Click"
+                            ToolTip="进入专用查询和导出页面；切换前停止当前生产。生产中查询可使用主页的批次查询按钮。" />
                     <Button Style="{StaticResource MenuButton}">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
@@ -254,5 +256,6 @@
             <pages:ParameterSettingsPage x:Name="ParameterSettingsContent"
                                          Grid.Row="2"
                                          Visibility="Collapsed" />
+            <pages:BatchQueryPage x:Name="BatchQueryContent" Grid.Row="2" Visibility="Collapsed" />
     </Grid>
 </Window>

@@ -72,3 +72,17 @@ The vibration feeder connection is a raw TCP client. Existing ASCII/HEX device c
 socket; this is transport-level TCP, not Modbus TCP register framing. Configure the feeder's IP address and listening
 port on the connection page. The UI reports remote disconnects automatically, and connection/write operations use the
 configured timeouts.
+# 批次数据采集
+
+主页输入批次号后开始生产；运行和暂停期间批次号锁定。同名批次再次启动会继续累计。只采集已启用且有料工位的最终测量结果，每轮机械重测中的中间结果不重复计入图表。
+
+- E4981A：保存电容（nF）、损耗 D、BIN 和判定结果。
+- SM7110 电阻模式：保存最终测量轮首次达到门限的电阻（GΩ）及耗时；超时保存该轮最后读数并标记 NG；从未得到有效读数时保留空值及仪表状态。
+- 每条记录包含批次、跨站产品编号、时间、工位、仪表/模式、测量轮数、本站判定、截至本站的产品判定与原始响应。SM7110 的合格不会清除前站的不良判定。
+- 主页隐藏原转盘示意图，按已启用工位显示频数柱状图与正态拟合线。统计包括有效的 OK/NG 最终读数，排除无效读数；少于两个有效样本或标准差为零时仅显示实际频数。
+- 顶部“数据查询”菜单进入专用页面，可按批次查询、刷新批次列表和导出全部查询明细。切换页面沿用现有停止生产逻辑；主页“批次查询”按钮打开相同功能的独立窗口，可在生产中查看和导出。
+- 点击“导出当前批次 CSV”选择保存位置，文件含中文表头、批次、产品编号、最终值/单位、损耗D、判定、耗时、重测轮数、门限与原始响应，Excel 可打开。导出使用最近一次查询的完整快照，新增记录需先重新查询；空结果或修改批次后尚未查询时禁止导出。
+
+数据保存在内嵌 SQLite 数据库 `%LOCALAPPDATA%\ControlHub\batches\batch-measurements.db`，无需安装数据库服务。每个工位的最终结果使用独立事务立即提交，记录提交后才计入主页；双站结果可分别落库。启用 WAL、完整同步、外键和查询索引，保存失败会使生产流程报错并沿用现有安全退出逻辑。取消或通讯异常导致测量没有最终结果时，不生成虚假的测量数值。
+
+SQLite 版本启动时会扫描原有批次 JSON 并自动导入，记录编号作为主键，重复启动不会重复导入；这样旧版程序在切换前最后写入的记录也能在下次启动时补入。每个进程只扫描一次。旧 JSON 保留作为迁移备份；若个别旧文件损坏，会跳过该文件并在同目录生成 `sqlite-migration-errors.log`。
