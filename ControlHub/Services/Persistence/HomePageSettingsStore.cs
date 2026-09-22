@@ -212,12 +212,11 @@ public sealed class HomePageSettings
     // 两个仪表共用的追加测试次数；0表示不重试，旧配置默认重试1次。
     public int TestRetryCount { get; set; } = 1;
 
-    // 电容落入此闭区间时独立追加机械复测；单位nF，旧配置默认关闭。
+    // 电容不在此闭区间时复测，与仪表失败共用TestRetryCount；单位nF。
+    // 两端均留空兼容旧配方，仅按原仪表失败条件重试。
     public double? E4981ARetryLowerNf { get; set; }
 
     public double? E4981ARetryUpperNf { get; set; }
-
-    public int E4981ARangeRetryCount { get; set; }
 
     // 留空表示尚未配置；双站生产必须设置合格区间，不能默认为全部合格。
     public double? SM7110LowerLimit { get; set; }

@@ -2633,18 +2633,6 @@
                                              TextChanged="TestStationPositionTextBox_TextChanged" />
                                         </StackPanel>
                                         <StackPanel Margin="0,2,8,2">
-                                            <TextBlock Text="测试重试次数" Foreground="#9FB1BF" FontSize="9" />
-                                            <TextBox x:Name="TestRetryCountTextBox"
-                                             Height="25"
-                                             Text="1"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Foreground="#10263A"
-                                             Background="#F7FAFC"
-                                             ToolTip="E4981A和SM7110共用。失败站先回等待位，再到下压位，等待设置的毫秒数后重新测试。SM7110每轮内持续加电采样，整轮失败后才执行机械复测。首次不计入重试次数；0为不重试，范围0～10次。"
-                                             TextChanged="TestStationPositionTextBox_TextChanged" />
-                                        </StackPanel>
-                                        <StackPanel Margin="0,2,8,2">
                                             <TextBlock Text="测试站01 · 下压位" Foreground="#9FB1BF" FontSize="9" />
                                             <TextBox x:Name="TestStation1PressPositionTextBox"
                                              Height="25"
@@ -2723,29 +2711,29 @@
                             <Border x:Name="E4981ARetryRangeCard" Background="#10263A" BorderBrush="#29485D"
                                     BorderThickness="1" CornerRadius="6" Padding="14,12" Margin="0,12,0,0">
                                 <StackPanel>
-                                    <TextBlock Text="E4981A 电容区间重试" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
-                                    <TextBlock Text="电容在设定区间内时，回等待位、重新下压并稳定等待后复测。首次测量不计入重试次数，0次关闭。"
+                                    <TextBlock Text="仪表测试重试 · E4981A 电容区间" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
+                                    <TextBlock Text="E4981A电容超出区间才复测，含上下边界。区间外、仪表失败与通讯异常共用同一重试上限；每站独立计数，首次不计，0次关闭。"
                                                Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8" />
                                     <UniformGrid Columns="3">
                                         <StackPanel Margin="0,0,8,0">
-                                            <TextBlock Text="重试下限（nF，含）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBlock Text="免重试下限（nF，含）" Foreground="#9FB1BF" FontSize="12" />
                                             <TextBox x:Name="E4981ARetryLowerTextBox" Height="30"
                                                      Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
-                                                     ToolTip="电容重试区间下限，单位nF，支持科学计数法。"
+                                                     ToolTip="电容低于此值时重试。例如区间1～1000 nF，0.05 nF会重试。上下限同时留空时只按仪表失败条件重试。"
                                                      TextChanged="E4981ARetryRangeTextBox_TextChanged" />
                                         </StackPanel>
                                         <StackPanel Margin="0,0,8,0">
-                                            <TextBlock Text="重试上限（nF，含）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBlock Text="免重试上限（nF，含）" Foreground="#9FB1BF" FontSize="12" />
                                             <TextBox x:Name="E4981ARetryUpperTextBox" Height="30"
                                                      Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
-                                                     ToolTip="必须大于或等于下限；读数落入区间即触发复测，与BIN是否合格无关。"
+                                                     ToolTip="必须大于或等于下限。电容大于上限时重试，区间内（含边界）不因电容触发重试。"
                                                      TextChanged="E4981ARetryRangeTextBox_TextChanged" />
                                         </StackPanel>
                                         <StackPanel>
-                                            <TextBlock Text="区间重试次数（0～10）" Foreground="#9FB1BF" FontSize="12" />
-                                            <TextBox x:Name="E4981ARangeRetryCountTextBox" Text="0" Height="30"
+                                            <TextBlock Text="统一重试次数（0～10）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBox x:Name="TestRetryCountTextBox" Text="1" Height="30"
                                                      Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
-                                                     ToolTip="E4981A专用，与原测试重试次数独立计数。区间次数用完后按最后一次测量结果分料。自动保存，下次启动生产生效。"
+                                                     ToolTip="E4981A和SM7110共用此次数配置，各站单独计数。区间外、测量失败和通讯异常不叠加额度。复测先回等待位、再下压并稳定等待。自动保存，下次启动生产生效。"
                                                      TextChanged="E4981ARetryRangeTextBox_TextChanged" />
                                         </StackPanel>
                                     </UniformGrid>

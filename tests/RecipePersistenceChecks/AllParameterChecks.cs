@@ -31,7 +31,6 @@ internal static partial class Program
             {
                 "VisionPickupCountTextBox" => 30,
                 "TestRetryCountTextBox" => 2,
-                "E4981ARangeRetryCountTextBox" => 3,
                 "E4981ARetryLowerTextBox" => 400.123456789,
                 "E4981ARetryUpperTextBox" => 500.123456789,
                 "VacuumPickupDwellTextBox" or "VacuumBreakPulseTextBox" or "VacuumValveSwitchDelayTextBox" or "TestStationDwellTextBox" => 123,
@@ -92,7 +91,6 @@ internal static partial class Program
                      ("FirstSetNozzle2PlacePreDropTextBox", "999999"),
                      ("SecondSetNozzle1PreDropTextBox", "999999"),
                      ("TestRetryCountTextBox", "11"),
-                     ("E4981ARangeRetryCountTextBox", "11"),
                      ("E4981ARetryLowerTextBox", "501"),
                      ("Axis0.RunVelocity", "0"),
                      ("Axis0.StartVelocity", "-1")

@@ -4210,9 +4210,9 @@ public partial class HomePage : UserControl
                 Color.FromRgb(98, 181, 255));
             var attempts = 0;
             var range = settings.Instrument == TestStationInstrument.E4981A ? _e4981ARetryRange : null;
-            var finalResult = await TestMeasurementRetry.ExecuteWithRangeAsync(
+            var finalResult = await TestMeasurementRetry.ExecuteAsync(
                 MeasureOnceAsync,
-                result => result.Passed,
+                result => IsTestStationMeasurementComplete(result, range),
                 _testRetryCount,
                 async (retryNumber, token) =>
                 {
@@ -4236,15 +4236,13 @@ public partial class HomePage : UserControl
                             },
                             (milliseconds, delayToken) => Task.Delay(milliseconds, delayToken),
                             phase => SetTestStationRuntimeDisplay(stationNumber,
-                                $"第{retryNumber}次复测 · {phase}", "机械复测",
+                                $"重试 {retryNumber}/{_testRetryCount} · {phase}", "机械复测",
                                 $"{instrumentName} · 轴{axisNo} · {phase}", Color.FromRgb(242, 181, 68)), token);
                         await WaitIfProductionPausedAsync(token);
                     }
                     finally { _testStationRetryMotionLock.Release(); }
                 },
                 cancellationToken,
-                result => range?.Contains(result.E4981AReading) == true,
-                range?.RetryCount ?? 0,
                 canRetryException: exception => !SM7110TimedTest.HasStopFailure(exception));
 
             // 保存位于重测循环之外；写盘失败不能触发再次测量。另一站失败也不会丢失本站结果。
@@ -7920,7 +7918,6 @@ public partial class HomePage : UserControl
         TestRetryCountTextBox.IsEnabled = commandsIdle;
         E4981ARetryLowerTextBox.IsEnabled = commandsIdle;
         E4981ARetryUpperTextBox.IsEnabled = commandsIdle;
-        E4981ARangeRetryCountTextBox.IsEnabled = commandsIdle;
         SM7110LowerLimitTextBox.IsEnabled = commandsIdle;
         SM7110UpperLimitTextBox.IsEnabled = commandsIdle;
         SM7110MaximumTimeTextBox.IsEnabled = commandsIdle;
