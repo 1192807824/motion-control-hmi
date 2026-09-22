@@ -187,7 +187,7 @@ internal static partial class Program
         T QueryField<T>(string name) => (T)typeof(BatchQueryPage).GetField(name, Flags)!.GetValue(page)!;
         Task Query() => (Task)typeof(BatchQueryPage).GetMethod("QueryAsync", Flags)!.Invoke(page, null)!;
         void Update() => typeof(BatchQueryPage).GetMethod("UpdateCommands", Flags)!.Invoke(page, null);
-        var input = QueryField<ComboBox>("_batch");
+        var input = QueryField<TextBox>("_batch");
         var export = QueryField<Button>("_export");
         Require(export.IsEnabled && QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 4,
             "Query must enable exporting the full captured batch");

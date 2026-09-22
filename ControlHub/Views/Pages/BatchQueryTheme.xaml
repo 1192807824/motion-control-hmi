@@ -31,45 +31,16 @@
         <Setter Property="Background" Value="#247DC7" /><Setter Property="Foreground" Value="White" />
         <Setter Property="BorderBrush" Value="#439DE3" />
     </Style>
-    <Style x:Key="QueryBatchItem" TargetType="ComboBoxItem">
-        <Setter Property="Foreground" Value="#DCE8F2" /><Setter Property="Background" Value="#132B3F" />
-        <Setter Property="Padding" Value="12,9" />
-        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
-            <Border x:Name="Item" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                <ContentPresenter />
-            </Border>
-            <ControlTemplate.Triggers>
-                <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="#244C69" /></Trigger>
-                <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#1D4361" /></Trigger>
-            </ControlTemplate.Triggers>
-        </ControlTemplate></Setter.Value></Setter>
-    </Style>
-    <Style x:Key="QueryBatchInput" TargetType="ComboBox">
+    <Style x:Key="QueryBatchInput" TargetType="TextBox">
         <Setter Property="Height" Value="38" /><Setter Property="Foreground" Value="#EDF5FC" />
         <Setter Property="Background" Value="#0C1E2E" /><Setter Property="BorderBrush" Value="#35546C" />
-        <Setter Property="FontSize" Value="13" /><Setter Property="ItemContainerStyle" Value="{StaticResource QueryBatchItem}" />
-        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
-            <Grid>
-                <Border x:Name="InputBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" />
-                <TextBox x:Name="PART_EditableTextBox" Margin="12,1,40,1" Foreground="{TemplateBinding Foreground}"
-                         Background="Transparent" BorderThickness="0" VerticalContentAlignment="Center" CaretBrush="#EDF5FC"
-                         IsReadOnly="{TemplateBinding IsReadOnly}">
-                    <TextBox.Template><ControlTemplate TargetType="TextBox"><ScrollViewer x:Name="PART_ContentHost" /></ControlTemplate></TextBox.Template>
-                </TextBox>
-                <ToggleButton Width="34" HorizontalAlignment="Right" Focusable="False"
-                              IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-                    <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
-                        <Border Background="Transparent"><TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="11"
-                            Foreground="#8BA9C2" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
-                    </ControlTemplate></ToggleButton.Template>
-                </ToggleButton>
-                <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
-                    <Border Background="#132B3F" BorderBrush="#35546C" BorderThickness="1" CornerRadius="6" Margin="0,4,0,0"
-                            MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="300">
-                        <ScrollViewer CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" /></ScrollViewer>
-                    </Border>
-                </Popup>
-            </Grid>
+        <Setter Property="FontSize" Value="13" /><Setter Property="Padding" Value="12,0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" /><Setter Property="CaretBrush" Value="#EDF5FC" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+            <Border x:Name="InputBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                <ScrollViewer x:Name="PART_ContentHost" />
+            </Border>
             <ControlTemplate.Triggers>
                 <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="InputBorder" Property="BorderBrush" Value="#5CB9FF" /></Trigger>
                 <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>

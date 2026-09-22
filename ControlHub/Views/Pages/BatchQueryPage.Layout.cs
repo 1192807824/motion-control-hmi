@@ -13,7 +13,7 @@ public sealed partial class BatchQueryPage
 {
     private readonly TextBlock _metricRecords = new(), _metricProducts = new(), _metricYield = new(), _metricNg = new();
     private readonly TextBlock _resultCaption = new(), _batchBadge = new();
-    private readonly TextBlock _emptyMessage = new() { Text = "选择批次，查看测量记录", TextAlignment = TextAlignment.Center,
+    private readonly TextBlock _emptyMessage = new() { Text = "输入批次号，查看测量记录", TextAlignment = TextAlignment.Center,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _details = new() { Content = "记录详情", IsEnabled = false };
     private static SolidColorBrush Ink(string color) => new((Color)ColorConverter.ConvertFromString(color));
@@ -47,8 +47,7 @@ public sealed partial class BatchQueryPage
         var search = new DockPanel { LastChildFill = true };
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         _query.Style = (Style)FindResource("QueryPrimaryButton"); _query.Content = ButtonContent("\uE721", "查询批次");
-        _refresh.Style = (Style)FindResource("QueryButton"); _refresh.Content = ButtonContent("\uE72C", "刷新列表");
-        actions.Children.Add(_query); actions.Children.Add(_refresh);
+        actions.Children.Add(_query);
         DockPanel.SetDock(actions, Dock.Right); search.Children.Add(actions);
         var input = new DockPanel { Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
         var inputLabel = Label("批次号", 13, "#BCCFDF"); inputLabel.Margin = new Thickness(0, 0, 14, 0);

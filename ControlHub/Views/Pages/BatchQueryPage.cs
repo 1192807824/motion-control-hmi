@@ -13,9 +13,9 @@ namespace ControlHub.Views.Pages;
 public sealed partial class BatchQueryPage : UserControl
 {
     private readonly BatchMeasurementStore _store;
-    private readonly ComboBox _batch = new() { IsEditable = true, Width = 270, Margin = new Thickness(10, 0, 10, 0) };
+    private readonly TextBox _batch = new() { Width = 270, MaxLength = 80, Margin = new Thickness(10, 0, 10, 0),
+        ToolTip = "直接输入完整批次号，按 Enter 查询" };
     private readonly Button _query = new() { Content = "查询 / 刷新", Padding = new Thickness(18, 6, 18, 6) };
-    private readonly Button _refresh = new() { Content = "刷新批次列表", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0) };
     private readonly Button _export = new() { Content = "导出当前批次 CSV", Padding = new Thickness(18, 6, 18, 6),
         Margin = new Thickness(8, 0, 0, 0), IsEnabled = false, ToolTip = "导出最近一次查询的全部明细，可使用 Excel 打开" };
     private readonly TextBlock _status = new() { Foreground = Brushes.LightGray, Margin = new Thickness(0, 8, 0, 8), TextWrapping = TextWrapping.Wrap };
@@ -35,34 +35,18 @@ public sealed partial class BatchQueryPage : UserControl
 
         Content = BuildView();
         _query.Click += async (_, _) => await QueryAsync();
-        _refresh.Click += async (_, _) => await RefreshBatchesAsync();
         _export.Click += async (_, _) => await ExportAsync();
         _batch.KeyDown += async (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; await QueryAsync(); } };
-        _batch.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler((_, _) => UpdateCommands()));
-        _batch.SelectionChanged += (_, _) => Dispatcher.BeginInvoke(UpdateCommands);
-        _status.Text = "输入或选择批次号后查询，再导出该批次的全部明细。";
+        _batch.TextChanged += (_, _) => UpdateCommands();
+        _status.Text = "输入完整批次号后按 Enter 或点击查询。";
     }
 
     public async Task ActivateAsync(string? initialBatch = null)
     {
         if (_busy) return;
         if (string.IsNullOrWhiteSpace(_batch.Text) && !string.IsNullOrWhiteSpace(initialBatch)) _batch.Text = initialBatch;
-        await RefreshBatchesAsync();
         if (!string.IsNullOrWhiteSpace(_batch.Text)) await QueryAsync();
-    }
-
-    private async Task RefreshBatchesAsync()
-    {
-        if (_busy) return;
-        _busy = true; UpdateCommands();
-        try
-        {
-            var selected = _batch.Text;
-            _batch.ItemsSource = await Task.Run(_store.ListBatches);
-            _batch.Text = selected;
-        }
-        catch (Exception exception) { _status.Text = $"读取批次列表失败：{exception.Message}"; }
-        finally { _busy = false; UpdateCommands(); }
+        else _batch.Focus();
     }
 
     private async Task QueryAsync()
@@ -98,7 +82,7 @@ public sealed partial class BatchQueryPage : UserControl
 
     private void UpdateCommands()
     {
-        _query.IsEnabled = !_busy; _refresh.IsEnabled = !_busy; _batch.IsEnabled = !_busy;
+        _query.IsEnabled = !_busy && !string.IsNullOrWhiteSpace(_batch.Text); _batch.IsEnabled = !_busy;
         _export.IsEnabled = !_busy && _records.Count > 0 && _queriedBatch == _batch.Text.Trim();
     }
 
