@@ -232,7 +232,6 @@ public partial class HomePage : UserControl
         _uphRefreshTimer.Tick += (_, _) =>
         {
             UpdateUphDisplay();
-            if (_distributionDirty) RefreshDistributionCharts();
         };
         InitializeProductionMotionParameterEditors();
         LoadPresetPositions();
@@ -4170,7 +4169,6 @@ public partial class HomePage : UserControl
 
         foreach (var measurementResult in measurementResults)
         {
-            carouselStations[measurementResult.Key].SetMeasurement(measurementResult.Value);
             SetTestStationRuntimeDisplay(
                 measurementResult.Key,
                 $"测试完成 · {measurementResult.Value.StatusDescription}",
@@ -8141,7 +8139,6 @@ public partial class HomePage : UserControl
 
         _uphRefreshTimer.Stop();
         UpdateUphDisplay();
-        if (_distributionDirty) RefreshDistributionCharts();
     }
 
     private void RecordCompletedUphUnit()

@@ -112,12 +112,18 @@ internal static partial class Program
         var e = new E4981AMeasurementResult(0, 1e-9, 0.02, 2, "0,1e-9,0.02,2");
         var result = Invoke(null, "ClassifyE4981AMeasurement", e)!;
         Wait((Task)Invoke(page, "SaveStationMeasurementAsync", 5, product, result, 2)!);
+        Require(ChartTotal(charts.Children[0]) == 1 && ChartTotal(charts.Children[1]) == 0,
+            "First station chart did not refresh immediately after its own result");
+        Require((bool)product.GetType().GetProperty("Tested")!.GetValue(product)!,
+            "First station result was not published immediately");
         var rangeType = typeof(HomePage).GetNestedType("SM7110AcceptanceRange", BindingFlags.NonPublic)!;
         var range = Activator.CreateInstance(rangeType, 5e10, double.PositiveInfinity, "R")!;
         Set(page, "_sm7110AcceptanceRange", range);
         var sm = new SM7110MeasurementResult(5.2e10, 0, "R", "0,5.2e10") { TestElapsedSeconds = 0.4 };
         result = Invoke(null, "ClassifySM7110Measurement", sm, "BIN2", range)!;
         Wait((Task)Invoke(page, "SaveStationMeasurementAsync", 6, product, result, 1)!);
+        Require(ChartTotal(charts.Children[0]) == 1 && ChartTotal(charts.Children[1]) == 1,
+            "Second station chart did not refresh independently");
         sm = sm with { Value = 2e10, TimedOut = true, TestElapsedSeconds = 1 };
         result = Invoke(null, "ClassifySM7110Measurement", sm, "BIN2", range)!;
         Wait((Task)Invoke(page, "SaveStationMeasurementAsync", 6, product, result, 3)!);
@@ -246,6 +252,9 @@ internal static partial class Program
         Dispatcher.PushFrame(frame);
         task.GetAwaiter().GetResult();
     }
+
+    private static int ChartTotal(object chart) =>
+        (int)chart.GetType().GetField("_total", Flags)!.GetValue(chart)!;
 
     private static void Render(FrameworkElement view, string path, int width, int height)
     {

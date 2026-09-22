@@ -14,7 +14,6 @@ public partial class HomePage
     private readonly List<BatchMeasurement> _batchMeasurements = [];
     private string _activeBatchNumber = "";
     private int _batchLoadVersion;
-    private bool _distributionDirty;
 
     private void BatchNumberTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -99,14 +98,22 @@ public partial class HomePage
             throw new InvalidOperationException($"批次 {record.BatchNumber} / 工位{station} 数据保存失败，停止生产：{exception.Message}", exception);
         }
         _batchMeasurements.Add(record);
+        state.SetMeasurement(result);
         BatchCollectionStatusText.Text = $"批次 {_activeBatchNumber} · 已保存 {_batchMeasurements.Count} 条";
-        _distributionDirty = true;
+        RefreshDistributionCharts();
+        SetTestStationRuntimeDisplay(
+            station,
+            $"测试完成 · {result.StatusDescription}",
+            result.ResultLabel,
+            result.DisplayText,
+            result.Passed && !result.IsNg
+                ? Color.FromRgb(73, 209, 125)
+                : Color.FromRgb(242, 122, 128));
     }
 
     private void RefreshDistributionCharts()
     {
         if (DistributionChartsPanel is null || _loadingPresetPositions) return;
-        _distributionDirty = false;
         DistributionChartsPanel.Children.Clear();
         foreach (var definition in TestStationDefinitions)
         {
