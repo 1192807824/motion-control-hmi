@@ -2720,6 +2720,39 @@
                                 </Grid>
                             </Border>
 
+                            <Border x:Name="E4981ARetryRangeCard" Background="#10263A" BorderBrush="#29485D"
+                                    BorderThickness="1" CornerRadius="6" Padding="14,12" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="E4981A 电容区间重试" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
+                                    <TextBlock Text="电容在设定区间内时，回等待位、重新下压并稳定等待后复测。首次测量不计入重试次数，0次关闭。"
+                                               Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8" />
+                                    <UniformGrid Columns="3">
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="重试下限（nF，含）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBox x:Name="E4981ARetryLowerTextBox" Height="30"
+                                                     Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
+                                                     ToolTip="电容重试区间下限，单位nF，支持科学计数法。"
+                                                     TextChanged="E4981ARetryRangeTextBox_TextChanged" />
+                                        </StackPanel>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="重试上限（nF，含）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBox x:Name="E4981ARetryUpperTextBox" Height="30"
+                                                     Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
+                                                     ToolTip="必须大于或等于下限；读数落入区间即触发复测，与BIN是否合格无关。"
+                                                     TextChanged="E4981ARetryRangeTextBox_TextChanged" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="区间重试次数（0～10）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBox x:Name="E4981ARangeRetryCountTextBox" Text="0" Height="30"
+                                                     Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
+                                                     ToolTip="E4981A专用，与原测试重试次数独立计数。区间次数用完后按最后一次测量结果分料。自动保存，下次启动生产生效。"
+                                                     TextChanged="E4981ARetryRangeTextBox_TextChanged" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <TextBlock x:Name="E4981ARetryRangeStatusText" Foreground="#9FB1BF" FontSize="11"
+                                               TextWrapping="Wrap" Margin="0,8,0,0" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>

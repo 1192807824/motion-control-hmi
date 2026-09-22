@@ -159,6 +159,7 @@ internal static partial class Program
         Require((string?)product.GetType().GetProperty("Bin")!.GetValue(product) == "BIN0", "Reject BIN lost during rotation.");
         Console.WriteLine("PASS: complete carousel revolution, enabled/empty stations, test-axis highlight, fixed station positions and BIN0 tracking. No hardware opened.");
         CheckSM7110SettingsView();
+        CheckE4981ARangeRetry();
         CheckE4981ASetupChanges();
         CheckE4981ANanofaradUnits();
         CheckSM7110GigohmUnits();

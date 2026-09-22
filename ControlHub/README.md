@@ -72,6 +72,10 @@ The vibration feeder connection is a raw TCP client. Existing ASCII/HEX device c
 socket; this is transport-level TCP, not Modbus TCP register framing. Configure the feeder's IP address and listening
 port on the connection page. The UI reports remote disconnects automatically, and connection/write operations use the
 configured timeouts.
+## E4981A 电容区间重试
+
+参数配置页的“E4981A 电容区间重试”可设置电容下限/上限（nF，包含边界）和独立重试次数（0～10，0关闭）。有效电容落入区间时，即使BIN合格也会只对本站执行回等待位、下压、稳定等待后复测；离开区间即结束区间复测，次数用完按最后一次结果分料，不额外改变BIN或损耗判定。仪表异常仍使用原“测试重试次数”，两类次数独立累计；区间内损耗超限优先使用区间次数，区间额度耗尽不再追加失败重试。参数自动保存并随产品配方恢复，生产启动时锁定，旧配方默认关闭区间重试。
+
 # 批次数据采集
 
 主页输入批次号后开始生产；运行和暂停期间批次号锁定。同名批次再次启动会继续累计。只采集已启用且有料工位的最终测量结果，每轮机械重测中的中间结果不重复计入图表。

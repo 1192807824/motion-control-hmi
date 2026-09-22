@@ -14,7 +14,8 @@ internal static partial class Program
         var fields = typeof(HomePage).GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
         var inputs = fields.Where(field => field.FieldType == typeof(TextBox))
             // Upper limit is not used or saved in resistance mode; it is checked separately in current mode.
-            .Where(field => field.Name != "SM7110UpperLimitTextBox")
+            // Batch numbers are free text and are not numeric recipe parameters.
+            .Where(field => field.Name is not ("SM7110UpperLimitTextBox" or "BatchNumberTextBox"))
             .ToDictionary(field => field.Name, field => (TextBox)field.GetValue(home)!);
         var axisEditors = (IDictionary)typeof(HomePage).GetField("_productionAxisMotionEditors", PrivateInstance)!.GetValue(home)!;
         foreach (DictionaryEntry axis in axisEditors)
@@ -30,6 +31,9 @@ internal static partial class Program
             {
                 "VisionPickupCountTextBox" => 30,
                 "TestRetryCountTextBox" => 2,
+                "E4981ARangeRetryCountTextBox" => 3,
+                "E4981ARetryLowerTextBox" => 400.123456789,
+                "E4981ARetryUpperTextBox" => 500.123456789,
                 "VacuumPickupDwellTextBox" or "VacuumBreakPulseTextBox" or "VacuumValveSwitchDelayTextBox" or "TestStationDwellTextBox" => 123,
                 "SM7110LowerLimitTextBox" => 2.5,
                 "SM7110MaximumTimeTextBox" => 1.75,
@@ -88,6 +92,8 @@ internal static partial class Program
                      ("FirstSetNozzle2PlacePreDropTextBox", "999999"),
                      ("SecondSetNozzle1PreDropTextBox", "999999"),
                      ("TestRetryCountTextBox", "11"),
+                     ("E4981ARangeRetryCountTextBox", "11"),
+                     ("E4981ARetryLowerTextBox", "501"),
                      ("Axis0.RunVelocity", "0"),
                      ("Axis0.StartVelocity", "-1")
                  })

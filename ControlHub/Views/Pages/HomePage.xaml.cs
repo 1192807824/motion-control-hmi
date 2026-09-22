@@ -407,6 +407,7 @@ public partial class HomePage : UserControl
 
     public HomePageSettings CaptureRecipeSettings()
     {
+        SaveE4981ARetryRangeFromInputs(throwOnInvalid: true);
         SaveVisionPickupCountFromInput(throwOnInvalid: true);
         SaveSM7110RangeFromInputs(throwOnInvalid: true);
         SaveObservationCompensationFromInputs(throwOnInvalid: true);
@@ -2078,6 +2079,7 @@ public partial class HomePage : UserControl
             _testStationSettings = ReadTestStationSettings();
             _testStationDwellMilliseconds = ReadTestStationDwellMilliseconds();
             _testRetryCount = ReadTestRetryCount();
+            _e4981ARetryRange = ReadE4981ARetryRange();
             _sm7110AcceptanceRange = IsSM7110TestEnabled() ? ReadSM7110AcceptanceRange() : null;
             EnsureAssignedTestInstrumentsConnected();
             var velocity = GetProductionAxisMotionSettings(
@@ -4207,7 +4209,8 @@ public partial class HomePage : UserControl
                 "等待仪表返回…",
                 Color.FromRgb(98, 181, 255));
             var attempts = 0;
-            var finalResult = await TestMeasurementRetry.ExecuteAsync(
+            var range = settings.Instrument == TestStationInstrument.E4981A ? _e4981ARetryRange : null;
+            var finalResult = await TestMeasurementRetry.ExecuteWithRangeAsync(
                 MeasureOnceAsync,
                 result => result.Passed,
                 _testRetryCount,
@@ -4233,13 +4236,15 @@ public partial class HomePage : UserControl
                             },
                             (milliseconds, delayToken) => Task.Delay(milliseconds, delayToken),
                             phase => SetTestStationRuntimeDisplay(stationNumber,
-                                $"重试 {retryNumber}/{_testRetryCount} · {phase}", "机械复测",
+                                $"第{retryNumber}次复测 · {phase}", "机械复测",
                                 $"{instrumentName} · 轴{axisNo} · {phase}", Color.FromRgb(242, 181, 68)), token);
                         await WaitIfProductionPausedAsync(token);
                     }
                     finally { _testStationRetryMotionLock.Release(); }
                 },
                 cancellationToken,
+                result => range?.Contains(result.E4981AReading) == true,
+                range?.RetryCount ?? 0,
                 canRetryException: exception => !SM7110TimedTest.HasStopFailure(exception));
 
             // 保存位于重测循环之外；写盘失败不能触发再次测量。另一站失败也不会丢失本站结果。
@@ -6125,6 +6130,7 @@ public partial class HomePage : UserControl
         TestStationDwellTextBox.Text = _homeSettings.TestStationDwellMilliseconds
             .ToString(CultureInfo.CurrentCulture);
         TestRetryCountTextBox.Text = _homeSettings.TestRetryCount.ToString(CultureInfo.CurrentCulture);
+        LoadE4981ARetryRangeEditors();
         SM7110LowerLimitTextBox.Text = _homeSettings.SM7110LowerLimit is { } lower
             ? SM7110Protocol.ToDisplayValue(lower, _homeSettings.SM7110LimitMeasurementMode).ToString("R", CultureInfo.CurrentCulture) : "";
         SM7110UpperLimitTextBox.Text = _homeSettings.SM7110UpperLimit is { } upper
@@ -6824,6 +6830,7 @@ public partial class HomePage : UserControl
     {
         _ = ReadTestStationDwellMilliseconds();
         _ = ReadTestRetryCount();
+        _ = ReadE4981ARetryRange();
         var settingsByStation = new Dictionary<int, TestStationSettings>();
         foreach (var definition in TestStationDefinitions)
         {
@@ -7911,6 +7918,9 @@ public partial class HomePage : UserControl
         TestStationDwellTextBox.IsEnabled = commandsIdle;
         BatchNumberTextBox.IsEnabled = commandsIdle;
         TestRetryCountTextBox.IsEnabled = commandsIdle;
+        E4981ARetryLowerTextBox.IsEnabled = commandsIdle;
+        E4981ARetryUpperTextBox.IsEnabled = commandsIdle;
+        E4981ARangeRetryCountTextBox.IsEnabled = commandsIdle;
         SM7110LowerLimitTextBox.IsEnabled = commandsIdle;
         SM7110UpperLimitTextBox.IsEnabled = commandsIdle;
         SM7110MaximumTimeTextBox.IsEnabled = commandsIdle;
