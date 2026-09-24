@@ -67,7 +67,6 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         Axes.Clear();
         IoPoints.Clear();
-        AlarmRecords.Clear();
         SelectedAxis = null;
         MotionAxisSummaryText = "■ 轴状态监控";
         MotionDetectedCardsText = "未检测卡";

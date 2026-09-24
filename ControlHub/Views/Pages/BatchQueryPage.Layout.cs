@@ -38,6 +38,9 @@ public sealed partial class BatchQueryPage
         _export.Content = ButtonContent("\uE896", "导出该批次全部数据");
         _export.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(_export, Dock.Right); header.Children.Add(_export);
+        _clear.Style = (Style)FindResource("QueryButton");
+        _clear.Foreground = Ink("#FF9AA5"); _clear.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(_clear, Dock.Right); header.Children.Add(_clear);
         var heading = new StackPanel();
         heading.Children.Add(Label("生产数据  /  批次追溯", 11, "#78A0BE"));
         var title = Label("数据查询", 24, "#F0F6FC"); title.FontWeight = FontWeights.SemiBold; title.Margin = new Thickness(0, 3, 0, 0);

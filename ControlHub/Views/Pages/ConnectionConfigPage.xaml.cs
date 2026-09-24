@@ -57,6 +57,8 @@ public partial class ConnectionConfigPage : UserControl
     private readonly VibrationFeederTcpClient _tcpClient = new();
     private readonly TcpConnectionSettingsStore _tcpSettingsStore = new();
     private readonly E4981ATcpClient _generalTcpClient = new();
+    private int? _lastSerialFaultStatus;
+    private string? _lastTcpFaultStatus;
     private readonly SerialConnectionSettingsStore _serialSettingsStore = new();
     private readonly SerialConnectionClient _serialClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
@@ -154,6 +156,11 @@ public partial class ConnectionConfigPage : UserControl
             UpdateMeterResult(result);
             return result;
         }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AlarmHistory.Record("E4981A", "E4981A-MEASURE", exception.Message);
+            throw;
+        }
         finally
         {
             _meterOperationRunning = false;
@@ -250,6 +257,11 @@ public partial class ConnectionConfigPage : UserControl
                     throw new SM7110StopOutputException("SM7110停止输出/放电命令失败，禁止机械复测或继续流转。", ex);
                 }
             }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AlarmHistory.Record("SM7110", "SM7110-MEASURE", exception.Message);
+            throw;
         }
         finally
         {
@@ -463,7 +475,7 @@ public partial class ConnectionConfigPage : UserControl
         catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ArgumentException)
         {
             SetTcpStatus("连接失败");
-            AddTcpLog($"连接失败：{ex.Message}");
+            AddTcpLog($"连接失败：{ex.Message}", isAlarm: true);
         }
         catch (OperationCanceledException) when (_closed)
         {
@@ -497,12 +509,12 @@ public partial class ConnectionConfigPage : UserControl
         SaveTcpSettings(writeLog: false);
         if (string.IsNullOrWhiteSpace(settings.ManualSendText))
         {
-            AddTcpLog("发送失败：内容为空");
+            AddTcpLog("发送失败：内容为空", isAlarm: true);
             return;
         }
         if (!_generalTcpClient.IsConnected)
         {
-            AddTcpLog("发送失败：请先建立 TCP 连接");
+            AddTcpLog("发送失败：请先建立 TCP 连接", isAlarm: true);
             return;
         }
 
@@ -629,7 +641,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             _serialClient.Close();
             SetSerialStatus("连接失败");
-            AddSerialLog($"连接失败：{ex.Message}");
+            AddSerialLog($"连接失败：{ex.Message}", isAlarm: true);
         }
         finally
         {
@@ -655,12 +667,12 @@ public partial class ConnectionConfigPage : UserControl
         SaveSerialSettings(writeLog: false);
         if (string.IsNullOrWhiteSpace(settings.ManualSendText))
         {
-            AddSerialLog("发送失败：内容为空");
+            AddSerialLog("发送失败：内容为空", isAlarm: true);
             return;
         }
         if (!_serialClient.IsConnected)
         {
-            AddSerialLog("发送失败：请先建立串口连接");
+            AddSerialLog("发送失败：请先建立串口连接", isAlarm: true);
             return;
         }
 
@@ -726,7 +738,7 @@ public partial class ConnectionConfigPage : UserControl
         }
         catch (Exception exception)
         {
-            AddSerialLog($"测试失败：{exception.Message}");
+            AddSerialLog($"测试失败：{exception.Message}", isAlarm: true);
             SerialMeterResultStatusText.Text = exception.Message;
             SerialMeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
         }
@@ -804,7 +816,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             SetFeederStatus("\u8fde\u63a5\u5931\u8d25");
 
-            AddLog($"\u8fde\u63a5\u5931\u8d25\uff1a{ex.Message}");
+            AddLog($"\u8fde\u63a5\u5931\u8d25\uff1a{ex.Message}", isAlarm: true);
         }
         catch (OperationCanceledException) when (_closed)
         {
@@ -921,13 +933,13 @@ public partial class ConnectionConfigPage : UserControl
 
         if (string.IsNullOrWhiteSpace(settings.ManualSendText))
         {
-            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u5185\u5bb9\u4e3a\u7a7a");
+            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u5185\u5bb9\u4e3a\u7a7a", isAlarm: true);
             return;
         }
 
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return;
         }
 
@@ -941,7 +953,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             SetFeederStatus("\u901a\u8baf\u5f02\u5e38");
 
-            AddLog($"\u53d1\u9001\u5931\u8d25\uff1a{ex.Message}");
+            AddLog($"\u53d1\u9001\u5931\u8d25\uff1a{ex.Message}", isAlarm: true);
         }
     }
 
@@ -949,7 +961,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return;
         }
 
@@ -962,7 +974,7 @@ public partial class ConnectionConfigPage : UserControl
         if (sender is not Button { Tag: string mode } ||
             !VibrationDirectionNames.TryGetValue(mode, out var directionName))
         {
-            AddLog("方向震动失败：未知的方向模式");
+            AddLog("方向震动失败：未知的方向模式", isAlarm: true);
             return;
         }
 
@@ -976,7 +988,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         if (!_tcpClient.IsConnected)
         {
-            AddLog($"{directionName}失败：请先建立 TCP 连接");
+            AddLog($"{directionName}失败：请先建立 TCP 连接", isAlarm: true);
             return false;
         }
 
@@ -1043,7 +1055,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u4e00\u952e\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u4e00\u952e\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return false;
         }
 
@@ -1119,7 +1131,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         if (!_tcpClient.IsConnected)
         {
-            AddLog("生产震动失败：请先建立 TCP 连接");
+            AddLog("生产震动失败：请先建立 TCP 连接", isAlarm: true);
             return false;
         }
 
@@ -1204,7 +1216,7 @@ public partial class ConnectionConfigPage : UserControl
     {
         if (!_tcpClient.IsConnected)
         {
-            AddLog("拍照前停振确认失败：请先建立 TCP 连接");
+            AddLog("拍照前停振确认失败：请先建立 TCP 连接", isAlarm: true);
             return false;
         }
 
@@ -1243,7 +1255,7 @@ public partial class ConnectionConfigPage : UserControl
         if (_closed || !_tcpClient.IsConnected)
         {
             _vibrationFeederLightEnabled = false;
-            AddLog($"{actionName}{(enabled ? "打开" : "关闭")}失败：请先建立 TCP 连接");
+            AddLog($"{actionName}{(enabled ? "打开" : "关闭")}失败：请先建立 TCP 连接", isAlarm: true);
             return false;
         }
 
@@ -1263,7 +1275,7 @@ public partial class ConnectionConfigPage : UserControl
         var settings = Settings;
         if (settings is null)
         {
-            AddLog($"{actionName}打开失败：振动盘参数未加载");
+            AddLog($"{actionName}打开失败：振动盘参数未加载", isAlarm: true);
             return false;
         }
 
@@ -1370,7 +1382,7 @@ public partial class ConnectionConfigPage : UserControl
 
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u5149\u6e90\u6253\u5f00\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u5149\u6e90\u6253\u5f00\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return;
         }
 
@@ -1512,8 +1524,9 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private void AddLog(string message)
+    private void AddLog(string message, bool isAlarm = false)
     {
+        if (isAlarm) AlarmHistory.Record("振动盘", "FEEDER-COMM", message);
         if (ViewModel is not { } viewModel)
         {
             return;
@@ -1529,8 +1542,9 @@ public partial class ConnectionConfigPage : UserControl
         ConnectionLogListBox.ScrollIntoView(logItem);
     }
 
-    private void AddTcpLog(string message)
+    private void AddTcpLog(string message, bool isAlarm = false)
     {
+        if (isAlarm) AlarmHistory.Record("E4981A", "E4981A-COMM", message);
         if (ViewModel is not { } viewModel)
         {
             return;
@@ -1545,8 +1559,9 @@ public partial class ConnectionConfigPage : UserControl
         TcpConnectionLogListBox.ScrollIntoView(logItem);
     }
 
-    private void AddSerialLog(string message)
+    private void AddSerialLog(string message, bool isAlarm = false)
     {
+        if (isAlarm) AlarmHistory.Record("SM7110", "SM7110-COMM", message);
         if (ViewModel is not { } viewModel)
         {
             return;
@@ -1604,7 +1619,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             if (!_tcpClient.IsConnected)
             {
-                AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+                AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
                 return false;
             }
 
@@ -1619,7 +1634,7 @@ public partial class ConnectionConfigPage : UserControl
             {
                 SetFeederStatus("\u901a\u8baf\u5f02\u5e38");
 
-                AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
+                AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}", isAlarm: true);
                 return false;
             }
         }
@@ -1673,7 +1688,7 @@ public partial class ConnectionConfigPage : UserControl
         }
         if (!_generalTcpClient.IsConnected)
         {
-            AddTcpLog($"{actionName}失败：请先连接E4981A");
+            AddTcpLog($"{actionName}失败：请先连接E4981A", isAlarm: true);
             return;
         }
 
@@ -1692,7 +1707,7 @@ public partial class ConnectionConfigPage : UserControl
             {
                 SetTcpStatus("通讯异常");
             }
-            AddTcpLog($"{actionName}失败：{ex.Message}");
+            AddTcpLog($"{actionName}失败：{ex.Message}", isAlarm: true);
         }
         finally
         {
@@ -1758,7 +1773,7 @@ public partial class ConnectionConfigPage : UserControl
         }
         if (!_serialClient.IsConnected)
         {
-            AddSerialLog($"{actionName}失败：请先连接SM7110");
+            AddSerialLog($"{actionName}失败：请先连接SM7110", isAlarm: true);
             return;
         }
 
@@ -1777,7 +1792,7 @@ public partial class ConnectionConfigPage : UserControl
             {
                 SetSerialStatus("通讯异常");
             }
-            AddSerialLog($"{actionName}失败：{ex.Message}");
+            AddSerialLog($"{actionName}失败：{ex.Message}", isAlarm: true);
         }
         finally
         {
@@ -1828,6 +1843,9 @@ public partial class ConnectionConfigPage : UserControl
 
     private void UpdateSerialMeterResult(SM7110MeasurementResult result)
     {
+        if (!result.IsSuccessful && _lastSerialFaultStatus != result.Status)
+            AlarmHistory.Record("SM7110", $"SM7110-STATUS-{result.Status}", $"{result.StatusDescription}；{result.RawResponse}");
+        _lastSerialFaultStatus = result.IsSuccessful ? null : result.Status;
         SerialMeterResultStatusText.Text = result.StatusDescription;
         SerialMeterResultStatusText.Foreground = new SolidColorBrush(
             result.IsSuccessful ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
@@ -1872,6 +1890,10 @@ public partial class ConnectionConfigPage : UserControl
 
     private void UpdateMeterResult(E4981AMeasurementResult result)
     {
+        var fault = $"{result.Status}/{result.Bin}";
+        if (!result.IsSuccessful && _lastTcpFaultStatus != fault)
+            AlarmHistory.Record("E4981A", $"E4981A-STATUS-{result.Status}", $"{result.StatusDescription}；{result.RawResponse}");
+        _lastTcpFaultStatus = result.IsSuccessful ? null : fault;
         var outsideProductionBins = result.Bin is not null && result.Bin is not (>= 1 and <= 3);
         var rejected = result.LossRejected || outsideProductionBins || !result.IsSuccessful;
         MeterResultStatusText.Text = result.LossRejected
@@ -1905,6 +1927,7 @@ public partial class ConnectionConfigPage : UserControl
 
     private void TcpClient_ConnectionClosed(Exception? exception)
     {
+        AlarmHistory.Record("振动盘", "FEEDER-DISCONNECTED", exception?.Message ?? "振动盘连接由对端关闭");
         Dispatcher.BeginInvoke(new Action(() =>
         {
             _vibrationFeederLightEnabled = false;
@@ -1920,6 +1943,7 @@ public partial class ConnectionConfigPage : UserControl
 
     private void GeneralTcpClient_ConnectionClosed(Exception? exception)
     {
+        AlarmHistory.Record("E4981A", "E4981A-DISCONNECTED", exception?.Message ?? "仪表连接已关闭");
         Dispatcher.BeginInvoke(new Action(() =>
         {
             _e4981ASettingsApplied = false;
@@ -1938,6 +1962,7 @@ public partial class ConnectionConfigPage : UserControl
 
     private void SerialClient_ConnectionClosed(Exception? exception)
     {
+        AlarmHistory.Record("SM7110", "SM7110-DISCONNECTED", exception?.Message ?? "仪表串口连接已关闭");
         Dispatcher.BeginInvoke(new Action(() =>
         {
             _sm7110Session.ResetConnection();

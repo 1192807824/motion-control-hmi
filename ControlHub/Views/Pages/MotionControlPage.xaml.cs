@@ -4364,7 +4364,7 @@ public partial class MotionControlPage : UserControl
             return;
         }
 
-        ViewModel?.AlarmRecords.Clear();
+        // 复位设备不删除历史；只能在报警记录页显式清空。
         // Keep active keys while a physical alarm is still present. Clearing them
         // here makes the following poll insert every active alarm straight back
         // into the history, so the operator sees no visible effect.
@@ -6250,6 +6250,7 @@ public partial class MotionControlPage : UserControl
 
     private void RecordAlarm(string code, string message)
     {
+        AlarmHistory.Record("运动控制", code, message);
         if (ViewModel is not { } viewModel)
         {
             return;
@@ -6258,6 +6259,7 @@ public partial class MotionControlPage : UserControl
         viewModel.AlarmRecords.Insert(0, new AlarmInfo
         {
             Time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            Source = "运动控制",
             Code = code,
             Message = message,
             Level = "报警",

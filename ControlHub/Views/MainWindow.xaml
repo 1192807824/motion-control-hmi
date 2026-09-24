@@ -211,14 +211,14 @@
                     </Button>
                     <Button x:Name="BatchQueryMenuButton" Style="{StaticResource MenuButton}" Content="数据查询" Click="BatchQueryMenu_Click"
                             ToolTip="进入专用查询和导出页面；切换前停止当前生产。生产中查询可使用主页的批次查询按钮。" />
-                    <Button Style="{StaticResource MenuButton}">
+                    <Button x:Name="AlarmHistoryMenuButton" Style="{StaticResource MenuButton}" Click="AlarmHistoryMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
                                    Height="20"
                                    Margin="0,0,8,0"
                                    Source="/Assets/Icons/TopMenu/alarm-records.png"
                                    Stretch="Uniform" />
-                            <TextBlock Text="报警记录" VerticalAlignment="Center" />
+                            <TextBlock x:Name="AlarmHistoryMenuLabel" Text="报警记录" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource MenuButton}" Click="PermissionLogin_Click">
@@ -257,5 +257,6 @@
                                          Grid.Row="2"
                                          Visibility="Collapsed" />
             <pages:BatchQueryPage x:Name="BatchQueryContent" Grid.Row="2" Visibility="Collapsed" />
+            <pages:AlarmHistoryPage x:Name="AlarmHistoryContent" Grid.Row="2" Visibility="Collapsed" />
     </Grid>
 </Window>

@@ -366,6 +366,7 @@ public partial class ParameterSettingsPage : UserControl
 
     private void SetRecipeStatus(string message, bool success)
     {
+        if (!success) AlarmHistory.Record("参数配置", "RECIPE", message);
         RecipeStatusText.Text = message;
         RecipeStatusText.Foreground = new SolidColorBrush(
             success ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));

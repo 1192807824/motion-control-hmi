@@ -142,6 +142,7 @@ public partial class HomePage
 
     private void SetObservationCompensationStatus(string message, bool success)
     {
+        if (!success) ControlHub.Services.Persistence.AlarmHistory.Record("观测补偿", "OBSERVATION", message);
         ObservationCompensationStatusText.Text = message;
         ObservationCompensationStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(159, 177, 191)

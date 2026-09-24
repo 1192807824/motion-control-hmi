@@ -14,9 +14,12 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private RememberedLogin? _rememberedLogin;
     private bool _motionShutdownPrepared;
+    private long _alarmRevision = -1;
+    private bool _loadingAlarms;
 
     public MainWindow()
     {
+        AlarmHistory.Initialize();
         InitializeComponent();
 
         VisualCalibrationContent.AttachMotionController(MotionPage);
@@ -43,7 +46,12 @@ public partial class MainWindow : Window
         LoadRememberedLogin();
 
         _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _clockTimer.Tick += (_, _) => _viewModel.NowText = DateTime.Now.ToString("yyyy-MM-dd  HH:mm:ss");
+        _clockTimer.Tick += async (_, _) =>
+        {
+            _viewModel.NowText = DateTime.Now.ToString("yyyy-MM-dd  HH:mm:ss");
+            await RefreshRecentAlarmsAsync();
+        };
+        BatchMeasurementStore.DataCleared += BatchDataCleared;
         _clockTimer.Start();
         Loaded += MainWindow_Loaded;
     }
@@ -117,6 +125,7 @@ public partial class MainWindow : Window
                 "标定界面开启失败",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+            AlarmHistory.Record("视觉标定", "VISION-OPEN", exception.Message);
         }
     }
 
@@ -163,6 +172,8 @@ public partial class MainWindow : Window
 
     private void ShowBatchQueryPage()
     {
+        AlarmHistoryContent.Visibility = Visibility.Collapsed;
+        AlarmHistoryMenuButton.Style = (Style)Resources["MenuButton"];
         foreach (var button in new[] { HomeMenuButton, MotionMenuButton, VisualCalibrationMenuButton,
                      UsbMicroscopeMenuButton, ConnectionMenuButton, ParameterSettingsMenuButton })
             button.Style = (Style)Resources["MenuButton"];
@@ -178,8 +189,46 @@ public partial class MainWindow : Window
 
     private void HideBatchQueryPage()
     {
+        AlarmHistoryContent.Visibility = Visibility.Collapsed;
+        AlarmHistoryMenuButton.Style = (Style)Resources["MenuButton"];
         BatchQueryContent.Visibility = Visibility.Collapsed;
         BatchQueryMenuButton.Style = (Style)Resources["MenuButton"];
+    }
+
+    private async void AlarmHistoryMenu_Click(object sender, RoutedEventArgs e)
+    {
+        await HomeContent.DeactivateProductionAsync();
+        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync()) return;
+        ShowBatchQueryPage();
+        BatchQueryContent.Visibility = Visibility.Collapsed;
+        BatchQueryMenuButton.Style = (Style)Resources["MenuButton"];
+        AlarmHistoryMenuButton.Style = (Style)Resources["ActiveMenuButton"];
+        AlarmHistoryContent.Visibility = Visibility.Visible;
+        await AlarmHistoryContent.ActivateAsync();
+    }
+
+    private void BatchDataCleared(string path) => Dispatcher.InvokeAsync(() => HomeContent.RefreshAfterBatchDataCleared(path));
+
+    private async Task RefreshRecentAlarmsAsync()
+    {
+        if (_loadingAlarms || _alarmRevision == AlarmHistory.Revision && AlarmHistory.LastError is null) return;
+        _loadingAlarms = true;
+        try
+        {
+            var revision = AlarmHistory.Revision;
+            var result = await AlarmHistory.QueryAsync(null, null);
+            _viewModel.AlarmRecords.Clear();
+            foreach (var alarm in result.Records) _viewModel.AlarmRecords.Add(alarm);
+            _alarmRevision = revision;
+            AlarmHistoryMenuButton.ToolTip = AlarmHistory.LastError ?? "查询全部历史报警，可按日期筛选。切换前停止当前生产。";
+            AlarmHistoryMenuLabel.Text = AlarmHistory.LastError is null ? "报警记录" : "报警记录（保存异常）";
+        }
+        catch (Exception exception)
+        {
+            AlarmHistoryMenuLabel.Text = "报警记录（读取异常）";
+            AlarmHistoryMenuButton.ToolTip = exception.Message;
+        }
+        finally { _loadingAlarms = false; }
     }
 
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e)
@@ -233,6 +282,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        BatchMeasurementStore.DataCleared -= BatchDataCleared;
         VisualCalibrationContent.Shutdown();
         UsbMicroscopeContent.Shutdown();
         ConnectionConfigContent.Shutdown();

@@ -44,6 +44,48 @@ public sealed class BatchMeasurementStore
     private static readonly ConcurrentDictionary<string, object> InitializationLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> LegacyScans = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _connectionString;
+    private sealed class CollectionState { public int Active; }
+    private static readonly ConcurrentDictionary<string, CollectionState> Collections = new(StringComparer.OrdinalIgnoreCase);
+    public static event Action<string>? DataCleared;
+
+    public IDisposable BeginCollection()
+    {
+        var state = Collections.GetOrAdd(DatabasePath, _ => new());
+        lock (state) state.Active++;
+        return new CollectionLease(state);
+    }
+
+    private sealed class CollectionLease(CollectionState state) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                lock (state) state.Active--;
+        }
+    }
+
+    public int ClearAll()
+    {
+        var state = Collections.GetOrAdd(DatabasePath, _ => new());
+        int deleted;
+        lock (InitializationLocks.GetOrAdd(DatabasePath, static _ => new object()))
+        lock (state)
+        {
+            if (state.Active > 0) throw new InvalidOperationException("生产或暂停期间不能清空数据，请先停止生产并等待收尾完成。");
+            using var connection = OpenConnection();
+            using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM measurements;";
+            deleted = command.ExecuteNonQuery();
+            command.CommandText = "DELETE FROM batches; INSERT OR REPLACE INTO metadata(key,value) VALUES('legacy_import_disabled_after_clear','1');";
+            command.ExecuteNonQuery();
+            transaction.Commit();
+        }
+        DataCleared?.Invoke(DatabasePath);
+        return deleted;
+    }
 
     public string RootDirectory { get; }
     public string DatabasePath { get; }
@@ -205,6 +247,12 @@ public sealed class BatchMeasurementStore
 
     private void MigrateLegacyJson()
     {
+        using (var connection = OpenConnection(readOnly: true))
+        using (var check = connection.CreateCommand())
+        {
+            check.CommandText = "SELECT value FROM metadata WHERE key='legacy_import_disabled_after_clear';";
+            if (check.ExecuteScalar() is not null) return;
+        }
         var errors = new List<string>();
         var batchFiles = Directory.EnumerateFiles(RootDirectory, "batch.json", SearchOption.AllDirectories).ToArray();
         var measurementFiles = Directory.EnumerateFiles(RootDirectory, "*.json", SearchOption.AllDirectories)

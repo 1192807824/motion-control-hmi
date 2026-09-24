@@ -1657,6 +1657,7 @@ public partial class UsbMicroscopePage : UserControl
 
     private void SetStatus(string message, MicroscopeStatus status)
     {
+        if (status == MicroscopeStatus.Error) ControlHub.Services.Persistence.AlarmHistory.Record("USB显微镜", "MICROSCOPE", message);
         ConnectionStatusText.Text = message;
         AnnotationStatusText.Text = message;
         ConnectionStatusIndicator.Fill = new SolidColorBrush(status switch

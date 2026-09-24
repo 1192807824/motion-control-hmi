@@ -789,10 +789,10 @@
             <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="10">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <DockPanel><TextBlock Text="报警记录（最近）" Style="{StaticResource SectionTitle}" /><Button Content="清除报警" Style="{StaticResource FlatButton}" Height="26" HorizontalAlignment="Right" Click="ClearAlarm_Click" /></DockPanel>
+                    <DockPanel><TextBlock Text="报警历史（最近200条）" Style="{StaticResource SectionTitle}" /><Button Content="复位设备报警" Style="{StaticResource FlatButton}" Height="26" HorizontalAlignment="Right" Click="ClearAlarm_Click" ToolTip="仅复位设备，不删除报警历史" /></DockPanel>
                     <DataGrid x:Name="AlarmDataGrid" Grid.Row="1" ItemsSource="{Binding AlarmRecords}" Margin="0,6,0,0" LostKeyboardFocus="AlarmDataGrid_LostKeyboardFocus">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="时间" Binding="{Binding Time}" Width="160" />
+                            <DataGridTextColumn Header="时间" Binding="{Binding LocalTime}" Width="190" />
                             <DataGridTextColumn Header="代码" Binding="{Binding Code}" Width="120" />
                             <DataGridTextColumn Header="报警信息" Binding="{Binding Message}" Width="*" />
                         </DataGrid.Columns>

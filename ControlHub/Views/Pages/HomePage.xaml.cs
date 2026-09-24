@@ -2040,6 +2040,7 @@ public partial class HomePage : UserControl
         }
 
         // 在生产初始化和清理逻辑之外检查，拒绝启动时不改变真空等输出。
+        using var batchCollection = _batchStore.BeginCollection();
         try
         {
             PrepareProductionBatch();
@@ -8017,12 +8018,14 @@ public partial class HomePage : UserControl
         }
 
         StartProductionHintText.Text = message;
+        if (color == Color.FromRgb(242, 122, 128)) AlarmHistory.Record("生产流程", "PRODUCTION", message);
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
     }
 
     private void SetOneKeyCollectStatus(string message, Color color)
     {
+        if (color == Color.FromRgb(242, 122, 128)) AlarmHistory.Record("生产收料", "COLLECT", message);
         OneKeyCollectHintText.Text = message;
         OneKeyCollectHintText.ToolTip = message;
         OneKeyCollectHintText.Foreground = new SolidColorBrush(color);
@@ -8181,6 +8184,7 @@ public partial class HomePage : UserControl
 
     private void SetOneKeyResetStatus(string message, Color color)
     {
+        if (color == Color.FromRgb(242, 122, 128)) AlarmHistory.Record("一键复位", "RESET", message);
         OneKeyResetHintText.Text = message;
         OneKeyResetHintText.ToolTip = message;
         OneKeyResetHintText.Foreground = new SolidColorBrush(color);
@@ -8458,6 +8462,7 @@ public partial class HomePage : UserControl
 
     private void SetFirstSetPositionStatus(string message, bool success)
     {
+        if (!success) AlarmHistory.Record("生产操作", "POSITION", message);
         PresetPositionStatusText.Text = message;
         PresetPositionStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)
@@ -8466,6 +8471,7 @@ public partial class HomePage : UserControl
 
     private void SetFirstSetTeachingPositionStatus(string message, bool success)
     {
+        if (!success) AlarmHistory.Record("吸嘴示教", "TEACHING", message);
         FirstSetTeachingPositionStatusText.Text = message;
         FirstSetTeachingPositionStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)
@@ -8474,6 +8480,7 @@ public partial class HomePage : UserControl
 
     private void SetLowerCameraPhotoPositionStatus(string message, bool success)
     {
+        if (!success) AlarmHistory.Record("下相机", "PHOTO-POSITION", message);
         LowerCameraPhotoPositionStatusText.Text = message;
         LowerCameraPhotoPositionStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)

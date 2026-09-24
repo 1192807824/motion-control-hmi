@@ -15,6 +15,16 @@ public partial class HomePage
     private string _activeBatchNumber = "";
     private int _batchLoadVersion;
 
+    public void RefreshAfterBatchDataCleared(string path)
+    {
+        if (!string.Equals(path, _batchStore.DatabasePath, StringComparison.OrdinalIgnoreCase)) return;
+        if (_startSequenceRunning) return; // A new collection started after the clear already loaded fresh data.
+        ++_batchLoadVersion;
+        _batchMeasurements.Clear();
+        BatchCollectionStatusText.Text = "全部测量记录已清空";
+        RefreshDistributionCharts();
+    }
+
     private void BatchNumberTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (BatchCollectionStatusText is null || _startSequenceRunning || BatchNumberTextBox.Text.Trim() == _activeBatchNumber) return;
@@ -47,6 +57,7 @@ public partial class HomePage
         }
         catch (Exception exception)
         {
+            AlarmHistory.Record("数据采集", "BATCH-READ", exception.Message);
             if (version == _batchLoadVersion) BatchCollectionStatusText.Text = $"批次读取失败：{exception.Message}";
         }
     }

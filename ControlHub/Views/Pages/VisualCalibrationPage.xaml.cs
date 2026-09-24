@@ -348,6 +348,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetManualJogStatus(string message, WorkflowStatus status)
     {
+        if (status == WorkflowStatus.Error) AlarmHistory.Record("视觉手动移动", "VISION-JOG", message);
         ManualJogStatusText.Text = message;
         ManualJogStatusText.Foreground = new SolidColorBrush(status switch
         {
@@ -1042,6 +1043,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetGlobalLightStatus(string message, bool success)
     {
+        if (!success) AlarmHistory.Record("视觉光源", "VISION-LIGHT", message);
         SetWorkflowStatus(
             message,
             success ? WorkflowStatus.Success : WorkflowStatus.Error);
@@ -2712,6 +2714,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetRotationCenterStatus(string message, WorkflowStatus status)
     {
+        if (status == WorkflowStatus.Error) AlarmHistory.Record("旋转中心", "VISION-ROTATION", message);
         _rotationCenterStatus = message;
         ScheduleCalibrationSidebarSync();
     }
@@ -2794,6 +2797,7 @@ public partial class VisualCalibrationPage : UserControl
         catch (Exception exception)
         {
             SetLowerCameraCorrectionTestStatus($"纠偏测试失败：{exception.Message}");
+            AlarmHistory.Record("下相机纠偏", "VISION-CORRECTION", exception.Message);
             SetWorkflowStatus($"下相机纠偏测试失败：{exception.Message}", WorkflowStatus.Error);
         }
         finally
@@ -4113,6 +4117,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetHostStatus(string message, HostStatus status)
     {
+        if (status == HostStatus.Error) AlarmHistory.Record("视觉主机", "VISION-HOST", message);
         HostStatusText.Text = message;
         HostStatusIndicator.Fill = new SolidColorBrush(status switch
         {
@@ -4124,6 +4129,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetWorkflowStatus(string message, WorkflowStatus status)
     {
+        if (status == WorkflowStatus.Error) AlarmHistory.Record("视觉流程", "VISION-WORKFLOW", message);
         WorkflowStatusText.Text = message;
         WorkflowStatusText.Foreground = new SolidColorBrush(status switch
         {
@@ -4137,6 +4143,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetClickMoveStatus(string message, WorkflowStatus status)
     {
+        if (status == WorkflowStatus.Error) AlarmHistory.Record("视觉移动", "VISION-MOVE", message);
         ClickMoveStatusText.Text = message;
         ClickMoveStatusText.Foreground = new SolidColorBrush(status switch
         {
@@ -4150,6 +4157,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void SetNozzleCalibrationStatus(string message, WorkflowStatus status)
     {
+        if (status == WorkflowStatus.Error) AlarmHistory.Record("吸嘴标定", "VISION-NOZZLE", message);
         NozzleCalibrationStatusText.Text = message;
         NozzleCalibrationStatusText.Foreground = new SolidColorBrush(status switch
         {
