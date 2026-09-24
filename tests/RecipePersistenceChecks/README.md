@@ -21,3 +21,10 @@ positions and seven vision procedure names. High precision values must survive
 save, disk reload, recipe application and another save without rounding. Invalid
 drafts and out-of-range values must fail explicitly. The actual Save Current handler
 must use edited procedure names, independently of the active vision runtime names.
+
+Parameter position checks exercise all 16 Move/Record buttons with an injected
+confirmation response and an instant fake motion card. Cancel must leave saved
+coordinates and motion untouched, including initial records and overwrites.
+Approved moves use first-set, second-set or lower-camera calibration speeds in
+both interpolation modes, even with invalid production speeds or a different
+active calibration tab. Invalid calibration speeds must issue no motion commands.

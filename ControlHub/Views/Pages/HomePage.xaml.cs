@@ -182,6 +182,7 @@ public partial class HomePage : UserControl
     ];
     private readonly VisionCalibrationService _visionCalibration = VisionCalibrationService.Shared;
     private readonly HomePageSettingsStore _homeSettingsStore = new();
+    private readonly Func<string, string, bool> _parameterPositionConfirmation;
     private HomePageSettings _homeSettings = new();
     private MotionControlPage? _motionController;
     private VisualCalibrationPage? _visualCalibrationController;
@@ -223,7 +224,13 @@ public partial class HomePage : UserControl
     private bool _updatingTestStationConfiguration;
 
     public HomePage()
+        : this(null)
     {
+    }
+
+    internal HomePage(Func<string, string, bool>? parameterPositionConfirmation)
+    {
+        _parameterPositionConfirmation = parameterPositionConfirmation ?? ShowParameterPositionConfirmation;
         InitializeComponent();
         _uphRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -5063,22 +5070,9 @@ public partial class HomePage : UserControl
     {
         try
         {
-            var existingX = 0d;
-            var existingY = 0d;
-            var positionAlreadyConfigured =
-                TryParseCoordinate(xInput.Text, out existingX) &&
-                TryParseCoordinate(yInput.Text, out existingY);
-            if (positionAlreadyConfigured &&
-                MessageBox.Show(
-                    Window.GetWindow(this),
-                    $"{positionName}当前为 X={existingX:0.###}、Y={existingY:0.###} pulse。\n\n" +
-                    "确定用第一套 XY 的当前反馈位置覆盖吗？",
-                    $"确认覆盖{positionName}",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning,
-                    MessageBoxResult.No) != MessageBoxResult.Yes)
+            if (!ConfirmParameterPositionRecord(positionName, xInput, yInput, VisionCalibrationAxisSet.First))
             {
-                SetFirstSetTeachingPositionStatus($"已取消覆盖{positionName}。", true);
+                SetFirstSetTeachingPositionStatus($"已取消记录{positionName}。", true);
                 return;
             }
 
@@ -5136,18 +5130,24 @@ public partial class HomePage : UserControl
         {
             var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
-            _ = ReadProductionAxisMotionSettings();
+            var velocity = ReadParameterPositionVelocity(VisionCalibrationAxisSet.First);
+            if (!ConfirmParameterPositionMove(positionName, targetX, targetY, velocity))
+            {
+                SetFirstSetTeachingPositionStatus($"已取消移动{positionName}。", true);
+                return;
+            }
+
             _presetPositionMoveRunning = true;
             UpdateHomeCommandState();
             moveButton.Content = "移动中";
             SetFirstSetTeachingPositionStatus(
                 $"正在移动到{positionName}：X={targetX:0.###}、Y={targetY:0.###} pulse…",
                 true);
-            await MovePresetPositionCoreAsync(
-                positionName,
+            await MoveParameterPositionCoreAsync(
+                VisionCalibrationAxisSet.First,
                 targetX,
                 targetY,
-                CancellationToken.None);
+                velocity);
             SetFirstSetTeachingPositionStatus(
                 $"已移动到{positionName}：X={targetX:0.###}、Y={targetY:0.###} pulse。",
                 true);
@@ -5208,6 +5208,12 @@ public partial class HomePage : UserControl
     {
         try
         {
+            if (!ConfirmParameterPositionRecord(positionName, xInput, yInput, VisionCalibrationAxisSet.First))
+            {
+                SetLowerCameraPhotoPositionStatus($"已取消记录{positionName}。", true);
+                return;
+            }
+
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             var current = motionController.CaptureCalibrationFeedback(
@@ -5261,14 +5267,20 @@ public partial class HomePage : UserControl
         {
             var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
-            _ = ReadProductionAxisMotionSettings();
+            var velocity = ReadParameterPositionVelocity(VisionCalibrationAxisSet.First, lowerCamera: true);
+            if (!ConfirmParameterPositionMove(positionName, targetX, targetY, velocity))
+            {
+                SetLowerCameraPhotoPositionStatus($"已取消移动{positionName}。", true);
+                return;
+            }
+
             _presetPositionMoveRunning = true;
             moveButton.Content = "移动中";
             UpdateHomeCommandState();
             SetLowerCameraPhotoPositionStatus(
                 $"正在移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
                 true);
-            await MovePresetPositionCoreAsync(positionName, targetX, targetY, CancellationToken.None);
+            await MoveParameterPositionCoreAsync(VisionCalibrationAxisSet.First, targetX, targetY, velocity);
             SetLowerCameraPhotoPositionStatus(
                 $"{positionName}已到位：X={targetX:0.###}，Y={targetY:0.###} pulse。",
                 true);
@@ -5365,6 +5377,12 @@ public partial class HomePage : UserControl
     {
         try
         {
+            if (!ConfirmParameterPositionRecord(positionName, xInput, yInput, VisionCalibrationAxisSet.Second))
+            {
+                SetFirstSetPositionStatus($"已取消记录{positionName}。", true);
+                return;
+            }
+
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             var current = motionController.CaptureCalibrationFeedback(
@@ -5420,6 +5438,12 @@ public partial class HomePage : UserControl
         {
             var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X轴绝对脉冲");
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y轴绝对脉冲");
+            var velocity = ReadParameterPositionVelocity(VisionCalibrationAxisSet.Second);
+            if (!ConfirmParameterPositionMove(positionName, targetX, targetY, velocity))
+            {
+                SetFirstSetPositionStatus($"已取消移动{positionName}。", true);
+                return;
+            }
 
             _presetPositionMoveRunning = true;
             UpdateHomeCommandState();
@@ -5427,11 +5451,11 @@ public partial class HomePage : UserControl
             SetFirstSetPositionStatus(
                 $"正在绝对移动{positionName}：X={targetX:0.###}，Y={targetY:0.###} pulse…",
                 true);
-            await MoveSecondSetUnloadAxesToAsync(
-                positionName,
+            await MoveParameterPositionCoreAsync(
+                VisionCalibrationAxisSet.Second,
                 targetX,
                 targetY,
-                CancellationToken.None);
+                velocity);
             SetFirstSetPositionStatus(
                 $"{positionName}已到位：X={targetX:0.###}，Y={targetY:0.###} pulse。",
                 true);
@@ -5456,11 +5480,17 @@ public partial class HomePage : UserControl
     {
         try
         {
+            if (!ConfirmParameterPositionRecord(positionName, xInput, yInput, VisionCalibrationAxisSet.First))
+            {
+                SetFirstSetPositionStatus($"已取消记录{positionName}。", true);
+                return;
+            }
+
             var motionController = _motionController
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
             var current = motionController.CaptureCalibrationFeedback(
-                VisionCalibration.XHardwareAxisNo,
-                VisionCalibration.YHardwareAxisNo);
+                VisionCalibrationService.FirstSetXHardwareAxisNo,
+                VisionCalibrationService.FirstSetYHardwareAxisNo);
 
             _loadingPresetPositions = true;
             xInput.Text = current.ActualX.ToString("0.###", CultureInfo.CurrentCulture);
@@ -5501,6 +5531,7 @@ public partial class HomePage : UserControl
         Button moveButton)
     {
         if (_presetPositionMoveRunning ||
+            _oneKeyResetRunning ||
             _startSequenceRunning)
         {
             return;
@@ -5510,16 +5541,24 @@ public partial class HomePage : UserControl
         {
             var targetX = ParseFiniteCoordinate(xInput.Text, $"{positionName} X 轴绝对脉冲");
             var targetY = ParseFiniteCoordinate(yInput.Text, $"{positionName} Y 轴绝对脉冲");
-            _ = ReadProductionAxisMotionSettings();
+            var velocity = ReadParameterPositionVelocity(VisionCalibrationAxisSet.First);
+            if (!ConfirmParameterPositionMove(positionName, targetX, targetY, velocity))
+            {
+                SetFirstSetPositionStatus($"已取消移动{positionName}。", true);
+                return;
+            }
 
             _presetPositionMoveRunning = true;
             UpdateHomeCommandState();
             moveButton.Content = "移动中";
-            await MovePresetPositionCoreAsync(
-                positionName,
+            SetFirstSetPositionStatus($"正在移动{positionName}…", true);
+            await MoveParameterPositionCoreAsync(
+                VisionCalibrationAxisSet.First,
                 targetX,
                 targetY,
-                CancellationToken.None);
+                velocity);
+            SetFirstSetPositionStatus(
+                $"{positionName}已到位：X={targetX:0.###}，Y={targetY:0.###} pulse。", true);
         }
         catch (Exception exception)
         {
@@ -5531,6 +5570,85 @@ public partial class HomePage : UserControl
             moveButton.Content = "移动";
             UpdateHomeCommandState();
         }
+    }
+
+    private bool ConfirmParameterPositionRecord(
+        string positionName,
+        TextBox xInput,
+        TextBox yInput,
+        VisionCalibrationAxisSet axisSet)
+    {
+        var existingPosition =
+            TryParseCoordinate(xInput.Text, out var existingX) &&
+            TryParseCoordinate(yInput.Text, out var existingY)
+                ? $"当前保存位置：X={existingX:0.###}、Y={existingY:0.###} pulse，将被覆盖。\n\n"
+                : "";
+        var axisSetName = axisSet == VisionCalibrationAxisSet.Second ? "第二套" : "第一套";
+        return _parameterPositionConfirmation(
+            existingPosition + $"确定将{axisSetName} XY 的当前反馈位置记录并保存为“{positionName}”吗？",
+            $"确认记录{positionName}");
+    }
+
+    private bool ConfirmParameterPositionMove(string positionName, double targetX, double targetY, double velocity)
+    {
+        return _parameterPositionConfirmation(
+            $"确定移动到“{positionName}”吗？\n\n" +
+            $"目标：X={targetX:0.###}、Y={targetY:0.###} pulse\n" +
+            $"标定速度：{velocity:0.###} pulse/s",
+            $"确认移动{positionName}");
+    }
+
+    private bool ShowParameterPositionConfirmation(string message, string title)
+    {
+        return MessageBox.Show(
+            Window.GetWindow(this),
+            message,
+            title,
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel) == MessageBoxResult.OK;
+    }
+
+    private double ReadParameterPositionVelocity(VisionCalibrationAxisSet axisSet, bool lowerCamera = false)
+    {
+        var settings = _visionCalibration.Settings;
+        var velocity = lowerCamera
+            ? settings.LowerCameraVelocityPulsesPerSecond
+            : axisSet == VisionCalibrationAxisSet.Second
+                ? settings.SecondVelocityPulsesPerSecond
+                : settings.VelocityPulsesPerSecond;
+        if (!double.IsFinite(velocity) || velocity <= 0)
+        {
+            throw new InvalidOperationException("标定速度必须是大于 0 的有效数字，请在视觉标定中设置。");
+        }
+
+        return velocity;
+    }
+
+    private async Task MoveParameterPositionCoreAsync(
+        VisionCalibrationAxisSet axisSet,
+        double targetX,
+        double targetY,
+        double velocity)
+    {
+        var motionController = _motionController
+            ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
+        var axes = VisionCalibrationService.GetAxisPair(axisSet);
+        var current = motionController.CaptureCalibrationFeedback(axes.XHardwareAxisNo, axes.YHardwareAxisNo);
+        // 参数页手动移动使用对应标定速度，不读取或应用生产运动参数。
+        await motionController.MoveCalibrationAxesToAsync(
+            axes.XHardwareAxisNo,
+            axes.YHardwareAxisNo,
+            targetX,
+            targetY,
+            velocity,
+            positionTolerance: HomePageCompletionTolerance,
+            moveTimeoutMilliseconds: CalculateStartMoveTimeout(
+                current.ActualX, current.ActualY, targetX, targetY, velocity),
+            cancellationToken: CancellationToken.None,
+            linearInterpolationCoordinateSystemNo: axisSet == VisionCalibrationAxisSet.Second
+                ? GetSecondSetXyInterpolationCoordinateSystemNo()
+                : GetFirstSetXyInterpolationCoordinateSystemNo());
     }
 
     private async Task MovePresetPositionCoreAsync(
@@ -7883,13 +8001,11 @@ public partial class HomePage : UserControl
         MoveFirstSetTeachingCenterButton.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(FirstSetTeachingCenterXTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetTeachingCenterYTextBox.Text, out _);
         MoveFirstSetTeachingPressPositionButton.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(FirstSetTeachingPressPositionXTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out _);
         PresetPosition1XTextBox.IsEnabled = commandsIdle;
@@ -7973,37 +8089,31 @@ public partial class HomePage : UserControl
         MovePresetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(PresetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition1YTextBox.Text, out _);
         MovePresetPosition2Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(PresetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(PresetPosition2YTextBox.Text, out _);
         MoveLowerCameraPhotoPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(LowerCameraPhotoPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(LowerCameraPhotoPosition1YTextBox.Text, out _);
         MoveLowerCameraPhotoPosition2Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(LowerCameraPhotoPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(LowerCameraPhotoPosition2YTextBox.Text, out _);
         MoveSecondSetPosition1Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(SecondSetPosition1XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition1YTextBox.Text, out _);
         MoveSecondSetPosition2Button.IsEnabled =
             _motionController is not null &&
             commandsIdle &&
-            allProductionAxisParametersValid &&
             TryParseCoordinate(SecondSetPosition2XTextBox.Text, out _) &&
             TryParseCoordinate(SecondSetPosition2YTextBox.Text, out _);
         HomeEmergencyStopButton.IsEnabled = _motionController is not null;

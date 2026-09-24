@@ -87,6 +87,7 @@ internal static partial class Program
         }
         Console.WriteLine("PASS: New and Save Current report invalid pickup count and preserve recipe files. No hardware opened.");
         CheckAllParameterControls(home, defaults, store);
+        CheckParameterPositionActions(directory);
     }
 
     private static void Require(bool condition, string message)
