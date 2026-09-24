@@ -161,6 +161,7 @@ internal static partial class Program
         CheckSM7110SettingsView();
         CheckE4981ARangeRetry();
         CheckE4981ASetupChanges();
+        CheckE4981ATcpBoundariesAsync().GetAwaiter().GetResult();
         CheckE4981ANanofaradUnits();
         CheckSM7110GigohmUnits();
         CheckProductionZStartInterlock();

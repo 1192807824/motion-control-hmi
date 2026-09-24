@@ -149,12 +149,7 @@ public partial class ConnectionConfigPage : UserControl
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await EnsureE4981ASettingsAppliedAsync(cancellationToken);
-            var response = await QueryMeterAsync("*TRG", cancellationToken);
-            var result = E4981AProtocol.ApplyLossLimit(
-                E4981AProtocol.ParseMeasurement(response), _e4981AAppliedSettings!);
-            UpdateMeterResult(result);
-            return result;
+            return await RunE4981AMeasurementCycleAsync(cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -521,6 +516,8 @@ public partial class ConnectionConfigPage : UserControl
         await RunMeterOperationAsync("手动发送", async () =>
         {
             var command = settings.ManualSendText.Trim();
+            // 手动SCPI可能改变AVG/触发模式；下一次正式测试必须重新同步配置。
+            _e4981ASettingsApplied = false;
             if (E4981AProtocol.ExpectsResponse(command))
             {
                 var response = await QueryMeterAsync(command);
@@ -570,10 +567,7 @@ public partial class ConnectionConfigPage : UserControl
         CommitInputBindings(this);
         await RunMeterOperationAsync("单次测试", async () =>
         {
-            await EnsureE4981ASettingsAppliedAsync(CancellationToken.None);
-            var response = await QueryMeterAsync("*TRG");
-            UpdateMeterResult(E4981AProtocol.ApplyLossLimit(
-                E4981AProtocol.ParseMeasurement(response), _e4981AAppliedSettings!));
+            await RunE4981AMeasurementCycleAsync(CancellationToken.None);
         });
     }
 
@@ -1715,6 +1709,39 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
+    private async Task<E4981AMeasurementResult> RunE4981AMeasurementCycleAsync(
+        CancellationToken cancellationToken)
+    {
+        ClearMeterResult("正在测量…");
+        try
+        {
+            await EnsureE4981ASettingsAppliedAsync(cancellationToken);
+            var settings = _e4981AAppliedSettings!;
+            AddTcpLog($"开始单次测试：平均{(settings.AveragingEnabled ? "开启" : "关闭")}，触发1次");
+            var response = await QueryMeterAsync("*TRG", cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = E4981AProtocol.ApplyLossLimit(E4981AProtocol.ParseMeasurement(response), settings);
+            UpdateMeterResult(result);
+            return result;
+        }
+        catch (Exception exception)
+        {
+            ClearMeterResult(exception is OperationCanceledException ? "测量已取消" : "本次测量失败");
+            throw;
+        }
+    }
+
+    private void ClearMeterResult(string status)
+    {
+        MeterResultStatusText.Text = status;
+        MeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        MeterCapacitanceText.Text = "-- nF";
+        MeterDissipationText.Text = "--";
+        MeterBinText.Text = "--";
+        MeterRawResultText.Text = "--";
+        MeterRawResultText.ToolTip = null;
+    }
+
     private async Task EnsureE4981ASettingsAppliedAsync(CancellationToken cancellationToken)
     {
         var settings = TcpSettings
@@ -1740,6 +1767,19 @@ public partial class ConnectionConfigPage : UserControl
             !instrumentError.StartsWith("+0", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"仪表参数错误：{instrumentError}");
+        }
+
+        // 回读仪表实际值，避免只根据界面复选框/已发送命令推断现场状态。
+        var triggerSource = (await QueryMeterAsync("TRIG:SOUR?", cancellationToken)).Trim();
+        var continuous = (await QueryMeterAsync("INIT:CONT?", cancellationToken)).Trim();
+        var averaging = (await QueryMeterAsync("AVER?", cancellationToken)).Trim();
+        AddTcpLog($"仪表实际状态：TRIG={triggerSource}，INIT:CONT={continuous}，AVER={averaging}");
+        if (!string.Equals(triggerSource, "BUS", StringComparison.OrdinalIgnoreCase) ||
+            continuous != "1" || averaging != (appliedSettings.AveragingEnabled ? "1" : "0"))
+        {
+            _generalTcpClient.Close();
+            SetTcpStatus("参数回读异常，请重新连接");
+            throw new InvalidOperationException("E4981A参数回读与下发不一致或响应错位，已断开连接，请重新连接后测试。");
         }
 
         _e4981AAppliedSettings = appliedSettings;
@@ -1877,8 +1917,10 @@ public partial class ConnectionConfigPage : UserControl
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _lifetimeCancellation.Token,
             cancellationToken);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var response = await _generalTcpClient.QueryAsync(command, timeout, linkedCancellation.Token);
-        AddTcpLog($"RX [SCPI]  {response}");
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        AddTcpLog($"RX [SCPI]  {response}  （对应 {command}，{elapsed:0.0} ms）");
         return response;
     }
 

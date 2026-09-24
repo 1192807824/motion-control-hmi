@@ -126,15 +126,29 @@ public sealed class E4981ATcpClient : IDisposable
             var payload = Encoding.ASCII.GetBytes(command.TrimEnd('\r', '\n') + "\n");
             try
             {
+                timeout.Token.ThrowIfCancellationRequested();
+                if (_receiveBuffer.Count != 0 || stream.DataAvailable)
+                    throw new InvalidDataException("E4981A存在未读取的旧响应，已断开连接，请重新连接后测试。");
                 await stream.WriteAsync(payload, timeout.Token);
                 await stream.FlushAsync(timeout.Token);
                 return expectResponse ? await ReadLineAsync(stream, timeout.Token) : null;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new TimeoutException($"E4981A命令超时：{command}");
+                // SCPI没有请求编号；超时后无法把迟到响应与下一次响应区分开。
+                // 必须废弃整条连接，不能只清空当前已经到达的接收缓冲。
+                var exception = new TimeoutException($"E4981A命令超时：{command}；已断开连接，请重新连接后测试。");
+                Close();
+                ConnectionClosed?.Invoke(exception);
+                throw exception;
             }
-            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+            catch (OperationCanceledException exception)
+            {
+                Close();
+                ConnectionClosed?.Invoke(exception);
+                throw;
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidDataException)
             {
                 Close();
                 ConnectionClosed?.Invoke(ex);

@@ -34,21 +34,41 @@ internal static partial class Program
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var commands = new ConcurrentQueue<string>();
         var failNextSetup = 0;
+        var capacitance = 1.5e-10;
+        var measurementStatus = 0;
+        var averageEnabled = false;
+        var failNextMeasurement = 0;
+        var failNextReadback = 0;
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var server = Task.Run(async () =>
         {
-            using var socket = await listener.AcceptTcpClientAsync(cancellation.Token);
-            using var reader = new StreamReader(socket.GetStream());
-            using var writer = new StreamWriter(socket.GetStream()) { AutoFlush = true, NewLine = "\n" };
-            while (await reader.ReadLineAsync(cancellation.Token) is { } command)
+            while (!cancellation.IsCancellationRequested)
             {
-                commands.Enqueue(command);
-                if (command == "SYST:ERR?")
-                    await writer.WriteLineAsync(Interlocked.Exchange(ref failNextSetup, 0) == 1
-                        ? "-222,Data out of range" : "+0,No error");
-                else if (command == "*TRG")
-                    await writer.WriteLineAsync("0,1.5E-10,0.2,2");
+                using var socket = await listener.AcceptTcpClientAsync(cancellation.Token);
+                using var reader = new StreamReader(socket.GetStream());
+                using var writer = new StreamWriter(socket.GetStream()) { AutoFlush = true, NewLine = "\n" };
+                while (await reader.ReadLineAsync(cancellation.Token) is { } command)
+                {
+                    commands.Enqueue(command);
+                    if (command == "AVER ON") averageEnabled = true;
+                    else if (command == "AVER OFF") averageEnabled = false;
+                    if (command == "SYST:ERR?")
+                        await writer.WriteLineAsync(Interlocked.Exchange(ref failNextSetup, 0) == 1
+                            ? "-222,Data out of range" : "+0,No error");
+                    else if (command == "TRIG:SOUR?")
+                        await writer.WriteLineAsync(Interlocked.Exchange(ref failNextReadback, 0) == 1 ? "INT" : "BUS");
+                    else if (command == "INIT:CONT?") await writer.WriteLineAsync("1");
+                    else if (command == "AVER?") await writer.WriteLineAsync(averageEnabled ? "1" : "0");
+                    else if (command == "*TRG")
+                    {
+                        if (Interlocked.Exchange(ref failNextMeasurement, 0) == 1)
+                            continue;
+                        var status = Volatile.Read(ref measurementStatus);
+                        await writer.WriteLineAsync(FormattableString.Invariant(
+                            $"{status},{Volatile.Read(ref capacitance):G17},0.2,{(status == 0 ? 2 : 11)}"));
+                    }
+                }
             }
         });
 
@@ -58,6 +78,7 @@ internal static partial class Program
         settings.Host = IPAddress.Loopback.ToString();
         settings.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         settings.CommandTimeoutMilliseconds = 1000;
+        settings.AveragingEnabled = false;
         settings.ComparatorEnabled = true;
         settings.Bin1Enabled = settings.Bin3Enabled = false;
         settings.Bin2Enabled = true;
@@ -99,14 +120,86 @@ internal static partial class Program
             Require(commands.Count(command => command == "*TRG") == 4, "Instrument was triggered after failed setup.");
             await page.MeasureE4981AAsync(cancellation.Token);
             Require(commands.Count(command => command == "*CLS") == 4, "A failed setup must be resent on the next attempt.");
+
+            settings.LossLower = 0.05;
+            // Production machine has averaging OFF: every logical test must trigger exactly once,
+            // regardless of the disabled count retained in settings.
+            foreach (var count in new[] { 3, 8, 1, 256 })
+            {
+                settings.AveragingCount = count;
+                Volatile.Write(ref capacitance, 400e-9);
+                Volatile.Write(ref measurementStatus, 0);
+                var triggersBefore = commands.Count(command => command == "*TRG");
+                var contacted = await page.MeasureE4981AAsync(cancellation.Token);
+                Require(Math.Abs(contacted.CapacitanceNf - 400) < 1e-6 && contacted.Bin == 2 && !contacted.LossRejected,
+                    "First test after contact retained old samples or lost final BIN/D.");
+                Require(commands.Count(command => command == "*TRG") - triggersBefore == 1,
+                    "A single test must trigger exactly once when averaging is disabled.");
+
+                Volatile.Write(ref capacitance, 0.003e-9);
+                Volatile.Write(ref measurementStatus, 2);
+                var released = await page.MeasureE4981AAsync(cancellation.Token);
+                Require(Math.Abs(released.CapacitanceNf - 0.003) < 1e-6 && !released.IsSuccessful && released.Bin == 11,
+                    "First test after release retained previous product or lost NC/BIN11.");
+            }
+
+            settings.AveragingEnabled = false;
+            var beforeSingle = commands.Count(command => command == "*TRG");
+            Volatile.Write(ref capacitance, 400e-9);
+            Volatile.Write(ref measurementStatus, 0);
+            Require(Math.Abs((await page.MeasureE4981AAsync(cancellation.Token)).CapacitanceNf - 400) < 1e-6 &&
+                    commands.Count(command => command == "*TRG") - beforeSingle == 1,
+                "Disabled averaging must use one fresh trigger, regardless of saved average count.");
+
+            // Exercise the actual async-void button handler as well as the production entry point.
+            settings.AveragingCount = 3;
+            Volatile.Write(ref capacitance, 0.003e-9);
+            var beforeManual = commands.Count(command => command == "*TRG");
+            typeof(ConnectionConfigPage).GetMethod("TriggerMeterTest_Click", Private)!
+                .Invoke(page, new object[] { page, new System.Windows.RoutedEventArgs() });
+            while ((bool)typeof(ConnectionConfigPage).GetField("_meterOperationRunning", Private)!.GetValue(page)!)
+                await Task.Delay(5, cancellation.Token);
+            var valueText = (System.Windows.Controls.TextBlock)typeof(ConnectionConfigPage)
+                .GetField("MeterCapacitanceText", Private)!.GetValue(page)!;
+            Require(valueText.Text == "0.003 nF" && commands.Count(command => command == "*TRG") - beforeManual == 1,
+                "Manual single-test button must trigger exactly once and show the current product.");
+            Require(viewModel.TcpConnectionLogs.Any(log => log.Contains("TRIG=BUS，INIT:CONT=1，AVER=0")),
+                "Actual instrument trigger/averaging state must be read back and logged.");
+
+            settings.Bin2UpperNf = 0.5;
+            Interlocked.Exchange(ref failNextReadback, 1);
+            var beforeMismatch = commands.Count(command => command == "*TRG");
+            try
+            {
+                await page.MeasureE4981AAsync(cancellation.Token);
+                throw new Exception("Mismatched instrument readback must not trigger.");
+            }
+            catch (InvalidOperationException) { }
+            Require(!client.IsConnected && valueText.Text == "-- nF" &&
+                    commands.Count(command => command == "*TRG") == beforeMismatch,
+                "Readback mismatch must invalidate the connection and the displayed result without triggering.");
+            await client.ConnectAsync(settings, cancellation.Token);
+            await page.MeasureE4981AAsync(cancellation.Token);
+
+            // A failed refresh must never leave the last valid reading visible as a current result.
+            settings.CommandTimeoutMilliseconds = 500;
+            Interlocked.Exchange(ref failNextMeasurement, 1);
+            try
+            {
+                await page.MeasureE4981AAsync(cancellation.Token);
+                throw new Exception("Missing measurement response must time out.");
+            }
+            catch (TimeoutException) { }
+            Require(!client.IsConnected && valueText.Text == "-- nF",
+                "Timeout must invalidate both the TCP stream and the previously displayed capacitance.");
         }
         finally
         {
             client.Close();
-            listener.Stop();
             cancellation.Cancel();
+            listener.Stop();
             try { await server; } catch (OperationCanceledException) { }
         }
-        Console.WriteLine("PASS: real E4981A connection path against loopback simulator; changed BIN/loss limits resend, unchanged setup caches, setup failure blocks trigger and retries safely.");
+        Console.WriteLine("PASS: E4981A AVG OFF contact/release, exactly one trigger in production/manual tests, final BIN/D, setup cache/rejection, actual-state readback/mismatch and timeout clears old display.");
     }
 }
