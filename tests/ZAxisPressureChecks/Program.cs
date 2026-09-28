@@ -16,6 +16,7 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        MotionCardPriorityChecks.Run();
         CheckPressureSafety();
         var card = DispatchProxy.Create<IMotionCard, CardProxy>();
         var fake = (CardProxy)(object)card;
@@ -272,6 +273,15 @@ internal static class Program
         stops = 0;
         protection.CheckOnce(card, () => stops++, _ => { });
         Require(stops == 1, "Missed scan deadline did not stop all axes.");
+
+        (card, fake) = SafeCard();
+        protection = new ZAxisPressureSafety();
+        fake.BeforeRead = axis => { if (axis == 7) Thread.Sleep(120); };
+        stops = 0;
+        protection.CheckOnce(card, () => stops++, _ => { });
+        Require(stops == 1 && protection.TripReason!.Contains("轴7") && protection.TripReason.Contains("排队"),
+            "A genuinely stalled read must still stop and identify the slow operation");
+        MustBlock(protection);
 
         (card, fake) = SafeCard();
         protection = new ZAxisPressureSafety();

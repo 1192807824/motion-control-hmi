@@ -1,7 +1,7 @@
 namespace ControlHub.Services.Motion;
 
 /// <summary>在每个DD运动指令下发前检查测试站，覆盖点动、定位、联动及回原；停止指令始终放行。</summary>
-public sealed class DdInterlockedMotionCard(IMotionCard inner, Action ensureDdCanStart) : IMotionCard
+public sealed class DdInterlockedMotionCard(IMotionCard inner, Action ensureDdCanStart) : IMotionCard, IPriorityPressureSampling
 {
     private void Check(int axis) { if (axis == 0) ensureDdCanStart(); }
     private void Check(IReadOnlyList<int> axes) { if (axes.Contains(0)) ensureDdCanStart(); }
@@ -29,6 +29,7 @@ public sealed class DdInterlockedMotionCard(IMotionCard inner, Action ensureDdCa
     public ushort ReadBusErrorCode() => inner.ReadBusErrorCode();
     public MotionAxisSnapshot ReadAxis(int hardwareAxisNo) => inner.ReadAxis(hardwareAxisNo);
     public int ReadActualTorque(int hardwareAxisNo) => inner.ReadActualTorque(hardwareAxisNo);
+    public IDisposable? EnterPressureSampling() => (inner as IPriorityPressureSampling)?.EnterPressureSampling();
     public uint ReadDigitalInputs(int portNo) => inner.ReadDigitalInputs(portNo);
     public uint ReadDigitalOutputs(int portNo) => inner.ReadDigitalOutputs(portNo);
     public void WriteDigitalOutput(int bitNo, bool enabled) => inner.WriteDigitalOutput(bitNo, enabled);

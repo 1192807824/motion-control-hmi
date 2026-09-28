@@ -99,30 +99,40 @@ public sealed class ZAxisPressureSafety
             var started = Stopwatch.GetTimestamp();
             // 同一批次采用同一阈值，改值后必须重新完成四轴校验才能启动运动。
             var threshold = Threshold;
+            var stage = "检查反馈更新时间";
             try
             {
                 var previous = Interlocked.Read(ref _lastHealthyScan);
                 if (previous != 0 && Stopwatch.GetElapsedTime(previous).TotalMilliseconds > MaximumFeedbackAgeMilliseconds)
-                    Trip("压力反馈超过100 ms未完成有效更新", emergencyStop, notify);
+                    Trip($"压力反馈超过{MaximumFeedbackAgeMilliseconds} ms未完成有效更新（距上次有效采集{Stopwatch.GetElapsedTime(previous).TotalMilliseconds:F1} ms）", emergencyStop, notify);
+                stage = "等待控制卡采集优先权";
+                using var sampling = (card as IPriorityPressureSampling)?.EnterPressureSampling();
+                var queueMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                if (queueMilliseconds > MaximumFeedbackAgeMilliseconds)
+                    Trip($"压力采集等待控制卡{queueMilliseconds:F1} ms，超过{MaximumFeedbackAgeMilliseconds} ms；当前SDK调用未及时释放通信权", emergencyStop, notify);
                 var readings = new ZAxisPressureReading[Axes.Length];
                 for (var index = 0; index < Axes.Length; index++)
                 {
                     if (_cancellation.IsCancellationRequested) return;
                     var (axis, label) = Axes[index];
+                    stage = $"读取轴{axis}压力（nmc_get_torque）";
+                    var readStarted = Stopwatch.GetTimestamp();
                     var value = card.ReadActualTorque(axis);
                     // 每轴读取后立即判定，不等剩余轴、总线检查或界面刷新。
                     if (value > threshold)
                         Trip($"{label}（轴{axis}）压力原始值 {value} > {threshold}", emergencyStop, notify);
                     readings[index] = new(axis, label, value, value > threshold ? "超限" : "实时", $"6077 原始反馈；超过{threshold}触发全轴急停。");
                     if (Stopwatch.GetElapsedTime(started).TotalMilliseconds > MaximumFeedbackAgeMilliseconds)
-                        Trip("压力采集耗时超过100 ms，无法维持有效监控", emergencyStop, notify);
+                        Trip($"压力采集耗时超过{MaximumFeedbackAgeMilliseconds} ms，无法维持有效监控：排队{queueMilliseconds:F1} ms，{stage}耗时{Stopwatch.GetElapsedTime(readStarted).TotalMilliseconds:F1} ms，整轮{Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms", emergencyStop, notify);
                 }
+                stage = "读取总线状态";
+                var busStarted = Stopwatch.GetTimestamp();
                 var busError = card.ReadBusErrorCode();
                 if (busError != 0 && busError != 0x0228)
                     throw new MotionCardException($"EtherCAT 总线错误 0x{busError:X4}");
                 if (!card.IsOpen) throw new MotionCardException("控制卡连接已断开");
                 if (Stopwatch.GetElapsedTime(started).TotalMilliseconds > MaximumFeedbackAgeMilliseconds)
-                    Trip("压力采集耗时超过100 ms，无法维持有效监控", emergencyStop, notify);
+                    Trip($"压力采集耗时超过{MaximumFeedbackAgeMilliseconds} ms，无法维持有效监控：排队{queueMilliseconds:F1} ms，总线查询{Stopwatch.GetElapsedTime(busStarted).TotalMilliseconds:F1} ms，整轮{Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms", emergencyStop, notify);
                 Volatile.Write(ref _readings, readings);
                 Interlocked.Exchange(ref _lastHealthyScan, Stopwatch.GetTimestamp());
                 Volatile.Write(ref _verifiedThreshold, threshold);
@@ -131,7 +141,7 @@ public sealed class ZAxisPressureSafety
             {
                 if (_cancellation.IsCancellationRequested) return;
                 Volatile.Write(ref _readings, ZAxisPressureMonitor.Unavailable("保护读取失败", exception.Message));
-                Trip($"压力保护读取失败：{exception.Message}", emergencyStop, notify);
+                Trip($"压力保护读取失败（{stage}）：{exception.Message}", emergencyStop, notify);
             }
             if (TripReason is { } reason && !_stopSucceeded)
                 Trip(reason, emergencyStop, notify);

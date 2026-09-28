@@ -3,7 +3,7 @@ using System.IO;
 
 namespace ControlHub.Services.Motion;
 
-public sealed class LeisaiMotionCard : IMotionCard
+public sealed class LeisaiMotionCard : IMotionCard, IPriorityPressureSampling
 {
     private const ushort EtherCatPort = 2;
     private const ushort ExternalIoNodeId = 1001;
@@ -11,7 +11,7 @@ public sealed class LeisaiMotionCard : IMotionCard
     private const ushort AllEtherCatAxesSentinel = 255;
     private const ushort EnabledStateMachine = 4;
 
-    private readonly object _sync = new();
+    private readonly MotionCardAccessGate _sync = new();
     private readonly MotionCardOptions _options;
     private readonly Action? _ensureMotionAllowed;
     private ushort _cardNo;
@@ -38,7 +38,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public MotionCardConnectionInfo Open()
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             if (IsOpen)
             {
@@ -151,7 +151,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Close()
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             if (!IsOpen)
             {
@@ -173,7 +173,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public ushort ReadBusErrorCode()
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             ushort errorCode = 0;
@@ -184,7 +184,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public MotionAxisSnapshot ReadAxis(int hardwareAxisNo)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             ushort stateMachine = 0;
@@ -251,7 +251,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public int ReadActualTorque(int hardwareAxisNo)
     {
-        lock (_sync)
+        using (_sync.Enter(MotionCardAccessPriority.Pressure))
         {
             var axis = GetAxis(hardwareAxisNo);
             var torque = 0;
@@ -260,9 +260,11 @@ public sealed class LeisaiMotionCard : IMotionCard
         }
     }
 
+    public IDisposable EnterPressureSampling() => _sync.Enter(MotionCardAccessPriority.Pressure);
+
     public uint ReadDigitalInputs(int portNo)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             if (portNo is < 0 or > ushort.MaxValue)
@@ -285,7 +287,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public uint ReadDigitalOutputs(int portNo)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             if (portNo is < 0 or > ushort.MaxValue)
@@ -308,7 +310,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void WriteDigitalOutput(int bitNo, bool enabled)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             var maximumBitNo = Math.Max(DigitalOutputCount, _options.DigitalOutputStartBit + DigitalOutputCount);
@@ -330,7 +332,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public double ReadAnalogInput(int channel)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             ValidateAnalogChannel(channel, AnalogInputCount, nameof(channel));
             double value = 0;
@@ -341,7 +343,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public double ReadAnalogOutput(int channel)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             ValidateAnalogChannel(channel, AnalogOutputCount, nameof(channel));
             double value = 0;
@@ -352,7 +354,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void WriteAnalogOutput(int channel, double value)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             ValidateAnalogChannel(channel, AnalogOutputCount, nameof(channel));
             if (!double.IsFinite(value) || value < _options.AnalogOutputMinimum || value > _options.AnalogOutputMaximum)
@@ -368,7 +370,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void ServoOn(int hardwareAxisNo, bool enabled)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             EnsureBusReady();
@@ -393,7 +395,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void SetAllServos(bool enabled)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             EnsureBusReady();
@@ -493,7 +495,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Home(int hardwareAxisNo, MotionHomeProfile profile)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             EnsureAxisReadyForDirection(axis, direction: 0);
@@ -518,7 +520,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Jog(int hardwareAxisNo, double velocity)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             ValidateVelocity(velocity, allowSigned: true);
@@ -533,7 +535,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void MoveRelative(int hardwareAxisNo, double distance, double velocity)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             if (!double.IsFinite(distance) || distance == 0)
@@ -567,7 +569,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             throw new ArgumentException("同步相对移动的轴号、脉冲和速度数量必须一致且不能为空。");
         }
 
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axisList = new ushort[hardwareAxisNos.Count];
             var distanceList = new double[distances.Count];
@@ -629,7 +631,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             throw new ArgumentException("XY直线插补必须提供两根不同轴及对应的目标位置和最大速度。");
         }
 
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             var coordinate = checked((ushort)coordinateSystemNo);
@@ -750,7 +752,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
         }
 
-        lock (_sync)
+        using (_sync.Enter(MotionCardAccessPriority.EmergencyStop))
         {
             EnsureOpen();
             EnsureSuccess(
@@ -764,7 +766,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void MoveAbsolute(int hardwareAxisNo, double position, double velocity)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             if (!double.IsFinite(position))
@@ -786,7 +788,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Stop(int hardwareAxisNo, bool emergency = false)
     {
-        lock (_sync)
+        using (_sync.Enter(MotionCardAccessPriority.EmergencyStop))
         {
             StopCore(GetAxis(hardwareAxisNo), emergency);
         }
@@ -794,7 +796,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void EmergencyStop()
     {
-        lock (_sync)
+        using (_sync.Enter(MotionCardAccessPriority.EmergencyStop))
         {
             EnsureOpen();
             var failures = new List<(string Operation, int ErrorCode)>();
@@ -835,7 +837,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void ClearAlarms(IEnumerable<int> hardwareAxisNumbers)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             EnsureSuccess(LeisaiNative.nmc_clear_errcode(_cardNo, EtherCatPort), "nmc_clear_errcode");
@@ -1017,9 +1019,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
 
             // 调用方持有 _sync；等待使能确认期间释放锁，让压力采集和急停能够进入。
-            Monitor.Exit(_sync);
-            try { Thread.Sleep(_options.PollIntervalMilliseconds); }
-            finally { Monitor.Enter(_sync); }
+            _sync.SleepOutside(_options.PollIntervalMilliseconds);
             EnsureOpen();
             if (enabled) _ensureMotionAllowed?.Invoke();
         }
