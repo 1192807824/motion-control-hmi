@@ -500,7 +500,9 @@ public sealed class VisionMasterProcessHost : HwndHost
                 state.Nozzle2SaveEnabled ? "1" : "0",
                 state.LoadingServoEnabled ? "1" : "0",
                 Encode(state.LoadingXServoText),
-                Encode(state.LoadingZServoText)),
+                Encode(state.LoadingZServoText),
+                state.RecognizedCenterMoveVisible ? "1" : "0",
+                state.RecognizedCenterMoveEnabled ? "1" : "0"),
             cancellationToken);
     }
 
@@ -659,6 +661,15 @@ public sealed class VisionMasterProcessHost : HwndHost
         CancellationToken cancellationToken)
     {
         return RunTwoPointBlobInspectionAsync("RUN_NOZZLE_POINTS", cancellationToken);
+    }
+
+    public async Task<RecognizedCenterResult> RunRecognizedCenterAsync(string calibrationFilePath, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var response = await SendCalibrationCommandAsync("RUN_RECOGNIZED_CENTER\t" +
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath)), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return RecognizedCenterResult.Parse(response);
     }
 
     private async Task<VisionRectangleBlobResult> RunTwoPointBlobInspectionAsync(
@@ -1751,7 +1762,9 @@ public sealed record CalibrationSidebarState(
     bool Nozzle2SaveEnabled,
     bool LoadingServoEnabled = false,
     string LoadingXServoText = "上料X轴使能开关",
-    string LoadingZServoText = "上料双Z使能开关");
+    string LoadingZServoText = "上料双Z使能开关",
+    bool RecognizedCenterMoveVisible = false,
+    bool RecognizedCenterMoveEnabled = false);
 
 public sealed record VisionRotationPoint(double X, double Y);
 

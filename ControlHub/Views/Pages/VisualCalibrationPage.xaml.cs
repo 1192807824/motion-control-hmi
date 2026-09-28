@@ -2149,6 +2149,9 @@ public partial class VisualCalibrationPage : UserControl
             case "StopClickMove":
                 StopClickMove_Click(this, new RoutedEventArgs());
                 break;
+            case "RecognizedCenterMove":
+                RecognizedCenterMove_Click(this, new RoutedEventArgs());
+                break;
             case "CalculateRotationCenter":
                 CalculateRotationCenter_Click(this, new RoutedEventArgs());
                 break;
@@ -3951,6 +3954,8 @@ public partial class VisualCalibrationPage : UserControl
             calibrationPathValid &&
             File.Exists(calibrationFilePath);
         StopClickMoveButton.IsEnabled = _clickMoveRunning;
+        RecognizedCenterMoveButton.Visibility = ActiveCalibrationMode == VisualCalibrationMode.First ? Visibility.Visible : Visibility.Collapsed;
+        RecognizedCenterMoveButton.IsEnabled = CanMoveRecognizedCenter();
         UpdateNozzleTeachUi();
         ScheduleCalibrationToolbarSync();
         ScheduleCalibrationSidebarSync();
@@ -4086,7 +4091,9 @@ public partial class VisualCalibrationPage : UserControl
                     $"上料X轴：{_motionController?.LoadingXAxis?.ServoText ?? "未连接"}（切换）",
                     _motionController?.LoadingZ1Axis?.ServoOn == true &&
                     _motionController?.LoadingZ2Axis?.ServoOn == true
-                        ? "解除上料双Z使能" : "上料双Z使能");
+                        ? "解除上料双Z使能" : "上料双Z使能",
+                    ActiveCalibrationMode == VisualCalibrationMode.First,
+                    RecognizedCenterMoveButton.IsEnabled);
                 try
                 {
                     await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);
