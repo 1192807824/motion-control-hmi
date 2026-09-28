@@ -567,6 +567,7 @@ public partial class HomePage : UserControl
         }
 
         _motionController = motionController;
+        LoadPressureThresholdInput();
         _motionController.AttachDdTestStationInterlock(ReadDdTestStationWaitPositions);
         _motionController.EmergencyStopIssued += MotionController_EmergencyStopIssued;
         UpdateHomeCommandState();

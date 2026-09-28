@@ -1,9 +1,13 @@
 using System.IO;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using ControlHub.Services.Motion;
 using ControlHub.Views.Pages;
 
@@ -48,11 +52,14 @@ internal static class Program
 
         _ = new Application();
         var page = new HomePage();
+        CheckThresholdConfiguration(page);
         var apply = typeof(HomePage).GetMethod("ApplyPressureReadings", BindingFlags.Instance | BindingFlags.NonPublic)!;
         apply.Invoke(page, new object[] { partial });
         page.Measure(new Size(1680, 854));
         page.Arrange(new Rect(0, 0, 1680, 854));
         page.UpdateLayout();
+        CheckProductionPressureRefresh(page);
+        apply.Invoke(page, new object[] { partial });
         var items = (ItemsControl)page.FindName("ZPressureItems");
         var texts = Descendants(items).OfType<TextBlock>().Select(text => text.Text).ToArray();
         Require(texts.Contains("-32768") && texts.Contains("32767") && texts.Contains("读取失败") && texts.Contains("—"),
@@ -74,6 +81,24 @@ internal static class Program
         texts = Descendants(items).OfType<TextBlock>().Select(text => text.Text).ToArray();
         Require(texts.Count(text => text == "—") == 4 && !texts.Contains("-32768"), "UI retained stale readings after disconnect.");
         Console.WriteLine("PASS: homepage renders four readings, independent error, and clears stale values on disconnect.");
+        if (args.Length > 0)
+        {
+            var parameters = new ParameterSettingsPage();
+            parameters.AttachSettingsContent(page.DetachParameterSettingsPanel());
+            parameters.Measure(new Size(1680, 854));
+            parameters.Arrange(new Rect(0, 0, 1680, 854));
+            parameters.UpdateLayout();
+            var button = (Button)page.FindName("SaveZPressureThresholdButton");
+            var position = button.TransformToAncestor(parameters).Transform(new Point());
+            Require(position.X >= 0 && position.Y >= 0 && position.Y + button.ActualHeight < 854,
+                "Pressure setting is not visible on parameter page.");
+            var preview = new RenderTargetBitmap(1680, 854, 96, 96, PixelFormats.Pbgra32);
+            preview.Render(parameters);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(preview));
+            using var output = File.Create(Path.ChangeExtension(args[0], ".parameters.png"));
+            encoder.Save(output);
+        }
     }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
@@ -89,6 +114,59 @@ internal static class Program
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
+    }
+
+    private static void CheckProductionPressureRefresh(HomePage page)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var motion = (MotionControlPage)typeof(HomePage).GetField("_motionController", flags)!.GetValue(page)!;
+        var protection = new ZAxisPressureSafety();
+        typeof(MotionControlPage).GetField("_pressureSafety", flags)!.SetValue(motion, protection);
+        typeof(HomePage).GetField("_startSequenceRunning", flags)!.SetValue(page, true);
+        var card = DispatchProxy.Create<IMotionCard, CardProxy>();
+        var fake = (CardProxy)(object)card;
+        fake.TorqueValues = new() { [5] = 10, [7] = 20, [9] = 30, [11] = 40 };
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        var timer = (DispatcherTimer)typeof(HomePage).GetField("_pressureTimer", flags)!.GetValue(page)!;
+        var items = (ItemsControl)page.FindName("ZPressureItems");
+        var changes = new int[4];
+        var subscriptions = new List<(INotifyPropertyChanged Item, PropertyChangedEventHandler Handler)>();
+        for (var index = 0; index < 4; index++)
+        {
+            var slot = index;
+            var item = (INotifyPropertyChanged)items.Items[index];
+            PropertyChangedEventHandler handler = (_, _) => changes[slot]++;
+            item.PropertyChanged += handler;
+            subscriptions.Add((item, handler));
+        }
+        var elapsed = Stopwatch.StartNew();
+        var frame = new DispatcherFrame();
+        var cycles = 0;
+        Action? productionContinuation = null;
+        productionContinuation = () =>
+        {
+            for (var index = 0; index < 4; index++) fake.TorqueValues[new[] { 5, 7, 9, 11 }[index]] = 10 + (cycles % 350) + index;
+            protection.CheckOnce(card, () => throw new Exception("Unexpected protection trip"), _ => { });
+            cycles++;
+            Thread.Sleep(1);
+            if (elapsed.ElapsedMilliseconds < 650)
+                dispatcher.BeginInvoke(DispatcherPriority.Normal, productionContinuation!);
+            else frame.Continue = false;
+        };
+        timer.Start();
+        dispatcher.BeginInvoke(DispatcherPriority.Normal, productionContinuation);
+        try { Dispatcher.PushFrame(frame); }
+        finally
+        {
+            timer.Stop();
+            foreach (var (item, handler) in subscriptions) item.PropertyChanged -= handler;
+            typeof(HomePage).GetField("_startSequenceRunning", flags)!.SetValue(page, false);
+        }
+        Require(cycles > 20 && changes.All(count => count >= 3),
+            $"Production queue starved pressure refresh: cycles={cycles}, updates=[{string.Join(",", changes)}].");
+        Require(protection.TripReason is null, "Display load disrupted pressure safety sampling.");
+        Console.WriteLine($"PASS: all four pressure displays update during production queue load: [{string.Join(",", changes)}].");
     }
 
     private static void CheckPressureSafety()
@@ -113,6 +191,34 @@ internal static class Program
         protection.CheckOnce(card, () => stops++, _ => { });
         protection.ThrowIfMotionBlocked();
         Require(stops == 0, "500 or negative values incorrectly triggered signed >500 protection.");
+        protection.ConfigureThreshold(800);
+        MustBlock(protection);
+        fake.TorqueValues![7] = 800;
+        protection.CheckOnce(card, () => stops++, _ => { });
+        protection.ThrowIfMotionBlocked();
+        Require(stops == 0 && protection.Status.Contains("800"), "Custom threshold equality should not trip.");
+        fake.TorqueValues[7] = 801;
+        protection.CheckOnce(card, () => stops++, _ => { });
+        Require(stops == 1 && protection.TripReason!.Contains("> 800"), "Custom threshold did not replace 500.");
+        protection.ConfigureThreshold(900);
+        MustBlock(protection);
+        foreach (var invalid in new[] { -1, 0, 32767, int.MaxValue })
+        {
+            try { protection.ConfigureThreshold(invalid); throw new Exception("Invalid threshold accepted."); }
+            catch (InvalidDataException) { }
+            Require(protection.Threshold == 900, "Invalid input changed active protection threshold.");
+        }
+
+        // A threshold changed mid-scan must not be treated as verified by an older scan.
+        (card, fake) = SafeCard();
+        protection = new ZAxisPressureSafety();
+        fake.BeforeRead = axis => { if (axis == 11) protection.ConfigureThreshold(200); };
+        protection.CheckOnce(card, () => { }, _ => { });
+        MustBlock(protection);
+        fake.BeforeRead = null;
+        stops = 0;
+        protection.CheckOnce(card, () => stops++, _ => { });
+        Require(stops == 1 && protection.TripReason!.Contains("> 200"), "Lowered threshold did not apply on next scan.");
         foreach (var axis in new[] { 5, 7, 9, 11 })
         {
             (card, fake) = SafeCard();
@@ -188,6 +294,51 @@ internal static class Program
         protection.CheckOnce(card, () => { }, _ => { });
         MustBlock(protection);
         Console.WriteLine("PASS: >500 boundary on all four axes, immediate per-axis stop, fail closed, latch, retry, stale feedback, UI-independent worker.");
+    }
+
+    private static void CheckThresholdConfiguration(HomePage page)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ControlHub-pressure-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "motion-settings.json");
+        File.WriteAllText(path, "{}");
+        var store = new MotionCardOptionsStore(path);
+        var options = store.Load();
+        Require(options.ZPressureEmergencyStopThreshold == 500, "Legacy configuration must default to 500.");
+        var safety = new ZAxisPressureSafety();
+        var motion = (MotionControlPage)RuntimeHelpers.GetUninitializedObject(typeof(MotionControlPage));
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        typeof(MotionControlPage).GetField("_motionOptions", flags)!.SetValue(motion, options);
+        typeof(MotionControlPage).GetField("_motionOptionsStore", flags)!.SetValue(motion, store);
+        typeof(MotionControlPage).GetField("_pressureSafety", flags)!.SetValue(motion, safety);
+        typeof(HomePage).GetField("_motionController", flags)!.SetValue(page, motion);
+        typeof(HomePage).GetMethod("LoadPressureThresholdInput", flags)!.Invoke(page, null);
+        var input = (TextBox)page.FindName("ZPressureThresholdTextBox");
+        var save = (Button)page.FindName("SaveZPressureThresholdButton");
+        var status = (TextBlock)page.FindName("ZPressureThresholdSettingsStatusText");
+        Require(input.Text == "500" && save.IsEnabled, "Parameter editor did not load active threshold.");
+        input.Text = "850";
+        Require(safety.Threshold == 500, "Uncommitted edits affected safety.");
+        save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Require(safety.Threshold == 850 && store.Load().ZPressureEmergencyStopThreshold == 850 && status.Text.Contains("已保存"),
+            "Save did not persist and activate threshold.");
+        foreach (var invalid in new[] { "", "0", "-10", "1.5", "abc", "32767" })
+        {
+            input.Text = invalid;
+            save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(safety.Threshold == 850 && store.Load().ZPressureEmergencyStopThreshold == 850 && status.Text.Contains("未应用"),
+                "Invalid editor input replaced saved threshold.");
+        }
+        // Use a directory as destination to inject an actual filesystem save failure.
+        typeof(MotionControlPage).GetField("_motionOptionsStore", flags)!.SetValue(motion, new MotionCardOptionsStore(directory));
+        input.Text = "950";
+        save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Require(safety.Threshold == 850 && options.ZPressureEmergencyStopThreshold == 850 && status.Text.Contains("未应用"),
+            "Failed persistence changed active protection.");
+        typeof(MotionControlPage).GetField("_motionOptionsStore", flags)!.SetValue(motion, store);
+        typeof(HomePage).GetMethod("LoadPressureThresholdInput", flags)!.Invoke(page, null);
+        Require(input.Text == "850", "Saved threshold was not restored to editor.");
+        Console.WriteLine("PASS: configurable threshold, legacy default, UI save/validation, persistence, failed-save rollback, latch and in-flight update.");
     }
 }
 

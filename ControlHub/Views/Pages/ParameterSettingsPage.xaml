@@ -84,7 +84,8 @@
                             CornerRadius="14"
                             Padding="12,5"
                             Margin="0,0,10,0">
-                        <TextBlock Text="修改自动保存"
+                        <TextBlock Text="常规参数自动保存"
+                                   ToolTip="压力急停阈值需点击对应的“保存并生效”按钮。"
                                    Foreground="#49D17D"
                                    FontSize="12"
                                    FontWeight="Bold" />

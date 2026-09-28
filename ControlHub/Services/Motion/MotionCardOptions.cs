@@ -6,6 +6,15 @@ namespace ControlHub.Services.Motion;
 public sealed class MotionCardOptions
 {
     public const int DefaultPollIntervalMilliseconds = 5;
+    public const int DefaultZPressureEmergencyStopThreshold = 500;
+
+    public int ZPressureEmergencyStopThreshold { get; set; } = DefaultZPressureEmergencyStopThreshold;
+
+    public static void ValidateZPressureEmergencyStopThreshold(int value)
+    {
+        if (value is < 1 or > 32766)
+            throw new InvalidDataException("四轴压力急停阈值必须为 1–32766 的整数（6077 原始值）。");
+    }
 
     public int ConfigurationVersion { get; set; }
 
@@ -203,6 +212,7 @@ public sealed class MotionCardOptions
 
     public void Validate()
     {
+        ValidateZPressureEmergencyStopThreshold(ZPressureEmergencyStopThreshold);
         if (AxisCount is < 1 or > 64)
         {
             throw new InvalidDataException("AxisCount 必须在 1 到 64 之间。");

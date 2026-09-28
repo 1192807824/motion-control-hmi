@@ -8,7 +8,21 @@ public sealed record PressureSafetyTrip(string Reason, Exception? StopError, dou
 /// <summary>软件压力保护。1 ms 是目标轮询等待时间，不是 Windows/SDK/机械停止的硬实时保证。</summary>
 public sealed class ZAxisPressureSafety
 {
-    public const int Threshold = 500;
+    private int _threshold;
+    private int _verifiedThreshold;
+    public int Threshold => Volatile.Read(ref _threshold);
+
+    public ZAxisPressureSafety(int threshold = MotionCardOptions.DefaultZPressureEmergencyStopThreshold)
+    {
+        ConfigureThreshold(threshold);
+    }
+
+    public void ConfigureThreshold(int threshold)
+    {
+        MotionCardOptions.ValidateZPressureEmergencyStopThreshold(threshold);
+        // 不等待采集锁，不清除已触发的锁定；下一轮采集使用新阈值。
+        Volatile.Write(ref _threshold, threshold);
+    }
     public const int PollMilliseconds = 1;
     public const int MaximumFeedbackAgeMilliseconds = 100;
     private static readonly (int Axis, string Label)[] Axes =
@@ -30,9 +44,9 @@ public sealed class ZAxisPressureSafety
         {
             if (TripReason is not null) return "压力保护已锁定 · 排障后重启";
             var stamp = Interlocked.Read(ref _lastHealthyScan);
-            if (stamp == 0) return "压力保护初始化";
+            if (stamp == 0 || Volatile.Read(ref _verifiedThreshold) != Threshold) return "压力保护校验中";
             return Stopwatch.GetElapsedTime(stamp).TotalMilliseconds > MaximumFeedbackAgeMilliseconds
-                ? "压力反馈过期 · 禁止启动" : "保护中 · 原始值 > 500 全轴急停";
+                ? "压力反馈过期 · 禁止启动" : $"保护中 · 原始值 > {Threshold} 全轴急停";
         }
     }
 
@@ -47,7 +61,7 @@ public sealed class ZAxisPressureSafety
         if (TripReason is { } reason)
             throw new MotionCardException($"压力保护已锁定：{reason}。排除故障后重启程序。", "Z压力保护");
         var stamp = Interlocked.Read(ref _lastHealthyScan);
-        if (_cancellation.IsCancellationRequested || stamp == 0 ||
+        if (_cancellation.IsCancellationRequested || stamp == 0 || Volatile.Read(ref _verifiedThreshold) != Threshold ||
             Stopwatch.GetElapsedTime(stamp).TotalMilliseconds > MaximumFeedbackAgeMilliseconds)
             throw new MotionCardException("四个Z轴压力尚未获得有效实时反馈，禁止启动运动。", "Z压力保护");
     }
@@ -83,6 +97,8 @@ public sealed class ZAxisPressureSafety
         {
             if (_cancellation.IsCancellationRequested) return;
             var started = Stopwatch.GetTimestamp();
+            // 同一批次采用同一阈值，改值后必须重新完成四轴校验才能启动运动。
+            var threshold = Threshold;
             try
             {
                 var previous = Interlocked.Read(ref _lastHealthyScan);
@@ -95,9 +111,9 @@ public sealed class ZAxisPressureSafety
                     var (axis, label) = Axes[index];
                     var value = card.ReadActualTorque(axis);
                     // 每轴读取后立即判定，不等剩余轴、总线检查或界面刷新。
-                    if (value > Threshold)
-                        Trip($"{label}（轴{axis}）压力原始值 {value} > {Threshold}", emergencyStop, notify);
-                    readings[index] = new(axis, label, value, value > Threshold ? "超限" : "实时", "6077 原始反馈；超过500触发全轴急停。");
+                    if (value > threshold)
+                        Trip($"{label}（轴{axis}）压力原始值 {value} > {threshold}", emergencyStop, notify);
+                    readings[index] = new(axis, label, value, value > threshold ? "超限" : "实时", $"6077 原始反馈；超过{threshold}触发全轴急停。");
                     if (Stopwatch.GetElapsedTime(started).TotalMilliseconds > MaximumFeedbackAgeMilliseconds)
                         Trip("压力采集耗时超过100 ms，无法维持有效监控", emergencyStop, notify);
                 }
@@ -109,6 +125,7 @@ public sealed class ZAxisPressureSafety
                     Trip("压力采集耗时超过100 ms，无法维持有效监控", emergencyStop, notify);
                 Volatile.Write(ref _readings, readings);
                 Interlocked.Exchange(ref _lastHealthyScan, Stopwatch.GetTimestamp());
+                Volatile.Write(ref _verifiedThreshold, threshold);
             }
             catch (Exception exception)
             {

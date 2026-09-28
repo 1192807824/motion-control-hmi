@@ -262,7 +262,7 @@ public partial class MotionControlPage : UserControl
         RelativeModeRadio.IsChecked = !Tuning.AbsolutePositionMode;
         AbsoluteModeRadio.IsChecked = Tuning.AbsolutePositionMode;
 
-        _pressureSafety = _motionOptions.SimulationMode ? null : new ZAxisPressureSafety();
+        _pressureSafety = _motionOptions.SimulationMode ? null : new ZAxisPressureSafety(_motionOptions.ZPressureEmergencyStopThreshold);
         _motionCard = new DdInterlockedMotionCard(
             MotionCardFactory.Create(_motionOptions, _pressureSafety is null ? null : _pressureSafety.ThrowIfMotionBlocked),
             EnsureDdTestStationsSafe);
@@ -280,15 +280,35 @@ public partial class MotionControlPage : UserControl
 
     public MotionHomeTuningSettings HomeTuning { get; } = new();
 
-    public ZAxisPressureReading[] ReadZAxisPressures(CancellationToken cancellationToken) =>
+    // 主页高优先级刷新专用：所有分支均只读内存，绝不在UI线程调用SDK。
+    public ZAxisPressureReading[] ReadZAxisPressures() =>
         _closed ? ZAxisPressureMonitor.Unavailable("未连接") :
-        _pressureSafety?.Readings ?? ZAxisPressureMonitor.Read(_motionCard, _motionOptions.SimulationMode, cancellationToken);
+        _pressureSafety?.Readings ?? ZAxisPressureMonitor.Unavailable(
+            _motionOptions.SimulationMode ? "模拟模式" : "保护初始化");
 
     public string PressureSafetyStatus => _closed ? "压力保护已停止" :
         _pressureSafety?.Status ?? "模拟模式 · 未启用硬件保护";
 
     public string PressureSafetyDetails => _pressureSafety?.TripReason ??
-        "独立线程目标等待间隔1 ms；原始值 > 500触发，等于500不触发。Windows与SDK不保证硬实时停机。";
+        $"独立线程目标等待间隔1 ms；原始值 > {ZPressureEmergencyStopThreshold}触发，等于阈值不触发。Windows与SDK不保证硬实时停机。";
+
+    public int ZPressureEmergencyStopThreshold => _motionOptions.ZPressureEmergencyStopThreshold;
+
+    public void SaveZPressureEmergencyStopThreshold(int threshold)
+    {
+        MotionCardOptions.ValidateZPressureEmergencyStopThreshold(threshold);
+        if (_closed || _configurationError is not null)
+            throw new InvalidOperationException("运动配置不可用，无法保存压力阈值。");
+        var previous = _motionOptions.ZPressureEmergencyStopThreshold;
+        _motionOptions.ZPressureEmergencyStopThreshold = threshold;
+        try { _motionOptionsStore.Save(_motionOptions); }
+        catch
+        {
+            _motionOptions.ZPressureEmergencyStopThreshold = previous;
+            throw;
+        }
+        _pressureSafety?.ConfigureThreshold(threshold);
+    }
 
     private void OnPressureSafetyTrip(PressureSafetyTrip trip)
     {

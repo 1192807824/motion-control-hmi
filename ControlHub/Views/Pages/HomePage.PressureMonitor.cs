@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
@@ -10,21 +9,51 @@ namespace ControlHub.Views.Pages;
 
 public partial class HomePage
 {
+    private void LoadPressureThresholdInput()
+    {
+        ZPressureThresholdTextBox.Text = (_motionController?.ZPressureEmergencyStopThreshold ??
+            MotionCardOptions.DefaultZPressureEmergencyStopThreshold).ToString(CultureInfo.InvariantCulture);
+        SaveZPressureThresholdButton.IsEnabled = _motionController is not null;
+        ZPressureThresholdSettingsStatusText.Foreground = Brushes.LightGreen;
+        ZPressureThresholdSettingsStatusText.Text = $"当前生效阈值：{ZPressureThresholdTextBox.Text}；四轴共用，保存后生效。";
+    }
+
+    private void SaveZPressureThreshold_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!int.TryParse(ZPressureThresholdTextBox.Text.Trim(), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var threshold))
+                throw new ArgumentException("请输入 1–32766 的整数阈值。");
+            var controller = _motionController ?? throw new InvalidOperationException("运动控制配置尚未连接。");
+            controller.SaveZPressureEmergencyStopThreshold(threshold);
+            ZPressureThresholdTextBox.Text = threshold.ToString(CultureInfo.InvariantCulture);
+            ZPressureThresholdSettingsStatusText.Foreground = Brushes.LightGreen;
+            ZPressureThresholdSettingsStatusText.Text = $"已保存并生效：任一Z轴原始值 > {threshold} 全轴急停；重启后保留。";
+            ZPressureProtectionStatusText.Text = controller.PressureSafetyStatus;
+            ZPressureProtectionStatusText.ToolTip = controller.PressureSafetyDetails;
+        }
+        catch (Exception exception)
+        {
+            ZPressureThresholdSettingsStatusText.Foreground = Brushes.OrangeRed;
+            ZPressureThresholdSettingsStatusText.Text = $"未应用：{exception.Message} 当前阈值仍为 {_motionController?.ZPressureEmergencyStopThreshold.ToString() ?? "未知"}。";
+        }
+    }
+
     private readonly PressureDisplay[] _pressureDisplays = ZAxisPressureMonitor.Unavailable("未连接")
         .Select(reading => new PressureDisplay(reading)).ToArray();
     private DispatcherTimer? _pressureTimer;
-    private CancellationTokenSource? _pressureCancellation;
-    private bool _pressureReadPending;
-    private long _pressureReadStarted;
 
     private void InitializePressureMonitor()
     {
         ZPressureItems.ItemsSource = _pressureDisplays;
-        _pressureTimer = new DispatcherTimer(DispatcherPriority.Background)
+        // 生产异步续体使用 Normal；Background 显示刷新可能被持续延后。
+        // 此高优先级回调仅复制四个缓存值，不等待控制卡、线程池或磁盘。
+        _pressureTimer = new DispatcherTimer(DispatcherPriority.Send)
         {
             Interval = TimeSpan.FromMilliseconds(100)
         };
-        _pressureTimer.Tick += async (_, _) => await RefreshPressureMonitorAsync();
+        _pressureTimer.Tick += (_, _) => RefreshPressureMonitor();
         Loaded += (_, _) => UpdatePressureMonitorVisibility();
         IsVisibleChanged += (_, _) => UpdatePressureMonitorVisibility();
         Unloaded += (_, _) => StopPressureMonitor();
@@ -37,34 +66,24 @@ public partial class HomePage
             StopPressureMonitor();
             return;
         }
-        if (_pressureCancellation is not null)
+        if (_pressureTimer!.IsEnabled)
             return;
-        _pressureCancellation = new CancellationTokenSource();
         _pressureTimer!.Start();
-        _ = RefreshPressureMonitorAsync();
+        RefreshPressureMonitor();
     }
 
     private void StopPressureMonitor()
     {
         _pressureTimer?.Stop();
-        _pressureCancellation?.Cancel();
-        _pressureCancellation?.Dispose();
-        _pressureCancellation = null;
         ApplyPressureReadings(ZAxisPressureMonitor.Unavailable("待刷新"));
     }
 
-    private async Task RefreshPressureMonitorAsync()
+    private void RefreshPressureMonitor()
     {
-        if (_pressureCancellation is null)
+        if (_pressureTimer?.IsEnabled != true)
             return;
         ZPressureProtectionStatusText.Text = _motionController?.PressureSafetyStatus ?? "压力保护未连接";
         ZPressureProtectionStatusText.ToolTip = _motionController?.PressureSafetyDetails;
-        if (_pressureReadPending)
-        {
-            if (Stopwatch.GetElapsedTime(_pressureReadStarted).TotalSeconds >= 1)
-                ApplyPressureReadings(ZAxisPressureMonitor.Unavailable("读取超时", "反馈超过 1 秒未更新，已清空旧值。"));
-            return;
-        }
         var controller = _motionController;
         if (controller is null)
         {
@@ -72,27 +91,15 @@ public partial class HomePage
             return;
         }
 
-        var token = _pressureCancellation.Token;
-        _pressureReadPending = true;
-        _pressureReadStarted = Stopwatch.GetTimestamp();
         try
         {
-            // 后台读取，每次仅允许一个批次，避免慢接口阻塞界面或堆积采集任务。
-            var readings = await Task.Run(() => controller.ReadZAxisPressures(token), token);
-            if (!token.IsCancellationRequested && ReferenceEquals(controller, _motionController))
-                ApplyPressureReadings(Stopwatch.GetElapsedTime(_pressureReadStarted).TotalSeconds >= 1
-                    ? ZAxisPressureMonitor.Unavailable("读取超时", "本轮读取耗时超过 1 秒，已丢弃过期值。")
-                    : readings);
+            // ReadZAxisPressures 仅访问内存缓存；反馈是否过期由采集时间判定，
+            // 不再把UI/线程池排队时间误当成控制卡读取超时。
+            ApplyPressureReadings(controller.ReadZAxisPressures());
         }
-        catch (OperationCanceledException) { }
         catch (Exception exception)
         {
-            if (!token.IsCancellationRequested)
-                ApplyPressureReadings(ZAxisPressureMonitor.Unavailable("读取失败", exception.Message));
-        }
-        finally
-        {
-            _pressureReadPending = false;
+            ApplyPressureReadings(ZAxisPressureMonitor.Unavailable("读取失败", exception.Message));
         }
     }
 
