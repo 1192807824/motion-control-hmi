@@ -22,6 +22,9 @@ public interface IMotionCard : IDisposable
 
     MotionAxisSnapshot ReadAxis(int hardwareAxisNo);
 
+    /// <summary>读取驱动器实际转矩反馈（0x6077），保留原始有符号数值，不换算压力单位。</summary>
+    int ReadActualTorque(int hardwareAxisNo) => throw new NotSupportedException("当前控制卡不支持实际转矩读取。");
+
     uint ReadDigitalInputs(int portNo);
 
     uint ReadDigitalOutputs(int portNo);

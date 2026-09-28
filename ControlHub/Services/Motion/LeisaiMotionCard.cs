@@ -247,6 +247,17 @@ public sealed class LeisaiMotionCard : IMotionCard
         }
     }
 
+    public int ReadActualTorque(int hardwareAxisNo)
+    {
+        lock (_sync)
+        {
+            var axis = GetAxis(hardwareAxisNo);
+            var torque = 0;
+            EnsureSuccess(LeisaiNative.nmc_get_torque(_cardNo, axis, ref torque), "nmc_get_torque");
+            return torque;
+        }
+    }
+
     public uint ReadDigitalInputs(int portNo)
     {
         lock (_sync)

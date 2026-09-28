@@ -7,6 +7,9 @@ internal static class LeisaiNative
     private const string DllName = "LTDMC.dll";
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_get_torque(ushort cardNo, ushort axis, ref int torque);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_board_init();
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]

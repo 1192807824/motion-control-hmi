@@ -199,6 +199,8 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="60" />
             <RowDefinition Height="8" />
+            <RowDefinition Height="76" />
+            <RowDefinition Height="8" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -259,7 +261,44 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="2">
+        <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="14,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="186" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Z轴压力实时监控" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" />
+                    <TextBlock Text="6077 原始反馈 · 未标定" Style="{StaticResource MutedLabel}" Margin="0,5,0,0"
+                               ToolTip="显示驱动器实际转矩原始值，保留正负方向；尚未换算为 N 或 kgf。约每 100 ms 刷新。" />
+                </StackPanel>
+                <ItemsControl x:Name="ZPressureItems" Grid.Column="1">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><UniformGrid Rows="1" Columns="4" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border BorderBrush="#29465C" BorderThickness="1,0,0,0" Padding="16,0" ToolTip="{Binding Detail}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="22" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="{Binding Label}" Foreground="{StaticResource TextSecondary}" FontSize="12" />
+                                    <DockPanel Grid.Row="1" LastChildFill="True">
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Foreground="{StaticResource TextSecondary}"
+                                                   FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" />
+                                        <TextBlock Text="{Binding Value}" Foreground="{Binding ValueBrush}" FontFamily="Consolas" FontSize="23" FontWeight="Bold" />
+                                    </DockPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="8" />

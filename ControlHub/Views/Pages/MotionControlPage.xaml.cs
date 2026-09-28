@@ -276,6 +276,10 @@ public partial class MotionControlPage : UserControl
 
     public MotionHomeTuningSettings HomeTuning { get; } = new();
 
+    public ZAxisPressureReading[] ReadZAxisPressures(CancellationToken cancellationToken) =>
+        _closed ? ZAxisPressureMonitor.Unavailable("未连接") :
+        ZAxisPressureMonitor.Read(_motionCard, _motionOptions.SimulationMode, cancellationToken);
+
     private ObservableCollection<AxisStatus>? Axes => ViewModel?.Axes;
 
     private AxisStatus? SelectedAxis

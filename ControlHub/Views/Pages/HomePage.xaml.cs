@@ -232,6 +232,7 @@ public partial class HomePage : UserControl
     {
         _parameterPositionConfirmation = parameterPositionConfirmation ?? ShowParameterPositionConfirmation;
         InitializeComponent();
+        InitializePressureMonitor();
         _uphRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(1)
