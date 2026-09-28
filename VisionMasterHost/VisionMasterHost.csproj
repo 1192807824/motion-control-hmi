@@ -102,6 +102,10 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSHPFeatureMatchModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="ImageSourceModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\ImageSourceModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

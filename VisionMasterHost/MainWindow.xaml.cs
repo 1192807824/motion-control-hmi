@@ -4599,6 +4599,8 @@ public partial class MainWindow : Window
 
     private static string FormatException(Exception exception)
     {
+        // 保留识别调用阶段；否则查找内层VmException会把定位信息丢掉。
+        if (exception is RecognizedCenterStageException) return exception.Message;
         var vmException = FindVmException(exception) ?? VmSolution.GetVmException(exception);
         return vmException is null
             ? exception.Message

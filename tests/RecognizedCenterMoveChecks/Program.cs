@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using ControlHub.Services.Motion;
 using ControlHub.Services.Vision;
+using VisionMasterHost;
 
 internal static class Program
 {
@@ -13,6 +14,16 @@ internal static class Program
 
     private static async Task Main()
     {
+        // 现场同一条通用错误曾混淆NG、无目标、多目标和结果缺失；逐项保留原因。
+        Require(RecognizedCenterValidation.GetMatchError(1, 1, 1) is null, "One valid rectangle is accepted");
+        var invalidMatches = new[] { (0, 1, 1), (1, 0, 0), (1, 2, 2), (1, 1, 0) };
+        var errors = invalidMatches.Select(value => RecognizedCenterValidation.GetMatchError(value.Item1, value.Item2, value.Item3)).ToArray();
+        Require(errors.All(error => !string.IsNullOrWhiteSpace(error)) && errors.Distinct().Count() == 4,
+            "NG, zero targets, multiple targets and missing rectangles have distinct errors");
+        var sdkFailure = new Exception("SDK parameter error");
+        var stagedFailure = new RecognizedCenterStageException("读取107本次图像尺寸", "错误码 0xE0000001", sdkFailure);
+        Require(stagedFailure.Message.Contains("读取107本次图像尺寸") && stagedFailure.Message.Contains("0xE0000001") &&
+                ReferenceEquals(stagedFailure.InnerException, sdkFailure), "Stage, SDK code and original exception are retained");
         var originalCulture = CultureInfo.CurrentCulture;
         try
         {
