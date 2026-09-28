@@ -14,10 +14,10 @@ internal static class Program
 
     private static async Task Main()
     {
-        // 现场同一条通用错误曾混淆NG、无目标、多目标和结果缺失；逐项保留原因。
-        Require(RecognizedCenterValidation.GetMatchError(1, 1, 1) is null, "One valid rectangle is accepted");
-        var invalidMatches = new[] { (0, 1, 1), (1, 0, 0), (1, 2, 2), (1, 1, 0) };
-        var errors = invalidMatches.Select(value => RecognizedCenterValidation.GetMatchError(value.Item1, value.Item2, value.Item3)).ToArray();
+        // 最终有效性由110脚本结果决定，不再依赖108匹配框数量。
+        Require(RecognizedCenterValidation.GetScriptError(1, 1) is null, "One valid script row is accepted");
+        var invalidMatches = new[] { (0, 1), (1, 0), (1, 2), (1, -1) };
+        var errors = invalidMatches.Select(value => RecognizedCenterValidation.GetScriptError(value.Item1, value.Item2)).ToArray();
         Require(errors.All(error => !string.IsNullOrWhiteSpace(error)) && errors.Distinct().Count() == 4,
             "NG, zero targets, multiple targets and missing rectangles have distinct errors");
         var sdkFailure = new Exception("SDK parameter error");

@@ -2,12 +2,12 @@ namespace VisionMasterHost;
 
 internal static class RecognizedCenterValidation
 {
-    internal static string? GetMatchError(int moduleStatus, int matchCount, int rectangleCount)
+    internal static string? GetScriptError(int moduleStatus, int resultCount)
     {
-        if (moduleStatus != 1) return "108高精度匹配返回NG，请检查本次取图及匹配参数";
-        if (matchCount == 0) return "108高精度匹配未找到目标";
-        if (matchCount > 1) return "108高精度匹配找到多个目标，请保证只有一个目标";
-        if (matchCount != 1 || rectangleCount != 1) return "108匹配数量与匹配框结果不一致";
+        if (moduleStatus != 1) return "110脚本1返回NG，请检查脚本及上游模块";
+        if (resultCount == 0) return "110脚本1未返回有效X/Y/R坐标";
+        if (resultCount > 1) return "110脚本1返回多个目标，请保证只有一个目标";
+        if (resultCount < 0) return "110脚本1结果数量无效";
         return null;
     }
 }

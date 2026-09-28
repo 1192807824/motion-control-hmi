@@ -661,7 +661,7 @@
                                 </Grid>
                                 <Button x:Name="RecognizedCenterMoveButton" Content="识别中心点移动"
                                         Style="{StaticResource PanelButton}" Margin="0,6,0,0" IsEnabled="False"
-                                        ToolTip="执行找芯片流程_011_测试；将108匹配框中心转换为所选吸嘴的XY目标。"
+                                        ToolTip="执行找芯片流程_011_测试；将110脚本1返回的XY像素坐标转换为所选吸嘴目标，108仅用于预览。"
                                         Click="RecognizedCenterMove_Click" />
                                 <TextBlock x:Name="ClickMoveStatusText"
                                            Margin="0,4,0,0"

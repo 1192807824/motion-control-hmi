@@ -36,7 +36,7 @@ public partial class VisualCalibrationPage
             var path = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "识别移动速度");
             CalibrationCenterPosition? actual = null;
-            SetClickMoveStatus($"正在执行{RecognizedCenterMove.ProcedureName}，识别108匹配框中心…", WorkflowStatus.Running);
+            SetClickMoveStatus($"正在执行{RecognizedCenterMove.ProcedureName}，读取110脚本1的XY坐标…", WorkflowStatus.Running);
             await RecognizedCenterMove.ExecuteAsync(calibration, nozzle,
                 () => controller.CaptureCalibrationCenter(1, 2),
                 cancellation => VisionHost.RunRecognizedCenterAsync(path, cancellation),
@@ -48,7 +48,7 @@ public partial class VisualCalibrationPage
                         DefaultPositionTolerancePulses,
                         CalculateDirectMoveTimeout(target.X - current.ActualX, target.Y - current.ActualY, velocity), cancellation);
                 }, token);
-            SetClickMoveStatus($"{GetToolDisplayName(nozzle)}已对准匹配框中心：X={actual!.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。", WorkflowStatus.Success);
+            SetClickMoveStatus($"{GetToolDisplayName(nozzle)}已对准110脚本1返回点：X={actual!.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。", WorkflowStatus.Success);
         }
         catch (OperationCanceledException)
         {

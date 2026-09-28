@@ -723,7 +723,7 @@
                             </Grid>
                             <Button x:Name="SidebarRecognizedCenterMoveButton" Tag="RecognizedCenterMove" Content="识别中心点移动"
                                     Style="{StaticResource SidebarButton}" Margin="26,8,0,0" Visibility="Collapsed" IsEnabled="False"
-                                    ToolTip="运行找芯片流程_011_测试，让所选吸嘴对准108匹配框中心。仅移动第一套XY。"
+                                    ToolTip="运行找芯片流程_011_测试，让所选吸嘴对准110脚本1返回的XY坐标。108仅用于预览，仅移动第一套XY。"
                                     Click="CalibrationSidebarButton_Click" />
                             <TextBlock x:Name="SidebarClickMoveStatusText" Margin="26,6,0,0"
                                        Text="未启用" Foreground="#AFC0CD" FontSize="11" TextAlignment="Center" />
