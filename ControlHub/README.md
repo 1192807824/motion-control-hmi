@@ -72,6 +72,12 @@ The vibration feeder connection is a raw TCP client. Existing ASCII/HEX device c
 socket; this is transport-level TCP, not Modbus TCP register framing. Configure the feeder's IP address and listening
 port on the connection page. The UI reports remote disconnects automatically, and connection/write operations use the
 configured timeouts.
+## 料仓手动振动
+
+连接配置页的振动盘设备下增加“料仓振动控制”，与振动盘共用 TCP 连接。可设置频率（1–999）、振幅（0–99%）和时间（100–30000 ms）；默认值为 28、50%、300 ms，来自协议示例，现场需按物料调整。点击“启动料仓”保存参数并发送 `&13,xx,yyy$`，定时结束发送 `&04$`。参数随当前配置及产品配方保存。
+
+协议中的 `&04$` 是全部停止，因此两处停止按钮均标为“全部停止”，会同时停止振动盘和料仓。料仓手动动作与方向振动互斥，生产、收料、复位或定位动作期间禁止手动启动料仓；断开连接和正常退出程序前先发送停止。此功能为手动调试，不会自动加入生产补料流程。
+
 ## 历史数据与报警清空
 
 数据查询页的“清空全部数据”删除 SQLite 内所有批次及测量记录，不受当前批次筛选影响，执行前有确认提示。生产、暂停和生产收尾期间禁止清空。完成后刷新查询表、统计图和主页缓存；旧 JSON 备份保留，但不会在下次启动时重新导入已清空数据，新生产数据仍可正常写入。

@@ -14,6 +14,8 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private RememberedLogin? _rememberedLogin;
     private bool _motionShutdownPrepared;
+    private bool _feederShutdownPrepared;
+    private bool _feederShutdownPending;
     private long _alarmRevision = -1;
     private bool _loadingAlarms;
 
@@ -261,7 +263,7 @@ public partial class MainWindow : Window
         _rememberedLogin = _rememberedLoginStore.Load();
     }
 
-    protected override void OnClosing(CancelEventArgs e)
+    protected override async void OnClosing(CancelEventArgs e)
     {
         HomeContent.RequestProductionStopNoWait();
         if (!_motionShutdownPrepared && !MotionPage.TryShutdown(out var failureMessage))
@@ -277,6 +279,31 @@ public partial class MainWindow : Window
         }
 
         _motionShutdownPrepared = true;
+        if (!_feederShutdownPrepared)
+        {
+            e.Cancel = true;
+            base.OnClosing(e);
+            if (_feederShutdownPending)
+            {
+                return;
+            }
+
+            _feederShutdownPending = true;
+            // Return from this closing event before closing again, even if the socket write completes synchronously.
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            var stopped = await ConnectionConfigContent.PrepareFeederShutdownAsync();
+            _feederShutdownPending = false;
+            if (!stopped)
+            {
+                MessageBox.Show(this, "退出前发送全部停止失败，请确认振动盘和料仓已停止后重试。",
+                    "无法安全关闭程序", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            _feederShutdownPrepared = true;
+            Close();
+            return;
+        }
         base.OnClosing(e);
     }
 

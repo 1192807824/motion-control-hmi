@@ -22,6 +22,9 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     private int _directionalVibrationFrequency = DefaultProductionVibrationFrequency;
     private int _directionalVibrationAmplitude = DefaultProductionVibrationAmplitude;
     private int _directionalVibrationDurationMilliseconds = DefaultProductionVibrationDurationMilliseconds;
+    private int _hopperVibrationFrequency = 28;
+    private int _hopperVibrationAmplitude = 50;
+    private int _hopperVibrationDurationMilliseconds = 300;
     private string? _lastSuccessfulConnectionSignature;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -84,6 +87,24 @@ public sealed class VibrationFeederSettings : INotifyPropertyChanged
     {
         get => _lastSuccessfulConnectionSignature;
         set => SetField(ref _lastSuccessfulConnectionSignature, value);
+    }
+
+    public int HopperVibrationFrequency
+    {
+        get => _hopperVibrationFrequency;
+        set => SetField(ref _hopperVibrationFrequency, Math.Clamp(value, 1, 999));
+    }
+
+    public int HopperVibrationAmplitude
+    {
+        get => _hopperVibrationAmplitude;
+        set => SetField(ref _hopperVibrationAmplitude, Math.Clamp(value, 0, 99));
+    }
+
+    public int HopperVibrationDurationMilliseconds
+    {
+        get => _hopperVibrationDurationMilliseconds;
+        set => SetField(ref _hopperVibrationDurationMilliseconds, Math.Clamp(value, 100, 30000));
     }
 
     internal void MigrateLegacyProductionVibrationPreset()

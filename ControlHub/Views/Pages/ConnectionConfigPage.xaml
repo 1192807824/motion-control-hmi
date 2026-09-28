@@ -623,9 +623,10 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
-                    <Border Grid.Row="1" Style="{StaticResource Panel}" Margin="0,0,0,10">
+                    <Border Grid.Row="2" Style="{StaticResource Panel}" Margin="0,0,0,10">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
@@ -675,7 +676,7 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="2" Style="{StaticResource Panel}" Height="156" Margin="0,0,0,10">
+                    <Border Grid.Row="3" Style="{StaticResource Panel}" Height="156" Margin="0,0,0,10">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />
@@ -851,7 +852,8 @@
                                             Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
                                     <Button Grid.Row="1" Content="&#x2195; &#x4E0A;&#x4E0B;&#x805A;&#x62E2;" Tag="06"
                                             Style="{StaticResource DirectionButton}" Click="DirectionalVibration_Click" />
-                                    <Button Grid.Row="2" Content="&#x505C;&#x6B62;&#x9707;&#x52A8;"
+                                    <Button Grid.Row="2" Content="全部停止"
+                                            ToolTip="同时停止振动盘和料仓"
                                             Style="{StaticResource DirectionButton}"
                                             Background="{StaticResource AccentRed}" BorderBrush="#A90A12"
                                             Click="StopVibration_Click" />
@@ -874,7 +876,63 @@
                         </Grid>
                     </Border>
 
-                    <Border Grid.Row="3" Style="{StaticResource Panel}" MinHeight="220">
+                    <Border x:Name="HopperVibrationPanel" Grid.Row="1" Style="{StaticResource Panel}" Margin="0,0,0,10">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="44" />
+                                <RowDefinition Height="58" />
+                                <RowDefinition Height="48" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource PanelHeader}"
+                                    BorderBrush="{StaticResource PanelBorder}"
+                                    BorderThickness="0,0,0,1"
+                                    CornerRadius="6,6,0,0" Padding="14,0">
+                                <TextBlock Text="料仓振动控制" Style="{StaticResource PanelTitle}" />
+                            </Border>
+                            <Grid Grid.Row="1" Margin="14,8,14,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="44" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="频率" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="HopperFrequencyTextBox" Grid.Column="1"
+                                         Style="{StaticResource ConfigInput}" HorizontalContentAlignment="Center"
+                                         ToolTip="1 - 999"
+                                         Text="{Binding FeederSettings.HopperVibrationFrequency, UpdateSourceTrigger=LostFocus}" />
+                                <TextBlock Grid.Column="3" Text="振幅" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="HopperAmplitudeTextBox" Grid.Column="4"
+                                         Style="{StaticResource ConfigInput}" HorizontalContentAlignment="Center"
+                                         ToolTip="0 - 99%"
+                                         Text="{Binding FeederSettings.HopperVibrationAmplitude, UpdateSourceTrigger=LostFocus}" />
+                                <TextBlock Grid.Column="6" Text="时间ms" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="HopperDurationTextBox" Grid.Column="7"
+                                         Style="{StaticResource ConfigInput}" HorizontalContentAlignment="Center"
+                                         ToolTip="100 - 30000 ms"
+                                         Text="{Binding FeederSettings.HopperVibrationDurationMilliseconds, UpdateSourceTrigger=LostFocus}" />
+                            </Grid>
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,2,14,6">
+                                <Button x:Name="HopperStartButton" Content="启动料仓"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Background="{StaticResource AccentGreen}" BorderBrush="#16723F"
+                                        Click="HopperVibration_Click" />
+                                <Button Content="全部停止" Style="{StaticResource PrimaryButton}"
+                                        Background="{StaticResource AccentRed}" BorderBrush="#A90A12" Margin="0"
+                                        ToolTip="同时停止振动盘和料仓" Click="StopVibration_Click" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="3" Margin="14,2,14,10" TextWrapping="Wrap"
+                                       Text="按设定时间振动后自动停止；启动时保存参数。停止会同时停止振动盘和料仓。"
+                                       Foreground="{StaticResource MutedText}" FontSize="12" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="4" Style="{StaticResource Panel}" MinHeight="220">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="44" />

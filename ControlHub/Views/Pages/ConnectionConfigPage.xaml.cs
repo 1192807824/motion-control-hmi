@@ -65,6 +65,7 @@ public partial class ConnectionConfigPage : UserControl
     private readonly SemaphoreSlim _protocolWriteLock = new(1, 1);
     private readonly DispatcherTimer _brightnessSendTimer;
     private bool _closed;
+    private bool _feederClosing;
     private bool _connecting;
     private bool _tcpConnecting;
     private bool _meterOperationRunning;
@@ -81,6 +82,12 @@ public partial class ConnectionConfigPage : UserControl
     private int? _appliedFeederBrightness;
     private CancellationTokenSource? _vibrationOperationCancellation;
     private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
+    private Func<bool>? _isHopperManualControlBlocked;
+
+    public void AttachHopperManualControlInterlock(Func<bool> isBlocked)
+    {
+        _isHopperManualControlBlocked = isBlocked ?? throw new ArgumentNullException(nameof(isBlocked));
+    }
 
     public ConnectionConfigPage()
     {
@@ -263,6 +270,14 @@ public partial class ConnectionConfigPage : UserControl
             _sm7110MeasurementCancellation = null;
             _serialMeterOperationRunning = false;
         }
+    }
+
+    public async Task<bool> PrepareFeederShutdownAsync()
+    {
+        _feederClosing = true;
+        _vibrationOperationCancellation?.Cancel();
+        return !_tcpClient.IsConnected ||
+            await SendAsciiProtocolCommandAsync(StopVibrationCommand, "退出前全部停止（振动盘和料仓）");
     }
 
     public void Shutdown()
@@ -907,8 +922,13 @@ public partial class ConnectionConfigPage : UserControl
             settings.StopBits?.Trim().ToUpperInvariant());
     }
 
-    private void DisconnectFeeder_Click(object sender, RoutedEventArgs e)
+    private async void DisconnectFeeder_Click(object sender, RoutedEventArgs e)
     {
+        _vibrationOperationCancellation?.Cancel();
+        if (_tcpClient.IsConnected)
+        {
+            await SendAsciiProtocolCommandAsync(StopVibrationCommand, "断开前全部停止（振动盘和料仓）");
+        }
         _tcpClient.Close();
 
         SetFeederStatus("\u672a\u8fde\u63a5");
@@ -960,7 +980,95 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         _vibrationOperationCancellation?.Cancel();
-        await SendAsciiProtocolCommandAsync(StopVibrationCommand, "手动停止震动");
+        await SendAsciiProtocolCommandAsync(StopVibrationCommand, "手动全部停止（振动盘和料仓）");
+    }
+
+    private async void HopperVibration_Click(object sender, RoutedEventArgs e)
+    {
+        await RunHopperVibrationAsync(_lifetimeCancellation.Token);
+    }
+
+    private async Task<bool> RunHopperVibrationAsync(CancellationToken cancellationToken)
+    {
+        if (_closed || _feederClosing || !_tcpClient.IsConnected)
+        {
+            AddLog("料仓振动失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+        if (_isHopperManualControlBlocked?.Invoke() == true)
+        {
+            AddLog("料仓振动未执行：请先结束生产、收料或复位操作");
+            return false;
+        }
+        if (_vibrationSequenceRunning)
+        {
+            AddLog("料仓振动未执行：当前振动尚未结束，可先点“全部停止”");
+            return false;
+        }
+        if (Settings is not { } settings)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(HopperFrequencyTextBox.Text, out var frequency) || frequency is < 1 or > 999 ||
+            !int.TryParse(HopperAmplitudeTextBox.Text, out var amplitude) || amplitude is < 0 or > 99 ||
+            !int.TryParse(HopperDurationTextBox.Text, out var durationMs) || durationMs is < 100 or > 30000)
+        {
+            AddLog("料仓振动未执行：请输入整数，频率 1–999、振幅 0–99%、时间 100–30000 ms", isAlarm: true);
+            return false;
+        }
+        settings.HopperVibrationFrequency = frequency;
+        settings.HopperVibrationAmplitude = amplitude;
+        settings.HopperVibrationDurationMilliseconds = durationMs;
+        try
+        {
+            _settingsStore.Save(settings);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AddLog($"料仓参数保存失败，未启动振动：{exception.Message}", isAlarm: true);
+            return false;
+        }
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+        HopperStartButton.IsEnabled = false;
+        try
+        {
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            AddLog($"料仓振动：频率 {frequency}，振幅 {amplitude}%，持续 {durationMs} ms");
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "料仓切换正常模式"))
+            {
+                return false;
+            }
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            var stopped = await RunVibrationPulseAsync(
+                null,
+                FormattableString.Invariant($"&13,{amplitude:00},{frequency:000}$"),
+                durationMs,
+                "料仓振动",
+                operationCancellation.Token);
+            if (stopped)
+            {
+                AddLog("料仓定时振动结束，已发送全部停止");
+            }
+            return stopped;
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            AddLog("料仓振动已取消");
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+            _vibrationSequenceRunning = false;
+            HopperStartButton.IsEnabled = true;
+        }
     }
 
     private async void DirectionalVibration_Click(object sender, RoutedEventArgs e)
@@ -988,7 +1096,7 @@ public partial class ConnectionConfigPage : UserControl
 
         if (_vibrationSequenceRunning)
         {
-            AddLog($"{directionName}未执行：当前震动尚未结束，可先点“停止震动”");
+            AddLog($"{directionName}未执行：当前震动尚未结束，可先点“全部停止”");
             return false;
         }
 
@@ -1606,11 +1714,17 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private async Task<bool> SendAsciiProtocolCommandAsync(string command, string actionName)
+    private async Task<bool> SendAsciiProtocolCommandAsync(
+        string command, string actionName, CancellationToken cancellationToken = default)
     {
-        await _protocolWriteLock.WaitAsync();
+        await _protocolWriteLock.WaitAsync(cancellationToken);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_feederClosing && command != StopVibrationCommand)
+            {
+                return false;
+            }
             if (!_tcpClient.IsConnected)
             {
                 AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
@@ -1645,13 +1759,14 @@ public partial class ConnectionConfigPage : UserControl
         string actionName,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if ((!string.IsNullOrWhiteSpace(parameterCommand) &&
              !await SendAsciiProtocolCommandAsync(
                  parameterCommand,
-                 $"{actionName}-\u4e0b\u53d1\u53c2\u6570")) ||
+                 $"{actionName}-\u4e0b\u53d1\u53c2\u6570", cancellationToken)) ||
             !await SendAsciiProtocolCommandAsync(
                 startCommand,
-                $"{actionName}-\u542f\u52a8"))
+                $"{actionName}-\u542f\u52a8", cancellationToken))
         {
             return false;
         }
@@ -1664,9 +1779,12 @@ public partial class ConnectionConfigPage : UserControl
         finally
         {
             // 停止生产或关闭页面时也先下发停止，避免振动脉冲停留在启动状态。
-            stopped = await SendAsciiProtocolCommandAsync(
-                StopVibrationCommand,
-                $"{actionName}-\u505c\u6b62");
+            if (_tcpClient.IsConnected)
+            {
+                stopped = await SendAsciiProtocolCommandAsync(
+                    StopVibrationCommand,
+                    $"{actionName}-\u505c\u6b62");
+            }
         }
 
         await Task.Delay(VibrationStopSettleMilliseconds, cancellationToken);
@@ -1972,6 +2090,7 @@ public partial class ConnectionConfigPage : UserControl
         AlarmHistory.Record("振动盘", "FEEDER-DISCONNECTED", exception?.Message ?? "振动盘连接由对端关闭");
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            _vibrationOperationCancellation?.Cancel();
             _vibrationFeederLightEnabled = false;
             _productionVibrationSetupSignature = null;
             _appliedFeederBrightness = null;

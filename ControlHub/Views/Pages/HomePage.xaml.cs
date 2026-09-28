@@ -600,6 +600,8 @@ public partial class HomePage : UserControl
     {
         _connectionConfigController = connectionConfigController
             ?? throw new ArgumentNullException(nameof(connectionConfigController));
+        connectionConfigController.AttachHopperManualControlInterlock(
+            () => _startSequenceRunning || _oneKeyCollectRunning || _oneKeyResetRunning || _presetPositionMoveRunning);
         if (SM7110RangeCard.Parent is Panel parent)
             parent.Children.Remove(SM7110RangeCard);
         connectionConfigController.AttachSM7110RangeEditor(
