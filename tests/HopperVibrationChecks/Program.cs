@@ -51,6 +51,7 @@ internal static class Program
         using var peer = await listener.AcceptTcpClientAsync();
         var stream = peer.GetStream();
         var packets = new List<string>();
+        var simulatedHopperAmplitude = 0;
         var reading = Task.Run(async () =>
         {
             var pending = "";
@@ -63,12 +64,23 @@ internal static class Program
                 int end;
                 while ((end = pending.IndexOf('$')) >= 0)
                 {
-                    lock (packets) packets.Add(pending[..(end + 1)]);
+                    var packet = pending[..(end + 1)];
+                    lock (packets)
+                    {
+                        // Reproduce the reported controller: &04$ acknowledges but does not stop channel 5.
+                        if (packet.StartsWith("&13,"))
+                            simulatedHopperAmplitude = int.Parse(packet.Split(',')[1]);
+                        packets.Add(packet);
+                    }
+                    var command = packet[..3] + "$\r\n";
+                    await stream.WriteAsync(Encoding.ASCII.GetBytes(command));
                     pending = pending[(end + 1)..];
                 }
             }
         });
         string[] Snapshot() { lock (packets) return packets.ToArray(); }
+        bool HopperStopped() { lock (packets) return simulatedHopperAmplitude == 0; }
+        static bool IsHopperStart(string packet) => packet.StartsWith("&13,") && !packet.StartsWith("&13,00,");
         void Clear() { lock (packets) packets.Clear(); }
         Task<bool> Run() => (Task<bool>)typeof(ConnectionConfigPage).GetMethod("RunHopperVibrationAsync", Hidden)!
             .Invoke(page, [CancellationToken.None])!;
@@ -89,8 +101,9 @@ internal static class Program
         var pulseClock = System.Diagnostics.Stopwatch.StartNew();
         Require(await Run(), "Timed vibration succeeds.");
         Require(pulseClock.ElapsedMilliseconds >= 120, "Configured pulse duration is respected.");
-        await WaitFor(() => Snapshot().Length == 3);
-        Require(Snapshot().SequenceEqual(new[] { "&05,00$", "&13,50,028$", "&04$" }), "Exact protocol order and ASCII field widths.");
+        await WaitFor(() => Snapshot().Length == 4);
+        Require(Snapshot().SequenceEqual(new[] { "&05,00$", "&13,50,028$", "&13,00,028$", "&04$" }), "Zero amplitude precedes &04$, with exact field widths.");
+        Require(HopperStopped(), "Timed stop clears hopper amplitude even when &04$ does not stop channel 5.");
         var saved = new VibrationFeederSettingsStore().Load();
         Require(saved.HopperVibrationFrequency == 28 && saved.HopperVibrationAmplitude == 50 && saved.HopperVibrationDurationMilliseconds == 120,
             "Hopper parameters persist independently.");
@@ -117,19 +130,29 @@ internal static class Program
         Inputs("7", "9", "30000");
         var running = Run();
         await WaitFor(() => Snapshot().Contains("&13,09,007$"));
+        await client.WriteAsync(Encoding.ASCII.GetBytes("&04$"));
+        await WaitFor(() => Snapshot().Contains("&04$"));
+        Require(!HopperStopped(), "Regression setup: &04$ alone acknowledges but leaves channel 5 moving.");
         Require(!await Run(), "Repeated starts are blocked.");
         var direction = (Task<bool>)typeof(ConnectionConfigPage).GetMethod("RunDirectionalVibrationAsync", Hidden)!
             .Invoke(page, ["04", "震散", CancellationToken.None])!;
         Require(!await direction, "Directional vibration cannot overlap hopper.");
+        vm.FeederSettings.HopperVibrationFrequency = 88;
         Click("StopVibration_Click");
         Require(!await running.WaitAsync(TimeSpan.FromSeconds(3)), "Manual stop cancels long pulse promptly.");
         await WaitFor(() => Snapshot().Contains("&04$"));
-        Require(Snapshot().Count(packet => packet.StartsWith("&13,")) == 1, "Only one hopper start sent.");
+        Require(Snapshot().Count(IsHopperStart) == 1, "Only one nonzero hopper start sent.");
+        Require(Snapshot().Contains("&13,00,007$") && !Snapshot().Contains("&13,00,088$"), "Stop keeps the actual start frequency when settings change mid-pulse.");
+        Require(HopperStopped(), "Manual stop clears channel 5 amplitude.");
+        Require(vm.FeederSettings.HopperVibrationAmplitude == 9 && new VibrationFeederSettingsStore().Load().HopperVibrationAmplitude == 9,
+            "Zero-amplitude stop does not overwrite the user's saved run amplitude.");
         Require(((Button)page.FindName("HopperStartButton")).IsEnabled, "Start button restored after stop.");
         Console.WriteLine("PASS: shared vibration interlock, manual all-stop and restart availability.");
 
         // A stop while a command is queued must prevent a later hopper start.
+        await WaitFor(() => WriteLockAvailable(page));
         Clear();
+        Inputs("7", "9", "30000");
         var writeLock = (SemaphoreSlim)typeof(ConnectionConfigPage).GetField("_protocolWriteLock", Hidden)!.GetValue(page)!;
         await writeLock.WaitAsync();
         running = Run();
@@ -137,16 +160,17 @@ internal static class Program
         writeLock.Release();
         Require(!await running.WaitAsync(TimeSpan.FromSeconds(3)), "Queued startup can be cancelled.");
         await WaitFor(() => Snapshot().Contains("&04$"));
-        Require(!Snapshot().Any(packet => packet.StartsWith("&13,")), "No delayed start after stop.");
+        Require(!Snapshot().Any(IsHopperStart) && HopperStopped(), "No delayed nonzero start after stop.");
         Console.WriteLine("PASS: queued cancellation cannot restart hopper after stop.");
 
         Clear();
         running = Run();
-        await WaitFor(() => Snapshot().Any(packet => packet.StartsWith("&13,")));
+        await WaitFor(() => Snapshot().Any(IsHopperStart));
         Click("DisconnectFeeder_Click");
         await running.WaitAsync(TimeSpan.FromSeconds(3));
         await reading.WaitAsync(TimeSpan.FromSeconds(3));
-        Require(Snapshot().Contains("&04$") && !client.IsConnected, "Disconnect sends stop before closing socket.");
+        Require(Snapshot().Contains("&13,00,007$") && Snapshot().Contains("&04$") && HopperStopped() && !client.IsConnected,
+            "Disconnect clears hopper amplitude and sends &04$ before closing socket.");
         Require(!await Run(), "Disconnected startup is blocked.");
         Console.WriteLine("PASS: disconnect stops vibration and blocks disconnected startup.");
 
@@ -173,7 +197,8 @@ internal static class Program
         Require(!await Run(), "Hopper cannot restart while shutting down.");
         page.Shutdown();
         var shutdownWire = await shutdownPackets.WaitAsync(TimeSpan.FromSeconds(3));
-        Require(shutdownWire.Contains("&13,50,028$") && shutdownWire.EndsWith("&04$"), "Final shutdown wire command stops both motors.");
+        Require(shutdownWire.Contains("&13,50,028$") && shutdownWire.Contains("&13,00,028$") && shutdownWire.EndsWith("&04$"),
+            "Shutdown permits hopper zero-amplitude command before final &04$ and socket disposal.");
         Console.WriteLine("PASS: shutdown cancels hopper and writes all-stop before socket disposal.");
     }
 
@@ -181,4 +206,7 @@ internal static class Program
     {
         if (!value) throw new InvalidOperationException(message);
     }
+
+    private static bool WriteLockAvailable(ConnectionConfigPage page) =>
+        ((SemaphoreSlim)typeof(ConnectionConfigPage).GetField("_protocolWriteLock", Hidden)!.GetValue(page)!).CurrentCount == 1;
 }

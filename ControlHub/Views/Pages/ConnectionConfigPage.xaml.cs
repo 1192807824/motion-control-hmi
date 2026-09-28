@@ -66,6 +66,8 @@ public partial class ConnectionConfigPage : UserControl
     private readonly DispatcherTimer _brightnessSendTimer;
     private bool _closed;
     private bool _feederClosing;
+    private int? _lastHopperVibrationFrequency;
+    private bool _hopperRequiresStop;
     private bool _connecting;
     private bool _tcpConnecting;
     private bool _meterOperationRunning;
@@ -277,7 +279,7 @@ public partial class ConnectionConfigPage : UserControl
         _feederClosing = true;
         _vibrationOperationCancellation?.Cancel();
         return !_tcpClient.IsConnected ||
-            await SendAsciiProtocolCommandAsync(StopVibrationCommand, "退出前全部停止（振动盘和料仓）");
+            await SendAsciiProtocolCommandAsync(StopVibrationCommand, "退出前全部停止（振动盘和料仓）", stopHopper: true);
     }
 
     public void Shutdown()
@@ -927,7 +929,11 @@ public partial class ConnectionConfigPage : UserControl
         _vibrationOperationCancellation?.Cancel();
         if (_tcpClient.IsConnected)
         {
-            await SendAsciiProtocolCommandAsync(StopVibrationCommand, "断开前全部停止（振动盘和料仓）");
+            if (!await SendAsciiProtocolCommandAsync(StopVibrationCommand, "断开前全部停止（振动盘和料仓）", stopHopper: true))
+            {
+                AddLog("停止指令发送失败，保留连接，请确认设备状态后重试", isAlarm: true);
+                return;
+            }
         }
         _tcpClient.Close();
 
@@ -980,7 +986,7 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         _vibrationOperationCancellation?.Cancel();
-        await SendAsciiProtocolCommandAsync(StopVibrationCommand, "手动全部停止（振动盘和料仓）");
+        await SendAsciiProtocolCommandAsync(StopVibrationCommand, "手动全部停止（振动盘和料仓）", stopHopper: true);
     }
 
     private async void HopperVibration_Click(object sender, RoutedEventArgs e)
@@ -1003,6 +1009,11 @@ public partial class ConnectionConfigPage : UserControl
         if (_vibrationSequenceRunning)
         {
             AddLog("料仓振动未执行：当前振动尚未结束，可先点“全部停止”");
+            return false;
+        }
+        if (_hopperRequiresStop)
+        {
+            AddLog("料仓振动未执行：上次停振指令未完整发送，请先点“全部停止”", isAlarm: true);
             return false;
         }
         if (Settings is not { } settings)
@@ -1043,6 +1054,8 @@ public partial class ConnectionConfigPage : UserControl
                 return false;
             }
             operationCancellation.Token.ThrowIfCancellationRequested();
+            _lastHopperVibrationFrequency = frequency;
+            _hopperRequiresStop = true;
             var stopped = await RunVibrationPulseAsync(
                 null,
                 FormattableString.Invariant($"&13,{amplitude:00},{frequency:000}$"),
@@ -1051,7 +1064,7 @@ public partial class ConnectionConfigPage : UserControl
                 operationCancellation.Token);
             if (stopped)
             {
-                AddLog("料仓定时振动结束，已发送全部停止");
+                AddLog("料仓定时已到，已发送振幅归零和振动盘停止指令");
             }
             return stopped;
         }
@@ -1715,7 +1728,7 @@ public partial class ConnectionConfigPage : UserControl
     }
 
     private async Task<bool> SendAsciiProtocolCommandAsync(
-        string command, string actionName, CancellationToken cancellationToken = default)
+        string command, string actionName, CancellationToken cancellationToken = default, bool stopHopper = false)
     {
         await _protocolWriteLock.WaitAsync(cancellationToken);
         try
@@ -1733,10 +1746,35 @@ public partial class ConnectionConfigPage : UserControl
 
             try
             {
+                var hopperStopSent = true;
+                // 实机确认：&04$ 有应答但料仓仍振动；第5路必须单独将振幅归零。
+                // 在同一发送锁内完成归零与 &04$，防止新启动插入两条停机指令之间。
+                if (command == StopVibrationCommand && (stopHopper || _hopperRequiresStop))
+                {
+                    _hopperRequiresStop = true;
+                    var frequency = _lastHopperVibrationFrequency ?? Settings?.HopperVibrationFrequency ?? 28;
+                    var hopperStopCommand = FormattableString.Invariant($"&13,00,{frequency:000}$");
+                    try
+                    {
+                        await _tcpClient.WriteAsync(Encoding.ASCII.GetBytes(hopperStopCommand));
+                        AddLog($"TX [ASCII]  {hopperStopCommand}  {ProtocolCommandName}-{actionName}-料仓振幅归零");
+                    }
+                    catch (Exception exception) when (exception is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+                    {
+                        hopperStopSent = false;
+                        AddLog($"料仓振幅归零发送失败：{exception.Message}", isAlarm: true);
+                    }
+                    // 归零失败仍尝试停止振动盘；停机序列不受原动作取消令牌影响。
+                    await Task.Delay(VibrationStopSettleMilliseconds);
+                }
                 var payload = Encoding.ASCII.GetBytes(command);
                 await _tcpClient.WriteAsync(payload);
                 AddLog($"TX [ASCII]  {command}  {ProtocolCommandName}-{actionName}");
-                return true;
+                if (command == StopVibrationCommand && hopperStopSent)
+                {
+                    _hopperRequiresStop = false;
+                }
+                return hopperStopSent;
             }
             catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
             {
@@ -1759,21 +1797,20 @@ public partial class ConnectionConfigPage : UserControl
         string actionName,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if ((!string.IsNullOrWhiteSpace(parameterCommand) &&
-             !await SendAsciiProtocolCommandAsync(
-                 parameterCommand,
-                 $"{actionName}-\u4e0b\u53d1\u53c2\u6570", cancellationToken)) ||
-            !await SendAsciiProtocolCommandAsync(
-                startCommand,
-                $"{actionName}-\u542f\u52a8", cancellationToken))
-        {
-            return false;
-        }
-
         var stopped = false;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if ((!string.IsNullOrWhiteSpace(parameterCommand) &&
+                 !await SendAsciiProtocolCommandAsync(
+                     parameterCommand,
+                     $"{actionName}-\u4e0b\u53d1\u53c2\u6570", cancellationToken)) ||
+                !await SendAsciiProtocolCommandAsync(
+                    startCommand,
+                    $"{actionName}-\u542f\u52a8", cancellationToken))
+            {
+                return false;
+            }
             await Task.Delay(durationMs, cancellationToken);
         }
         finally
