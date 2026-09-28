@@ -26,6 +26,7 @@ public partial class MotionControlPage : UserControl
     private const double OneKeyResetDdHomeVelocity = 50_000;
     private const double OneKeyResetHomePositionTolerance = 100;
     private readonly IMotionCard _motionCard;
+    private readonly ZAxisPressureSafety? _pressureSafety;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
     private readonly AxisSettingsStore _axisSettingsStore = new();
@@ -261,7 +262,10 @@ public partial class MotionControlPage : UserControl
         RelativeModeRadio.IsChecked = !Tuning.AbsolutePositionMode;
         AbsoluteModeRadio.IsChecked = Tuning.AbsolutePositionMode;
 
-        _motionCard = new DdInterlockedMotionCard(MotionCardFactory.Create(_motionOptions), EnsureDdTestStationsSafe);
+        _pressureSafety = _motionOptions.SimulationMode ? null : new ZAxisPressureSafety();
+        _motionCard = new DdInterlockedMotionCard(
+            MotionCardFactory.Create(_motionOptions, _pressureSafety is null ? null : _pressureSafety.ThrowIfMotionBlocked),
+            EnsureDdTestStationsSafe);
         _pollTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(_motionOptions.PollIntervalMilliseconds)
@@ -278,7 +282,32 @@ public partial class MotionControlPage : UserControl
 
     public ZAxisPressureReading[] ReadZAxisPressures(CancellationToken cancellationToken) =>
         _closed ? ZAxisPressureMonitor.Unavailable("未连接") :
-        ZAxisPressureMonitor.Read(_motionCard, _motionOptions.SimulationMode, cancellationToken);
+        _pressureSafety?.Readings ?? ZAxisPressureMonitor.Read(_motionCard, _motionOptions.SimulationMode, cancellationToken);
+
+    public string PressureSafetyStatus => _closed ? "压力保护已停止" :
+        _pressureSafety?.Status ?? "模拟模式 · 未启用硬件保护";
+
+    public string PressureSafetyDetails => _pressureSafety?.TripReason ??
+        "独立线程目标等待间隔1 ms；原始值 > 500触发，等于500不触发。Windows与SDK不保证硬实时停机。";
+
+    private void OnPressureSafetyTrip(PressureSafetyTrip trip)
+    {
+        // 全轴急停已经由保护线程下发；UI只负责取消流程、停止确认和报警记录。
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
+        {
+            if (_closed) return;
+            ActivateMotionSafetyLock(trip.Reason, trip.StopError,
+                trip.StopError is null ? "Z-PRESSURE-EMERGENCY-STOP" : "Z-PRESSURE-STOP-FAILED",
+                armStopConfirmations: false);
+            if (trip.StopError is null) CompleteEmergencyStopStateAfterHardwareIssued();
+            else ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: false);
+            SetConnectionText(trip.StopError is null
+                ? "压力保护：已下发全轴急停，运动锁定（排障后重启）"
+                : "压力保护：急停下发失败，后台持续重试；请使用硬件急停");
+            RecordAlarmOnce("z-pressure-stop-timing", "Z-PRESSURE-STOP-TIMING",
+                $"{trip.Reason}；本次全轴停止接口耗时 {trip.StopCallMilliseconds:F2} ms（不是机械停止时间）。");
+        }));
+    }
 
     private ObservableCollection<AxisStatus>? Axes => ViewModel?.Axes;
 
@@ -363,6 +392,7 @@ public partial class MotionControlPage : UserControl
         }
 
         _closed = true;
+        _pressureSafety?.Stop();
         StopExternalEmergencyStopMonitor();
         _pollTimer.Stop();
         if (_ownerWindow is not null)
@@ -2582,6 +2612,7 @@ public partial class MotionControlPage : UserControl
         try
         {
             var connection = _motionCard.Open();
+            _pressureSafety?.Start(_motionCard, IssueEmergencyStopAndNotify, OnPressureSafetyTrip);
             _connectedCardNo = connection.IsSimulation ? null : connection.CardNo;
             if (ViewModel is { } viewModel)
             {

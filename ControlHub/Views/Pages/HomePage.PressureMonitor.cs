@@ -57,6 +57,8 @@ public partial class HomePage
     {
         if (_pressureCancellation is null)
             return;
+        ZPressureProtectionStatusText.Text = _motionController?.PressureSafetyStatus ?? "压力保护未连接";
+        ZPressureProtectionStatusText.ToolTip = _motionController?.PressureSafetyDetails;
         if (_pressureReadPending)
         {
             if (Stopwatch.GetElapsedTime(_pressureReadStarted).TotalSeconds >= 1)

@@ -264,13 +264,14 @@
         <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="14,8">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="186" />
+                    <ColumnDefinition Width="240" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Z轴压力实时监控" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="Bold" />
-                    <TextBlock Text="6077 原始反馈 · 未标定" Style="{StaticResource MutedLabel}" Margin="0,5,0,0"
-                               ToolTip="显示驱动器实际转矩原始值，保留正负方向；尚未换算为 N 或 kgf。约每 100 ms 刷新。" />
+                    <TextBlock x:Name="ZPressureProtectionStatusText" Text="压力保护初始化" Style="{StaticResource MutedLabel}" Margin="0,3,0,0" FontSize="11" />
+                    <TextBlock Text="6077 原始值 · 未标定" Style="{StaticResource MutedLabel}" FontSize="10" Margin="0,2,0,0"
+                               ToolTip="保护线程目标间隔1 ms，主页约100 ms刷新。原始值 > 500触发全轴急停；软件保护不保证硬实时机械停止。" />
                 </StackPanel>
                 <ItemsControl x:Name="ZPressureItems" Grid.Column="1">
                     <ItemsControl.ItemsPanel>

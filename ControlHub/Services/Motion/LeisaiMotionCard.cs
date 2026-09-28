@@ -13,13 +13,15 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     private readonly object _sync = new();
     private readonly MotionCardOptions _options;
+    private readonly Action? _ensureMotionAllowed;
     private ushort _cardNo;
     private int _detectedCardCount;
     private MotionCardDescriptor[] _detectedCards = [];
 
-    public LeisaiMotionCard(MotionCardOptions options)
+    public LeisaiMotionCard(MotionCardOptions options, Action? ensureMotionAllowed = null)
     {
         _options = options;
+        _ensureMotionAllowed = ensureMotionAllowed;
     }
 
     public bool IsOpen { get; private set; }
@@ -509,6 +511,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                     profile.DecelerationSeconds,
                     profile.OffsetPosition),
                 "nmc_set_home_profile");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_home_move(_cardNo, axis), "dmc_home_move");
         }
     }
@@ -523,6 +526,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             EnsureAxisStopped(axis);
             ConfigureMove(axis, Math.Abs(velocity));
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_vmove(_cardNo, axis, velocity >= 0 ? (ushort)1 : (ushort)0), "dmc_vmove");
         }
     }
@@ -542,6 +546,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             EnsureAxisStopped(axis);
             ConfigureMove(axis, velocity);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, distance, 0), "dmc_pmove_unit");
         }
     }
@@ -589,6 +594,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                 positionModeList[index] = 0;
             }
 
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(
                 LeisaiNative.nmc_sync_pmove_unit(
                     _cardNo,
@@ -724,6 +730,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                     0,
                     sTimeSeconds),
                 "dmc_set_vector_s_profile");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(
                 LeisaiNative.dmc_line_unit(
                     _cardNo,
@@ -772,6 +779,7 @@ public sealed class LeisaiMotionCard : IMotionCard
             EnsureAxisStopped(axis);
             ConfigureMove(axis, velocity);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, position, 1), "dmc_pmove_unit");
         }
     }
@@ -969,6 +977,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     private void SetServoCommand(ushort axis, bool enabled)
     {
+        if (enabled) _ensureMotionAllowed?.Invoke();
         EnsureSuccess(
             enabled
                 ? LeisaiNative.nmc_set_axis_enable(_cardNo, axis)
@@ -1007,7 +1016,12 @@ public sealed class LeisaiMotionCard : IMotionCard
                 }
             }
 
-            Thread.Sleep(_options.PollIntervalMilliseconds);
+            // 调用方持有 _sync；等待使能确认期间释放锁，让压力采集和急停能够进入。
+            Monitor.Exit(_sync);
+            try { Thread.Sleep(_options.PollIntervalMilliseconds); }
+            finally { Monitor.Enter(_sync); }
+            EnsureOpen();
+            if (enabled) _ensureMotionAllowed?.Invoke();
         }
 
         throw new MotionCardException(
