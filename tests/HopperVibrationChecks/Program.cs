@@ -1,4 +1,6 @@
 using System.IO;
+using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -127,6 +129,66 @@ internal static class Program
         Require(Snapshot().Length == 0, "Rejected operations send no commands.");
         Console.WriteLine("PASS: invalid input and active-production rejection send no commands.");
 
+        // Production has a fixed recipe, independent of the manual controls and their production interlock.
+        long productionStartAt = 0, productionZeroAt = 0, productionStopAt = 0;
+        void TrackProductionTiming(object? sender, NotifyCollectionChangedEventArgs args)
+        {
+            if (args.NewItems is null) return;
+            foreach (string log in args.NewItems)
+            {
+                if (!log.Contains("TX [ASCII]") || !log.Contains("生产拍照前料仓补料")) continue;
+                if (log.Contains("&13,50,100$")) productionStartAt = Stopwatch.GetTimestamp();
+                if (log.Contains("&13,00,100$")) productionZeroAt = Stopwatch.GetTimestamp();
+                if (log.Contains("&04$")) productionStopAt = Stopwatch.GetTimestamp();
+            }
+        }
+        vm.FeederConnectionLogs.CollectionChanged += TrackProductionTiming;
+        page.AttachHopperManualControlInterlock(() => true);
+        var cameraTriggers = 0;
+        for (var photoIndex = 0; photoIndex < 2; photoIndex++)
+        {
+            Clear();
+            productionStartAt = productionZeroAt = productionStopAt = 0;
+            Require(await page.FeedHopperBeforeProductionPhotoAsync(CancellationToken.None), "Each production photo completes hopper preparation.");
+            cameraTriggers++;
+            await WaitFor(() => Snapshot().Length == 4);
+            Require(Snapshot().SequenceEqual(new[] { "&05,00$", "&13,50,100$", "&13,00,100$", "&04$" }),
+                "Each photo uses exactly one 100-frequency/50%-amplitude pulse, then zero amplitude and stop.");
+            Require(productionStartAt > 0 && productionZeroAt > 0 && productionStopAt > 0, "All production stages observed.");
+            Require(Stopwatch.GetElapsedTime(productionStartAt, productionZeroAt).TotalMilliseconds >= 95,
+                "Production hopper pulse lasts 100 ms before zero amplitude (5 ms timer tolerance).");
+            Require(Stopwatch.GetElapsedTime(productionStopAt).TotalMilliseconds >= 195,
+                "Photo gate waits 200 ms after final stop (5 ms timer tolerance).");
+            Require(HopperStopped(), "Hopper is zeroed before photo gate opens.");
+        }
+        Require(vm.FeederSettings.HopperVibrationFrequency == 28 && vm.FeederSettings.HopperVibrationDurationMilliseconds == 120,
+            "Production constants do not change manual settings.");
+
+        foreach (var cancelDuringSettle in new[] { false, true })
+        {
+            Clear();
+            using var photoCancellation = new CancellationTokenSource();
+            var photoGate = page.FeedHopperBeforeProductionPhotoAsync(photoCancellation.Token);
+            await WaitFor(() => Snapshot().Contains(cancelDuringSettle ? "&04$" : "&13,50,100$"));
+            Require(!await page.FeedHopperBeforeProductionPhotoAsync(CancellationToken.None), "Overlapping photo preparation is blocked.");
+            photoCancellation.Cancel();
+            if (await photoGate) cameraTriggers++;
+            Require(cameraTriggers == 2, "Cancellation during pulse or settle must not release a photo.");
+            await WaitFor(() => Snapshot().Contains("&13,00,100$"));
+            Require(HopperStopped(), "Cancellation still zeros hopper amplitude.");
+        }
+        Clear();
+        using (var alreadyCancelled = new CancellationTokenSource())
+        {
+            alreadyCancelled.Cancel();
+            Require(!await page.FeedHopperBeforeProductionPhotoAsync(alreadyCancelled.Token), "Cancelled production never starts feeding.");
+        }
+        await Task.Delay(50);
+        Require(Snapshot().Length == 0, "Already-cancelled photo preparation emits no commands.");
+        vm.FeederConnectionLogs.CollectionChanged -= TrackProductionTiming;
+        page.AttachHopperManualControlInterlock(() => false);
+        Console.WriteLine("PASS: every production photo feeds once at 100/50/100 ms, waits 200 ms after stop, and cancellation prevents photo.");
+
         Inputs("7", "9", "30000");
         var running = Run();
         await WaitFor(() => Snapshot().Contains("&13,09,007$"));
@@ -172,6 +234,7 @@ internal static class Program
         Require(Snapshot().Contains("&13,00,007$") && Snapshot().Contains("&04$") && HopperStopped() && !client.IsConnected,
             "Disconnect clears hopper amplitude and sends &04$ before closing socket.");
         Require(!await Run(), "Disconnected startup is blocked.");
+        Require(!await page.FeedHopperBeforeProductionPhotoAsync(CancellationToken.None), "Disconnected feeder cannot release production photo.");
         Console.WriteLine("PASS: disconnect stops vibration and blocks disconnected startup.");
 
         Inputs("28", "50", "300");

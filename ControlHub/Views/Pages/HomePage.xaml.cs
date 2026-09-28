@@ -2337,7 +2337,7 @@ public partial class HomePage : UserControl
 
                 if (pendingPickupBatches.Count == 0)
                 {
-                    // 把“等待震动结束、最终停振、开灯及相机返回”整体作为独立任务启动。
+                    // 把“等待振动盘结束、料仓补料100 ms、停稳200 ms、开灯及相机返回”整体作为独立任务启动。
                     // 主流程等待结果；上一批已启动的DD、测试和第二套下料任务继续完成。
                     var inspectionTask = RunProductionUpperCameraInspectionAsync(
                         visualCalibrationController,
@@ -3090,14 +3090,14 @@ public partial class HomePage : UserControl
         await WaitIfProductionPausedAsync(cancellationToken);
 
         var connectionController = _connectionConfigController
-            ?? throw new InvalidOperationException("振动盘控制组件未连接，无法确认拍照前停振。");
+            ?? throw new InvalidOperationException("振动盘控制组件未连接，无法执行拍照前料仓补料。");
         SetStartProductionStatus(
-            $"第{cycleNumber}轮：震动序列已结束，正在执行最终停振并等待振动盘停稳；下方流水线继续运行…",
+            $"第{cycleNumber}轮：料仓以频率100、振幅50%补料100 ms，停止后等待200 ms再拍照；下方流水线继续运行…",
             Color.FromRgb(242, 181, 68));
-        if (!await connectionController.EnsureStoppedForProductionPhotoAsync(cancellationToken))
+        if (!await connectionController.FeedHopperBeforeProductionPhotoAsync(cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            throw new InvalidOperationException("拍照前最终停振失败，已取消本次拍照。");
+            throw new InvalidOperationException("拍照前料仓补料或停振等待未完成，已取消本次拍照。");
         }
         await WaitIfProductionPausedAsync(cancellationToken);
 

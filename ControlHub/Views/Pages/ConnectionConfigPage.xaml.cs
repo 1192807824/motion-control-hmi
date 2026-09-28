@@ -26,6 +26,9 @@ public partial class ConnectionConfigPage : UserControl
     private const int BrightnessSendDebounceMs = 150;
     private const int VibrationStopSettleMilliseconds = 50;
     private const int ProductionPhotoSettleMilliseconds = 200;
+    private const int ProductionHopperVibrationFrequency = 100;
+    private const int ProductionHopperVibrationAmplitude = 50;
+    private const int ProductionHopperVibrationDurationMilliseconds = 100;
     private const int ProductionUpDownGatherDurationMilliseconds = 100;
     private const string StopVibrationCommand = "&04$";
     private const string ProtocolCommandName = "\u632f\u52a8\u76d8\u534f\u8bae";
@@ -1323,32 +1326,66 @@ public partial class ConnectionConfigPage : UserControl
     }
 
     /// <summary>
-    /// 拍照前的最终停振安全门。即使上层记录的震动任务已经完成，也重新下发一次
-    /// 停止命令并等待机械余振消失；这样首轮拍照和外部手动震动后的拍照同样安全。
+    /// 每次生产上相机取料拍照前：料仓以频率100、振幅50%运行100 ms，
+    /// 振幅归零并停止振动盘，再等待200 ms。整个序列占用振动互斥状态。
     /// </summary>
-    public async Task<bool> EnsureStoppedForProductionPhotoAsync(
+    public async Task<bool> FeedHopperBeforeProductionPhotoAsync(
         CancellationToken cancellationToken)
     {
-        if (!_tcpClient.IsConnected)
+        if (_closed || _feederClosing || !_tcpClient.IsConnected)
         {
-            AddLog("拍照前停振确认失败：请先建立 TCP 连接", isAlarm: true);
+            AddLog("拍照前料仓补料失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+        if (_vibrationSequenceRunning || _hopperRequiresStop)
+        {
+            AddLog("拍照前料仓补料未执行：已有振动动作或未完成的停振，请先全部停止", isAlarm: true);
             return false;
         }
 
-        // 开始生产时若仍有手动震动序列，先终止它；正在执行的脉冲会在 finally 中
-        // 再补发一次停止命令，和这里的最终停止命令不会冲突。
-        _vibrationOperationCancellation?.Cancel();
-
-        if (!await SendAsciiProtocolCommandAsync(
-                StopVibrationCommand,
-                "生产拍照前最终停振"))
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+        try
         {
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            AddLog($"生产拍照前料仓补料：频率 {ProductionHopperVibrationFrequency}，" +
+                $"振幅 {ProductionHopperVibrationAmplitude}%，持续 {ProductionHopperVibrationDurationMilliseconds} ms");
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "拍照前料仓切换正常模式", operationCancellation.Token))
+            {
+                return false;
+            }
+
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            _lastHopperVibrationFrequency = ProductionHopperVibrationFrequency;
+            _hopperRequiresStop = true;
+            var completed = await RunVibrationPulseAsync(
+                null,
+                FormattableString.Invariant($"&13,{ProductionHopperVibrationAmplitude:00},{ProductionHopperVibrationFrequency:000}$"),
+                ProductionHopperVibrationDurationMilliseconds,
+                "生产拍照前料仓补料",
+                operationCancellation.Token,
+                settleMilliseconds: ProductionPhotoSettleMilliseconds);
+            if (completed)
+            {
+                AddLog($"生产拍照前料仓归零和停振指令已发送，已等待 {ProductionPhotoSettleMilliseconds} ms，可进入拍照");
+            }
+            return completed;
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            AddLog("拍照前料仓补料或停稳等待已取消，本次不拍照");
             return false;
         }
-
-        await Task.Delay(ProductionPhotoSettleMilliseconds, cancellationToken);
-        AddLog($"生产拍照停振确认完成：已等待 {ProductionPhotoSettleMilliseconds} ms 停稳");
-        return true;
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+            _vibrationSequenceRunning = false;
+        }
     }
 
     /// <summary>
@@ -1795,7 +1832,8 @@ public partial class ConnectionConfigPage : UserControl
         string startCommand,
         int durationMs,
         string actionName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int settleMilliseconds = VibrationStopSettleMilliseconds)
     {
         var stopped = false;
         try
@@ -1824,7 +1862,7 @@ public partial class ConnectionConfigPage : UserControl
             }
         }
 
-        await Task.Delay(VibrationStopSettleMilliseconds, cancellationToken);
+        await Task.Delay(settleMilliseconds, cancellationToken);
         return stopped;
     }
 
