@@ -129,6 +129,36 @@ internal static class Program
         Require(Snapshot().Length == 0, "Rejected operations send no commands.");
         Console.WriteLine("PASS: invalid input and active-production rejection send no commands.");
 
+        vm.FeederSettings.DirectionalVibrationFrequency = 47;
+        vm.FeederSettings.DirectionalVibrationAmplitude = 62;
+        vm.FeederSettings.DirectionalVibrationDurationMilliseconds = 130;
+        Clear();
+        var sequenceClock = Stopwatch.StartNew();
+        Require(await page.RunProductionScatterThenLeftAsync(CancellationToken.None), "Four-stage production vibration completes.");
+        await WaitFor(() => Snapshot().Length == 12);
+        var productionPackets = Snapshot();
+        foreach (var mode in new[] { "04", "03", "06" })
+            Require(productionPackets.Contains($"&02,047,062,1,047,062,1,047,062,1,047,062,1,{mode}$"),
+                "All production modes use the configured frequency/amplitude.");
+        Require(productionPackets.Where(packet => packet.StartsWith("&03,") || packet == "&04$")
+            .SequenceEqual(new[] { "&03,04$", "&04$", "&03,03$", "&04$", "&03,06$", "&04$", "&03,04$", "&04$" }),
+            "Production runs scatter, left, gather, scatter, stopping after each stage.");
+        Require(sequenceClock.ElapsedMilliseconds >= 3 * 130 + 100 + 4 * 50 - 20,
+            "Completion waits for all configured pulses and stop-settle intervals.");
+
+        Clear();
+        using (var finalScatterCancellation = new CancellationTokenSource())
+        {
+            var sequence = page.RunProductionScatterThenLeftAsync(finalScatterCancellation.Token);
+            await WaitFor(() => Snapshot().Count(packet => packet == "&03,04$") == 2);
+            finalScatterCancellation.Cancel();
+            Require(!await sequence, "Cancellation in the added final scatter must not report completion.");
+            await WaitFor(() => Snapshot().LastOrDefault() == "&04$");
+            Require(Snapshot().Count(packet => packet.StartsWith("&03,")) == 4,
+                "Cancelling the final scatter stops it without restarting another pulse.");
+        }
+        Console.WriteLine("PASS: configured scatter/left/gather/scatter sequence, final stop and final-pulse cancellation.");
+
         // Production has a fixed recipe, independent of the manual controls and their production interlock.
         long productionStartAt = 0, productionZeroAt = 0, productionStopAt = 0;
         void TrackProductionTiming(object? sender, NotifyCollectionChangedEventArgs args)

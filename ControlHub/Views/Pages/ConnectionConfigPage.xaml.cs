@@ -1240,8 +1240,8 @@ public partial class ConnectionConfigPage : UserControl
     }
 
     /// <summary>
-    /// 自动生产专用补料序列：先震散，再向左移入拍照视野，最后上下聚拢。
-    /// 三段均使用连接配置页当前的方向震动频率和振幅；前两段使用配置时长，
+    /// 自动生产专用补料序列：震散、向左移入拍照视野、上下聚拢，最后再震散。
+    /// 四段均使用连接配置页当前的方向震动频率和振幅；两次震散及向左使用配置时长，
     /// 上下聚拢固定执行100 ms。
     /// </summary>
     public async Task<bool> RunProductionScatterThenLeftAsync(
@@ -1272,8 +1272,8 @@ public partial class ConnectionConfigPage : UserControl
         try
         {
             AddLog(
-                $"生产震动开始：震散 -> 向左 -> 上下聚拢，频率 {settings.DirectionalVibrationFrequency}，" +
-                $"振幅 {settings.DirectionalVibrationAmplitude}%，前两段各 " +
+                $"生产震动开始：震散 -> 向左 -> 上下聚拢 -> 再震散，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，两次震散及向左各 " +
                 $"{settings.DirectionalVibrationDurationMilliseconds} ms，上下聚拢 " +
                 $"{ProductionUpDownGatherDurationMilliseconds} ms");
             if (!await EnsureProductionVibrationSettingsAppliedAsync(
@@ -1300,12 +1300,18 @@ public partial class ConnectionConfigPage : UserControl
                     UpDownGatherStartCommand,
                     ProductionUpDownGatherDurationMilliseconds,
                     "生产震动-上下聚拢",
+                    operationCancellation.Token) ||
+                !await RunVibrationPulseAsync(
+                    parameterCommand: null,
+                    "&03,04$",
+                    settings.DirectionalVibrationDurationMilliseconds,
+                    "生产震动-收尾震散",
                     operationCancellation.Token))
             {
                 return false;
             }
 
-            AddLog("生产震动完成：震散 -> 向左 -> 上下聚拢");
+            AddLog("生产震动完成：震散 -> 向左 -> 上下聚拢 -> 再震散");
             return true;
         }
         catch (OperationCanceledException) when (

@@ -3052,7 +3052,7 @@ public partial class HomePage : UserControl
         var connectionController = _connectionConfigController
             ?? throw new InvalidOperationException("振动盘控制组件未连接，无法执行自动震动。");
         SetStartProductionStatus(
-            $"第{cycleNumber}轮：{reason}，正在执行“震散 → 向左 → 上下聚拢100 ms”…",
+            $"第{cycleNumber}轮：{reason}，正在执行“震散 → 向左 → 上下聚拢100 ms → 再震散”…",
             Color.FromRgb(242, 181, 68));
         var vibrationCompleted = await connectionController.RunProductionScatterThenLeftAsync(
             cancellationToken);
@@ -3060,11 +3060,11 @@ public partial class HomePage : UserControl
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException(
-                "“震散 → 向左 → 上下聚拢”未执行，请检查振动盘连接和方向震动参数。");
+                "“震散 → 向左 → 上下聚拢 → 再震散”未完成，请检查振动盘连接和方向震动参数。");
         }
 
         SetStartProductionStatus(
-            $"第{cycleNumber}轮：{reason}，“震散 → 向左 → 上下聚拢”完成，下一轮重新拍照。",
+            $"第{cycleNumber}轮：{reason}，“震散 → 向左 → 上下聚拢 → 再震散”完成，下一轮重新拍照。",
             Color.FromRgb(73, 209, 125));
     }
 
