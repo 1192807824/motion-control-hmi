@@ -11,5 +11,6 @@
   <ItemGroup>
     <ProjectReference Include="../../ControlHub/ControlHub.csproj" />
     <Compile Include="../../VisionMasterHost/ThreePointCircle.cs" Link="ThreePointCircle.cs" />
+    <Compile Include="../../VisionMasterHost/NozzleTeachingExecution.cs" Link="NozzleTeachingExecution.cs" />
   </ItemGroup>
 </Project>

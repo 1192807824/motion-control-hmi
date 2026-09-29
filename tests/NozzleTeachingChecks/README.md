@@ -22,6 +22,15 @@ Coverage:
 - Saving both requires both checks; resaving one invalidates only its earlier check.
 - Moving the camera or the untouched nozzle cannot satisfy a pending replacement check.
 - Resetting the teaching context discards requirements from the previous context.
+- Procedure-level NG and SDK execution exceptions become teaching warnings so the
+  current image can still be displayed; missing current-image results remain errors.
+
+Additional hardware verification: run coarse teaching with only one nozzle dot,
+and force position correction / circle finding to fail. Both teaching panels must
+show the current image from `图像组合1` and permit manual circles in the original
+pixel coordinate system. Neither old automatic centers nor previous drafts may
+restrict the new circle. Disconnecting the camera must clear old teaching images
+and prevent saving. Normal production inspection must still reject execution errors.
 
 Operator instructions: [更换单个吸嘴](../../ControlHub/NOZZLE_REPLACEMENT.md).
 

@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private const string InspectionScriptModuleName = "脚本1";
     private const string Nozzle1CircleModuleName = "圆查找1";
     private const string Nozzle2CircleModuleName = "圆查找2";
+    private const string NozzleTeachingImageModuleName = "图像组合1";
     private const string DefaultRotationPointProcedureName = "获取三点流程";
     private const string DefaultRotationCenterProcedureName = "计算旋转中心";
     private const string RotationCenterCircleModuleName = "圆拟合1";
@@ -99,8 +100,8 @@ public partial class MainWindow : Window
     private bool _showingCalibrationRender;
     private bool _showingSplitRender;
     private bool _nozzleTeachingResultsDisplayed;
-    private IMVSCircleFindModuTool? _retainedNozzle1ResultModule;
-    private IMVSCircleFindModuTool? _retainedNozzle2ResultModule;
+    private VmModule? _retainedNozzle1ResultModule;
+    private VmModule? _retainedNozzle2ResultModule;
     private bool _manualNozzleCircleMode;
     private readonly List<Point> _manualNozzle1CirclePoints = [];
     private readonly List<Point> _manualNozzle2CirclePoints = [];
@@ -942,6 +943,7 @@ public partial class MainWindow : Window
         ShellModuleTool? scriptModule = null;
         IMVSCircleFindModuTool? nozzle1CircleModule = null;
         IMVSCircleFindModuTool? nozzle2CircleModule = null;
+        VmModule? nozzleTeachingImageModule = null;
         VmModule? displayModule = null;
         if (isNozzlePointProcedure)
         {
@@ -951,6 +953,9 @@ public partial class MainWindow : Window
             nozzle2CircleModule = ResolveNamedModule<IMVSCircleFindModuTool>(
                 procedureName,
                 Nozzle2CircleModuleName);
+            // 该方案的两个圆查找都订阅图像组合1；回退时保持同一像素坐标系。
+            nozzleTeachingImageModule = ResolveNamedModule<VmModule>(
+                procedureName, NozzleTeachingImageModuleName);
         }
         else
         {
@@ -980,11 +985,18 @@ public partial class MainWindow : Window
         }
 
         InspectionImageFile? inspectionImage = null;
+        var teachingImageReceived = 0;
+        EventHandler teachingImageHandler = (_, _) => Interlocked.Exchange(ref teachingImageReceived, 1);
+        if (nozzleTeachingImageModule is not null)
+        {
+            nozzleTeachingImageModule.ModuleResultCallBackArrived += teachingImageHandler;
+        }
         try
         {
-            procedure.Run(true);
-            if (procedure.GetIsExecuteNormal() != 1)
+            nozzleTeachingImageModule?.EnableResultCallback();
+            string ReadProcedureFailure()
             {
+                if (procedure.GetIsExecuteNormal() == 1) return "";
                 var errors = procedure.GetModuErrorInfoList();
                 var details = errors is null
                     ? ""
@@ -992,17 +1004,61 @@ public partial class MainWindow : Window
                         "；",
                         errors.Select(error =>
                             $"{error.strDisplayName}(0x{unchecked((uint)error.nErrorCode):X8})"));
-                throw new InvalidOperationException(
-                    string.IsNullOrWhiteSpace(details)
+                return string.IsNullOrWhiteSpace(details)
                         ? $"固定方案中的{procedureName}执行异常。"
-                        : $"固定方案中的{procedureName}执行异常：{details}");
+                        : $"固定方案中的{procedureName}执行异常：{details}";
+            }
+            var teachingWarning = "";
+            if (isNozzlePointProcedure)
+            {
+                teachingWarning = NozzleTeachingExecution.Run(
+                    () => procedure.Run(true), ReadProcedureFailure);
+            }
+            else
+            {
+                procedure.Run(true);
+                var failure = ReadProcedureFailure();
+                if (failure.Length > 0) throw new InvalidOperationException(failure);
             }
             if (isNozzlePointProcedure)
             {
-                // 现场安装方向中圆查找2对应吸嘴1、圆查找1对应吸嘴2。
-                // 两个结果模块分别绑定左右渲染控件，显示各自的原图和圆查找叠加图形。
-                BindNozzleTeachingResultModules(nozzle2CircleModule!, nozzle1CircleModule!);
+                bool HasTeachingImages() => HasCurrentVisionRenderImage() &&
+                    CalibrationRenderControl.ImageSource is { Width: > 0, Height: > 0 };
+
+                void BindCurrentTeachingImage()
+                {
+                    // 算法异常仍可手动画圆，但必须有本次图像组合模块的结果回调。
+                    // 不能拿上一轮保留的图像或圆心作为这次示教的依据。
+                    var imageModuleFailed = procedure.GetModuErrorInfoList()?.Any(error =>
+                        error.strDisplayName == CalibrationImageSourceName ||
+                        error.strDisplayName == "颜色转换1" ||
+                        error.strDisplayName == NozzleTeachingImageModuleName) == true;
+                    NozzleTeachingExecution.RequireCurrentImage(
+                        Volatile.Read(ref teachingImageReceived) != 0 && !imageModuleFailed,
+                        teachingWarning);
+                    BindNozzleTeachingResultModules(nozzleTeachingImageModule!, nozzleTeachingImageModule!);
+                }
+
+                if (teachingWarning.Length > 0)
+                {
+                    BindCurrentTeachingImage();
+                }
+                else
+                {
+                    // 现场安装方向中圆查找2对应吸嘴1、圆查找1对应吸嘴2。
+                    BindNozzleTeachingResultModules(nozzle2CircleModule!, nozzle1CircleModule!);
+                }
                 RefreshNozzleTeachingDisplaysNoThrow();
+                if (!HasTeachingImages() && teachingWarning.Length == 0)
+                {
+                    teachingWarning = "圆查找未提供可显示的结果图。";
+                    BindCurrentTeachingImage();
+                    RefreshNozzleTeachingDisplaysNoThrow();
+                }
+                if (!HasTeachingImages())
+                {
+                    throw new InvalidOperationException("本次粗定位没有可显示的有效图像，请检查采图后重试。" + teachingWarning);
+                }
             }
             else
             {
@@ -1016,16 +1072,20 @@ public partial class MainWindow : Window
                 // 按吸嘴顺序返回，避免上层显示和保存时再次交换。
                 // 手动画圆是粗定位示教的最终结果。自动圆只作为画面参考；即使自动圆
                 // 返回NG，也要把两张相机画面交给操作员，不能阻断手动画圆。
-                var automaticNozzle1 = ReadCircleCenterOrPlaceholder(
+                var automaticNozzle1 = teachingWarning.Length > 0
+                    ? new RectangleBlobCandidate(0f, 0f, 0f, 0f, 0, 0, 1, 1)
+                    : ReadCircleCenterOrPlaceholder(
                     nozzle2CircleModule!,
                     procedureName,
                     Nozzle2CircleModuleName);
-                var automaticNozzle2 = ReadCircleCenterOrPlaceholder(
+                var automaticNozzle2 = teachingWarning.Length > 0
+                    ? new RectangleBlobCandidate(0f, 0f, 0f, 0f, 0, 0, 1, 1)
+                    : ReadCircleCenterOrPlaceholder(
                     nozzle1CircleModule!,
                     procedureName,
                     Nozzle1CircleModuleName);
-                _automaticNozzle1Center = TryGetAutomaticCircleCenter(automaticNozzle1);
-                _automaticNozzle2Center = TryGetAutomaticCircleCenter(automaticNozzle2);
+                _automaticNozzle1Center = teachingWarning.Length == 0 ? TryGetAutomaticCircleCenter(automaticNozzle1) : null;
+                _automaticNozzle2Center = teachingWarning.Length == 0 ? TryGetAutomaticCircleCenter(automaticNozzle2) : null;
                 candidates =
                 [
                     automaticNozzle1,
@@ -1081,8 +1141,10 @@ public partial class MainWindow : Window
             }
 
             SetStatus(
-                $"{procedureName}执行完成：共返回 {candidates.Count} 个结果{imageWarning}",
-                StatusKind.Success);
+                teachingWarning.Length > 0
+                    ? $"自动定位失败，已显示本次底图，可继续三点画圆并保存对应吸嘴。{teachingWarning}{imageWarning}"
+                    : $"{procedureName}执行完成：共返回 {candidates.Count} 个结果{imageWarning}",
+                teachingWarning.Length > 0 ? StatusKind.Ready : StatusKind.Success);
             var responseParts = new List<string>
             {
                 candidates.Count.ToString(CultureInfo.InvariantCulture)
@@ -1108,6 +1170,7 @@ public partial class MainWindow : Window
         }
         catch
         {
+            if (isNozzlePointProcedure) ClearNozzleTeachingDraft();
             if (inspectionImage is not null)
             {
                 try
@@ -1123,6 +1186,10 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (nozzleTeachingImageModule is not null)
+            {
+                nozzleTeachingImageModule.ModuleResultCallBackArrived -= teachingImageHandler;
+            }
             if (!_closed)
             {
                 // 找点流程保持单次执行；停止全部连续流程即可释放相机，同时保留结果图。
@@ -1437,6 +1504,7 @@ public partial class MainWindow : Window
 
     private void PrepareNozzleTeachingRenderersForCameraAcquisition()
     {
+        ClearNozzleTeachingDraft();
         _automaticNozzle1Center = null;
         _automaticNozzle2Center = null;
         PrepareLiveRendererForCameraAcquisition();
@@ -1454,8 +1522,8 @@ public partial class MainWindow : Window
     }
 
     private void BindNozzleTeachingResultModules(
-        IMVSCircleFindModuTool nozzle1ResultModule,
-        IMVSCircleFindModuTool nozzle2ResultModule)
+        VmModule nozzle1ResultModule,
+        VmModule nozzle2ResultModule)
     {
         DetachCrosshairModule();
         _displayedModule = null;

@@ -19,11 +19,36 @@ internal static class Program
     {
         CheckCircleGeometry();
         CheckReplacementVerification();
+        CheckAlgorithmFailureRecovery();
         var directory = Path.Combine(Path.GetTempPath(), "nozzle-teaching-checks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         CheckIndependentResults(directory);
-        Console.WriteLine("PASS: three-point circle, invalid points, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
+        Console.WriteLine("PASS: three-point circle, invalid points, algorithm NG/exception recovery, missing-current-image rejection, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
         Console.WriteLine("Test artifacts: " + directory);
+    }
+
+    private static void CheckAlgorithmFailureRecovery()
+    {
+        var failure = "位置修正2(0xE0000001)；圆查找2(0xE0000512)";
+        var ran = false;
+        var warning = NozzleTeachingExecution.Run(() => ran = true, () => failure);
+        Require(ran && warning == failure, "Procedure-level algorithm NG is retained as a warning, not thrown before rendering");
+        NozzleTeachingExecution.RequireCurrentImage(true, warning);
+
+        warning = NozzleTeachingExecution.Run(() => throw new InvalidOperationException(failure), () => "");
+        Require(warning.Contains(failure), "SDK Run exception still permits current-image recovery");
+        NozzleTeachingExecution.RequireCurrentImage(true, warning);
+        try
+        {
+            NozzleTeachingExecution.RequireCurrentImage(false, warning);
+            throw new Exception("Missing current image must not enable manual teaching on an old frame");
+        }
+        catch (InvalidOperationException exception)
+        {
+            Require(exception.Message.Contains("本次未获得") && exception.Message.Contains(failure),
+                "No-image failure explains why manual teaching is blocked and retains the algorithm diagnostic");
+        }
+        Require(NozzleTeachingExecution.Run(() => { }, () => "") == "", "Normal teaching remains successful");
     }
 
     private static void CheckReplacementVerification()
