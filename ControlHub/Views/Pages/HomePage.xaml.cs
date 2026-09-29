@@ -3999,8 +3999,17 @@ public partial class HomePage : UserControl
 
     private int CountLoadedTestStations(IReadOnlyList<CarouselStationState> carouselStations)
     {
-        return GetEnabledTestStationAxisByStation().Keys.Count(station =>
-            station < carouselStations.Count && carouselStations[station].Occupied);
+        return GetRequiredTestStationAxisByStation(carouselStations).Count;
+    }
+
+    private IReadOnlyDictionary<int, int> GetRequiredTestStationAxisByStation(
+        IReadOnlyList<CarouselStationState> carouselStations)
+    {
+        return GetEnabledTestStationAxisByStation()
+            .Where(pair => pair.Key < carouselStations.Count && carouselStations[pair.Key].Occupied &&
+                !(GetTestStationSettings(pair.Key).Instrument == TestStationInstrument.SM7110 &&
+                  carouselStations[pair.Key].HasFinalE4981ARejection))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
     }
 
     private IReadOnlyDictionary<int, int> GetEnabledTestStationAxisByStation()
@@ -4022,9 +4031,15 @@ public partial class HomePage : UserControl
     {
         using var diagnosticStep = _productionDiagnostics?.Begin("test-stations", "press, measure, return");
         await WaitIfProductionPausedAsync(cancellationToken);
-        var enabledTestStations = GetEnabledTestStationAxisByStation();
-        var activeStationParameters = enabledTestStations
-            .Where(pair => carouselStations[pair.Key].Occupied)
+        // 仅使用已完成复测并保存的第一站最终判定；NG料不下压、不触发SM7110。
+        var requiredTestStations = GetRequiredTestStationAxisByStation(carouselStations);
+        foreach (var station in GetEnabledTestStationAxisByStation().Keys
+                     .Where(station => carouselStations[station].Occupied && !requiredTestStations.ContainsKey(station)))
+        {
+            SetTestStationRuntimeDisplay(station, "第一站最终NG，跳过测试", "已跳过",
+                "不下压、不测量 · NG→0号盒", Color.FromRgb(242, 122, 128));
+        }
+        var activeStationParameters = requiredTestStations
             .ToDictionary(
                 pair => pair.Value,
                 pair => GetTestStationSettings(pair.Key));
@@ -4034,17 +4049,13 @@ public partial class HomePage : UserControl
         if (axisTargets.Count == 0)
         {
             SetStartProductionStatus(
-                "已启用测试站当前无料，跳过本次下压。",
+                "当前无待测料（空工位或第一站最终NG），跳过本次下压。",
                 Color.FromRgb(159, 177, 191));
             return 0;
         }
 
-        var activeStationNumbers = enabledTestStations
-            .Where(pair => carouselStations[pair.Key].Occupied)
-            .Select(pair => pair.Key)
-            .ToArray();
-        var stations = enabledTestStations
-            .Where(pair => carouselStations[pair.Key].Occupied)
+        var activeStationNumbers = requiredTestStations.Keys.ToArray();
+        var stations = requiredTestStations
             .Select(pair => $"{pair.Key}号→轴{pair.Value}")
             .ToArray();
 
@@ -4087,8 +4098,7 @@ public partial class HomePage : UserControl
         }
         await Task.Delay(_testStationDwellMilliseconds, cancellationToken);
 
-        var measurementTasks = enabledTestStations.Keys
-            .Where(station => carouselStations[station].Occupied)
+        var measurementTasks = activeStationNumbers
             .ToDictionary(
                 station => station,
                 station => MeasureTestStationAsync(
@@ -4433,7 +4443,8 @@ public partial class HomePage : UserControl
 
             if (occupied)
             {
-                var waitingForSM7110 = state.Tested && IsSM7110TestEnabled() && state.SM7110Passed is null;
+                var waitingForSM7110 = state.Tested && !state.HasFinalE4981ARejection &&
+                    IsSM7110TestEnabled() && state.SM7110Passed is null;
                 var rejected = state.Bin == "BIN0" || state.E4981ALossRejected || state.SM7110Passed == false;
                 var complete = state.Tested && !waitingForSM7110;
                 var stateColor = rejected ? Color.FromRgb(242, 122, 128)
@@ -4523,6 +4534,9 @@ public partial class HomePage : UserControl
 
         public string? E4981ALossFailureReason { get; private set; }
 
+        public bool HasFinalE4981ARejection => Tested && Bin is ("BIN0" or "BIN1" or "BIN2" or "BIN3") &&
+            (Bin == "BIN0" || E4981ALossRejected);
+
         public static CarouselStationState Empty() => new();
 
         public void SetLoaded()
@@ -4564,9 +4578,11 @@ public partial class HomePage : UserControl
         {
             if (!Occupied || !Tested || Bin is not ("BIN0" or "BIN1" or "BIN2" or "BIN3"))
                 throw new InvalidOperationException("产品尚无有效E4981A分档结果，禁止下料。");
+            if (HasFinalE4981ARejection)
+                return "NG";
             if (sm7110Enabled && SM7110Passed is null)
                 throw new InvalidOperationException("产品尚未完成SM7110判定，禁止下料。");
-            if (Bin == "BIN0" || E4981ALossRejected || (sm7110Enabled && SM7110Passed == false))
+            if (sm7110Enabled && SM7110Passed == false)
                 return "NG";
             return Bin;
         }

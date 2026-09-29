@@ -89,6 +89,7 @@ internal static partial class Program
         CheckE4981AFaultRetriesAsync().GetAwaiter().GetResult();
         CheckE4981ALossRoutingAsync().GetAwaiter().GetResult();
         CheckSM7110RangeAndRouting(page);
+        CheckRejectedProductSkip();
         CheckSM7110RangeRetriesAsync().GetAwaiter().GetResult();
         CheckSM7110TimedTestsAsync().GetAwaiter().GetResult();
         CheckMechanicalRetestsAsync().GetAwaiter().GetResult();
@@ -145,7 +146,7 @@ internal static partial class Program
             var station = (1 + turn) % 16 + 1;
             Require(ReferenceEquals(states.GetValue(station), product), "Product advanced to wrong physical station.");
             var count = (int)Invoke(page, "CountLoadedTestStations", states)!;
-            Require(count == (station is 5 or 6 ? 1 : 0), "Test eligibility must match occupied enabled physical stations.");
+            Require(count == (station == 5 ? 1 : 0), "First-station NG must skip the downstream SM7110 station.");
             if (station == 5)
                 product.GetType().GetMethod("SetTested")!.Invoke(product, new object[] { "BIN0" });
             Invoke(page, "UpdateCarouselStationDisplay", states, station == 5 ? new[] { 13 } : null, station == 5 ? "下压" : null);
@@ -340,7 +341,8 @@ internal static partial class Program
             Call(product, "SetMeasurement", e4981a);
             Require((string)Call(product, "GetUnloadDestination", false)! == "NG",
                 "E4981A loss failure must go to box0 even without SM7110.");
-            ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
+            Require((string)Call(product, "GetUnloadDestination", true)! == "NG",
+                "Final E4981A loss failure must unload without an SM7110 result.");
             var originalBin = (string)Property(product, "Bin")!;
             var sm7110 = Invoke(null, "ClassifySM7110Measurement",
                 new SM7110MeasurementResult(150, 0, "R", ""), originalBin, range)!;
@@ -433,7 +435,11 @@ internal static partial class Program
             Call(product, "SetTested", bin);
             Require((string)Call(product, "GetUnloadDestination", false)! == (bin == "BIN0" ? "NG" : bin),
                 "Single station must route out-of-bin capacitance to NG and preserve BIN1-3.");
-            ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
+            if (bin == "BIN0")
+                Require((string)Call(product, "GetUnloadDestination", true)! == "NG",
+                    "Final BIN0 must unload without an SM7110 result.");
+            else
+                ExpectFailure<InvalidOperationException>(() => Call(product, "GetUnloadDestination", true));
             foreach (var passed in new[] { false, true })
             {
                 var result = Invoke(null, "ClassifySM7110Measurement",
