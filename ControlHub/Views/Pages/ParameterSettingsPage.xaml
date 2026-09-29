@@ -1,0 +1,278 @@
+<UserControl x:Class="ControlHub.Views.Pages.ParameterSettingsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="1680"
+             d:DesignHeight="854"
+             Background="#0F2335"
+             FontFamily="Microsoft YaHei UI"
+             UseLayoutRounding="True"
+             SnapsToDevicePixels="True">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="PanelBackground" Color="#162E43" />
+        <SolidColorBrush x:Key="PanelBorder" Color="#345269" />
+        <SolidColorBrush x:Key="TextPrimary" Color="#F2F6F9" />
+        <SolidColorBrush x:Key="TextSecondary" Color="#9FB1BF" />
+        <SolidColorBrush x:Key="AccentBlue" Color="#1F75C8" />
+        <Style x:Key="RecipeButton" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#1F75C8" />
+            <Setter Property="BorderBrush" Value="#62B5FF" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style x:Key="VisionProcedureNameInput" TargetType="TextBox">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="7,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="#17344A" />
+            <Setter Property="Foreground" Value="#F2F6F9" />
+            <Setter Property="BorderBrush" Value="#3B5F78" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style x:Key="VisionProcedureNameLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#9FB1BF" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="76" />
+            <RowDefinition Height="14" />
+            <RowDefinition Height="276" />
+            <RowDefinition Height="14" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource PanelBorder}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="22,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="参数设置"
+                               Foreground="{StaticResource TextPrimary}"
+                               FontSize="24"
+                               FontWeight="Bold" />
+                    <TextBlock Text="整机产品配方、视觉流程与全部生产参数集中管理"
+                               Margin="0,5,0,0"
+                               Foreground="{StaticResource TextSecondary}"
+                               FontSize="13" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Border Background="#143B35"
+                            BorderBrush="#28725C"
+                            BorderThickness="1"
+                            CornerRadius="14"
+                            Padding="12,5"
+                            Margin="0,0,10,0">
+                        <TextBlock Text="常规参数自动保存"
+                                   ToolTip="压力急停阈值需点击对应的“保存并生效”按钮。"
+                                   Foreground="#49D17D"
+                                   FontSize="12"
+                                   FontWeight="Bold" />
+                    </Border>
+                    <Border Background="#183955"
+                            BorderBrush="#35688F"
+                            BorderThickness="1"
+                            CornerRadius="14"
+                            Padding="12,5"
+                            Margin="0,0,10,0">
+                        <TextBlock Text="单位：pulse / pulse·s⁻¹ / ms"
+                                   Foreground="#77BEFF"
+                                   FontSize="12"
+                                   FontWeight="Bold" />
+                    </Border>
+                    <Button Content="全轴急停"
+                            Height="38"
+                            Padding="16,0"
+                            Foreground="White"
+                            Background="#C9363E"
+                            BorderBrush="#E45A61"
+                            FontWeight="Bold"
+                            Cursor="Hand"
+                            AutomationProperties.Name="全轴急停"
+                            Click="EmergencyStopAllAxes_Click"
+                            ToolTip="立即调用运动控制的全轴急停" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2"
+                Background="#12283A"
+                BorderBrush="{StaticResource PanelBorder}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="250" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="320" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="产品配方"
+                               Foreground="{StaticResource TextPrimary}"
+                               FontSize="15"
+                               FontWeight="Bold" />
+                    <ListBox x:Name="RecipeListBox"
+                             Grid.Row="1"
+                             DisplayMemberPath="Name"
+                             Background="#0F2335"
+                             Foreground="#EAF2F7"
+                             BorderBrush="#345269"
+                             SelectionChanged="RecipeListBox_SelectionChanged" />
+                </Grid>
+
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="36" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="配方操作"
+                               Foreground="{StaticResource TextPrimary}"
+                               FontSize="15"
+                               FontWeight="Bold" />
+                    <TextBox x:Name="RecipeNameTextBox"
+                             Grid.Row="1"
+                             Height="30"
+                             Padding="8,0"
+                             VerticalContentAlignment="Center"
+                             Background="#17344A"
+                             Foreground="#F2F6F9"
+                             BorderBrush="#3B5F78"
+                             ToolTip="输入新配方名，或修改所选配方名称" />
+                    <WrapPanel Grid.Row="2" Margin="0,8,0,0">
+                        <Button Content="新建" Style="{StaticResource RecipeButton}" Click="CreateRecipe_Click" />
+                        <Button Content="保存当前" Style="{StaticResource RecipeButton}" Click="SaveCurrentRecipe_Click" />
+                        <Button Content="应用" Style="{StaticResource RecipeButton}" Background="#167B59" BorderBrush="#49D17D" Click="ApplyRecipe_Click" />
+                        <Button Content="重命名" Style="{StaticResource RecipeButton}" Click="RenameRecipe_Click" />
+                        <Button Content="删除" Style="{StaticResource RecipeButton}" Background="#9F3040" BorderBrush="#F27A80" Click="DeleteRecipe_Click" />
+                    </WrapPanel>
+                    <TextBlock x:Name="RecipeStatusText"
+                               Grid.Row="3"
+                               Margin="0,8,0,0"
+                               Foreground="#9FB1BF"
+                               FontSize="12"
+                               Text="输入名称后可将整机当前参数另存为产品配方。"
+                               TextWrapping="Wrap" />
+                </Grid>
+
+                <Grid Grid.Column="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <TextBlock Text="所选配方视觉流程"
+                                   Foreground="{StaticResource TextPrimary}"
+                                   FontSize="15"
+                                   FontWeight="Bold" />
+                        <Button x:Name="SaveVisionProcedureNamesButton"
+                                Content="保存名称"
+                                Width="82"
+                                Height="24"
+                                Padding="8,0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Foreground="White"
+                                Background="#7B4AB2"
+                                BorderBrush="#B693E0"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Cursor="Hand"
+                                Click="SaveVisionProcedureNames_Click" />
+                    </Grid>
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="找芯片" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="InspectionProcedureNameTextBox"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="1" Text="粗定位示教" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="NozzleTeachingProcedureNameTextBox"
+                                 Grid.Row="1"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="2" Text="九点标定" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="CalibrationProcedureNameTextBox"
+                                 Grid.Row="2"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="3" Text="下相机标定" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="LowerCalibrationProcedureNameTextBox"
+                                 Grid.Row="3"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="4" Text="获取三点" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="RotationPointProcedureNameTextBox"
+                                 Grid.Row="4"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="5" Text="计算旋转中心" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="RotationCenterProcedureNameTextBox"
+                                 Grid.Row="5"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="6" Text="下相机纠偏" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="LowerCorrectionProcedureNameTextBox"
+                                 Grid.Row="6"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}" />
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4">
+            <Border Background="#12283A"
+                    BorderBrush="{StaticResource PanelBorder}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                <ContentControl x:Name="SettingsContentHost"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch" />
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

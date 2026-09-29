@@ -54,6 +54,41 @@
             <Setter Property="Background" Value="#10283C" />
             <Setter Property="CornerRadius" Value="4" />
         </Style>
+        <Style x:Key="JogButton" TargetType="Button">
+            <Setter Property="Width" Value="42" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="#F4F8FB" />
+            <Setter Property="Background" Value="#123B59" />
+            <Setter Property="BorderBrush" Value="#2A789E" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="ManualJogButton_PreviewMouseLeftButtonDown" />
+            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ManualJogButton_PreviewMouseLeftButtonUp" />
+            <EventSetter Event="MouseLeave" Handler="ManualJogButton_MouseLeave" />
+            <EventSetter Event="LostMouseCapture" Handler="ManualJogButton_LostMouseCapture" />
+            <EventSetter Event="PreviewKeyDown" Handler="ManualJogButton_PreviewKeyDown" />
+            <EventSetter Event="PreviewKeyUp" Handler="ManualJogButton_PreviewKeyUp" />
+            <EventSetter Event="LostKeyboardFocus" Handler="ManualJogButton_LostKeyboardFocus" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#17577D" />
+                    <Setter Property="BorderBrush" Value="#38A0D0" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#0D6EE8" />
+                    <Setter Property="BorderBrush" Value="#5EA8FF" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.42" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="8" Background="#071D2F">
@@ -86,26 +121,183 @@
                              Fill="#E0A21A" />
                     <TextBlock x:Name="HostStatusText"
                                Margin="9,0,0,0"
+                               MaxWidth="150"
                                Text="正在准备视觉组件…"
                                Foreground="#D8E4EC"
                                FontSize="14"
+                               TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center" />
+                    <TextBlock Text="标定类型"
+                               Foreground="#AFC0CD"
+                               FontSize="12"
+                               Margin="18,0,8,0"
+                               VerticalAlignment="Center" />
+                    <ComboBox x:Name="AxisSetComboBox"
+                              Width="168"
+                              Height="34"
+                              VerticalContentAlignment="Center"
+                              SelectionChanged="AxisSet_SelectionChanged">
+                        <ComboBoxItem Content="第一套 XY 标定" Tag="First" />
+                        <ComboBoxItem Content="下相机标定" Tag="LowerCamera" />
+                    </ComboBox>
+                    <TextBlock x:Name="LowerCameraNozzleLabel"
+                               Text="吸嘴"
+                               Foreground="#AFC0CD"
+                               FontSize="12"
+                               Margin="14,0,8,0"
+                               VerticalAlignment="Center"
+                               Visibility="Collapsed" />
+                    <ComboBox x:Name="LowerCameraNozzleComboBox"
+                              Width="92"
+                              Height="34"
+                              VerticalContentAlignment="Center"
+                              ToolTip="下相机的吸嘴1、吸嘴2都使用第一套 XY（轴1/2），每次只标一个吸嘴"
+                              Visibility="Collapsed"
+                              SelectionChanged="LowerCameraNozzle_SelectionChanged">
+                        <ComboBoxItem Content="吸嘴 1" Tag="1" />
+                        <ComboBoxItem Content="吸嘴 2" Tag="2" />
+                    </ComboBox>
+                    <StackPanel x:Name="LowerCameraArrivalPanel"
+                                Margin="10,0,0,0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                        <TextBlock Text="1:X"
+                                   Foreground="#AFC0CD"
+                                   FontSize="11"
+                                   VerticalAlignment="Center" />
+                        <TextBox x:Name="ArrivalPosition1XTextBox"
+                                 Width="62"
+                                 Height="30"
+                                 Margin="4,0,5,0"
+                                 Style="{StaticResource PanelInput}"
+                                 ToolTip="到位1的X轴绝对脉冲坐标"
+                                 TextChanged="ArrivalPosition_Changed" />
+                        <TextBlock Text="Y"
+                                   Foreground="#AFC0CD"
+                                   FontSize="11"
+                                   VerticalAlignment="Center" />
+                        <TextBox x:Name="ArrivalPosition1YTextBox"
+                                 Width="62"
+                                 Height="30"
+                                 Margin="4,0,5,0"
+                                 Style="{StaticResource PanelInput}"
+                                 ToolTip="到位1的Y轴绝对脉冲坐标"
+                                 TextChanged="ArrivalPosition_Changed" />
+                        <Button x:Name="MoveToArrivalPosition1Button"
+                                Width="62"
+                                Height="34"
+                                Content="到位1"
+                                Style="{StaticResource PanelButton}"
+                                Click="MoveToArrivalPosition1_Click"
+                                ToolTip="按速度100000移动第一套XY（轴1/2）到到位1坐标" />
+                        <TextBlock Text="2:X"
+                                   Margin="9,0,0,0"
+                                   Foreground="#AFC0CD"
+                                   FontSize="11"
+                                   VerticalAlignment="Center" />
+                        <TextBox x:Name="ArrivalPosition2XTextBox"
+                                 Width="62"
+                                 Height="30"
+                                 Margin="4,0,5,0"
+                                 Style="{StaticResource PanelInput}"
+                                 ToolTip="到位2的X轴绝对脉冲坐标"
+                                 TextChanged="ArrivalPosition_Changed" />
+                        <TextBlock Text="Y"
+                                   Foreground="#AFC0CD"
+                                   FontSize="11"
+                                   VerticalAlignment="Center" />
+                        <TextBox x:Name="ArrivalPosition2YTextBox"
+                                 Width="62"
+                                 Height="30"
+                                 Margin="4,0,5,0"
+                                 Style="{StaticResource PanelInput}"
+                                 ToolTip="到位2的Y轴绝对脉冲坐标"
+                                 TextChanged="ArrivalPosition_Changed" />
+                        <Button x:Name="MoveToArrivalPosition2Button"
+                                Width="62"
+                                Height="34"
+                                Content="到位2"
+                                Style="{StaticResource PanelButton}"
+                                Click="MoveToArrivalPosition2_Click"
+                                ToolTip="按速度100000移动第一套XY（轴1/2）到到位2坐标" />
+                    </StackPanel>
                 </StackPanel>
-                <Button Grid.Column="2"
-                        x:Name="RestartHostButton"
-                        Content="重启视觉"
-                        Height="38"
-                        Padding="14,0"
-                        Foreground="White"
-                        Background="#0B2235"
-                        BorderBrush="#45647A"
-                        Cursor="Hand"
-                        IsEnabled="False"
-                        Click="RestartHost_Click" />
+                <StackPanel Grid.Column="2"
+                            Margin="10,0,0,0"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button x:Name="VibrationFeederLightToggleButton"
+                            Width="104"
+                            Height="28"
+                            Margin="0,0,6,0"
+                            Content="振动盘灯：关"
+                            Foreground="White"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            FontSize="10"
+                            FontWeight="SemiBold"
+                            Cursor="Hand"
+                            IsEnabled="False"
+                            ToolTip="全局振动盘光源开关，不区分标定类型"
+                            Click="VibrationFeederLightToggle_Click" />
+                    <Button x:Name="LowerCameraLightToggleButton"
+                            Width="104"
+                            Height="28"
+                            Margin="0,0,8,0"
+                            Content="下相机灯：关"
+                            Foreground="White"
+                            Background="#294A64"
+                            BorderBrush="#45647A"
+                            FontSize="10"
+                            FontWeight="SemiBold"
+                            Cursor="Hand"
+                            IsEnabled="False"
+                            ToolTip="全局下相机光源开关，控制Y10，不区分标定类型"
+                            Click="LowerCameraLightToggle_Click" />
+                    <Button x:Name="CalibrationEmergencyStopButton"
+                            Content="全轴急停"
+                            Height="38"
+                            Padding="14,0"
+                            Margin="0,0,8,0"
+                            Foreground="White"
+                            Background="#C9363E"
+                            BorderBrush="#E45A61"
+                            FontWeight="Bold"
+                            Cursor="Hand"
+                            IsEnabled="False"
+                            Click="CalibrationEmergencyStop_Click"
+                            ToolTip="立即调用运动控制的全轴急停" />
+                    <Button x:Name="RestartHostButton"
+                            Content="重启视觉"
+                            Height="38"
+                            Padding="14,0"
+                            Margin="0,0,8,0"
+                            Foreground="White"
+                            Background="#0B2235"
+                            BorderBrush="#45647A"
+                            Cursor="Hand"
+                            IsEnabled="False"
+                            Click="RestartHost_Click" />
+                    <Button x:Name="CloseVisionButton"
+                            Content="关闭视觉"
+                            Height="38"
+                            Padding="14,0"
+                            Foreground="White"
+                            Background="#6E252A"
+                            BorderBrush="#B84B52"
+                            Cursor="Hand"
+                            Click="CloseVision_Click"
+                             ToolTip="关闭 VisionMasterHost 和所有 VisionMaster 相关进程，释放相机及视觉资源" />
+                </StackPanel>
             </Grid>
         </Border>
 
         <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition x:Name="ManualJogRow" Height="0" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="0" />
@@ -120,6 +312,13 @@
                     BorderThickness="1"
                     CornerRadius="5">
                     <StackPanel>
+                        <Border Style="{StaticResource SectionCard}">
+                            <Button x:Name="StartLivePreviewButton"
+                                    Content="获取实时画面"
+                                    Style="{StaticResource PanelButton}"
+                                    Click="StartLivePreview_Click" />
+                        </Border>
+
                         <Grid Margin="0,0,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -138,7 +337,9 @@
 
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
-                                <TextBlock Text="1　记录中心" Style="{StaticResource SectionTitle}" />
+                                <TextBlock x:Name="CenterSectionTitleText"
+                                           Text="1　移动中心"
+                                           Style="{StaticResource SectionTitle}" />
                                 <Grid Margin="0,5,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -149,7 +350,7 @@
                                         <TextBlock Text="轴1 X（pulse）" Style="{StaticResource PanelLabel}" />
                                         <Border Height="27" Background="#243E52" CornerRadius="2">
                                             <TextBlock x:Name="CenterXPulseText"
-                                                       Text="未记录"
+                                                       Text="未配置"
                                                        Foreground="#F4F8FB"
                                                        TextAlignment="Center"
                                                        VerticalAlignment="Center" />
@@ -159,7 +360,7 @@
                                         <TextBlock Text="轴2 Y（pulse）" Style="{StaticResource PanelLabel}" />
                                         <Border Height="27" Background="#243E52" CornerRadius="2">
                                             <TextBlock x:Name="CenterYPulseText"
-                                                       Text="未记录"
+                                                       Text="未配置"
                                                        Foreground="#F4F8FB"
                                                        TextAlignment="Center"
                                                        VerticalAlignment="Center" />
@@ -174,9 +375,9 @@
                                            FontWeight="SemiBold"
                                            TextAlignment="Center" />
                                 <Button x:Name="RecordCenterButton"
-                                        Content="记录当前中心"
+                                        Content="移动中心"
                                         Style="{StaticResource PanelButton}"
-                                        Click="RecordCenter_Click" />
+                                        Click="MoveTeachingCenter_Click" />
                             </StackPanel>
                         </Border>
 
@@ -259,7 +460,7 @@
                                            Margin="0,4,0,4"
                                            MinHeight="20"
                                            MaxHeight="30"
-                                           Text="请先记录中心坐标"
+                                           Text="请先在参数配置中设置中心位，然后点击移动中心"
                                            Foreground="#D8E4EC"
                                            FontSize="11"
                                            TextAlignment="Center"
@@ -296,12 +497,12 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="3　吸嘴对位"
+                                    <TextBlock Text="3　粗定位示教"
                                                Style="{StaticResource SectionTitle}"
                                                VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1"
                                                x:Name="NozzleTeachStepText"
-                                               Text="等待记录十字"
+                                               Text="等待手动打点"
                                                Foreground="#49D17D"
                                                FontSize="10"
                                                VerticalAlignment="Center" />
@@ -312,35 +513,112 @@
                                         <ColumnDefinition Width="7" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Button x:Name="RecordCameraToolPointButton"
-                                            Content="1 记录十字"
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Button x:Name="LoadingXServoButton"
+                                            Grid.ColumnSpan="3"
+                                            Margin="0,0,0,5"
+                                            Content="{Binding ServoText, StringFormat=上料X轴：{0}（切换）, FallbackValue=上料X轴使能开关}"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             FontSize="11"
-                                            Click="RecordCameraToolPoint_Click" />
+                                            ToolTip="切换上料X轴（轴1）的伺服使能"
+                                            Click="LoadingXServo_Click" />
+                                    <Button Grid.Row="1" x:Name="RecordNozzleDotPositionButton"
+                                            Content="移动下压位置"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            Click="MoveTeachingPressPosition_Click" />
                                     <Button Grid.Column="2"
-                                            x:Name="RecordNozzleToolPointButton"
-                                            Content="2 记录吸嘴1"
+                                            Grid.Row="1"
+                                            x:Name="LoadingZServoButton"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            ToolTip="统一切换上料Z1、Z2（轴5、7）的使能；状态不一致时统一使能"
+                                            Click="LoadingZServo_Click">
+                                        <TextBlock>
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="上料双Z使能" />
+                                                    <Style.Triggers>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding LoadingZ1Axis.ServoOn}" Value="True" />
+                                                                <Condition Binding="{Binding LoadingZ2Axis.ServoOn}" Value="True" />
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Text" Value="解除上料双Z使能" />
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Button>
+                                    <Button Grid.ColumnSpan="3"
+                                            Grid.Row="2"
+                                            Margin="0,5,0,0"
+                                            x:Name="ReturnToPhotoPositionButton"
+                                            Content="回拍照位"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#0B4CA3"
+                                            BorderBrush="#0D6EE8"
+                                            FontSize="11"
+                                            Click="ReturnCameraToCenter_Click" />
+                                </Grid>
+                                <Button x:Name="FindNozzlePointsButton"
+                                        Margin="0,5,0,0"
+                                        Content="执行粗定位示教"
+                                        Style="{StaticResource PanelButton}"
+                                        Background="#294A64"
+                                        BorderBrush="#45647A"
+                                        FontSize="11"
+                                        Click="FindNozzlePoints_Click" />
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="7" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="AssignPoint1ToNozzle1Button"
+                                            Content="保存 Z1 结果"
                                             Style="{StaticResource PanelButton}"
                                             Background="#294A64"
                                             BorderBrush="#45647A"
                                             FontSize="11"
                                             IsEnabled="False"
-                                            Click="RecordNozzleToolPoint_Click" />
+                                            Click="AssignPoint1ToNozzle1_Click" />
+                                    <Button Grid.Column="2"
+                                            x:Name="AssignPoint1ToNozzle2Button"
+                                            Content="保存 Z2 结果"
+                                            Style="{StaticResource PanelButton}"
+                                            Background="#294A64"
+                                            BorderBrush="#45647A"
+                                            FontSize="11"
+                                            IsEnabled="False"
+                                            Click="AssignPoint1ToNozzle2_Click" />
                                 </Grid>
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
                                            Margin="0,4,0,0"
-                                           MaxHeight="30"
-                                           Text="记录一次十字，再依次记录吸嘴1、吸嘴2"
+                                           MinHeight="30"
+                                           Text="换哪个吸嘴，就只为该吸嘴打点、三点画圆并保存；另一吸嘴数据保留。首次标定需分别完成两个吸嘴。"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
+                                           LineHeight="16"
                                            TextAlignment="Center"
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
-                        <Border Style="{StaticResource SectionCard}" Margin="0">
+                        <Border x:Name="ClickMoveSection"
+                                Style="{StaticResource SectionCard}"
+                                Margin="0">
                             <StackPanel>
                                 <Grid Margin="0,0,0,4">
                                     <Grid.ColumnDefinitions>
@@ -381,6 +659,10 @@
                                             IsEnabled="False"
                                             Click="StopClickMove_Click" />
                                 </Grid>
+                                <Button x:Name="RecognizedCenterMoveButton" Content="识别中心点移动"
+                                        Style="{StaticResource PanelButton}" Margin="0,6,0,0" IsEnabled="False"
+                                        ToolTip="执行找芯片流程_011_测试；将110脚本1返回的XY像素坐标转换为所选吸嘴目标，108仅用于预览。"
+                                        Click="RecognizedCenterMove_Click" />
                                 <TextBlock x:Name="ClickMoveStatusText"
                                            Margin="0,4,0,0"
                                            MaxHeight="24"
@@ -395,6 +677,7 @@
             </Border>
 
             <Border Grid.Column="2"
+                    Grid.Row="0"
                     Background="#202427"
                     BorderBrush="#345269"
                     BorderThickness="1"
@@ -407,6 +690,7 @@
                                                       Exited="VisionHost_Exited"
                                                       CalibrationToolbarActionRequested="VisionHost_CalibrationToolbarActionRequested"
                                                       CalibrationSidebarActionRequested="VisionHost_CalibrationSidebarActionRequested"
+                                                      ManualNozzleCircleReceived="VisionHost_ManualNozzleCircleReceived"
                                                       ClickTargetReceived="VisionHost_ClickTargetReceived"
                                                       ClickTargetFailed="VisionHost_ClickTargetFailed" />
                     <StackPanel x:Name="HostPlaceholder"
@@ -418,6 +702,166 @@
                                    FontSize="14"
                                    HorizontalAlignment="Center" />
                     </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border x:Name="ManualJogBorder"
+                    Visibility="Collapsed"
+                    Grid.Row="1"
+                    Grid.Column="2"
+                    Margin="0,8,0,0"
+                    Padding="10,8"
+                    Background="#0B263A"
+                    BorderBrush="#294F68"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <Grid x:Name="ManualJogPanel">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="196" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="158" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="124" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="124" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Margin="2,0,12,0" VerticalAlignment="Center">
+                        <TextBlock Text="第一套手动点动"
+                                   Foreground="#F4F8FB"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Margin="0,3,0,7"
+                                   Text="XY 固定使用轴1/2；Z/R 按吸嘴切换"
+                                   Foreground="#8FB2C9"
+                                   FontSize="11" />
+                        <ComboBox x:Name="ManualJogNozzleComboBox"
+                                  Width="116"
+                                  HorizontalAlignment="Left"
+                                  Style="{StaticResource PanelComboBox}"
+                                  SelectionChanged="ManualJogSetting_Changed">
+                            <ComboBoxItem Content="吸嘴 1" Tag="1" />
+                            <ComboBoxItem Content="吸嘴 2" Tag="2" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Background="#294F68" />
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <TextBlock Text="XY 平移·按住运行"
+                                   Style="{StaticResource PanelLabel}"
+                                   Margin="0,0,0,1" />
+                        <Grid Width="114" Height="96" HorizontalAlignment="Center">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="32" />
+                                <RowDefinition Height="32" />
+                                <RowDefinition Height="32" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="38" />
+                                <ColumnDefinition Width="38" />
+                                <ColumnDefinition Width="38" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="1" Tag="Y:1" Content="↑"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="Y 正向（轴2）" />
+                            <Button Grid.Row="1" Grid.Column="0" Tag="X:-1" Content="←"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="X 负向（轴1）" />
+                            <Border Grid.Row="1" Grid.Column="1" Width="32" Height="28"
+                                    Margin="3" Background="#071D2F" BorderBrush="#294F68"
+                                    BorderThickness="1" CornerRadius="3">
+                                <TextBlock Text="XY" Foreground="#8FB2C9" FontSize="11"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <Button Grid.Row="1" Grid.Column="2" Tag="X:1" Content="→"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="X 正向（轴1）" />
+                            <Button Grid.Row="2" Grid.Column="1" Tag="Y:-1" Content="↓"
+                                    Width="35" Height="30" FontSize="19"
+                                    Style="{StaticResource JogButton}" ToolTip="Y 负向（轴2）" />
+                        </Grid>
+                    </StackPanel>
+
+                    <Border Grid.Column="3" Background="#294F68" />
+
+                    <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                        <TextBlock Text="Z 升降"
+                                   Style="{StaticResource PanelLabel}"
+                                   Margin="0,0,0,5" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Tag="Z:-1" Content="↥"
+                                    Style="{StaticResource JogButton}" ToolTip="Z 上升（负向）" />
+                            <Button Tag="Z:1" Content="↧"
+                                    Style="{StaticResource JogButton}" ToolTip="Z 下降（正向）" />
+                        </StackPanel>
+                        <TextBlock Text="上升　下降" Foreground="#8FB2C9" FontSize="10"
+                                   Margin="0,4,0,0" TextAlignment="Center" />
+                    </StackPanel>
+
+                    <Border Grid.Column="5" Background="#294F68" />
+
+                    <StackPanel Grid.Column="6" VerticalAlignment="Center">
+                        <TextBlock Text="R 旋转"
+                                   Style="{StaticResource PanelLabel}"
+                                   Margin="0,0,0,5" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Tag="R:-1" Content="↶"
+                                    Style="{StaticResource JogButton}" ToolTip="R 负向旋转" />
+                            <Button Tag="R:1" Content="↷"
+                                    Style="{StaticResource JogButton}" ToolTip="R 正向旋转" />
+                        </StackPanel>
+                        <TextBlock Text="R−　　R+" Foreground="#8FB2C9" FontSize="10"
+                                   Margin="0,4,0,0" TextAlignment="Center" />
+                    </StackPanel>
+
+                    <Border Grid.Column="7" Background="#294F68" />
+
+                    <Grid Grid.Column="8" Margin="12,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="82" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="XY 速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                        <TextBlock Grid.Column="2" Text="Z 速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                        <TextBlock Grid.Column="4" Text="R 速度（pulse/s）" Style="{StaticResource PanelLabel}" />
+                        <TextBox Grid.Row="1" x:Name="ManualJogXyVelocityTextBox"
+                                 Text="100000" Style="{StaticResource PanelInput}"
+                                 TextChanged="ManualJogSetting_Changed" />
+                        <TextBox Grid.Row="1" Grid.Column="2" x:Name="ManualJogZVelocityTextBox"
+                                 Text="50000" Style="{StaticResource PanelInput}"
+                                 TextChanged="ManualJogSetting_Changed" />
+                        <TextBox Grid.Row="1" Grid.Column="4" x:Name="ManualJogRVelocityTextBox"
+                                 Text="50000" Style="{StaticResource PanelInput}"
+                                 TextChanged="ManualJogSetting_Changed" />
+                        <Button Grid.Row="1" Grid.Column="5"
+                                x:Name="ManualJogStopButton"
+                                Margin="8,0,0,0"
+                                Content="停止"
+                                Style="{StaticResource PanelButton}"
+                                Background="#8E2029"
+                                BorderBrush="#D90D16"
+                                Click="ManualJogStop_Click" />
+                        <TextBlock Grid.Row="2" Grid.ColumnSpan="6"
+                                   x:Name="ManualJogStatusText"
+                                   Margin="0,7,0,0"
+                                   Text="按住按钮运行，松开即减速停止"
+                                   Foreground="#8FB2C9"
+                                   FontSize="11"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

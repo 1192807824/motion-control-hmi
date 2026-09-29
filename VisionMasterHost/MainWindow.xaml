@@ -246,121 +246,51 @@
         </Style>
     </Window.Resources>
 
-    <Grid Background="#111D29">
+    <Grid x:Name="RootGrid" Background="#111D29">
         <Grid.RowDefinitions>
-            <RowDefinition Height="64" />
-            <RowDefinition Height="34" />
+            <RowDefinition x:Name="CommandBarRow" Height="52" />
+            <RowDefinition x:Name="StatusBarRow" Height="34" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <Border x:Name="CommandBar"
                 Grid.Row="0"
-                Padding="18,8"
+                Padding="14,6"
                 Background="#071D2F"
                 BorderBrush="#345269"
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="252" />
-                    <ColumnDefinition Width="21" />
+                    <ColumnDefinition Width="220" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="150" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="150" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="160" />
-                    <ColumnDefinition Width="21" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="160" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="21" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
-                           Text="固定方案"
-                           Style="{StaticResource FieldLabel}"
-                           Margin="0,0,8,0" />
-
-                <Grid Grid.Column="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="0" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="SolutionPathTextBox"
-                             Height="40"
-                             Padding="10,0"
-                             VerticalContentAlignment="Center"
-                             IsReadOnly="True"
-                             Background="#0B2235"
-                             Foreground="#EDF4F9"
-                             BorderBrush="#35546B"
-                             BorderThickness="1"
-                             Text="等待加载固定方案"
-                             ToolTip="优先加载桌面的新纳方案.sol；兼容标定方案.sol" />
-                    <Button Grid.Column="1"
-                            x:Name="ChooseSolutionButton"
-                            Visibility="Collapsed" />
-                </Grid>
-
-                <Border Grid.Column="2" Width="1" Height="34" Background="#345269" />
-
-                <TextBlock Grid.Column="3" Text="实时方案" Style="{StaticResource FieldLabel}" />
-                <TextBlock Grid.Column="4"
-                           Text="实时画面.sol / 流程1"
-                           VerticalAlignment="Center"
-                           Foreground="#EDF4F9"
-                           FontWeight="SemiBold" />
-
-                <TextBlock Grid.Column="5" Text="找芯片" Style="{StaticResource FieldLabel}" />
-                <TextBlock Grid.Column="6"
-                           Text="找芯片流程"
-                           VerticalAlignment="Center"
-                           Foreground="#EDF4F9"
-                           FontWeight="SemiBold" />
-
-                <TextBlock Grid.Column="7" Text="标定流程" Style="{StaticResource FieldLabel}" />
-                <TextBlock Grid.Column="8"
-                           Text="标定流程"
-                           VerticalAlignment="Center"
-                           Foreground="#EDF4F9"
-                           FontWeight="SemiBold" />
-
-                <!-- Fixed workflow internals: kept for renderer and calibration state only. -->
-                <StackPanel Grid.Column="14" Visibility="Collapsed">
-                    <ComboBox x:Name="PreviewProcedureComboBox"
-                              SelectionChanged="PreviewProcedureComboBox_SelectionChanged" />
-                    <ComboBox x:Name="CalibrationProcedureComboBox"
-                              SelectionChanged="CalibrationProcedureComboBox_SelectionChanged" />
-                    <ComboBox x:Name="ImageStepComboBox"
-                              DisplayMemberPath="DisplayName"
-                              SelectionChanged="ImageStepComboBox_SelectionChanged" />
-                </StackPanel>
-
-                <Border Grid.Column="9" Width="1" Height="34" Background="#345269" />
-
-                <StackPanel Grid.Column="10"
-                            x:Name="CalibrationToolbarPanel"
-                            Orientation="Horizontal">
+                <StackPanel Grid.Column="0"
+                             x:Name="CalibrationToolbarPanel"
+                             Orientation="Horizontal"
+                             VerticalAlignment="Center">
                     <TextBlock Text="标定文件" Style="{StaticResource FieldLabel}" Margin="0,0,8,0" />
                 </StackPanel>
-                <TextBox Grid.Column="11"
-                         x:Name="CalibrationToolbarPathTextBox"
-                         Height="40"
-                         Padding="8,0"
-                         VerticalContentAlignment="Center"
-                         IsReadOnly="True"
+                <TextBox Grid.Column="1"
+                          x:Name="CalibrationToolbarPathTextBox"
+                          Height="34"
+                          Padding="8,0"
+                          VerticalAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          IsReadOnly="True"
                          Background="#0B2235"
                          Foreground="#EDF4F9"
-                         BorderBrush="#35546B"
-                         BorderThickness="1"
-                         ToolTip="当前九点标定文件" />
-                <StackPanel Grid.Column="12" Orientation="Horizontal">
+                          BorderBrush="#35546B"
+                          BorderThickness="1"
+                          ToolTip="当前应用的九点标定文件" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="ChooseCalibrationToolbarButton"
                             Content="保存位置"
-                            Tag="SaveLocation"
-                            Style="{StaticResource PrimaryButton}"
+                             Tag="SaveLocation"
+                             Style="{StaticResource PrimaryButton}"
+                             Height="34"
                             MinWidth="68"
                             Padding="8,0"
                             Margin="6,0,0,0"
@@ -369,8 +299,9 @@
                             Click="CalibrationToolbarAction_Click" />
                     <Button x:Name="ImportCalibrationToolbarButton"
                             Content="导入已有"
-                            Tag="Import"
-                            Style="{StaticResource PrimaryButton}"
+                             Tag="Import"
+                             Style="{StaticResource PrimaryButton}"
+                             Height="34"
                             MinWidth="68"
                             Padding="8,0"
                             Margin="6,0,0,0"
@@ -380,25 +311,45 @@
                             Click="CalibrationToolbarAction_Click" />
                     <Button x:Name="LoadCalibrationProfileToolbarButton"
                             Content="加载配置"
-                            Tag="LoadProfile"
-                            Style="{StaticResource PrimaryButton}"
+                             Tag="LoadProfile"
+                             Style="{StaticResource PrimaryButton}"
+                             Height="34"
                             MinWidth="68"
                             Padding="8,0"
                             Margin="6,0,0,0"
                             Background="#0B2235"
                             BorderBrush="#0D6EE8"
                             Click="CalibrationToolbarAction_Click" />
+                    <Button x:Name="SaveCalibrationProfileToolbarButton"
+                            Content="保存配置"
+                             Tag="SaveProfile"
+                             Style="{StaticResource PrimaryButton}"
+                             Height="34"
+                            MinWidth="68"
+                            Padding="8,0"
+                            Margin="6,0,0,0"
+                            Background="#0B2B24"
+                            BorderBrush="#00A965"
+                            Foreground="#1EEA86"
+                             ToolTip="保存当前九点标定和双吸嘴粗定位示教配置"
+                             Click="CalibrationToolbarAction_Click" />
                 </StackPanel>
 
-                <Border Grid.Column="13" Width="1" Height="34" Background="#345269" />
-
-                <StackPanel Grid.Column="14"
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Right">
+                <!-- 方案和流程名称仅供后台状态同步，不再占用标定界面空间。 -->
+                <StackPanel Grid.Column="3" Visibility="Collapsed">
+                    <TextBox x:Name="SolutionPathTextBox" />
+                    <Button x:Name="ChooseSolutionButton" />
+                    <TextBlock x:Name="CalibrationProcedureNameText" />
+                    <ComboBox x:Name="PreviewProcedureComboBox"
+                              SelectionChanged="PreviewProcedureComboBox_SelectionChanged" />
+                    <ComboBox x:Name="CalibrationProcedureComboBox"
+                              SelectionChanged="CalibrationProcedureComboBox_SelectionChanged" />
+                    <ComboBox x:Name="ImageStepComboBox"
+                              DisplayMemberPath="DisplayName"
+                              SelectionChanged="ImageStepComboBox_SelectionChanged" />
                     <Button x:Name="RunOnceButton"
-                            Content="采集画面1"
-                            Visibility="Collapsed"
-                            Style="{StaticResource PrimaryButton}"
+                             Content="采集画面1"
+                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
                             Background="#102A3E"
@@ -406,17 +357,15 @@
                             IsEnabled="False"
                             Click="RunOnce_Click" />
                     <Button x:Name="ContinuousRunButton"
-                            Content="实时预览"
-                            Visibility="Collapsed"
-                            Style="{StaticResource PrimaryButton}"
+                             Content="实时预览"
+                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
                             IsEnabled="False"
                             Click="ContinuousRun_Click" />
                     <Button x:Name="StopRunButton"
-                            Content="暂停预览"
-                            Visibility="Collapsed"
-                            Style="{StaticResource PrimaryButton}"
+                             Content="暂停预览"
+                             Style="{StaticResource PrimaryButton}"
                             MinWidth="76"
                             Padding="10,0"
                             Background="#102A3E"
@@ -427,7 +376,8 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="1"
+        <Border x:Name="StatusBar"
+                Grid.Row="1"
                 Margin="330,0,8,0"
                 Padding="8,0"
                 Background="#071D2F"
@@ -437,7 +387,7 @@
                 <Ellipse x:Name="StatusIndicator" Width="9" Height="9" Fill="#E0A21A" />
                 <TextBlock x:Name="StatusTextBlock"
                            Margin="8,0,0,0"
-                           Text="视觉方案尚未加载；进入标定页或主页找芯片时按需开启"
+                           Text="视觉组件准备中…"
                            Foreground="#D8E4EC"
                            FontSize="12"
                            FontWeight="SemiBold"
@@ -458,7 +408,19 @@
                     BorderBrush="#29475D"
                     BorderThickness="1"
                     CornerRadius="4">
-                <StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalFirst"
+                              CanContentScroll="False">
+                    <StackPanel>
+                    <Border Style="{StaticResource SidebarSection}">
+                        <Button x:Name="SidebarStartLivePreviewButton" Tag="StartLivePreview"
+                                Margin="0" Content="获取实时画面"
+                                Style="{StaticResource SidebarButton}"
+                                Background="#0D6EE8" BorderBrush="#2A8CFF"
+                                Click="CalibrationSidebarButton_Click" />
+                    </Border>
+
                     <Border Style="{StaticResource SidebarSection}">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
@@ -466,7 +428,10 @@
                                     <TextBlock Text="1" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="记录中心" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock x:Name="SidebarCenterTitleText"
+                                           Text="移动中心"
+                                           Style="{StaticResource SidebarTitle}"
+                                           Margin="10,0,0,0" />
                             </StackPanel>
                             <Grid Margin="26,0,0,4">
                                 <Grid.ColumnDefinitions>
@@ -480,13 +445,13 @@
                                 <TextBlock Text="轴 1 X（pulse）" Style="{StaticResource SidebarLabel}" />
                                 <Border Grid.Column="1" Height="28" Background="#0B2235"
                                         BorderBrush="#35546B" BorderThickness="1" CornerRadius="2">
-                                    <TextBlock x:Name="SidebarCenterXPulseText" Text="未记录"
+                                    <TextBlock x:Name="SidebarCenterXPulseText" Text="未配置"
                                                Foreground="#EDF4F9" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <TextBlock Grid.Row="1" Text="轴 2 Y（pulse）" Style="{StaticResource SidebarLabel}" />
                                 <Border Grid.Row="1" Grid.Column="1" Height="28" Background="#0B2235"
                                         BorderBrush="#35546B" BorderThickness="1" CornerRadius="2">
-                                    <TextBlock x:Name="SidebarCenterYPulseText" Text="未记录"
+                                    <TextBlock x:Name="SidebarCenterYPulseText" Text="未配置"
                                                Foreground="#EDF4F9" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                             </Grid>
@@ -494,7 +459,7 @@
                                        Margin="26,0,0,6" Foreground="#12D879" FontSize="12"
                                        FontWeight="SemiBold" TextAlignment="Center" />
                             <Button x:Name="SidebarRecordCenterButton" Tag="RecordCenter"
-                                    Margin="26,0,0,0" Content="记录当前中心"
+                                    Margin="26,0,0,0" Content="移动中心"
                                     Style="{StaticResource SidebarButton}"
                                     Click="CalibrationSidebarButton_Click" />
                         </StackPanel>
@@ -553,7 +518,37 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource SidebarSection}">
+                    <Border x:Name="SidebarRotationCenterSection"
+                            Style="{StaticResource SidebarSection}"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="3" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="旋转中心" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                            </StackPanel>
+                            <Button x:Name="SidebarRotationCenterButton"
+                                    Tag="CalculateRotationCenter"
+                                    Margin="26,0,0,6"
+                                    Content="计算并写入参数设置"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#6B3FD6"
+                                    BorderBrush="#8A63E8"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <TextBlock x:Name="SidebarRotationCenterStatusText"
+                                       Margin="26,0,0,0"
+                                       Text="九点标定完成后可计算"
+                                       Foreground="#AFC0CD"
+                                       FontSize="11"
+                                       LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="SidebarNozzleTeachSection" Style="{StaticResource SidebarSection}">
                         <StackPanel>
                             <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>
@@ -565,33 +560,132 @@
                                     <TextBlock Text="3" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="吸嘴对位" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                                <TextBlock Grid.Column="1" Text="粗定位示教" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
                                 <TextBlock Grid.Column="2" x:Name="SidebarNozzleTeachStepText"
-                                           Text="等待记录十字" Foreground="#12D879" FontSize="11"
+                                           Text="等待手动打点" Foreground="#12D879" FontSize="11"
                                            VerticalAlignment="Center" />
                             </Grid>
+                            <Button x:Name="SidebarLoadingXServoButton" Tag="ToggleLoadingXServo"
+                                    Margin="26,0,0,6" Content="上料X轴使能开关"
+                                    IsEnabled="False" Style="{StaticResource SidebarButton}"
+                                    Background="#102A3E" BorderBrush="#35546B"
+                                    Click="CalibrationSidebarButton_Click" />
                             <Grid Margin="26,0,0,6">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="5" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Button x:Name="SidebarRecordCameraButton" Tag="RecordCamera"
-                                        Content="1 记录十字" Style="{StaticResource SidebarButton}"
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Button x:Name="SidebarRecordNozzleDotButton" Tag="RecordNozzleDotPosition"
+                                        Content="移动下压位置" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
-                                <Button Grid.Column="2" x:Name="SidebarRecordNozzleButton" Tag="RecordNozzle"
-                                        Content="2 记录吸嘴1" Style="{StaticResource SidebarButton}"
+                                <Button Grid.Column="2" x:Name="SidebarLoadingZServoButton"
+                                        Tag="ToggleLoadingZServos" Content="上料双Z使能"
+                                        IsEnabled="False" Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E" BorderBrush="#35546B"
+                                        Click="CalibrationSidebarButton_Click" />
+                                <Button Grid.Row="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                                        x:Name="SidebarReturnCameraCenterButton"
+                                        Tag="ReturnCameraCenter" Content="回拍照位"
+                                        Style="{StaticResource SidebarButton}"
+                                        Background="#0B4CA3" BorderBrush="#0D6EE8"
+                                        Click="CalibrationSidebarButton_Click" />
+                            </Grid>
+                            <Button x:Name="SidebarRecordCameraButton" Tag="FindNozzlePoints"
+                                    Margin="26,0,0,6" Content="执行粗定位示教"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#102A3E" BorderBrush="#35546B"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <Grid Margin="26,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="SidebarManualCircleButton"
+                                        Content="Z1 三点重画"
+                                        Style="{StaticResource SidebarButton}"
+                                        Background="#6B3FD6"
+                                        BorderBrush="#8A63E8"
+                                        IsEnabled="False"
+                                        Click="ManualNozzleCircleButton_Click" />
+                                <Button Grid.Column="2"
+                                        x:Name="SidebarClearManualCircleButton"
+                                        Content="Z2 三点重画"
+                                        Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E"
+                                        BorderBrush="#35546B"
+                                        IsEnabled="False"
+                                        Click="ClearManualNozzleCirclesButton_Click" />
+                            </Grid>
+                            <TextBlock x:Name="SidebarManualCircleStatusText"
+                                       Margin="26,0,0,6"
+                                       Text="换嘴时，只在该吸嘴画面的圆边上选 3 点，再保存对应结果"
+                                       Foreground="#D5C5FF"
+                                       FontSize="11"
+                                       LineHeight="18"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap" />
+                            <Grid Margin="26,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="5" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="SidebarRecordNozzleButton" Tag="AssignPoint1Nozzle1"
+                                        Content="保存 Z1 结果" Style="{StaticResource SidebarButton}"
+                                        Background="#102A3E" BorderBrush="#35546B"
+                                        Click="CalibrationSidebarButton_Click" />
+                                <Button Grid.Column="2" x:Name="SidebarAssignPoint1Nozzle2Button" Tag="AssignPoint1Nozzle2"
+                                        Content="保存 Z2 结果" Style="{StaticResource SidebarButton}"
                                         Background="#102A3E" BorderBrush="#35546B"
                                         Click="CalibrationSidebarButton_Click" />
                             </Grid>
                             <TextBlock x:Name="SidebarNozzleStatusText"
-                                       Margin="26,0,0,0" Text="吸嘴1：未标定&#x0a;吸嘴2：未标定"
-                                       Foreground="#AFC0CD" FontSize="11" LineHeight="22" />
+                                       Margin="26,0,0,0" Text="换哪个吸嘴，就只示教该吸嘴；另一吸嘴数据保留。首次标定需分别完成两个吸嘴。"
+                                       Foreground="#AFC0CD" FontSize="11" LineHeight="19"
+                                       TextAlignment="Center" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource SidebarSection}" BorderThickness="0">
+                    <Border x:Name="SidebarLowerCameraCorrectionSection"
+                            Style="{StaticResource SidebarSection}"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
+                                    <TextBlock Text="4" Foreground="White" FontWeight="Bold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="纠偏验证" Style="{StaticResource SidebarTitle}" Margin="10,0,0,0" />
+                            </StackPanel>
+                            <Button x:Name="SidebarLowerCameraCorrectionTestButton"
+                                    Tag="RunLowerCameraCorrectionTest"
+                                    Margin="26,0,0,6"
+                                    Content="纠偏测试"
+                                    Style="{StaticResource SidebarButton}"
+                                    Background="#5B3A8C"
+                                    BorderBrush="#9067C6"
+                                    Click="CalibrationSidebarButton_Click" />
+                            <TextBlock x:Name="SidebarLowerCameraCorrectionTestStatusText"
+                                       Margin="26,0,0,0"
+                                       Text="旋转中心完成后可测试"
+                                       Foreground="#AFC0CD"
+                                       FontSize="11"
+                                       LineHeight="19"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="SidebarClickMoveSection"
+                            Style="{StaticResource SidebarSection}"
+                            BorderThickness="0">
                         <StackPanel>
                             <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>
@@ -600,10 +694,10 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Border Width="22" Height="22" Background="#0D6EE8" CornerRadius="11">
-                                    <TextBlock Text="4" Foreground="White" FontWeight="Bold"
+                                    <TextBlock x:Name="SidebarClickMoveStepText" Text="4" Foreground="White" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Grid.Column="1" Text="点击移动" Style="{StaticResource SidebarTitle}" Margin="10,0,10,0" />
+                                <TextBlock Grid.Column="1" x:Name="SidebarClickMoveTitleText" Text="点击移动" Style="{StaticResource SidebarTitle}" Margin="10,0,10,0" />
                                 <ComboBox Grid.Column="2" x:Name="SidebarClickTargetComboBox" Tag="ClickTarget"
                                           Style="{StaticResource SidebarCombo}"
                                           SelectionChanged="CalibrationSidebarSelection_Changed">
@@ -612,14 +706,6 @@
                                     <ComboBoxItem Content="吸嘴2中心对准" Tag="Nozzle2" />
                                 </ComboBox>
                             </Grid>
-                            <Button x:Name="SidebarReturnCameraCenterButton"
-                                    Tag="ReturnCameraCenter"
-                                    Margin="26,0,0,6"
-                                    Content="相机回到中心点"
-                                    Style="{StaticResource SidebarButton}"
-                                    Background="#0B4CA3"
-                                    BorderBrush="#0D6EE8"
-                                    Click="CalibrationSidebarButton_Click" />
                             <Grid Margin="26,0,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -635,32 +721,41 @@
                                         Foreground="#FF4B55" Background="#071F32" BorderBrush="#D90D16"
                                         Click="CalibrationSidebarButton_Click" />
                             </Grid>
+                            <Button x:Name="SidebarRecognizedCenterMoveButton" Tag="RecognizedCenterMove" Content="识别中心点移动"
+                                    Style="{StaticResource SidebarButton}" Margin="26,8,0,0" Visibility="Collapsed" IsEnabled="False"
+                                    ToolTip="运行找芯片流程_011_测试，让所选吸嘴对准110脚本1返回的XY坐标。108仅用于预览，仅移动第一套XY。"
+                                    Click="CalibrationSidebarButton_Click" />
                             <TextBlock x:Name="SidebarClickMoveStatusText" Margin="26,6,0,0"
                                        Text="未启用" Foreground="#AFC0CD" FontSize="11" TextAlignment="Center" />
                         </StackPanel>
                     </Border>
-                </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
 
             <Grid x:Name="RenderGrid" Grid.Column="2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="6" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
                 <Border x:Name="LiveRenderPanel" Grid.Column="0" Background="#202427" BorderBrush="#345269"
-                        BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                        BorderThickness="0" CornerRadius="3" ClipToBounds="True">
                     <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="48" />
+                            <RowDefinition x:Name="LiveRenderHeaderRow" Height="40" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Border Padding="18,0,10,0" Background="#0B263A" BorderBrush="#345269" BorderThickness="0,0,0,1">
+                        <Border x:Name="LiveRenderHeader"
+                                Padding="18,0,10,0"
+                                Background="#0B263A"
+                                BorderBrush="#345269"
+                                BorderThickness="0,0,0,1">
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#00D77B" />
-                                    <TextBlock Margin="14,0,0,0" Text="实时画面（流程1 / 图像源1）" Foreground="#F4F8FB"
+                                    <TextBlock x:Name="LiveRenderTitleText" Margin="14,0,0,0" Text="实时画面" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -679,37 +774,39 @@
                         </Border>
                         <Grid Grid.Row="1">
                             <vm:VmRenderControl x:Name="VisionRenderControl"
-                                                CoordinateInfoVisible="False"
+                                                CoordinateInfoVisible="True"
                                                 OnMouseLeftButtonDownPixelChanged="VisionRenderControl_OnMouseLeftButtonDownPixelChanged" />
-                            <local:RealtimeVisionProcessHost x:Name="RealtimePreviewHost"
-                                                           Visibility="Collapsed"
-                                                           Panel.ZIndex="10" />
                             <Grid x:Name="CenterCrosshair" IsHitTestVisible="False"
                                   Visibility="Collapsed" Panel.ZIndex="20">
                                 <Border Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#FF00E676" />
                                 <Border Height="1" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="#FF00E676" />
                             </Grid>
-                            <StackPanel x:Name="ImagePlaceholder" HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" IsHitTestVisible="False">
-                                <TextBlock Text="等待实时图像" Foreground="#D9E0E5" FontSize="20"
-                                           FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            </StackPanel>
+                            <Grid x:Name="ImagePlaceholder"
+                                  Background="#202427"
+                                  IsHitTestVisible="False"
+                                  Panel.ZIndex="30">
+                                <TextBlock x:Name="ImagePlaceholderText"
+                                           Text="等待实时图像" Foreground="#D9E0E5" FontSize="20"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Grid>
                         </Grid>
                     </Grid>
                 </Border>
 
                 <Border x:Name="CalibrationRenderPanel" Grid.Column="2" Background="#202427" BorderBrush="#345269"
-                        BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                        BorderThickness="0" CornerRadius="3" ClipToBounds="True">
                     <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="48" />
+                            <RowDefinition Height="40" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <Border Padding="18,0,10,0" Background="#0B263A" BorderBrush="#345269" BorderThickness="0,0,0,1">
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Ellipse Width="12" Height="12" Fill="#0D6EE8" />
-                                    <TextBlock Margin="14,0,0,0" Text="标定（标定流程）" Foreground="#F4F8FB"
+                                    <TextBlock x:Name="CalibrationRenderTitleText" Margin="14,0,0,0" Text="标定结果" Foreground="#F4F8FB"
                                                FontSize="16" FontWeight="SemiBold" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -727,12 +824,19 @@
                             </Grid>
                         </Border>
                         <Grid Grid.Row="1">
-                            <vm:VmRenderControl x:Name="CalibrationRenderControl" CoordinateInfoVisible="False" />
-                            <StackPanel x:Name="CalibrationImagePlaceholder" HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" IsHitTestVisible="False">
-                                <TextBlock Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"
-                                           FontWeight="SemiBold" HorizontalAlignment="Center" />
-                            </StackPanel>
+                            <vm:VmRenderControl x:Name="CalibrationRenderControl"
+                                                CoordinateInfoVisible="True"
+                                                OnMouseLeftButtonDownPixelChanged="CalibrationRenderControl_OnMouseLeftButtonDownPixelChanged" />
+                            <Grid x:Name="CalibrationImagePlaceholder"
+                                  Background="#202427"
+                                  IsHitTestVisible="False"
+                                  Panel.ZIndex="30">
+                                <TextBlock x:Name="CalibrationImagePlaceholderText"
+                                           Text="等待九点标定" Foreground="#D9E0E5" FontSize="20"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Grid>
                         </Grid>
                     </Grid>
                 </Border>

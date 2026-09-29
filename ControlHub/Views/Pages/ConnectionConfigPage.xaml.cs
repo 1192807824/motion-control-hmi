@@ -1,8 +1,10 @@
 using System.IO;
+using System.IO.Ports;
 using System.Net.Sockets;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ControlHub.Services.Devices;
@@ -13,8 +15,21 @@ namespace ControlHub.Views.Pages;
 
 public partial class ConnectionConfigPage : UserControl
 {
+    private enum ConnectionTarget
+    {
+        Feeder,
+        Tcp,
+        Serial
+    }
+
     private const int MaxConnectionLogCount = 300;
     private const int BrightnessSendDebounceMs = 150;
+    private const int VibrationStopSettleMilliseconds = 50;
+    private const int ProductionPhotoSettleMilliseconds = 200;
+    private const int ProductionHopperVibrationFrequency = 100;
+    private const int ProductionHopperVibrationAmplitude = 50;
+    private const int ProductionHopperVibrationDurationMilliseconds = 100;
+    private const int ProductionUpDownGatherDurationMilliseconds = 100;
     private const string StopVibrationCommand = "&04$";
     private const string ProtocolCommandName = "\u632f\u52a8\u76d8\u534f\u8bae";
     private const string LightOnCommand = "&07,1$";
@@ -22,19 +37,62 @@ public partial class ConnectionConfigPage : UserControl
     private const int OneKeyGatherCycleCount = 1;
     private const int LeftRightGatherPulseDurationMs = 1500;
     private const int UpDownGatherPulseDurationMs = 1500;
-    private const string LeftRightGatherParameterCommand = "&02,044,050,1,044,050,1,044,050,1,044,050,1,05$";
+    private const string LeftRightGatherParameterCommand = "&02,044,040,1,044,040,1,044,040,1,044,040,1,05$";
     private const string LeftRightGatherStartCommand = "&03,05$";
-    private const string UpDownGatherParameterCommand = "&02,044,077,1,044,077,1,044,077,1,044,077,1,06$";
+    private const string UpDownGatherParameterCommand = "&02,044,060,1,044,060,1,044,060,1,044,060,1,06$";
     private const string UpDownGatherStartCommand = "&03,06$";
+    private static readonly IReadOnlyDictionary<string, string> VibrationDirectionNames =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["00"] = "左上移动",
+            ["01"] = "向上移动",
+            ["02"] = "右上移动",
+            ["03"] = "向左移动",
+            ["04"] = "震散",
+            ["05"] = "左右聚拢",
+            ["06"] = "上下聚拢",
+            ["07"] = "向右移动",
+            ["08"] = "左下移动",
+            ["09"] = "向下移动",
+            ["10"] = "右下移动"
+        };
     private readonly VibrationFeederSettingsStore _settingsStore = new();
     private readonly VibrationFeederTcpClient _tcpClient = new();
+    private readonly TcpConnectionSettingsStore _tcpSettingsStore = new();
+    private readonly E4981ATcpClient _generalTcpClient = new();
+    private int? _lastSerialFaultStatus;
+    private string? _lastTcpFaultStatus;
+    private readonly SerialConnectionSettingsStore _serialSettingsStore = new();
+    private readonly SerialConnectionClient _serialClient = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly SemaphoreSlim _protocolWriteLock = new(1, 1);
     private readonly DispatcherTimer _brightnessSendTimer;
     private bool _closed;
+    private bool _feederClosing;
+    private int? _lastHopperVibrationFrequency;
+    private bool _hopperRequiresStop;
     private bool _connecting;
+    private bool _tcpConnecting;
+    private bool _meterOperationRunning;
+    private bool _e4981ASettingsApplied;
+    private string? _e4981AAppliedSetupSignature;
+    private TcpConnectionSettings? _e4981AAppliedSettings;
+    private bool _serialConnecting;
+    private bool _serialMeterOperationRunning;
+    private readonly SM7110Session _sm7110Session = new();
     private bool _loaded;
     private bool _vibrationSequenceRunning;
+    private bool _vibrationFeederLightEnabled;
+    private string? _productionVibrationSetupSignature;
+    private int? _appliedFeederBrightness;
+    private CancellationTokenSource? _vibrationOperationCancellation;
+    private ConnectionTarget _selectedTarget = ConnectionTarget.Feeder;
+    private Func<bool>? _isHopperManualControlBlocked;
+
+    public void AttachHopperManualControlInterlock(Func<bool> isBlocked)
+    {
+        _isHopperManualControlBlocked = isBlocked ?? throw new ArgumentNullException(nameof(isBlocked));
+    }
 
     public ConnectionConfigPage()
     {
@@ -46,11 +104,186 @@ public partial class ConnectionConfigPage : UserControl
         InitializeComponent();
         _tcpClient.DataReceived += TcpClient_DataReceived;
         _tcpClient.ConnectionClosed += TcpClient_ConnectionClosed;
+        _generalTcpClient.ConnectionClosed += GeneralTcpClient_ConnectionClosed;
+        _serialClient.ResponseReceived += SerialClient_ResponseReceived;
+        _serialClient.ConnectionClosed += SerialClient_ConnectionClosed;
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
 
     private VibrationFeederSettings? Settings => ViewModel?.FeederSettings;
+
+    private TcpConnectionSettings? TcpSettings => ViewModel?.TcpConnectionSettings;
+
+    private SerialConnectionSettings? SerialSettings => ViewModel?.SerialConnectionSettings;
+
+    public string SM7110MeasurementMode => SerialSettings?.MeasurementMode ?? string.Empty;
+
+    private Func<SM7110TimedTestSettings>? _readSM7110TimedTestSettings;
+    private CancellationTokenSource? _sm7110MeasurementCancellation;
+
+    public void AttachSM7110RangeEditor(
+        FrameworkElement editor, TextBox lowerLimit, TextBox upperLimit, ComboBox mode,
+        TextBox maximumTime, Func<SM7110TimedTestSettings> readTimedTestSettings)
+    {
+        lowerLimit.Style = upperLimit.Style = (Style)FindResource("ConfigInput");
+        maximumTime.Style = (Style)FindResource("ConfigInput");
+        _readSM7110TimedTestSettings = readTimedTestSettings;
+        mode.Style = (Style)FindResource("ConfigComboBox");
+        SM7110AcceptanceRangeHost.Content = editor;
+        editor.Visibility = Visibility.Visible;
+    }
+
+    public bool IsE4981AConnected => _generalTcpClient.IsConnected;
+
+    public bool IsSM7110Connected => _serialClient.IsConnected;
+
+    public bool IsVibrationFeederLightEnabled =>
+        _tcpClient.IsConnected && _vibrationFeederLightEnabled;
+
+    public async Task<E4981AMeasurementResult> MeasureE4981AAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_closed)
+        {
+            throw new ObjectDisposedException(nameof(ConnectionConfigPage));
+        }
+        if (!_generalTcpClient.IsConnected)
+        {
+            throw new InvalidOperationException("E4981A未连接，请先在连接配置页连接仪表。");
+        }
+        if (_meterOperationRunning)
+        {
+            throw new InvalidOperationException("E4981A正在处理上一条命令。");
+        }
+
+        _meterOperationRunning = true;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await RunE4981AMeasurementCycleAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AlarmHistory.Record("E4981A", "E4981A-MEASURE", exception.Message);
+            throw;
+        }
+        finally
+        {
+            _meterOperationRunning = false;
+        }
+    }
+
+    public async Task<SM7110MeasurementResult> MeasureSM7110Async(
+        CancellationToken cancellationToken, SM7110TimedTestSettings? timedTest = null,
+        Action<SM7110MeasurementResult>? progress = null)
+    {
+        if (_closed)
+        {
+            throw new ObjectDisposedException(nameof(ConnectionConfigPage));
+        }
+        if (!_serialClient.IsConnected)
+        {
+            throw new InvalidOperationException("SM7110未连接，请先在连接配置页连接仪表。");
+        }
+        if (_serialMeterOperationRunning)
+        {
+            throw new InvalidOperationException("SM7110正在处理上一条命令。");
+        }
+
+        var settings = SerialSettings
+            ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        if (timedTest is not null)
+        {
+            timedTest.Validate();
+            if (!string.Equals(settings.MeasurementMode, "R", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("持续加电达标测试需要选择电阻R模式。");
+        }
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeCancellation.Token);
+        _sm7110MeasurementCancellation = operationCancellation;
+        cancellationToken = operationCancellation.Token;
+        _serialMeterOperationRunning = true;
+        try
+        {
+            if (_sm7110Session.NeedsResponseSync)
+            {
+                // 上次总时限/停止可能中断了查询；用有筛选条件的IDN屏障排空旧响应，避免旧值判定新产品。
+                AddSerialLog("同步上次中断的测量响应，保留已下发参数");
+                var identity = await _sm7110Session.SynchronizeResponseAsync(
+                    token => _serialClient.QueryAsync("*IDN?", SM7110Protocol.DecodeNewLine(settings.NewLine),
+                        settings.CommandTimeoutMilliseconds, token, SM7110Protocol.IsSupportedIdentity),
+                    cancellationToken);
+                if (identity is not null) UpdateSerialMeterIdentity(identity);
+            }
+            await EnsureSM7110SettingsAppliedAsync(cancellationToken);
+            if (timedTest is not null)
+            {
+                var result = await SM7110TimedTest.RunAsync(timedTest,
+                    (command, token) => SendSerialMeterCommandAsync(command, token, command != ":STOP"),
+                    (command, token) => _sm7110Session.QueryMeasurementAsync(command, QuerySerialMeterAsync, token),
+                    reading =>
+                    {
+                        UpdateSerialMeterResult(reading);
+                        SerialMeterResultStatusText.Text = reading.IsSuccessful && reading.Value >= timedTest.MinimumResistanceOhms
+                            ? "OK · 已达标" : "持续加电 · 等待达标";
+                        SerialMeterResultStatusText.Foreground = new SolidColorBrush(
+                            reading.IsSuccessful && reading.Value >= timedTest.MinimumResistanceOhms
+                                ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68));
+                        progress?.Invoke(reading);
+                    }, cancellationToken);
+                UpdateSerialMeterResult(result);
+                SerialMeterResultStatusText.Text = result.TimedOut ? "NG · 超时未达标" : "OK · 已达标";
+                SerialMeterResultStatusText.Foreground = new SolidColorBrush(result.TimedOut
+                    ? Color.FromRgb(242, 122, 128) : Color.FromRgb(73, 209, 125));
+                AddSerialLog($"持续测试结束：{SerialMeterResultStatusText.Text}，耗时{result.TestElapsedSeconds:0.###}秒，已发送停止输出/放电命令");
+                return result;
+            }
+            try
+            {
+                await SendSerialMeterCommandAsync(":STARt", cancellationToken);
+                var response = await _sm7110Session.QueryMeasurementAsync(
+                    "*TRG;*WAI;:MEASure:RESult? 3",
+                    QuerySerialMeterAsync,
+                    cancellationToken);
+                var result = SM7110Protocol.ParseMeasurementResult(
+                    response,
+                    settings.MeasurementMode);
+                UpdateSerialMeterResult(result);
+                return result;
+            }
+            finally
+            {
+                try
+                {
+                    await SendSerialMeterCommandAsync(":STOP", CancellationToken.None, useLifetimeCancellation: false);
+                    AddSerialLog("自动测试结束，已停止输出并进入放电状态");
+                }
+                catch (Exception ex) when (ex is IOException or TimeoutException or
+                                           InvalidOperationException or ObjectDisposedException)
+                {
+                    throw new SM7110StopOutputException("SM7110停止输出/放电命令失败，禁止机械复测或继续流转。", ex);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AlarmHistory.Record("SM7110", "SM7110-MEASURE", exception.Message);
+            throw;
+        }
+        finally
+        {
+            _sm7110MeasurementCancellation = null;
+            _serialMeterOperationRunning = false;
+        }
+    }
+
+    public async Task<bool> PrepareFeederShutdownAsync()
+    {
+        _feederClosing = true;
+        _vibrationOperationCancellation?.Cancel();
+        return !_tcpClient.IsConnected ||
+            await SendAsciiProtocolCommandAsync(StopVibrationCommand, "退出前全部停止（振动盘和料仓）", stopHopper: true);
+    }
 
     public void Shutdown()
     {
@@ -63,27 +296,487 @@ public partial class ConnectionConfigPage : UserControl
         _brightnessSendTimer.Stop();
         _brightnessSendTimer.Tick -= BrightnessSendTimer_Tick;
         SaveSettings(writeLog: false);
+        SaveTcpSettings(writeLog: false);
+        SaveSerialSettings(writeLog: false);
+        _vibrationOperationCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
         _tcpClient.DataReceived -= TcpClient_DataReceived;
         _tcpClient.ConnectionClosed -= TcpClient_ConnectionClosed;
+        _generalTcpClient.ConnectionClosed -= GeneralTcpClient_ConnectionClosed;
+        _serialClient.ResponseReceived -= SerialClient_ResponseReceived;
+        _serialClient.ConnectionClosed -= SerialClient_ConnectionClosed;
         _tcpClient.Dispose();
+        _generalTcpClient.Dispose();
+        _serialClient.Dispose();
         _lifetimeCancellation.Dispose();
     }
 
-    private void ConnectionConfigPage_Loaded(object sender, RoutedEventArgs e)
+    private async void ConnectionConfigPage_Loaded(object sender, RoutedEventArgs e)
     {
         if (_loaded)
         {
             return;
         }
 
-        AddLog("\u8fde\u63a5\u914d\u7f6e\u9875\u5df2\u52a0\u8f7d");
         _loaded = true;
+        AddLog("\u8fde\u63a5\u914d\u7f6e\u9875\u5df2\u52a0\u8f7d");
+        AddTcpLog("E4981A连接配置已加载");
+        AddSerialLog("SM7110串口连接配置已加载");
+        RefreshSerialOptionLists();
+        RefreshSerialPorts();
+        await AutoConnectAsync();
     }
 
     private void ConnectionConfigPage_Unloaded(object sender, RoutedEventArgs e)
     {
         Shutdown();
+    }
+
+    private void FeederConnectionItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        SelectConnectionTarget(ConnectionTarget.Feeder);
+    }
+
+    private void TcpConnectionItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        SelectConnectionTarget(ConnectionTarget.Tcp);
+    }
+
+    private void SerialConnectionItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        RefreshSerialPorts();
+        SelectConnectionTarget(ConnectionTarget.Serial);
+    }
+
+    private void SerialPortComboBox_DropDownOpened(object sender, EventArgs e)
+    {
+        RefreshSerialPorts();
+    }
+
+    private void RefreshSerialPorts()
+    {
+        var configuredPort = SerialSettings?.PortName?.Trim();
+        var ports = SerialPort.GetPortNames()
+            .OrderBy(portName => portName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // 保留尚未接入的已保存端口，避免刷新列表时清空用户配置。
+        if (!string.IsNullOrWhiteSpace(configuredPort) &&
+            !ports.Contains(configuredPort, StringComparer.OrdinalIgnoreCase))
+        {
+            ports.Insert(0, configuredPort);
+        }
+
+        SerialPortComboBox.ItemsSource = ports;
+        if (!string.IsNullOrWhiteSpace(configuredPort))
+        {
+            SerialPortComboBox.SelectedItem = ports.FirstOrDefault(
+                portName => string.Equals(portName, configuredPort, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private void RefreshSerialOptionLists()
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        SerialBaudRateComboBox.ItemsSource = AddConfiguredOption(
+            [300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600],
+            settings.BaudRate);
+        SerialDataBitsComboBox.ItemsSource = AddConfiguredOption([5, 6, 7, 8], settings.DataBits);
+        SerialParityComboBox.ItemsSource = AddConfiguredOption(
+            ["None", "Odd", "Even", "Mark", "Space"],
+            settings.Parity);
+        SerialStopBitsComboBox.ItemsSource = AddConfiguredOption(
+            ["One", "OnePointFive", "Two"],
+            settings.StopBits);
+        SerialNewLineComboBox.ItemsSource = AddConfiguredOption(
+            ["\\r\\n", "\\r", "\\n", "无"],
+            settings.NewLine);
+    }
+
+    private static IReadOnlyList<T> AddConfiguredOption<T>(IEnumerable<T> standardOptions, T configuredOption)
+    {
+        var options = standardOptions.Distinct().ToList();
+        if (configuredOption is not null && !options.Contains(configuredOption))
+        {
+            options.Add(configuredOption);
+        }
+        return options;
+    }
+
+    private void SelectConnectionTarget(ConnectionTarget target)
+    {
+        _selectedTarget = target;
+
+        FeederConnectionItem.Style = (Style)FindResource(
+            target == ConnectionTarget.Feeder ? "ActiveConnectionItem" : "ConnectionItem");
+        TcpConnectionItem.Style = (Style)FindResource(
+            target == ConnectionTarget.Tcp ? "ActiveConnectionItem" : "ConnectionItem");
+        SerialConnectionItem.Style = (Style)FindResource(
+            target == ConnectionTarget.Serial ? "ActiveConnectionItem" : "ConnectionItem");
+
+        FeederDetailPanel.Visibility = target == ConnectionTarget.Feeder
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        TcpDetailPanel.Visibility = target == ConnectionTarget.Tcp
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        SerialDetailPanel.Visibility = target == ConnectionTarget.Serial
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        RefreshActiveStatus();
+    }
+
+    private void RefreshActiveStatus()
+    {
+        if (ViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        ActiveConnectionStatusText.Text = _selectedTarget switch
+        {
+            ConnectionTarget.Tcp => viewModel.TcpConnectionStatusText,
+            ConnectionTarget.Serial => viewModel.SerialConnectionStatusText,
+            _ => viewModel.FeederConnectionStatusText
+        };
+    }
+
+    private void SaveTcpSettings_Click(object sender, RoutedEventArgs e)
+    {
+        SaveTcpSettings(writeLog: true);
+    }
+
+    private async void ConnectTcp_Click(object sender, RoutedEventArgs e)
+    {
+        if (TcpSettings is not { } settings)
+        {
+            return;
+        }
+
+        if (_tcpConnecting)
+        {
+            AddTcpLog("E4981A正在连接，请稍候");
+            return;
+        }
+
+        SaveTcpSettings(writeLog: false);
+        await ConnectTcpAsync(settings);
+    }
+
+    private async Task ConnectTcpAsync(TcpConnectionSettings settings)
+    {
+        _tcpConnecting = true;
+        try
+        {
+            await _generalTcpClient.ConnectAsync(settings, _lifetimeCancellation.Token);
+            var identity = await QueryMeterAsync("*IDN?");
+            if (!identity.Contains("E4981A", StringComparison.OrdinalIgnoreCase))
+            {
+                _generalTcpClient.Close();
+                throw new InvalidDataException($"已连接的设备不是E4981A：{identity}");
+            }
+            UpdateMeterIdentity(identity);
+            _e4981ASettingsApplied = false;
+            settings.LastSuccessfulConnectionSignature = CreateTcpConnectionSignature(settings.Host, settings.Port);
+            _tcpSettingsStore.Save(settings);
+            SetTcpStatus($"E4981A已连接：{settings.Host}:{settings.Port}");
+            AddTcpLog($"E4981A身份确认成功：{identity}");
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ArgumentException)
+        {
+            SetTcpStatus("连接失败");
+            AddTcpLog($"连接失败：{ex.Message}", isAlarm: true);
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (OperationCanceledException)
+        {
+            SetTcpStatus("未连接");
+            AddTcpLog("E4981A连接已取消");
+        }
+        finally
+        {
+            _tcpConnecting = false;
+        }
+    }
+
+    private void DisconnectTcp_Click(object sender, RoutedEventArgs e)
+    {
+        _generalTcpClient.Close();
+        _e4981ASettingsApplied = false;
+        SetTcpStatus("未连接");
+        AddTcpLog("已断开E4981A连接");
+    }
+
+    private async void SendTcpMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if (TcpSettings is not { } settings)
+        {
+            return;
+        }
+
+        SaveTcpSettings(writeLog: false);
+        if (string.IsNullOrWhiteSpace(settings.ManualSendText))
+        {
+            AddTcpLog("发送失败：内容为空", isAlarm: true);
+            return;
+        }
+        if (!_generalTcpClient.IsConnected)
+        {
+            AddTcpLog("发送失败：请先建立 TCP 连接", isAlarm: true);
+            return;
+        }
+
+        await RunMeterOperationAsync("手动发送", async () =>
+        {
+            var command = settings.ManualSendText.Trim();
+            // 手动SCPI可能改变AVG/触发模式；下一次正式测试必须重新同步配置。
+            _e4981ASettingsApplied = false;
+            if (E4981AProtocol.ExpectsResponse(command))
+            {
+                var response = await QueryMeterAsync(command);
+                if (string.Equals(command, "*IDN?", StringComparison.OrdinalIgnoreCase))
+                {
+                    UpdateMeterIdentity(response);
+                }
+                else if (string.Equals(command, "*TRG", StringComparison.OrdinalIgnoreCase))
+                {
+                    UpdateMeterResult(E4981AProtocol.ParseMeasurement(response));
+                }
+            }
+            else
+            {
+                await SendMeterCommandAsync(command);
+            }
+        });
+    }
+
+    private async void IdentifyMeter_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMeterOperationAsync("读取仪表型号", async () =>
+        {
+            var identity = await QueryMeterAsync("*IDN?");
+            UpdateMeterIdentity(identity);
+        });
+    }
+
+    private async void ApplyMeterSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (TcpSettings is not { } settings)
+        {
+            return;
+        }
+
+        CommitInputBindings(this);
+        SaveTcpSettings(writeLog: false);
+        await RunMeterOperationAsync("下发测试参数", async () =>
+        {
+            _e4981ASettingsApplied = false;
+            await EnsureE4981ASettingsAppliedAsync(CancellationToken.None);
+        });
+    }
+
+    private async void TriggerMeterTest_Click(object sender, RoutedEventArgs e)
+    {
+        CommitInputBindings(this);
+        await RunMeterOperationAsync("单次测试", async () =>
+        {
+            await RunE4981AMeasurementCycleAsync(CancellationToken.None);
+        });
+    }
+
+    private async void ReadMeterError_Click(object sender, RoutedEventArgs e)
+    {
+        await RunMeterOperationAsync("读取仪表错误", async () =>
+        {
+            var response = await QueryMeterAsync("SYST:ERR?");
+            MeterErrorText.Text = response;
+        });
+    }
+
+    private void ClearTcpLog_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel?.TcpConnectionLogs.Clear();
+    }
+
+    private void SaveSerialSettings_Click(object sender, RoutedEventArgs e)
+    {
+        SaveSerialSettings(writeLog: true);
+    }
+
+    private async void ConnectSerial_Click(object sender, RoutedEventArgs e)
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        SaveSerialSettings(writeLog: false);
+        await ConnectSerialAsync(settings);
+    }
+
+    private async Task ConnectSerialAsync(SerialConnectionSettings settings)
+    {
+        if (_serialConnecting)
+        {
+            AddSerialLog("SM7110正在连接，请稍候");
+            return;
+        }
+
+        _serialConnecting = true;
+        try
+        {
+            SM7110Protocol.ValidateSettings(settings);
+            _sm7110Session.ResetConnection();
+            _serialClient.Connect(settings);
+            AddSerialLog($"串口已打开 {settings.PortName}，{settings.BaudRate} bps，正在识别仪表");
+            var identity = await QuerySerialMeterAsync("*IDN?");
+            if (!SM7110Protocol.IsSupportedIdentity(identity))
+            {
+                _serialClient.Close();
+                throw new InvalidDataException($"已连接的设备不是SM7110/SM7120：{identity}");
+            }
+
+            UpdateSerialMeterIdentity(identity);
+            await EnsureSM7110SettingsAppliedAsync(CancellationToken.None);
+            settings.LastSuccessfulConnectionSignature = CreateSerialConnectionSignature(settings);
+            _serialSettingsStore.Save(settings);
+            SetSerialStatus($"SM7110已连接：{settings.PortName}");
+            AddSerialLog($"SM7110身份确认成功：{identity}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or
+                                   InvalidOperationException or ArgumentException or ObjectDisposedException)
+        {
+            _serialClient.Close();
+            SetSerialStatus("连接失败");
+            AddSerialLog($"连接失败：{ex.Message}", isAlarm: true);
+        }
+        finally
+        {
+            _serialConnecting = false;
+        }
+    }
+
+    private void DisconnectSerial_Click(object sender, RoutedEventArgs e)
+    {
+        _serialClient.Close();
+        _sm7110Session.ResetConnection();
+        SetSerialStatus("未连接");
+        AddSerialLog("已断开SM7110串口连接");
+    }
+
+    private async void SendSerialMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        SaveSerialSettings(writeLog: false);
+        if (string.IsNullOrWhiteSpace(settings.ManualSendText))
+        {
+            AddSerialLog("发送失败：内容为空", isAlarm: true);
+            return;
+        }
+        if (!_serialClient.IsConnected)
+        {
+            AddSerialLog("发送失败：请先建立串口连接", isAlarm: true);
+            return;
+        }
+
+        var command = settings.ManualSendText.Trim();
+        await RunSerialMeterOperationAsync("手动命令", async () =>
+        {
+            if (!settings.AppendNewLine)
+            {
+                throw new InvalidOperationException("SM7110命令必须追加结束符。");
+            }
+
+            if (SM7110Protocol.ExpectsResponse(command))
+            {
+                var response = await QuerySerialMeterAsync(command);
+                if (string.Equals(command, "*IDN?", StringComparison.OrdinalIgnoreCase))
+                {
+                    UpdateSerialMeterIdentity(response);
+                }
+            }
+            else
+            {
+                await SendSerialMeterCommandAsync(command);
+            }
+        });
+    }
+
+    private async void ApplySerialMeterSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        CommitInputBindings(this);
+        SaveSerialSettings(writeLog: false);
+        await RunSerialMeterOperationAsync("下发测试参数", async () =>
+        {
+            _sm7110Session.InvalidateSettings();
+            await EnsureSM7110SettingsAppliedAsync(CancellationToken.None);
+        });
+    }
+
+    private async void TriggerSerialMeterTest_Click(object sender, RoutedEventArgs e)
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        CommitInputBindings(this);
+        SaveSerialSettings(writeLog: false);
+        try
+        {
+            var timedTest = settings.MeasurementMode == "R"
+                ? _readSM7110TimedTestSettings?.Invoke()
+                    ?? throw new ArgumentException("请先配置SM7110达标门限和最长测试时间。")
+                : null;
+            await MeasureSM7110Async(CancellationToken.None, timedTest);
+        }
+        catch (OperationCanceledException)
+        {
+            SerialMeterResultStatusText.Text = "测试已停止";
+        }
+        catch (Exception exception)
+        {
+            AddSerialLog($"测试失败：{exception.Message}", isAlarm: true);
+            SerialMeterResultStatusText.Text = exception.Message;
+            SerialMeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        }
+    }
+
+    private async void StopSerialMeter_Click(object sender, RoutedEventArgs e)
+    {
+        if (_sm7110MeasurementCancellation is { } cancellation)
+        {
+            cancellation.Cancel();
+            AddSerialLog("已请求停止测试，正在停止输出并放电");
+            return;
+        }
+        await RunSerialMeterOperationAsync("停止并放电", async () =>
+        {
+            await SendSerialMeterCommandAsync(":STOP");
+            SerialMeterResultStatusText.Text = "已停止并放电";
+            SerialMeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(98, 181, 255));
+        });
+    }
+
+    private void ClearSerialLog_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel?.SerialConnectionLogs.Clear();
     }
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
@@ -105,36 +798,46 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         SaveSettings(writeLog: false);
+        await ConnectFeederAsync(settings);
+    }
+
+    private async Task ConnectFeederAsync(VibrationFeederSettings settings)
+    {
         _connecting = true;
+        _productionVibrationSetupSignature = null;
+        _appliedFeederBrightness = null;
 
         try
         {
             await _tcpClient.ConnectAsync(settings, _lifetimeCancellation.Token);
-            if (ViewModel is { } viewModel)
+            if (!await EnsureProductionVibrationSettingsAppliedAsync(
+                    settings,
+                    _lifetimeCancellation.Token) ||
+                !await EnsureFeederBrightnessAppliedAsync(
+                    settings,
+                    "连接初始化光源亮度"))
             {
-                viewModel.FeederConnectionStatusText = $"\u5df2\u8fde\u63a5\uff1a{settings.Host}:{settings.Port}";
+                _tcpClient.Close();
+                throw new InvalidOperationException("振动盘生产参数初始化失败。");
             }
+            settings.LastSuccessfulConnectionSignature = CreateTcpConnectionSignature(settings.Host, settings.Port);
+            _settingsStore.Save(settings);
+            SetFeederStatus($"\u5df2\u8fde\u63a5\uff1a{settings.Host}:{settings.Port}");
 
             AddLog($"TCP \u5df2\u8fde\u63a5 {settings.Host}:{settings.Port}");
         }
         catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ArgumentException)
         {
-            if (ViewModel is { } viewModel)
-            {
-                viewModel.FeederConnectionStatusText = "\u8fde\u63a5\u5931\u8d25";
-            }
+            SetFeederStatus("\u8fde\u63a5\u5931\u8d25");
 
-            AddLog($"\u8fde\u63a5\u5931\u8d25\uff1a{ex.Message}");
+            AddLog($"\u8fde\u63a5\u5931\u8d25\uff1a{ex.Message}", isAlarm: true);
         }
         catch (OperationCanceledException) when (_closed)
         {
         }
         catch (OperationCanceledException)
         {
-            if (ViewModel is { } viewModel)
-            {
-                viewModel.FeederConnectionStatusText = "\u672a\u8fde\u63a5";
-            }
+            SetFeederStatus("\u672a\u8fde\u63a5");
 
             AddLog("TCP \u8fde\u63a5\u5df2\u53d6\u6d88");
         }
@@ -144,14 +847,100 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private void DisconnectFeeder_Click(object sender, RoutedEventArgs e)
+    private async Task AutoConnectAsync()
     {
+        if (SerialSettings is { } serialSettings &&
+            HasSuccessfulSerialConnection(serialSettings))
+        {
+            AddSerialLog("程序启动，正在自动连接SM7110");
+        }
+        else
+        {
+            AddSerialLog("未自动连接：当前串口配置尚未成功连接过");
+        }
+
+        var connectionTasks = new List<Task>(3);
+        if (SerialSettings is { } autoSerialSettings && HasSuccessfulSerialConnection(autoSerialSettings))
+        {
+            connectionTasks.Add(ConnectSerialAsync(autoSerialSettings));
+        }
+        if (Settings is { } feederSettings &&
+            HasSuccessfulTcpConnection(
+                feederSettings.LastSuccessfulConnectionSignature,
+                feederSettings.Host,
+                feederSettings.Port))
+        {
+            AddLog("程序启动，正在自动连接振动盘 TCP");
+            connectionTasks.Add(ConnectFeederAsync(feederSettings));
+        }
+        else
+        {
+            AddLog("未自动连接：当前振动盘配置尚未成功连接过");
+        }
+
+        if (TcpSettings is { } tcpSettings &&
+            HasSuccessfulTcpConnection(
+                tcpSettings.LastSuccessfulConnectionSignature,
+                tcpSettings.Host,
+                tcpSettings.Port))
+        {
+            AddTcpLog("程序启动，正在自动连接E4981A");
+            connectionTasks.Add(ConnectTcpAsync(tcpSettings));
+        }
+        else
+        {
+            AddTcpLog("未自动连接：当前E4981A配置尚未成功连接过");
+        }
+
+        await Task.WhenAll(connectionTasks);
+    }
+
+    private static bool HasSuccessfulTcpConnection(string? successfulSignature, string? host, int port)
+    {
+        return string.Equals(
+            successfulSignature,
+            CreateTcpConnectionSignature(host, port),
+            StringComparison.Ordinal);
+    }
+
+    private static bool HasSuccessfulSerialConnection(SerialConnectionSettings settings)
+    {
+        return string.Equals(
+            settings.LastSuccessfulConnectionSignature,
+            CreateSerialConnectionSignature(settings),
+            StringComparison.Ordinal);
+    }
+
+    private static string CreateTcpConnectionSignature(string? host, int port)
+    {
+        return $"{host?.Trim().ToUpperInvariant()}\n{port}";
+    }
+
+    private static string CreateSerialConnectionSignature(SerialConnectionSettings settings)
+    {
+        return string.Join(
+            '\n',
+            settings.PortName?.Trim().ToUpperInvariant(),
+            settings.BaudRate,
+            settings.DataBits,
+            settings.Parity?.Trim().ToUpperInvariant(),
+            settings.StopBits?.Trim().ToUpperInvariant());
+    }
+
+    private async void DisconnectFeeder_Click(object sender, RoutedEventArgs e)
+    {
+        _vibrationOperationCancellation?.Cancel();
+        if (_tcpClient.IsConnected)
+        {
+            if (!await SendAsciiProtocolCommandAsync(StopVibrationCommand, "断开前全部停止（振动盘和料仓）", stopHopper: true))
+            {
+                AddLog("停止指令发送失败，保留连接，请确认设备状态后重试", isAlarm: true);
+                return;
+            }
+        }
         _tcpClient.Close();
 
-        if (ViewModel is { } viewModel)
-        {
-            viewModel.FeederConnectionStatusText = "\u672a\u8fde\u63a5";
-        }
+        SetFeederStatus("\u672a\u8fde\u63a5");
 
         AddLog("\u5df2\u65ad\u5f00\u9707\u52a8\u76d8 TCP \u8fde\u63a5");
     }
@@ -167,13 +956,13 @@ public partial class ConnectionConfigPage : UserControl
 
         if (string.IsNullOrWhiteSpace(settings.ManualSendText))
         {
-            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u5185\u5bb9\u4e3a\u7a7a");
+            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u5185\u5bb9\u4e3a\u7a7a", isAlarm: true);
             return;
         }
 
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u53d1\u9001\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return;
         }
 
@@ -185,12 +974,9 @@ public partial class ConnectionConfigPage : UserControl
         }
         catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or FormatException or InvalidOperationException or ObjectDisposedException)
         {
-            if (ViewModel is { } viewModel)
-            {
-                viewModel.FeederConnectionStatusText = "\u901a\u8baf\u5f02\u5e38";
-            }
+            SetFeederStatus("\u901a\u8baf\u5f02\u5e38");
 
-            AddLog($"\u53d1\u9001\u5931\u8d25\uff1a{ex.Message}");
+            AddLog($"\u53d1\u9001\u5931\u8d25\uff1a{ex.Message}", isAlarm: true);
         }
     }
 
@@ -198,73 +984,551 @@ public partial class ConnectionConfigPage : UserControl
     {
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return;
         }
 
+        _vibrationOperationCancellation?.Cancel();
+        await SendAsciiProtocolCommandAsync(StopVibrationCommand, "手动全部停止（振动盘和料仓）", stopHopper: true);
+    }
+
+    private async void HopperVibration_Click(object sender, RoutedEventArgs e)
+    {
+        await RunHopperVibrationAsync(_lifetimeCancellation.Token);
+    }
+
+    private async Task<bool> RunHopperVibrationAsync(CancellationToken cancellationToken)
+    {
+        if (_closed || _feederClosing || !_tcpClient.IsConnected)
+        {
+            AddLog("料仓振动失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+        if (_isHopperManualControlBlocked?.Invoke() == true)
+        {
+            AddLog("料仓振动未执行：请先结束生产、收料或复位操作");
+            return false;
+        }
+        if (_vibrationSequenceRunning)
+        {
+            AddLog("料仓振动未执行：当前振动尚未结束，可先点“全部停止”");
+            return false;
+        }
+        if (_hopperRequiresStop)
+        {
+            AddLog("料仓振动未执行：上次停振指令未完整发送，请先点“全部停止”", isAlarm: true);
+            return false;
+        }
+        if (Settings is not { } settings)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(HopperFrequencyTextBox.Text, out var frequency) || frequency is < 1 or > 999 ||
+            !int.TryParse(HopperAmplitudeTextBox.Text, out var amplitude) || amplitude is < 0 or > 99 ||
+            !int.TryParse(HopperDurationTextBox.Text, out var durationMs) || durationMs is < 100 or > 30000)
+        {
+            AddLog("料仓振动未执行：请输入整数，频率 1–999、振幅 0–99%、时间 100–30000 ms", isAlarm: true);
+            return false;
+        }
+        settings.HopperVibrationFrequency = frequency;
+        settings.HopperVibrationAmplitude = amplitude;
+        settings.HopperVibrationDurationMilliseconds = durationMs;
         try
         {
-            var payload = Encoding.ASCII.GetBytes(StopVibrationCommand);
-            await _tcpClient.WriteAsync(payload);
-            AddLog($"TX [ASCII]  {StopVibrationCommand}  \u505c\u6b62\u9707\u52a8");
+            _settingsStore.Save(settings);
         }
-        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            if (ViewModel is { } viewModel)
+            AddLog($"料仓参数保存失败，未启动振动：{exception.Message}", isAlarm: true);
+            return false;
+        }
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+        HopperStartButton.IsEnabled = false;
+        try
+        {
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            AddLog($"料仓振动：频率 {frequency}，振幅 {amplitude}%，持续 {durationMs} ms");
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "料仓切换正常模式"))
             {
-                viewModel.FeederConnectionStatusText = "\u901a\u8baf\u5f02\u5e38";
+                return false;
+            }
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            _lastHopperVibrationFrequency = frequency;
+            _hopperRequiresStop = true;
+            var stopped = await RunVibrationPulseAsync(
+                null,
+                FormattableString.Invariant($"&13,{amplitude:00},{frequency:000}$"),
+                durationMs,
+                "料仓振动",
+                operationCancellation.Token);
+            if (stopped)
+            {
+                AddLog("料仓定时已到，已发送振幅归零和振动盘停止指令");
+            }
+            return stopped;
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            AddLog("料仓振动已取消");
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+            _vibrationSequenceRunning = false;
+            HopperStartButton.IsEnabled = true;
+        }
+    }
+
+    private async void DirectionalVibration_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string mode } ||
+            !VibrationDirectionNames.TryGetValue(mode, out var directionName))
+        {
+            AddLog("方向震动失败：未知的方向模式", isAlarm: true);
+            return;
+        }
+
+        await RunDirectionalVibrationAsync(mode, directionName, _lifetimeCancellation.Token);
+    }
+
+    private async Task<bool> RunDirectionalVibrationAsync(
+        string mode,
+        string directionName,
+        CancellationToken cancellationToken)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog($"{directionName}失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+
+        if (_vibrationSequenceRunning)
+        {
+            AddLog($"{directionName}未执行：当前震动尚未结束，可先点“全部停止”");
+            return false;
+        }
+
+        if (Settings is not { } settings)
+        {
+            return false;
+        }
+
+        CommitInputBindings(this);
+        _settingsStore.Save(settings);
+
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+
+        try
+        {
+            AddLog(
+                $"方向震动：{directionName}，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，持续 {settings.DirectionalVibrationDurationMilliseconds} ms");
+
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "切换正常模式"))
+            {
+                return false;
             }
 
-            AddLog($"\u505c\u6b62\u9707\u52a8\u5931\u8d25\uff1a{ex.Message}");
+            return await RunVibrationPulseAsync(
+                BuildDirectionalVibrationParameterCommand(settings, mode),
+                $"&03,{mode}$",
+                settings.DirectionalVibrationDurationMilliseconds,
+                directionName,
+                operationCancellation.Token);
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            AddLog($"{directionName}已停止");
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+
+            _vibrationSequenceRunning = false;
         }
     }
 
     private async void OneKeyVibration_Click(object sender, RoutedEventArgs e)
     {
+        await RunOneKeyVibrationAsync(_lifetimeCancellation.Token);
+    }
+
+    public async Task<bool> RunOneKeyVibrationAsync(CancellationToken cancellationToken)
+    {
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u4e00\u952e\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
-            return;
+            AddLog("\u4e00\u952e\u9707\u52a8\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
+            return false;
         }
 
         if (_vibrationSequenceRunning)
         {
             AddLog("\u4e00\u952e\u9707\u52a8\u6b63\u5728\u6267\u884c\uff0c\u8bf7\u7a0d\u5019");
-            return;
+            return false;
         }
 
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
         _vibrationSequenceRunning = true;
         try
         {
             AddLog($"\u4e00\u952e\u9707\u52a8\u5f00\u59cb\uff1a\u5de6\u53f3\u805a\u62e2 -> \u4e0a\u4e0b\u805a\u62e2\uff0c\u5faa\u73af {OneKeyGatherCycleCount} \u6b21");
-            await SendAsciiProtocolCommandAsync("&05,00$", "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f");
+            if (!await SendAsciiProtocolCommandAsync(
+                    "&05,00$",
+                    "\u5207\u6362\u6b63\u5e38\u6a21\u5f0f"))
+            {
+                return false;
+            }
 
             for (var cycleIndex = 1; cycleIndex <= OneKeyGatherCycleCount; cycleIndex++)
             {
                 AddLog($"\u4e00\u952e\u805a\u62e2\u7b2c {cycleIndex}/{OneKeyGatherCycleCount} \u8f6e");
 
-                await RunVibrationPulseAsync(
-                    LeftRightGatherParameterCommand,
-                    LeftRightGatherStartCommand,
-                    LeftRightGatherPulseDurationMs,
-                    $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2");
-
-                await RunVibrationPulseAsync(
-                    UpDownGatherParameterCommand,
-                    UpDownGatherStartCommand,
-                    UpDownGatherPulseDurationMs,
-                    $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2");
+                if (!await RunVibrationPulseAsync(
+                        LeftRightGatherParameterCommand,
+                        LeftRightGatherStartCommand,
+                        LeftRightGatherPulseDurationMs,
+                        $"{cycleIndex}/{OneKeyGatherCycleCount}-\u5de6\u53f3\u805a\u62e2",
+                        operationCancellation.Token) ||
+                    !await RunVibrationPulseAsync(
+                        UpDownGatherParameterCommand,
+                        UpDownGatherStartCommand,
+                        UpDownGatherPulseDurationMs,
+                        $"{cycleIndex}/{OneKeyGatherCycleCount}-\u4e0a\u4e0b\u805a\u62e2",
+                        operationCancellation.Token))
+                {
+                    return false;
+                }
             }
 
             AddLog("\u4e00\u952e\u9707\u52a8\u5b8c\u6210");
+            return true;
         }
-        catch (OperationCanceledException) when (_closed)
+        catch (OperationCanceledException) when (
+            _closed ||
+            operationCancellation.IsCancellationRequested)
         {
+            return false;
         }
         finally
         {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+
             _vibrationSequenceRunning = false;
         }
+    }
+
+    /// <summary>
+    /// 自动生产专用补料序列：震散、向左移入拍照视野、上下聚拢，最后再震散。
+    /// 四段均使用连接配置页当前的方向震动频率和振幅；两次震散及向左使用配置时长，
+    /// 上下聚拢固定执行100 ms。
+    /// </summary>
+    public async Task<bool> RunProductionScatterThenLeftAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!_tcpClient.IsConnected)
+        {
+            AddLog("生产震动失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+
+        if (_vibrationSequenceRunning)
+        {
+            AddLog("生产震动未执行：当前震动尚未结束");
+            return false;
+        }
+
+        if (Settings is not { } settings)
+        {
+            return false;
+        }
+
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+        try
+        {
+            AddLog(
+                $"生产震动开始：震散 -> 向左 -> 上下聚拢 -> 再震散，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，两次震散及向左各 " +
+                $"{settings.DirectionalVibrationDurationMilliseconds} ms，上下聚拢 " +
+                $"{ProductionUpDownGatherDurationMilliseconds} ms");
+            if (!await EnsureProductionVibrationSettingsAppliedAsync(
+                    settings,
+                    operationCancellation.Token))
+            {
+                return false;
+            }
+
+            if (!await RunVibrationPulseAsync(
+                    parameterCommand: null,
+                    "&03,04$",
+                    settings.DirectionalVibrationDurationMilliseconds,
+                    "生产震动-震散",
+                    operationCancellation.Token) ||
+                !await RunVibrationPulseAsync(
+                    parameterCommand: null,
+                    "&03,03$",
+                    settings.DirectionalVibrationDurationMilliseconds,
+                    "生产震动-向左",
+                    operationCancellation.Token) ||
+                !await RunVibrationPulseAsync(
+                    parameterCommand: null,
+                    UpDownGatherStartCommand,
+                    ProductionUpDownGatherDurationMilliseconds,
+                    "生产震动-上下聚拢",
+                    operationCancellation.Token) ||
+                !await RunVibrationPulseAsync(
+                    parameterCommand: null,
+                    "&03,04$",
+                    settings.DirectionalVibrationDurationMilliseconds,
+                    "生产震动-收尾震散",
+                    operationCancellation.Token))
+            {
+                return false;
+            }
+
+            AddLog("生产震动完成：震散 -> 向左 -> 上下聚拢 -> 再震散");
+            return true;
+        }
+        catch (OperationCanceledException) when (
+            _closed ||
+            operationCancellation.IsCancellationRequested)
+        {
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+
+            _vibrationSequenceRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// 每次生产上相机取料拍照前：料仓以频率100、振幅50%运行100 ms，
+    /// 振幅归零并停止振动盘，再等待200 ms。整个序列占用振动互斥状态。
+    /// </summary>
+    public async Task<bool> FeedHopperBeforeProductionPhotoAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_closed || _feederClosing || !_tcpClient.IsConnected)
+        {
+            AddLog("拍照前料仓补料失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+        if (_vibrationSequenceRunning || _hopperRequiresStop)
+        {
+            AddLog("拍照前料仓补料未执行：已有振动动作或未完成的停振，请先全部停止", isAlarm: true);
+            return false;
+        }
+
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _lifetimeCancellation.Token);
+        _vibrationOperationCancellation = operationCancellation;
+        _vibrationSequenceRunning = true;
+        try
+        {
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            AddLog($"生产拍照前料仓补料：频率 {ProductionHopperVibrationFrequency}，" +
+                $"振幅 {ProductionHopperVibrationAmplitude}%，持续 {ProductionHopperVibrationDurationMilliseconds} ms");
+            if (!await SendAsciiProtocolCommandAsync("&05,00$", "拍照前料仓切换正常模式", operationCancellation.Token))
+            {
+                return false;
+            }
+
+            operationCancellation.Token.ThrowIfCancellationRequested();
+            _lastHopperVibrationFrequency = ProductionHopperVibrationFrequency;
+            _hopperRequiresStop = true;
+            var completed = await RunVibrationPulseAsync(
+                null,
+                FormattableString.Invariant($"&13,{ProductionHopperVibrationAmplitude:00},{ProductionHopperVibrationFrequency:000}$"),
+                ProductionHopperVibrationDurationMilliseconds,
+                "生产拍照前料仓补料",
+                operationCancellation.Token,
+                settleMilliseconds: ProductionPhotoSettleMilliseconds);
+            if (completed)
+            {
+                AddLog($"生产拍照前料仓归零和停振指令已发送，已等待 {ProductionPhotoSettleMilliseconds} ms，可进入拍照");
+            }
+            return completed;
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            AddLog("拍照前料仓补料或停稳等待已取消，本次不拍照");
+            return false;
+        }
+        finally
+        {
+            if (ReferenceEquals(_vibrationOperationCancellation, operationCancellation))
+            {
+                _vibrationOperationCancellation = null;
+            }
+            _vibrationSequenceRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// 自动生产找芯片拍照专用光源控制。开灯时同步下发当前亮度，
+    /// 任一指令失败都由上层停止本轮拍照，避免在无可靠照明时继续取像。
+    /// </summary>
+    public Task<bool> SetProductionLightAsync(bool enabled)
+    {
+        return SetVibrationFeederLightAsync(enabled, "生产拍照光源");
+    }
+
+    public Task<bool> SetCalibrationLightAsync(bool enabled)
+    {
+        return SetVibrationFeederLightAsync(enabled, "视觉标定振动盘光源");
+    }
+
+    private async Task<bool> SetVibrationFeederLightAsync(bool enabled, string actionName)
+    {
+        if (_closed || !_tcpClient.IsConnected)
+        {
+            _vibrationFeederLightEnabled = false;
+            AddLog($"{actionName}{(enabled ? "打开" : "关闭")}失败：请先建立 TCP 连接", isAlarm: true);
+            return false;
+        }
+
+        _brightnessSendTimer.Stop();
+        if (!enabled)
+        {
+            var lightOffSucceeded = await SendAsciiProtocolCommandAsync(
+                LightOffCommand,
+                $"{actionName}关闭");
+            if (lightOffSucceeded)
+            {
+                _vibrationFeederLightEnabled = false;
+            }
+            return lightOffSucceeded;
+        }
+
+        var settings = Settings;
+        if (settings is null)
+        {
+            AddLog($"{actionName}打开失败：振动盘参数未加载", isAlarm: true);
+            return false;
+        }
+
+        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
+        if (settings.LightOnBrightness != normalizedBrightness)
+        {
+            settings.LightOnBrightness = normalizedBrightness;
+        }
+
+        if (!await SendAsciiProtocolCommandAsync(
+                LightOnCommand,
+                $"{actionName}打开"))
+        {
+            return false;
+        }
+
+        if (await EnsureFeederBrightnessAppliedAsync(settings, $"{actionName}亮度"))
+        {
+            _vibrationFeederLightEnabled = true;
+            return true;
+        }
+
+        // 光源已打开但亮度指令失败时立即关灯，不允许继续拍照。
+        await SendAsciiProtocolCommandAsync(
+            LightOffCommand,
+            $"{actionName}失败回退关闭");
+        _vibrationFeederLightEnabled = false;
+        return false;
+    }
+
+    private static string BuildDirectionalVibrationParameterCommand(
+        VibrationFeederSettings settings,
+        string mode)
+    {
+        var frequency = Math.Clamp(settings.DirectionalVibrationFrequency, 1, 999);
+        var amplitude = Math.Clamp(settings.DirectionalVibrationAmplitude, 0, 100);
+        var channel = $"{frequency:000},{amplitude:000},1";
+        return $"&02,{channel},{channel},{channel},{channel},{mode}$";
+    }
+
+    private async Task<bool> EnsureProductionVibrationSettingsAppliedAsync(
+        VibrationFeederSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var setupCommands = new[]
+        {
+            "&05,00$",
+            BuildDirectionalVibrationParameterCommand(settings, "04"),
+            BuildDirectionalVibrationParameterCommand(settings, "03"),
+            BuildDirectionalVibrationParameterCommand(settings, "06")
+        };
+        var setupSignature = string.Join('\n', setupCommands);
+        if (string.Equals(
+                _productionVibrationSetupSignature,
+                setupSignature,
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        for (var index = 0; index < setupCommands.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!await SendAsciiProtocolCommandAsync(
+                    setupCommands[index],
+                    $"生产参数初始化 {index + 1}/{setupCommands.Length}"))
+            {
+                return false;
+            }
+        }
+
+        _productionVibrationSetupSignature = setupSignature;
+        AddLog("生产震动参数已下发；后续每轮只发送启动和停止命令");
+        return true;
+    }
+
+    private async Task<bool> EnsureFeederBrightnessAppliedAsync(
+        VibrationFeederSettings settings,
+        string actionName)
+    {
+        var normalizedBrightness = Math.Clamp(settings.LightOnBrightness, 0, 99);
+        if (_appliedFeederBrightness == normalizedBrightness)
+        {
+            return true;
+        }
+
+        if (!await SendAsciiProtocolCommandAsync(
+                $"&06,{normalizedBrightness:00},XX$",
+                $"{actionName} {normalizedBrightness:00}%"))
+        {
+            return false;
+        }
+
+        _appliedFeederBrightness = normalizedBrightness;
+        return true;
     }
 
     private async void LightOn_Click(object sender, RoutedEventArgs e)
@@ -276,20 +1540,19 @@ public partial class ConnectionConfigPage : UserControl
 
         if (!_tcpClient.IsConnected)
         {
-            AddLog("\u5149\u6e90\u6253\u5f00\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
+            AddLog("\u5149\u6e90\u6253\u5f00\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
             return;
         }
 
         _brightnessSendTimer.Stop();
         SaveSettings(writeLog: false);
-        await SendAsciiProtocolCommandAsync(LightOnCommand, "\u5149\u6e90\u6253\u5f00");
-        await ApplyLightBrightnessAsync("\u6253\u5f00\u540e\u8bbe\u7f6e\u4eae\u5ea6");
+        _ = await SetVibrationFeederLightAsync(enabled: true, "手动振动盘光源");
     }
 
     private async void LightOff_Click(object sender, RoutedEventArgs e)
     {
         _brightnessSendTimer.Stop();
-        await SendAsciiProtocolCommandAsync(LightOffCommand, "\u5149\u6e90\u5173\u95ed");
+        _ = await SetVibrationFeederLightAsync(enabled: false, "手动振动盘光源");
     }
 
     private void DecreaseLightBrightness_Click(object sender, RoutedEventArgs e)
@@ -359,9 +1622,12 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         _settingsStore.Save(settings);
-        await SendAsciiProtocolCommandAsync(
-            $"&06,{normalizedBrightness:00},XX$",
-            $"{actionName} {normalizedBrightness:00}%");
+        if (await SendAsciiProtocolCommandAsync(
+                $"&06,{normalizedBrightness:00},XX$",
+                $"{actionName} {normalizedBrightness:00}%"))
+        {
+            _appliedFeederBrightness = normalizedBrightness;
+        }
     }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e)
@@ -385,8 +1651,40 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private void AddLog(string message)
+    private void SaveTcpSettings(bool writeLog)
     {
+        if (TcpSettings is not { } settings)
+        {
+            return;
+        }
+
+        CommitInputBindings(this);
+        _tcpSettingsStore.Save(settings);
+        _e4981ASettingsApplied = false;
+        if (writeLog)
+        {
+            AddTcpLog("E4981A连接与测试参数已保存");
+        }
+    }
+
+    private void SaveSerialSettings(bool writeLog)
+    {
+        if (SerialSettings is not { } settings)
+        {
+            return;
+        }
+
+        CommitInputBindings(this);
+        _serialSettingsStore.Save(settings);
+        if (writeLog)
+        {
+            AddSerialLog("SM7110串口连接与测试参数已保存");
+        }
+    }
+
+    private void AddLog(string message, bool isAlarm = false)
+    {
+        if (isAlarm) AlarmHistory.Record("振动盘", "FEEDER-COMM", message);
         if (ViewModel is not { } viewModel)
         {
             return;
@@ -402,31 +1700,131 @@ public partial class ConnectionConfigPage : UserControl
         ConnectionLogListBox.ScrollIntoView(logItem);
     }
 
-    private async Task SendAsciiProtocolCommandAsync(string command, string actionName)
+    private void AddTcpLog(string message, bool isAlarm = false)
     {
-        await _protocolWriteLock.WaitAsync();
+        if (isAlarm) AlarmHistory.Record("E4981A", "E4981A-COMM", message);
+        if (ViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        var logItem = $"{DateTime.Now:HH:mm:ss}  {message}";
+        viewModel.TcpConnectionLogs.Add(logItem);
+        while (viewModel.TcpConnectionLogs.Count > MaxConnectionLogCount)
+        {
+            viewModel.TcpConnectionLogs.RemoveAt(0);
+        }
+        TcpConnectionLogListBox.ScrollIntoView(logItem);
+    }
+
+    private void AddSerialLog(string message, bool isAlarm = false)
+    {
+        if (isAlarm) AlarmHistory.Record("SM7110", "SM7110-COMM", message);
+        if (ViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        var logItem = $"{DateTime.Now:HH:mm:ss}  {message}";
+        viewModel.SerialConnectionLogs.Add(logItem);
+        while (viewModel.SerialConnectionLogs.Count > MaxConnectionLogCount)
+        {
+            viewModel.SerialConnectionLogs.RemoveAt(0);
+        }
+        SerialConnectionLogListBox.ScrollIntoView(logItem);
+    }
+
+    private void SetFeederStatus(string status)
+    {
+        if (ViewModel is { } viewModel)
+        {
+            viewModel.FeederConnectionStatusText = status;
+        }
+        if (_selectedTarget == ConnectionTarget.Feeder)
+        {
+            RefreshActiveStatus();
+        }
+    }
+
+    private void SetTcpStatus(string status)
+    {
+        if (ViewModel is { } viewModel)
+        {
+            viewModel.TcpConnectionStatusText = status;
+        }
+        if (_selectedTarget == ConnectionTarget.Tcp)
+        {
+            RefreshActiveStatus();
+        }
+    }
+
+    private void SetSerialStatus(string status)
+    {
+        if (ViewModel is { } viewModel)
+        {
+            viewModel.SerialConnectionStatusText = status;
+        }
+        if (_selectedTarget == ConnectionTarget.Serial)
+        {
+            RefreshActiveStatus();
+        }
+    }
+
+    private async Task<bool> SendAsciiProtocolCommandAsync(
+        string command, string actionName, CancellationToken cancellationToken = default, bool stopHopper = false)
+    {
+        await _protocolWriteLock.WaitAsync(cancellationToken);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_feederClosing && command != StopVibrationCommand)
+            {
+                return false;
+            }
             if (!_tcpClient.IsConnected)
             {
-                AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5");
-                return;
+                AddLog($"{actionName}\u5931\u8d25\uff1a\u8bf7\u5148\u5efa\u7acb TCP \u8fde\u63a5", isAlarm: true);
+                return false;
             }
 
             try
             {
+                var hopperStopSent = true;
+                // 实机确认：&04$ 有应答但料仓仍振动；第5路必须单独将振幅归零。
+                // 在同一发送锁内完成归零与 &04$，防止新启动插入两条停机指令之间。
+                if (command == StopVibrationCommand && (stopHopper || _hopperRequiresStop))
+                {
+                    _hopperRequiresStop = true;
+                    var frequency = _lastHopperVibrationFrequency ?? Settings?.HopperVibrationFrequency ?? 28;
+                    var hopperStopCommand = FormattableString.Invariant($"&13,00,{frequency:000}$");
+                    try
+                    {
+                        await _tcpClient.WriteAsync(Encoding.ASCII.GetBytes(hopperStopCommand));
+                        AddLog($"TX [ASCII]  {hopperStopCommand}  {ProtocolCommandName}-{actionName}-料仓振幅归零");
+                    }
+                    catch (Exception exception) when (exception is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
+                    {
+                        hopperStopSent = false;
+                        AddLog($"料仓振幅归零发送失败：{exception.Message}", isAlarm: true);
+                    }
+                    // 归零失败仍尝试停止振动盘；停机序列不受原动作取消令牌影响。
+                    await Task.Delay(VibrationStopSettleMilliseconds);
+                }
                 var payload = Encoding.ASCII.GetBytes(command);
                 await _tcpClient.WriteAsync(payload);
                 AddLog($"TX [ASCII]  {command}  {ProtocolCommandName}-{actionName}");
+                if (command == StopVibrationCommand && hopperStopSent)
+                {
+                    _hopperRequiresStop = false;
+                }
+                return hopperStopSent;
             }
             catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or InvalidOperationException or ObjectDisposedException)
             {
-                if (ViewModel is { } viewModel)
-                {
-                    viewModel.FeederConnectionStatusText = "\u901a\u8baf\u5f02\u5e38";
-                }
+                SetFeederStatus("\u901a\u8baf\u5f02\u5e38");
 
-                AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}");
+                AddLog($"{actionName}\u5931\u8d25\uff1a{ex.Message}", isAlarm: true);
+                return false;
             }
         }
         finally
@@ -435,13 +1833,324 @@ public partial class ConnectionConfigPage : UserControl
         }
     }
 
-    private async Task RunVibrationPulseAsync(string parameterCommand, string startCommand, int durationMs, string actionName)
+    private async Task<bool> RunVibrationPulseAsync(
+        string? parameterCommand,
+        string startCommand,
+        int durationMs,
+        string actionName,
+        CancellationToken cancellationToken,
+        int settleMilliseconds = VibrationStopSettleMilliseconds)
     {
-        await SendAsciiProtocolCommandAsync(parameterCommand, $"{actionName}-\u4e0b\u53d1\u53c2\u6570");
-        await SendAsciiProtocolCommandAsync(startCommand, $"{actionName}-\u542f\u52a8");
-        await Task.Delay(durationMs, _lifetimeCancellation.Token);
-        await SendAsciiProtocolCommandAsync(StopVibrationCommand, $"{actionName}-\u505c\u6b62");
-        await Task.Delay(120, _lifetimeCancellation.Token);
+        var stopped = false;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if ((!string.IsNullOrWhiteSpace(parameterCommand) &&
+                 !await SendAsciiProtocolCommandAsync(
+                     parameterCommand,
+                     $"{actionName}-\u4e0b\u53d1\u53c2\u6570", cancellationToken)) ||
+                !await SendAsciiProtocolCommandAsync(
+                    startCommand,
+                    $"{actionName}-\u542f\u52a8", cancellationToken))
+            {
+                return false;
+            }
+            await Task.Delay(durationMs, cancellationToken);
+        }
+        finally
+        {
+            // 停止生产或关闭页面时也先下发停止，避免振动脉冲停留在启动状态。
+            if (_tcpClient.IsConnected)
+            {
+                stopped = await SendAsciiProtocolCommandAsync(
+                    StopVibrationCommand,
+                    $"{actionName}-\u505c\u6b62");
+            }
+        }
+
+        await Task.Delay(settleMilliseconds, cancellationToken);
+        return stopped;
+    }
+
+    private async Task RunMeterOperationAsync(string actionName, Func<Task> operation)
+    {
+        if (_meterOperationRunning)
+        {
+            AddTcpLog($"{actionName}未执行：仪表正在处理上一条命令");
+            return;
+        }
+        if (!_generalTcpClient.IsConnected)
+        {
+            AddTcpLog($"{actionName}失败：请先连接E4981A", isAlarm: true);
+            return;
+        }
+
+        _meterOperationRunning = true;
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException or
+                                   InvalidOperationException or FormatException or ObjectDisposedException)
+        {
+            if (!_generalTcpClient.IsConnected)
+            {
+                SetTcpStatus("通讯异常");
+            }
+            AddTcpLog($"{actionName}失败：{ex.Message}", isAlarm: true);
+        }
+        finally
+        {
+            _meterOperationRunning = false;
+        }
+    }
+
+    private async Task<E4981AMeasurementResult> RunE4981AMeasurementCycleAsync(
+        CancellationToken cancellationToken)
+    {
+        ClearMeterResult("正在测量…");
+        try
+        {
+            await EnsureE4981ASettingsAppliedAsync(cancellationToken);
+            var settings = _e4981AAppliedSettings!;
+            AddTcpLog($"开始单次测试：平均{(settings.AveragingEnabled ? "开启" : "关闭")}，触发1次");
+            var response = await QueryMeterAsync("*TRG", cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = E4981AProtocol.ApplyLossLimit(E4981AProtocol.ParseMeasurement(response), settings);
+            UpdateMeterResult(result);
+            return result;
+        }
+        catch (Exception exception)
+        {
+            ClearMeterResult(exception is OperationCanceledException ? "测量已取消" : "本次测量失败");
+            throw;
+        }
+    }
+
+    private void ClearMeterResult(string status)
+    {
+        MeterResultStatusText.Text = status;
+        MeterResultStatusText.Foreground = new SolidColorBrush(Color.FromRgb(242, 122, 128));
+        MeterCapacitanceText.Text = "-- nF";
+        MeterDissipationText.Text = "--";
+        MeterBinText.Text = "--";
+        MeterRawResultText.Text = "--";
+        MeterRawResultText.ToolTip = null;
+    }
+
+    private async Task EnsureE4981ASettingsAppliedAsync(CancellationToken cancellationToken)
+    {
+        var settings = TcpSettings
+            ?? throw new InvalidOperationException("E4981A连接参数未加载。");
+        var commands = E4981AProtocol.BuildSetupCommands(settings);
+        var setupSignature = string.Join('\n', commands);
+        if (_e4981ASettingsApplied &&
+            string.Equals(_e4981AAppliedSetupSignature, setupSignature, StringComparison.Ordinal))
+            return;
+
+        // 切配方或编辑上下限后重新下发；判定使用本次实际下发的快照。
+        var appliedSettings = ProductRecipeStore.Clone(settings);
+        _e4981ASettingsApplied = false;
+        _e4981AAppliedSetupSignature = null;
+        _e4981AAppliedSettings = null;
+        foreach (var command in commands)
+        {
+            await SendMeterCommandAsync(command, cancellationToken);
+        }
+
+        var instrumentError = await QueryMeterAsync("SYST:ERR?", cancellationToken);
+        if (!instrumentError.StartsWith("0", StringComparison.OrdinalIgnoreCase) &&
+            !instrumentError.StartsWith("+0", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"仪表参数错误：{instrumentError}");
+        }
+
+        // 回读仪表实际值，避免只根据界面复选框/已发送命令推断现场状态。
+        var triggerSource = (await QueryMeterAsync("TRIG:SOUR?", cancellationToken)).Trim();
+        var continuous = (await QueryMeterAsync("INIT:CONT?", cancellationToken)).Trim();
+        var averaging = (await QueryMeterAsync("AVER?", cancellationToken)).Trim();
+        AddTcpLog($"仪表实际状态：TRIG={triggerSource}，INIT:CONT={continuous}，AVER={averaging}");
+        if (!string.Equals(triggerSource, "BUS", StringComparison.OrdinalIgnoreCase) ||
+            continuous != "1" || averaging != (appliedSettings.AveragingEnabled ? "1" : "0"))
+        {
+            _generalTcpClient.Close();
+            SetTcpStatus("参数回读异常，请重新连接");
+            throw new InvalidOperationException("E4981A参数回读与下发不一致或响应错位，已断开连接，请重新连接后测试。");
+        }
+
+        _e4981AAppliedSettings = appliedSettings;
+        _e4981AAppliedSetupSignature = setupSignature;
+        _e4981ASettingsApplied = true;
+        AddTcpLog($"E4981A测试参数下发完成，共{commands.Count}条命令");
+    }
+
+    private async Task EnsureSM7110SettingsAppliedAsync(CancellationToken cancellationToken)
+    {
+        var settings = SerialSettings
+            ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        var commands = SM7110Protocol.BuildSetupCommands(settings);
+        var applied = await _sm7110Session.ApplySettingsIfChangedAsync(
+            commands,
+            (command, token) => SendSerialMeterCommandAsync(command, token),
+            QuerySerialMeterAsync,
+            cancellationToken);
+
+        if (!applied) return;
+        AddSerialLog(
+            $"SM7110测试参数下发完成，共{commands.Count}条命令，逐条错误检查通过；后续单次测量直接触发，不再重复下发");
+    }
+
+    private async Task RunSerialMeterOperationAsync(string actionName, Func<Task> operation)
+    {
+        if (_serialMeterOperationRunning)
+        {
+            AddSerialLog($"{actionName}未执行：SM7110正在处理上一条命令");
+            return;
+        }
+        if (!_serialClient.IsConnected)
+        {
+            AddSerialLog($"{actionName}失败：请先连接SM7110", isAlarm: true);
+            return;
+        }
+
+        _serialMeterOperationRunning = true;
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or TimeoutException or
+                                   InvalidOperationException or FormatException or ObjectDisposedException)
+        {
+            if (!_serialClient.IsConnected)
+            {
+                SetSerialStatus("通讯异常");
+            }
+            AddSerialLog($"{actionName}失败：{ex.Message}", isAlarm: true);
+        }
+        finally
+        {
+            _serialMeterOperationRunning = false;
+        }
+    }
+
+    private async Task SendSerialMeterCommandAsync(
+        string command,
+        CancellationToken cancellationToken = default,
+        bool useLifetimeCancellation = true)
+    {
+        var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
+        AddSerialLog($"TX [SCPI]  {command}");
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            useLifetimeCancellation ? _lifetimeCancellation.Token : CancellationToken.None,
+            cancellationToken);
+        await _serialClient.SendCommandAsync(
+            command,
+            terminator,
+            settings.CommandTimeoutMilliseconds,
+            linkedCancellation.Token);
+    }
+
+    private async Task<string> QuerySerialMeterAsync(
+        string command,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = SerialSettings ?? throw new InvalidOperationException("SM7110串口参数未加载。");
+        var terminator = SM7110Protocol.DecodeNewLine(settings.NewLine);
+        AddSerialLog($"TX [SCPI]  {command}");
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
+        return await _serialClient.QueryAsync(
+            command,
+            terminator,
+            settings.CommandTimeoutMilliseconds,
+            linkedCancellation.Token);
+    }
+
+    private void UpdateSerialMeterIdentity(string identity)
+    {
+        SerialMeterIdentityText.Text = identity;
+        SerialMeterIdentityText.ToolTip = identity;
+    }
+
+    private void UpdateSerialMeterResult(SM7110MeasurementResult result)
+    {
+        if (!result.IsSuccessful && _lastSerialFaultStatus != result.Status)
+            AlarmHistory.Record("SM7110", $"SM7110-STATUS-{result.Status}", $"{result.StatusDescription}；{result.RawResponse}");
+        _lastSerialFaultStatus = result.IsSuccessful ? null : result.Status;
+        SerialMeterResultStatusText.Text = result.StatusDescription;
+        SerialMeterResultStatusText.Foreground = new SolidColorBrush(
+            result.IsSuccessful ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
+        SerialMeterValueText.Text = result.DisplayValue.ToString("G9");
+        SerialMeterUnitText.Text = result.DisplayUnit;
+        SerialMeterRawResultText.Text = result.RawResponse;
+        SerialMeterRawResultText.ToolTip = result.RawResponse;
+        AddSerialLog($"测试结果：{result.StatusDescription}，数值={result.DisplayValue:G9} {result.DisplayUnit}");
+    }
+
+    private async Task SendMeterCommandAsync(
+        string command,
+        CancellationToken cancellationToken = default)
+    {
+        var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
+        AddTcpLog($"TX [SCPI]  {command}");
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
+        await _generalTcpClient.SendCommandAsync(command, timeout, linkedCancellation.Token);
+    }
+
+    private async Task<string> QueryMeterAsync(
+        string command,
+        CancellationToken cancellationToken = default)
+    {
+        var timeout = TcpSettings?.CommandTimeoutMilliseconds ?? 5_000;
+        AddTcpLog($"TX [SCPI]  {command}");
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            cancellationToken);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var response = await _generalTcpClient.QueryAsync(command, timeout, linkedCancellation.Token);
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        AddTcpLog($"RX [SCPI]  {response}  （对应 {command}，{elapsed:0.0} ms）");
+        return response;
+    }
+
+    private void UpdateMeterIdentity(string identity)
+    {
+        MeterIdentityText.Text = identity;
+        MeterIdentityText.ToolTip = identity;
+    }
+
+    private void UpdateMeterResult(E4981AMeasurementResult result)
+    {
+        var fault = $"{result.Status}/{result.Bin}";
+        if (!result.IsSuccessful && _lastTcpFaultStatus != fault)
+            AlarmHistory.Record("E4981A", $"E4981A-STATUS-{result.Status}", $"{result.StatusDescription}；{result.RawResponse}");
+        _lastTcpFaultStatus = result.IsSuccessful ? null : fault;
+        var outsideProductionBins = result.Bin is not null && result.Bin is not (>= 1 and <= 3);
+        var rejected = result.LossRejected || outsideProductionBins || !result.IsSuccessful;
+        MeterResultStatusText.Text = result.LossRejected
+            ? $"NG · {result.LossFailureReason}"
+            : result.IsSuccessful && outsideProductionBins ? "NG · 未落入BIN1～BIN3" : result.StatusDescription;
+        MeterResultStatusText.Foreground = new SolidColorBrush(
+            !rejected ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 122, 128));
+        MeterCapacitanceText.Text = $"{result.CapacitanceNf:0.######} nF";
+        MeterDissipationText.Text = result.DissipationFactor.ToString("G9");
+        MeterBinText.Text = rejected ? $"NG → BIN0（仪表：{result.BinDescription}）" : result.BinDescription;
+        MeterRawResultText.Text = result.RawResponse;
+        MeterRawResultText.ToolTip = result.RawResponse;
+        AddTcpLog(
+            $"测试结果：{result.StatusDescription}，C={result.CapacitanceNf:0.######} nF，" +
+            $"D={result.DissipationFactor:G9}，{result.BinDescription}" +
+            (result.LossRejected ? $"；{result.LossFailureReason}，NG→BIN0" : ""));
     }
 
     private void TcpClient_DataReceived(byte[] payload)
@@ -459,12 +2168,14 @@ public partial class ConnectionConfigPage : UserControl
 
     private void TcpClient_ConnectionClosed(Exception? exception)
     {
+        AlarmHistory.Record("振动盘", "FEEDER-DISCONNECTED", exception?.Message ?? "振动盘连接由对端关闭");
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (ViewModel is { } viewModel)
-            {
-                viewModel.FeederConnectionStatusText = "\u672a\u8fde\u63a5";
-            }
+            _vibrationOperationCancellation?.Cancel();
+            _vibrationFeederLightEnabled = false;
+            _productionVibrationSetupSignature = null;
+            _appliedFeederBrightness = null;
+            SetFeederStatus("\u672a\u8fde\u63a5");
 
             AddLog(exception is null
                 ? "TCP \u8fde\u63a5\u5df2\u7531\u5bf9\u7aef\u5173\u95ed"
@@ -472,16 +2183,53 @@ public partial class ConnectionConfigPage : UserControl
         }));
     }
 
+    private void GeneralTcpClient_ConnectionClosed(Exception? exception)
+    {
+        AlarmHistory.Record("E4981A", "E4981A-DISCONNECTED", exception?.Message ?? "仪表连接已关闭");
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _e4981ASettingsApplied = false;
+            SetTcpStatus("未连接");
+            AddTcpLog(exception is null
+                ? "E4981A连接已由仪表关闭"
+                : $"E4981A连接中断：{exception.Message}");
+        }));
+    }
+
+    private void SerialClient_ResponseReceived(string response)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+            AddSerialLog($"RX [SCPI]  {response}")));
+    }
+
+    private void SerialClient_ConnectionClosed(Exception? exception)
+    {
+        AlarmHistory.Record("SM7110", "SM7110-DISCONNECTED", exception?.Message ?? "仪表串口连接已关闭");
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _sm7110Session.ResetConnection();
+            SetSerialStatus("未连接");
+            AddSerialLog(exception is null
+                ? "SM7110串口连接已关闭"
+                : $"SM7110串口连接中断：{exception.Message}");
+        }));
+    }
+
     private static byte[] BuildPayload(VibrationFeederSettings settings)
     {
-        var payload = Encoding.ASCII.GetBytes(settings.ManualSendText);
+        return BuildPayload(settings.ManualSendText, settings.AppendNewLine, settings.NewLine);
+    }
 
-        if (!settings.AppendNewLine)
+    private static byte[] BuildPayload(string text, bool appendNewLine, string? newLine)
+    {
+        var payload = Encoding.ASCII.GetBytes(text);
+
+        if (!appendNewLine)
         {
             return payload;
         }
 
-        var newLineBytes = Encoding.ASCII.GetBytes(DecodeNewLine(settings.NewLine));
+        var newLineBytes = Encoding.ASCII.GetBytes(DecodeNewLine(newLine));
         return [.. payload, .. newLineBytes];
     }
 
@@ -495,7 +2243,9 @@ public partial class ConnectionConfigPage : UserControl
 
     private static string DecodeNewLine(string? value)
     {
-        if (string.IsNullOrEmpty(value))
+        if (string.IsNullOrEmpty(value) ||
+            string.Equals(value, "无", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "None", StringComparison.OrdinalIgnoreCase))
         {
             return string.Empty;
         }

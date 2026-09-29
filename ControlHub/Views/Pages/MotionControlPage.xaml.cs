@@ -19,22 +19,20 @@ public partial class MotionControlPage : UserControl
 {
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const double TestHomeLowSpeedRatio = 0.25;
-    private static readonly TestHomeStage[] TestOneKeyResetStages =
-    [
-        new("4个R轴", [6, 8, 10, 12], 33, 30000),
-        new("4个Z轴", [5, 7, 9, 11], -1, 5000),
-        new("上料Y", [2], 33, 150000),
-        new("上料X", [1], 33, 150000),
-        new("下料X", [3], 33, 150000),
-        new("下料Y", [4], 33, 150000),
-        new("D马达", [0], 33, 25000, 600)
-    ];
+    private const double OneKeyResetRHomeVelocity = 50_000;
+    private const double OneKeyResetZHomeVelocity = 10_000;
+    private const double OneKeyResetXyHomeVelocity = 100_000;
+    private const double OneKeyResetTestStationHomeVelocity = 100_000;
+    private const double OneKeyResetDdHomeVelocity = 50_000;
+    private const double OneKeyResetHomePositionTolerance = 100;
     private readonly IMotionCard _motionCard;
+    private readonly ZAxisPressureSafety? _pressureSafety;
     private readonly MotionCardOptions _motionOptions;
     private readonly MotionCardOptionsStore _motionOptionsStore = new();
     private readonly AxisSettingsStore _axisSettingsStore = new();
     private readonly DispatcherTimer _pollTimer;
     private readonly HashSet<string> _activeAlarmKeys = [];
+    private readonly HashSet<int> _activeEmergencyInputAxisNos = [];
     private readonly Dictionary<int, DateTime> _homeDeadlines = [];
     private readonly Dictionary<int, DateTime> _homeIssuedAtUtc = [];
     private readonly HashSet<int> _homeObservedMovingAxisNos = [];
@@ -43,6 +41,8 @@ public partial class MotionControlPage : UserControl
     private CancellationTokenSource? _positionMoveCancellation;
     private CancellationTokenSource? _axisSelectionFeedbackCancellation;
     private CancellationTokenSource? _calibrationMotionCancellation;
+    private CancellationTokenSource? _externalEmergencyStopMonitorCancellation;
+    private Thread? _externalEmergencyStopMonitorThread;
     private Stopwatch? _commandStopwatch;
     private int? _activeJogAxisNo;
     private FrameworkElement? _activeJogInputOwner;
@@ -67,11 +67,181 @@ public partial class MotionControlPage : UserControl
     private bool _polling;
     private bool _closed;
     private bool _motionSafetyLock;
+    private volatile bool _externalEmergencyStopInputActive;
+    private int _externalEmergencyStopTriggerLatched;
     private bool _loadingAxisSettings;
     private bool _homeConfigurationSaveHealthy = true;
     private bool _calibrationOperationActive;
     private string? _motionSafetyLockReason;
     private Window? _ownerWindow;
+
+    public event EventHandler? EmergencyStopIssued;
+
+    private Func<IReadOnlyDictionary<int, double>>? _ddTestStationWaitPositions;
+
+    public void AttachDdTestStationInterlock(Func<IReadOnlyDictionary<int, double>> readWaitPositions) =>
+        _ddTestStationWaitPositions = readWaitPositions ?? throw new ArgumentNullException(nameof(readWaitPositions));
+
+    public void EnsureDdTestStationsSafe()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(EnsureDdTestStationsSafe);
+            return;
+        }
+        try
+        {
+            var waitPositions = _ddTestStationWaitPositions?.Invoke()
+                ?? throw new InvalidOperationException("测试站等待位尚未加载，禁止启动DD马达。");
+            DdTestStationInterlock.EnsureSafe(waitPositions, _motionCard.ReadAxis);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(Window.GetWindow(this), exception.Message, "DD马达启动警告",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            throw;
+        }
+    }
+
+    public void EnsureProductionZStartSafe(IReadOnlyDictionary<int, double> safePositions)
+    {
+        if (!_motionCard.IsOpen)
+            throw new InvalidOperationException("运动控制卡尚未连接，无法检查四个Z轴安全高度，禁止开始运行。");
+
+        ProductionZStartInterlock.EnsureSafe(safePositions, _motionCard.ReadAxis);
+    }
+
+    public IReadOnlyDictionary<int, AxisSettings> CaptureRecipeAxisSettings()
+    {
+        if (Axes is not { Count: > 0 } axes)
+        {
+            return new Dictionary<int, AxisSettings>();
+        }
+
+        CommitAndSaveAxisSettingsOrThrow();
+        return axes.ToDictionary(
+            axis => axis.AxisNo,
+            axis => new AxisSettings(
+                axis.Name,
+                axis.JogSpeed,
+                axis.JogDistance,
+                ConfigurationVersion: 2));
+    }
+
+    public MotionRecipeSettings CaptureRecipeMotionSettings()
+    {
+        CommitAndSaveAxisSettingsOrThrow();
+        return new MotionRecipeSettings
+        {
+            HomeTimeoutSeconds = _motionOptions.HomeTimeoutSeconds,
+            DefaultMoveProfile = ProductRecipeStore.Clone(_motionOptions.MoveProfile),
+            AxisMoveProfiles = ProductRecipeStore.Clone(_motionOptions.AxisMoveProfiles),
+            DefaultHomeProfile = ProductRecipeStore.Clone(_motionOptions.HomeProfile),
+            AxisHomeProfiles = ProductRecipeStore.Clone(_motionOptions.AxisHomeProfiles),
+            HomeSequence = _motionOptions.HomeSequence.ToArray(),
+            IoPointNames = new Dictionary<string, string>(_motionOptions.IoPointNames)
+        };
+    }
+
+    public void ApplyRecipeAxisSettings(IReadOnlyDictionary<int, AxisSettings> settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (_activeJogAxisNo is not null ||
+            _activePositionAxisNo is not null ||
+            _homeDeadlines.Count > 0 ||
+            _pendingStopAxisNos.Count > 0 ||
+            _calibrationOperationActive)
+        {
+            throw new InvalidOperationException("运动控制正在执行命令，不能切换配方轴参数。");
+        }
+
+        if (Axes is not { Count: > 0 } axes)
+        {
+            return;
+        }
+
+        _loadingAxisSettings = true;
+        try
+        {
+            foreach (var axis in axes)
+            {
+                if (!settings.TryGetValue(axis.AxisNo, out var saved))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(saved.Name))
+                {
+                    axis.Name = saved.Name;
+                }
+                if (saved.JogSpeed is { } speed)
+                {
+                    axis.JogSpeed = speed;
+                }
+                if (saved.JogDistance is { } distance)
+                {
+                    axis.JogDistance = distance;
+                }
+            }
+        }
+        finally
+        {
+            _loadingAxisSettings = false;
+        }
+
+        SaveAxisSettingsOrThrow();
+    }
+
+    public void ApplyRecipeMotionSettings(MotionRecipeSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (_activeJogAxisNo is not null ||
+            _activePositionAxisNo is not null ||
+            _homeDeadlines.Count > 0 ||
+            _pendingStopAxisNos.Count > 0 ||
+            _calibrationOperationActive)
+        {
+            throw new InvalidOperationException("运动控制正在执行命令，不能切换配方运动曲线。");
+        }
+
+        CopyProfile(settings.DefaultMoveProfile, _motionOptions.MoveProfile);
+        _motionOptions.AxisMoveProfiles.Clear();
+        foreach (var (axisNo, profile) in settings.AxisMoveProfiles)
+        {
+            _motionOptions.AxisMoveProfiles[axisNo] = ProductRecipeStore.Clone(profile);
+        }
+
+        CopyProfile(settings.DefaultHomeProfile, _motionOptions.HomeProfile);
+        _motionOptions.AxisHomeProfiles.Clear();
+        foreach (var (axisNo, profile) in settings.AxisHomeProfiles)
+        {
+            _motionOptions.AxisHomeProfiles[axisNo] = ProductRecipeStore.Clone(profile);
+        }
+
+        _motionOptions.HomeTimeoutSeconds = settings.HomeTimeoutSeconds;
+        _motionOptions.HomeSequence = settings.HomeSequence.ToArray();
+        _motionOptions.IoPointNames = new Dictionary<string, string>(settings.IoPointNames);
+        _motionOptions.Validate();
+        _motionOptionsStore.Save(_motionOptions);
+
+        if (SelectedAxis is { } selectedAxis)
+        {
+            Tuning.LoadFrom(_motionOptions.GetMoveProfile(selectedAxis.HardwareAxisNo));
+            HomeTuning.LoadFrom(
+                _motionOptions.GetHomeProfile(selectedAxis.HardwareAxisNo),
+                _motionOptions.HomeTimeoutSeconds,
+                GetHomeSequenceOrder(selectedAxis.HardwareAxisNo));
+        }
+    }
+
+    private static void CopyProfile<T>(T source, T destination)
+    {
+        foreach (var property in typeof(T).GetProperties()
+                     .Where(property => property.CanRead && property.CanWrite))
+        {
+            property.SetValue(destination, property.GetValue(source));
+        }
+    }
 
     public MotionControlPage()
     {
@@ -92,7 +262,10 @@ public partial class MotionControlPage : UserControl
         RelativeModeRadio.IsChecked = !Tuning.AbsolutePositionMode;
         AbsoluteModeRadio.IsChecked = Tuning.AbsolutePositionMode;
 
-        _motionCard = MotionCardFactory.Create(_motionOptions);
+        _pressureSafety = _motionOptions.SimulationMode ? null : new ZAxisPressureSafety(_motionOptions.ZPressureEmergencyStopThreshold);
+        _motionCard = new DdInterlockedMotionCard(
+            MotionCardFactory.Create(_motionOptions, _pressureSafety is null ? null : _pressureSafety.ThrowIfMotionBlocked),
+            EnsureDdTestStationsSafe);
         _pollTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(_motionOptions.PollIntervalMilliseconds)
@@ -106,6 +279,55 @@ public partial class MotionControlPage : UserControl
     public MotionTuningSettings Tuning { get; } = new();
 
     public MotionHomeTuningSettings HomeTuning { get; } = new();
+
+    // 主页高优先级刷新专用：所有分支均只读内存，绝不在UI线程调用SDK。
+    public ZAxisPressureReading[] ReadZAxisPressures() =>
+        _closed ? ZAxisPressureMonitor.Unavailable("未连接") :
+        _pressureSafety?.Readings ?? ZAxisPressureMonitor.Unavailable(
+            _motionOptions.SimulationMode ? "模拟模式" : "保护初始化");
+
+    public string PressureSafetyStatus => _closed ? "压力保护已停止" :
+        _pressureSafety?.Status ?? "模拟模式 · 未启用硬件保护";
+
+    public string PressureSafetyDetails => _pressureSafety?.TripReason ??
+        $"独立线程目标等待间隔1 ms；原始值 > {ZPressureEmergencyStopThreshold}触发，等于阈值不触发。Windows与SDK不保证硬实时停机。";
+
+    public int ZPressureEmergencyStopThreshold => _motionOptions.ZPressureEmergencyStopThreshold;
+
+    public void SaveZPressureEmergencyStopThreshold(int threshold)
+    {
+        MotionCardOptions.ValidateZPressureEmergencyStopThreshold(threshold);
+        if (_closed || _configurationError is not null)
+            throw new InvalidOperationException("运动配置不可用，无法保存压力阈值。");
+        var previous = _motionOptions.ZPressureEmergencyStopThreshold;
+        _motionOptions.ZPressureEmergencyStopThreshold = threshold;
+        try { _motionOptionsStore.Save(_motionOptions); }
+        catch
+        {
+            _motionOptions.ZPressureEmergencyStopThreshold = previous;
+            throw;
+        }
+        _pressureSafety?.ConfigureThreshold(threshold);
+    }
+
+    private void OnPressureSafetyTrip(PressureSafetyTrip trip)
+    {
+        // 全轴急停已经由保护线程下发；UI只负责取消流程、停止确认和报警记录。
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
+        {
+            if (_closed) return;
+            ActivateMotionSafetyLock(trip.Reason, trip.StopError,
+                trip.StopError is null ? "Z-PRESSURE-EMERGENCY-STOP" : "Z-PRESSURE-STOP-FAILED",
+                armStopConfirmations: false);
+            if (trip.StopError is null) CompleteEmergencyStopStateAfterHardwareIssued();
+            else ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: false);
+            SetConnectionText(trip.StopError is null
+                ? "压力保护：已下发全轴急停，运动锁定（排障后重启）"
+                : "压力保护：急停下发失败，后台持续重试；请使用硬件急停");
+            RecordAlarmOnce("z-pressure-stop-timing", "Z-PRESSURE-STOP-TIMING",
+                $"{trip.Reason}；本次全轴停止接口耗时 {trip.StopCallMilliseconds:F2} ms（不是机械停止时间）。");
+        }));
+    }
 
     private ObservableCollection<AxisStatus>? Axes => ViewModel?.Axes;
 
@@ -138,7 +360,7 @@ public partial class MotionControlPage : UserControl
         {
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
             }
             catch (Exception exception)
             {
@@ -190,6 +412,8 @@ public partial class MotionControlPage : UserControl
         }
 
         _closed = true;
+        _pressureSafety?.Stop();
+        StopExternalEmergencyStopMonitor();
         _pollTimer.Stop();
         if (_ownerWindow is not null)
         {
@@ -225,9 +449,97 @@ public partial class MotionControlPage : UserControl
         _ = TryShutdown(out _);
     }
 
+    /// <summary>
+    /// 从运动页之外的手动面板启动指定轴连续点动。
+    /// 仍共用本页的伺服、报警、限位、安全锁和停止确认链。
+    /// </summary>
+    public void StartExternalJog(int hardwareAxisNo, double signedVelocity, string sourceName)
+    {
+        if (hardwareAxisNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        if (!double.IsFinite(signedVelocity) || signedVelocity == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(signedVelocity), "点动速度必须是非零有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        ThrowIfExternalEmergencyStopActive();
+
+        if (ViewModel?.MotionControlsEnabled != true)
+        {
+            throw new InvalidOperationException("运动控制尚未就绪。");
+        }
+
+        if (IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("当前存在运动、回零、标定或停止流程，不能启动手动点动。");
+        }
+
+        if (hardwareAxisNo >= _motionCard.AxisCount)
+        {
+            throw new InvalidOperationException(
+                $"硬件轴 {hardwareAxisNo} 当前不可用，控制卡只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var axis = Axes?.FirstOrDefault(item =>
+                       item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+        var snapshot = _motionCard.ReadAxis(hardwareAxisNo);
+        ApplySnapshot(axis, snapshot);
+        EnsureRelativeAxisReady(axis, snapshot, signedVelocity);
+
+        try
+        {
+            _motionCard.Jog(hardwareAxisNo, signedVelocity);
+        }
+        catch (Exception exception)
+        {
+            axis.State = "外部点动启动失败";
+            RecordAlarm($"AXIS-{hardwareAxisNo:00}-EXTERNAL-JOG", FormatException(exception));
+            throw;
+        }
+
+        _activeJogAxisNo = hardwareAxisNo;
+        _activeJogInputOwner = null;
+        _commandStopwatch = Stopwatch.StartNew();
+        axis.IsMoving = true;
+        axis.State = signedVelocity > 0 ? "外部面板正向 JOG" : "外部面板负向 JOG";
+        SetCommandStage(
+            CommandStage.Running,
+            $"{(string.IsNullOrWhiteSpace(sourceName) ? "外部面板" : sourceName)}点动中");
+    }
+
+    public void StopExternalJog(int hardwareAxisNo, string reason)
+    {
+        if (_activeJogAxisNo != hardwareAxisNo)
+        {
+            return;
+        }
+
+        StopActiveJog(string.IsNullOrWhiteSpace(reason) ? "外部面板松开" : reason);
+    }
+
     public CalibrationCenterPosition CaptureCalibrationCenter(
         int xHardwareAxisNo,
-        int yHardwareAxisNo)
+        int yHardwareAxisNo,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (_closed)
         {
@@ -245,7 +557,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                [xHardwareAxisNo, yHardwareAxisNo]))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，请等待完成后再记录中心。");
         }
@@ -271,7 +585,8 @@ public partial class MotionControlPage : UserControl
     /// </summary>
     public CalibrationCenterPosition CaptureCalibrationFeedback(
         int xHardwareAxisNo,
-        int yHardwareAxisNo)
+        int yHardwareAxisNo,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null)
     {
         if (_closed)
         {
@@ -283,7 +598,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                [xHardwareAxisNo, yHardwareAxisNo]))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能读取拍照位置。");
         }
@@ -304,7 +621,203 @@ public partial class MotionControlPage : UserControl
             y.FeedbackPosition);
     }
 
+    /// <summary>
+    /// 监视一根正在运动的轴；反馈位置到达或低于指定负方向阈值后立即返回，
+    /// 不停止该轴，调用方可让它继续运动到原命令的最终目标。
+    /// </summary>
+    public async Task<MotionAxisSnapshot> WaitForAxisFeedbackAtOrBelowAsync(
+        int hardwareAxisNo,
+        double releasePosition,
+        Task motionCompletionTask,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(motionCompletionTask);
+        if (hardwareAxisNo < 0 || !double.IsFinite(releasePosition))
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        if (_closed || !_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接，不能监视Z轴XY放行位置。");
+        }
+
+        var axis = Axes?.FirstOrDefault(item =>
+                       item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (motionCompletionTask.IsCompleted)
+            {
+                await motionCompletionTask;
+            }
+
+            var snapshot = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, snapshot);
+            if (snapshot.Alarm || snapshot.EmergencyInput || snapshot.StopReason != 0)
+            {
+                throw new MotionCardException(
+                    $"{axis.Name}等待XY放行位置时发生报警、急停或异常停止：{snapshot.StateText}。",
+                    "Z轴XY放行位置监视");
+            }
+
+            if (snapshot.FeedbackPosition <= releasePosition)
+            {
+                return snapshot;
+            }
+
+            if (motionCompletionTask.IsCompleted)
+            {
+                throw new InvalidOperationException(
+                    $"{axis.Name}已停止，但未到XY放行位置：" +
+                    $"{snapshot.FeedbackPosition:0.###}/{releasePosition:0.###} pulse。");
+            }
+
+            await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
+        }
+    }
+
+    public void ConfigureAxisMoveParameters(
+        int hardwareAxisNo,
+        double startVelocity,
+        double stopVelocity,
+        double accelerationSeconds,
+        double decelerationSeconds,
+        double sTimeSeconds,
+        double decelerationStopSeconds)
+    {
+        if (hardwareAxisNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hardwareAxisNo));
+        }
+
+        var profile = _motionOptions.GetOrCreateMoveProfile(hardwareAxisNo);
+        profile.StartVelocity = startVelocity;
+        profile.StopVelocity = stopVelocity;
+        profile.AccelerationSeconds = accelerationSeconds;
+        profile.DecelerationSeconds = decelerationSeconds;
+        profile.STimeSeconds = sTimeSeconds;
+        profile.DecelerationStopSeconds = decelerationStopSeconds;
+        profile.Validate();
+    }
+
     public async Task<CalibrationCenterPosition> MoveCalibrationAxesToAsync(
+        int xHardwareAxisNo,
+        int yHardwareAxisNo,
+        double targetX,
+        double targetY,
+        double velocity,
+        double positionTolerance,
+        int moveTimeoutMilliseconds,
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? yVelocityOverride = null,
+        int? linearInterpolationCoordinateSystemNo = null)
+    {
+        if (xHardwareAxisNo < 0 || yHardwareAxisNo < 0 || xHardwareAxisNo == yHardwareAxisNo)
+        {
+            throw new ArgumentException("X/Y 轴号必须有效且不能相同。");
+        }
+
+        if (!double.IsFinite(targetX) || !double.IsFinite(targetY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetX), "点击移动目标必须是有效数值。");
+        }
+
+        if (!double.IsFinite(velocity) || velocity <= 0 ||
+            (yVelocityOverride is { } yVelocity &&
+             (!double.IsFinite(yVelocity) || yVelocity <= 0)) ||
+            !double.IsFinite(positionTolerance) || positionTolerance <= 0 ||
+            moveTimeoutMilliseconds < 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(velocity), "点击移动的速度、容差或超时参数无效。");
+        }
+
+        if (linearInterpolationCoordinateSystemNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(linearInterpolationCoordinateSystemNo),
+                "插补坐标系编号不能小于0。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        ThrowIfExternalEmergencyStopActive();
+
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                [xHardwareAxisNo, yHardwareAxisNo]))
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行点击移动。");
+        }
+
+        var xAxis = GetCalibrationAxis(xHardwareAxisNo, "X");
+        var yAxis = GetCalibrationAxis(yHardwareAxisNo, "Y");
+        _ = ReadReadyCalibrationAxis(xAxis, "X");
+        _ = ReadReadyCalibrationAxis(yAxis, "Y");
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        var completed = false;
+        try
+        {
+            await MoveCalibrationAxesAsync(
+                xAxis,
+                yAxis,
+                targetX,
+                targetY,
+                velocity,
+                positionTolerance,
+                moveTimeoutMilliseconds,
+                linkedCancellation.Token,
+                yVelocityOverride,
+                linearInterpolationCoordinateSystemNo);
+            var settled = ReadSettledCalibrationPosition(
+                xAxis,
+                yAxis,
+                targetX,
+                targetY,
+                positionTolerance);
+            completed = true;
+            return new CalibrationCenterPosition(
+                xHardwareAxisNo,
+                yHardwareAxisNo,
+                settled.X,
+                settled.Y);
+        }
+        finally
+        {
+            if (!completed && _motionCard.IsOpen)
+            {
+                StopCalibrationAxesNoThrow(
+                    xAxis,
+                    yAxis,
+                    linearInterpolationCoordinateSystemNo);
+            }
+
+            _calibrationOperationActive = false;
+            _calibrationMotionCancellation = null;
+            UpdateHomeEditorState();
+        }
+    }
+
+    public Task<CalibrationCenterPosition> StartCalibrationAxesMoveToAsync(
         int xHardwareAxisNo,
         int yHardwareAxisNo,
         double targetX,
@@ -346,9 +859,11 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
+        ThrowIfExternalEmergencyStopActive();
+
         if (IsAnyMotionWorkflowActive())
         {
-            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行点击移动。");
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能启动XY后台移动。");
         }
 
         var xAxis = GetCalibrationAxis(xHardwareAxisNo, "X");
@@ -356,9 +871,33 @@ public partial class MotionControlPage : UserControl
         _ = ReadReadyCalibrationAxis(xAxis, "X");
         _ = ReadReadyCalibrationAxis(yAxis, "Y");
 
-        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _calibrationMotionCancellation = linkedCancellation;
-        _calibrationOperationActive = true;
+        return RunStartedCalibrationAxesMoveAsync(
+            xAxis,
+            yAxis,
+            xHardwareAxisNo,
+            yHardwareAxisNo,
+            targetX,
+            targetY,
+            velocity,
+            positionTolerance,
+            moveTimeoutMilliseconds,
+            linkedCancellation);
+    }
+
+    private async Task<CalibrationCenterPosition> RunStartedCalibrationAxesMoveAsync(
+        AxisStatus xAxis,
+        AxisStatus yAxis,
+        int xHardwareAxisNo,
+        int yHardwareAxisNo,
+        double targetX,
+        double targetY,
+        double velocity,
+        double positionTolerance,
+        int moveTimeoutMilliseconds,
+        CancellationTokenSource linkedCancellation)
+    {
         var completed = false;
         try
         {
@@ -391,20 +930,28 @@ public partial class MotionControlPage : UserControl
                 StopCalibrationAxesNoThrow(xAxis, yAxis);
             }
 
-            _calibrationOperationActive = false;
-            _calibrationMotionCancellation = null;
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            linkedCancellation.Dispose();
             UpdateHomeEditorState();
+            PollMotionState();
         }
     }
 
     /// <summary>
     /// 以相对脉冲方式移动指定硬件轴，并在到位或失败停止后返回最终轴快照。
-    /// 该入口使用当前轴的速度与运动曲线配置，且与其它运动、回零、停止流程互斥。
+    /// 该入口默认使用当前轴速度，也允许调用方覆盖运行速度；运动曲线仍使用当前轴配置。
     /// </summary>
     public async Task<MotionAxisSnapshot> MoveAxisRelativeAsync(
         int hardwareAxisNo,
         double pulseDistance,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? minimumCompletionTolerance = null,
+        double? velocityOverride = null)
     {
         if (hardwareAxisNo < 0)
         {
@@ -433,7 +980,9 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
-        if (IsAnyMotionWorkflowActive())
+        ThrowIfExternalEmergencyStopActive();
+
+        if (IsAnyMotionWorkflowActiveExcept(allowedMovingAxisNos, hardwareAxisNo))
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行相对脉冲移动。");
         }
@@ -449,7 +998,21 @@ public partial class MotionControlPage : UserControl
             ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
         var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
         profile.Validate();
-        if (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0)
+        var completionTolerance = profile.CompletionTolerance;
+        if (minimumCompletionTolerance is { } requestedCompletionTolerance)
+        {
+            if (!double.IsFinite(requestedCompletionTolerance) || requestedCompletionTolerance <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(minimumCompletionTolerance),
+                    "最小完成容差必须是大于 0 的有效数值。");
+            }
+
+            completionTolerance = Math.Max(completionTolerance, requestedCompletionTolerance);
+        }
+
+        var velocity = velocityOverride ?? axis.JogSpeed;
+        if (!double.IsFinite(velocity) || velocity <= 0)
         {
             throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
         }
@@ -464,7 +1027,7 @@ public partial class MotionControlPage : UserControl
         }
 
         var estimatedTimeoutMilliseconds = Math.Ceiling(
-            Math.Abs(pulseDistance) / axis.JogSpeed * 1000d + 5000d);
+            Math.Abs(pulseDistance) / velocity * 1000d + 5000d);
         var moveTimeoutMilliseconds = (int)Math.Clamp(
             Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds),
             10_000d,
@@ -473,13 +1036,13 @@ public partial class MotionControlPage : UserControl
         var commandIssued = false;
         try
         {
-            _motionCard.MoveRelative(hardwareAxisNo, pulseDistance, axis.JogSpeed);
+            _motionCard.MoveRelative(hardwareAxisNo, pulseDistance, velocity);
             commandIssued = true;
             _activePositionAxisNo = hardwareAxisNo;
             _activePositionTarget = expectedTarget;
             _activePositionIssuedAtUtc = DateTime.UtcNow;
             _activePositionDeadlineUtc = _activePositionIssuedAtUtc.Value.AddMilliseconds(moveTimeoutMilliseconds);
-            _activePositionTolerance = profile.CompletionTolerance;
+            _activePositionTolerance = completionTolerance;
             _activePositionTimeoutMilliseconds = moveTimeoutMilliseconds;
             _activePositionObservedMoving = false;
             _operatorStopRequestedAxisNo = null;
@@ -498,10 +1061,10 @@ public partial class MotionControlPage : UserControl
             ApplySnapshot(axis, settled);
             EnsureRelativeAxisReady(axis, settled, pulseDistance);
             if (settled.IsMoving ||
-                Math.Abs(settled.FeedbackPosition - expectedTarget) > profile.CompletionTolerance)
+                Math.Abs(settled.FeedbackPosition - expectedTarget) > completionTolerance)
             {
                 throw new InvalidOperationException(
-                    $"{axis.Name} 未在允许误差内到位：{settled.FeedbackPosition:0.###}/{expectedTarget:0.###}。");
+                    $"{axis.Name} 未在允许误差内到位：{settled.FeedbackPosition:0.###}/{expectedTarget:0.###}，允许误差 {completionTolerance:0.###} pulse。");
             }
 
             return settled;
@@ -582,6 +1145,8 @@ public partial class MotionControlPage : UserControl
             throw new InvalidOperationException("运动控制卡尚未连接。");
         }
 
+        ThrowIfExternalEmergencyStopActive();
+
         if (IsAnyMotionWorkflowActive())
         {
             throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行同步相对脉冲移动。");
@@ -634,12 +1199,13 @@ public partial class MotionControlPage : UserControl
         _calibrationOperationActive = true;
         try
         {
+            _motionCard.MoveRelativeSynchronized(
+                moves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                moves.Select(_ => pulseDistance).ToArray(),
+                moves.Select(move => move.Axis.JogSpeed).ToArray());
+
             foreach (var move in moves)
             {
-                _motionCard.MoveRelative(
-                    move.Axis.HardwareAxisNo,
-                    pulseDistance,
-                    move.Axis.JogSpeed);
                 commandedAxes.Add(move.Axis);
                 move.Axis.Target = move.Target;
                 move.Axis.IsMoving = true;
@@ -700,7 +1266,7 @@ public partial class MotionControlPage : UserControl
                 }
 
                 SetCommandStage(CommandStage.Running, "轴组同步运动中");
-                await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), linkedCancellation.Token);
+                await Task.Delay(_motionOptions.PollIntervalMilliseconds, linkedCancellation.Token);
             }
         }
         catch (Exception exception)
@@ -737,6 +1303,871 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 将绝对目标换算为当前指令位置的相对量，并与各轴的相对脉冲一起同步下发。
+    /// </summary>
+    public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesSynchronizedAsync(
+        IReadOnlyDictionary<int, double> absoluteTargetPositions,
+        IReadOnlyDictionary<int, double> relativePulseDistances,
+        CancellationToken cancellationToken,
+        int minimumTimeoutMilliseconds = 10_000,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? minimumCompletionTolerance = null,
+        IReadOnlyDictionary<int, double>? velocityOverrides = null,
+        int? linearInterpolationCoordinateSystemNo = null,
+        IReadOnlyCollection<int>? linearInterpolationAxisNos = null)
+    {
+        ArgumentNullException.ThrowIfNull(absoluteTargetPositions);
+        ArgumentNullException.ThrowIfNull(relativePulseDistances);
+
+        var absoluteTargets = absoluteTargetPositions
+            .GroupBy(pair => pair.Key)
+            .Select(group => new KeyValuePair<int, double>(group.Key, group.Last().Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var relativeDistances = relativePulseDistances
+            .GroupBy(pair => pair.Key)
+            .Select(group => new KeyValuePair<int, double>(group.Key, group.Last().Value))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var axisNumbers = absoluteTargets.Keys
+            .Concat(relativeDistances.Keys)
+            .Distinct()
+            .OrderBy(axisNo => axisNo)
+            .ToArray();
+        if (axisNumbers.Length == 0 || axisNumbers.Any(axisNo => axisNo < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(absoluteTargetPositions));
+        }
+
+        if (absoluteTargets.Keys.Intersect(relativeDistances.Keys).Any())
+        {
+            throw new ArgumentException("同一根轴不能同时指定绝对目标和相对位移。");
+        }
+
+        if (absoluteTargets.Any(pair => !double.IsFinite(pair.Value)))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(absoluteTargetPositions),
+                "绝对位置目标必须是有限数值。");
+        }
+
+        if (relativeDistances.Any(pair => !double.IsFinite(pair.Value) || pair.Value == 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(relativePulseDistances),
+                "逐轴相对移动脉冲必须是非零有限数值。");
+        }
+
+        var interpolationAxisNumbers = linearInterpolationAxisNos?
+            .Distinct()
+            .OrderBy(axisNo => axisNo)
+            .ToArray();
+        if ((linearInterpolationCoordinateSystemNo is null) != (interpolationAxisNumbers is null) ||
+            linearInterpolationCoordinateSystemNo < 0 ||
+            (interpolationAxisNumbers is not null &&
+             (interpolationAxisNumbers.Length != 2 ||
+              interpolationAxisNumbers.Any(axisNo => !axisNumbers.Contains(axisNo)))))
+        {
+            throw new ArgumentException(
+                "轴组插补必须同时指定非负坐标系编号，以及本次运动中的两根XY轴。");
+        }
+
+        if (minimumCompletionTolerance is { } requestedCompletionTolerance &&
+            (!double.IsFinite(requestedCompletionTolerance) || requestedCompletionTolerance <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minimumCompletionTolerance),
+                "最小完成容差必须是大于 0 的有效数值。");
+        }
+
+        if (velocityOverrides is not null &&
+            velocityOverrides.Any(pair =>
+                pair.Key < 0 ||
+                !double.IsFinite(pair.Value) ||
+                pair.Value <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(velocityOverrides),
+                "逐轴运行速度必须使用有效轴号和大于 0 的有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        ThrowIfExternalEmergencyStopActive();
+
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                axisNumbers))
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行轴组同步移动。");
+        }
+
+        if (axisNumbers.Any(axisNo => axisNo >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"同步移动包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var moves = new List<(
+            AxisStatus Axis,
+            double Distance,
+            double Target,
+            double Tolerance,
+            double Velocity,
+            bool IsRelative)>();
+        var maximumTimeoutMilliseconds = Math.Clamp(
+            (double)minimumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        foreach (var hardwareAxisNo in axisNumbers)
+        {
+            var axis = Axes?.FirstOrDefault(item =>
+                           item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+            var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
+            profile.Validate();
+            var velocity = velocityOverrides?.GetValueOrDefault(hardwareAxisNo) ?? axis.JogSpeed;
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+
+            var beforeMove = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, beforeMove);
+            var isRelative = relativeDistances.TryGetValue(hardwareAxisNo, out var relativeDistance);
+            var target = isRelative
+                ? beforeMove.CommandPosition + relativeDistance
+                : absoluteTargets[hardwareAxisNo];
+            var distance = target - beforeMove.CommandPosition;
+            EnsureRelativeAxisReady(axis, beforeMove, distance);
+            if (!double.IsFinite(target))
+            {
+                throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 的相对脉冲目标无效。");
+            }
+
+            var estimatedTimeoutMilliseconds = Math.Ceiling(
+                Math.Abs(distance) / velocity * 1000d + 5000d);
+            maximumTimeoutMilliseconds = Math.Max(
+                maximumTimeoutMilliseconds,
+                Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
+            var completionTolerance = minimumCompletionTolerance is { } requestedTolerance
+                ? Math.Max(profile.CompletionTolerance, requestedTolerance)
+                : profile.CompletionTolerance;
+            moves.Add((axis, distance, target, completionTolerance, velocity, isRelative));
+        }
+
+        var moveTimeoutMilliseconds = (int)Math.Clamp(
+            maximumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var commandedAxes = new List<AxisStatus>();
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            var activeMoves = moves.Where(move => move.Distance != 0).ToArray();
+            var interpolationAxisSet = interpolationAxisNumbers?.ToHashSet() ?? [];
+            var interpolationMoves = interpolationAxisNumbers is null
+                ? []
+                : moves.Where(move => interpolationAxisSet.Contains(move.Axis.HardwareAxisNo)).ToArray();
+            var pointMoves = activeMoves
+                .Where(move => !interpolationAxisSet.Contains(move.Axis.HardwareAxisNo))
+                .ToArray();
+            commandedAxes.AddRange(activeMoves.Select(move => move.Axis));
+
+            if (pointMoves.Length > 0)
+            {
+                _motionCard.MoveRelativeSynchronized(
+                    pointMoves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                    pointMoves.Select(move => move.Distance).ToArray(),
+                    pointMoves.Select(move => move.Velocity).ToArray());
+            }
+
+            if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo &&
+                interpolationMoves.Any(move => move.Distance != 0))
+            {
+                _motionCard.MoveLinearAbsolute(
+                    coordinateSystemNo,
+                    interpolationMoves.Select(move => move.Axis.HardwareAxisNo).ToArray(),
+                    interpolationMoves.Select(move => move.Target).ToArray(),
+                    interpolationMoves.Select(move => move.Velocity).ToArray());
+            }
+
+            foreach (var move in moves)
+            {
+                move.Axis.Target = move.Target;
+                if (move.Distance == 0)
+                {
+                    continue;
+                }
+
+                move.Axis.IsMoving = true;
+                move.Axis.State = interpolationAxisSet.Contains(move.Axis.HardwareAxisNo)
+                    ? $"XY直线插补目标已发送：{move.Target:0.###} {move.Axis.Unit}"
+                    : move.IsRelative
+                        ? $"同步相对位置命令已发送：{move.Distance:0.###} {move.Axis.Unit}"
+                        : $"同步绝对目标已发送：{move.Target:0.###} {move.Axis.Unit}";
+            }
+
+            _commandStopwatch = Stopwatch.StartNew();
+            SetCommandStage(CommandStage.Issued, "轴组同步位置命令已下发");
+            var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
+            while (true)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var snapshots = new List<MotionAxisSnapshot>(moves.Count);
+                var allAtTarget = true;
+                foreach (var move in moves)
+                {
+                    var snapshot = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                    ApplySnapshot(move.Axis, snapshot);
+                    if (snapshot.Alarm || snapshot.EmergencyInput)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 轴组同步移动时发生报警或急停信号：{snapshot.StateText}。");
+                    }
+
+                    if ((move.Distance > 0 && snapshot.PositiveLimit) ||
+                        (move.Distance < 0 && snapshot.NegativeLimit))
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 轴组同步移动时触发了当前运动方向的限位。",
+                            "轴组同步位置安全检查");
+                    }
+
+                    if (snapshot.StopReason != 0)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 轴组同步移动未正常到位，停止原因 {snapshot.StopReason}。",
+                            "轴组同步位置完成检查");
+                    }
+
+                    snapshots.Add(snapshot);
+                    if (snapshot.IsMoving ||
+                        Math.Abs(snapshot.FeedbackPosition - move.Target) > move.Tolerance)
+                    {
+                        allAtTarget = false;
+                    }
+                }
+
+                if (allAtTarget)
+                {
+                    SetCommandStage(CommandStage.Stopped, "轴组同步位置运动完成");
+                    return snapshots;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        $"轴组同步位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。");
+                }
+
+                SetCommandStage(CommandStage.Running, "轴组同步运动中");
+                await Task.Delay(_motionOptions.PollIntervalMilliseconds, linkedCancellation.Token);
+            }
+        }
+        catch (Exception exception)
+        {
+            if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo)
+            {
+                try
+                {
+                    _motionCard.StopLinearInterpolation(coordinateSystemNo);
+                }
+                catch
+                {
+                    // 继续执行原有逐轴停止与升级急停安全链。
+                }
+            }
+
+            foreach (var axis in commandedAxes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-RELATIVE",
+                    "轴组同步位置移动异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisNumbers.Select(axisNo => axisNo.ToString("00")))}-EXTERNAL-RELATIVE",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
+    /// <summary>
+    /// 向多根硬件轴下发绝对位置命令，并等待全部轴到位。
+    /// </summary>
+    public async Task<IReadOnlyList<MotionAxisSnapshot>> MoveAxesAbsoluteAsync(
+        IReadOnlyDictionary<int, double> targetPositions,
+        CancellationToken cancellationToken,
+        int minimumTimeoutMilliseconds = 10_000,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        double? minimumCompletionTolerance = null,
+        double? velocityOverride = null,
+        IReadOnlyDictionary<int, double>? velocityOverrides = null)
+    {
+        ArgumentNullException.ThrowIfNull(targetPositions);
+
+        var axisTargets = targetPositions
+            .GroupBy(pair => pair.Key)
+            .Select(group => new KeyValuePair<int, double>(group.Key, group.Last().Value))
+            .OrderBy(pair => pair.Key)
+            .ToArray();
+        if (axisTargets.Length == 0 || axisTargets.Any(pair => pair.Key < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(targetPositions));
+        }
+
+        if (axisTargets.Any(pair => !double.IsFinite(pair.Value)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetPositions), "绝对位置目标必须是有限数值。");
+        }
+
+        if (minimumCompletionTolerance is { } requestedCompletionTolerance &&
+            (!double.IsFinite(requestedCompletionTolerance) || requestedCompletionTolerance <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minimumCompletionTolerance),
+                "最小完成容差必须是大于 0 的有效数值。");
+        }
+
+        if (velocityOverride is { } requestedVelocity &&
+            (!double.IsFinite(requestedVelocity) || requestedVelocity <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(velocityOverride),
+                "统一运行速度必须是大于 0 的有效数值。");
+        }
+
+        if (velocityOverrides is not null &&
+            velocityOverrides.Any(pair =>
+                pair.Key < 0 ||
+                !double.IsFinite(pair.Value) ||
+                pair.Value <= 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(velocityOverrides),
+                "逐轴运行速度必须使用有效轴号和大于 0 的有限数值。");
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        ThrowIfExternalEmergencyStopActive();
+
+        if (IsAnyMotionWorkflowActiveExcept(
+                allowedMovingAxisNos,
+                axisTargets.Select(pair => pair.Key).ToArray()))
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行同步绝对位置移动。");
+        }
+
+        if (axisTargets.Any(pair => pair.Key >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"同步移动包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var moves = new List<(AxisStatus Axis, double Target, double Tolerance, double Velocity)>();
+        var maximumTimeoutMilliseconds = Math.Clamp((double)minimumTimeoutMilliseconds, 10_000d, 120_000d);
+        foreach (var (hardwareAxisNo, target) in axisTargets)
+        {
+            var axis = Axes?.FirstOrDefault(item =>
+                           item.HardwareAxisNo == hardwareAxisNo && item.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {hardwareAxisNo} 当前不可用。");
+            var profile = _motionOptions.GetMoveProfile(hardwareAxisNo);
+            profile.Validate();
+            var velocity = velocityOverrides?.GetValueOrDefault(hardwareAxisNo)
+                ?? velocityOverride
+                ?? axis.JogSpeed;
+            if (!double.IsFinite(velocity) || velocity <= 0)
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+
+            var beforeMove = _motionCard.ReadAxis(hardwareAxisNo);
+            ApplySnapshot(axis, beforeMove);
+            var delta = target - beforeMove.CommandPosition;
+            EnsureRelativeAxisReady(axis, beforeMove, delta == 0 ? 1 : delta);
+
+            var estimatedTimeoutMilliseconds = Math.Ceiling(
+                Math.Abs(target - beforeMove.FeedbackPosition) / velocity * 1000d + 5000d);
+            maximumTimeoutMilliseconds = Math.Max(
+                maximumTimeoutMilliseconds,
+                Math.Max(profile.CompletionTimeoutMilliseconds, estimatedTimeoutMilliseconds));
+            var completionTolerance = minimumCompletionTolerance is { } requestedTolerance
+                ? Math.Max(profile.CompletionTolerance, requestedTolerance)
+                : profile.CompletionTolerance;
+            moves.Add((axis, target, completionTolerance, velocity));
+        }
+
+        var moveTimeoutMilliseconds = (int)Math.Clamp(
+            maximumTimeoutMilliseconds,
+            10_000d,
+            120_000d);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var commandedAxes = new List<AxisStatus>();
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            foreach (var move in moves)
+            {
+                var current = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                ApplySnapshot(move.Axis, current);
+                if (Math.Abs(current.FeedbackPosition - move.Target) <= move.Tolerance)
+                {
+                    continue;
+                }
+
+                _motionCard.MoveAbsolute(move.Axis.HardwareAxisNo, move.Target, move.Velocity);
+                commandedAxes.Add(move.Axis);
+                move.Axis.IsMoving = true;
+                move.Axis.State = $"同步绝对位置命令已发送：{move.Target:0.###} {move.Axis.Unit}";
+            }
+
+            foreach (var move in moves)
+            {
+                move.Axis.Target = move.Target;
+            }
+
+            _commandStopwatch = Stopwatch.StartNew();
+            SetCommandStage(CommandStage.Issued, "同步绝对位置命令已下发");
+            var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
+            while (true)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var snapshots = new List<MotionAxisSnapshot>(moves.Count);
+                var allAtTarget = true;
+                foreach (var move in moves)
+                {
+                    var snapshot = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
+                    ApplySnapshot(move.Axis, snapshot);
+                    if (snapshot.Alarm || snapshot.EmergencyInput)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步绝对位置移动时发生报警或急停信号：{snapshot.StateText}。");
+                    }
+
+                    if (snapshot.StopReason != 0)
+                    {
+                        throw new MotionCardException(
+                            $"{move.Axis.Name} 同步绝对位置移动未正常到位，停止原因 {snapshot.StopReason}。",
+                            "同步绝对位置完成检查");
+                    }
+
+                    snapshots.Add(snapshot);
+                    if (snapshot.IsMoving ||
+                        Math.Abs(snapshot.FeedbackPosition - move.Target) > move.Tolerance)
+                    {
+                        allAtTarget = false;
+                    }
+                }
+
+                if (allAtTarget)
+                {
+                    SetCommandStage(CommandStage.Stopped, "同步绝对位置运动完成");
+                    return snapshots;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        $"同步绝对位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。");
+                }
+
+                SetCommandStage(CommandStage.Running, "轴组同步运动中");
+                await Task.Delay(_motionOptions.PollIntervalMilliseconds, linkedCancellation.Token);
+            }
+        }
+        catch (Exception exception)
+        {
+            foreach (var axis in commandedAxes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-ABSOLUTE",
+                    "同步绝对位置移动异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisTargets.Select(pair => pair.Key.ToString("00")))}-EXTERNAL-ABSOLUTE",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
+    public bool SetDigitalOutputChannel(int channel, bool enabled)
+    {
+        if (channel < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(channel));
+        }
+
+        if (!EnsureConnected())
+        {
+            return false;
+        }
+
+        var count = _motionCard.DigitalOutputCount;
+        if (channel >= count)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(channel),
+                $"数字输出通道必须在 0 到 {count - 1} 之间。");
+        }
+
+        var hardwareBitNo = GetDigitalIoStartBit(IoPointKind.DigitalOutput, count) + channel;
+        _motionCard.WriteDigitalOutput(hardwareBitNo, enabled);
+        PollIoState();
+        return true;
+    }
+
+    public bool SetDigitalOutputHardwareBit(int bitNo, bool enabled)
+    {
+        if (bitNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bitNo));
+        }
+
+        // 该入口供自动流程控制真空阀。上下料会与其它轴组并行，不能因为
+        // _calibrationOperationActive 而阻止独立数字输出；安全锁和断线仍必须拦截。
+        if (!EnsureProcessIoWriteReady())
+        {
+            return false;
+        }
+
+        _motionCard.WriteDigitalOutput(bitNo, enabled);
+        PollIoState();
+        return true;
+    }
+
+    public bool TryReadDigitalOutputHardwareBit(int bitNo, out bool enabled)
+    {
+        enabled = false;
+        if (bitNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bitNo));
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            return false;
+        }
+
+        var count = _motionCard.DigitalOutputCount;
+        if (bitNo >= count)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(bitNo),
+                $"数字输出位必须在 0 到 {count - 1} 之间。");
+        }
+
+        var portNo = bitNo / 32;
+        var portBitNo = bitNo % 32;
+        var state = _motionCard.ReadDigitalOutputs(portNo);
+        enabled = (state & (1u << portBitNo)) != 0;
+        return true;
+    }
+
+    public Task HomeLoadingRAxesAsync(CancellationToken cancellationToken)
+    {
+        // 与生产开始流程的上料 R 轴使用相同模式、速度和零偏移；两轴同时启动回原。
+        return HomeAxesAsync(
+            [6, 8],
+            MotionCardOptions.GetOneKeyResetHomeMode(6),
+            0,
+            cancellationToken,
+            lowVelocityOverride: OneKeyResetRHomeVelocity,
+            highVelocityOverride: OneKeyResetRHomeVelocity);
+    }
+
+    public async Task HomeDdAxisAsync(CancellationToken cancellationToken)
+    {
+        const int ddHardwareAxisNo = 0;
+        await HomeAxesAsync(
+            [ddHardwareAxisNo],
+            MotionCardOptions.GetOneKeyResetHomeMode(ddHardwareAxisNo),
+            0,
+            cancellationToken,
+            lowVelocityOverride: OneKeyResetDdHomeVelocity,
+            highVelocityOverride: OneKeyResetDdHomeVelocity);
+
+        var axis = Axes?.FirstOrDefault(item =>
+            item.HardwareAxisNo == ddHardwareAxisNo && item.IsAvailable)
+            ?? throw new InvalidOperationException("DD马达（轴0）当前不可用。");
+        var snapshot = _motionCard.ReadAxis(ddHardwareAxisNo);
+        ApplySnapshot(axis, snapshot);
+        ProcessSnapshotAlarms(axis, snapshot);
+        var positionError = Math.Abs(snapshot.FeedbackPosition);
+        if (snapshot.IsMoving || !snapshot.Homed || snapshot.Alarm || snapshot.EmergencyInput ||
+            snapshot.StopReason != 0 || positionError > OneKeyResetHomePositionTolerance)
+        {
+            throw new MotionCardException(
+                $"DD马达回0确认失败：位置={snapshot.FeedbackPosition:F0} pulse，" +
+                $"运动={snapshot.IsMoving}，回原完成={snapshot.Homed}，" +
+                $"报警=0x{snapshot.AxisErrorCode:X4}，停止原因={snapshot.StopReason}；" +
+                $"允许误差±{OneKeyResetHomePositionTolerance:F0} pulse。");
+        }
+
+        axis.State = "DD马达回0完成";
+    }
+
+    public async Task HomeAxesAsync(
+        IReadOnlyCollection<int> hardwareAxisNos,
+        int homeMode,
+        double offsetPosition,
+        CancellationToken cancellationToken,
+        double? lowVelocityOverride = null,
+        double? highVelocityOverride = null,
+        IReadOnlyCollection<int>? allowedMovingAxisNos = null,
+        IReadOnlyDictionary<int, MotionHomeProfile>? profileOverrides = null)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        var axisNumbers = hardwareAxisNos
+            .Distinct()
+            .OrderBy(axisNo => axisNo)
+            .ToArray();
+        if (axisNumbers.Length == 0 || axisNumbers.Any(axisNo => axisNo < 0))
+        {
+            throw new ArgumentException("至少需要一根有效硬件轴。", nameof(hardwareAxisNos));
+        }
+
+        if (!double.IsFinite(offsetPosition))
+        {
+            throw new ArgumentOutOfRangeException(nameof(offsetPosition), "回原偏移必须是有限数值。");
+        }
+
+        if (lowVelocityOverride is { } lowVelocity &&
+            (!double.IsFinite(lowVelocity) || lowVelocity <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lowVelocityOverride), "回原低速必须是大于 0 的有效数值。");
+        }
+
+        if (highVelocityOverride is { } highVelocity &&
+            (!double.IsFinite(highVelocity) || highVelocity <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(highVelocityOverride), "回原高速必须是大于 0 的有效数值。");
+        }
+
+        if (profileOverrides is not null)
+        {
+            foreach (var (axisNo, profile) in profileOverrides)
+            {
+                if (axisNo < 0)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(profileOverrides),
+                        "逐轴回原参数包含无效轴号。");
+                }
+
+                profile.Validate(requireEnabled: true);
+            }
+        }
+
+        if (_closed)
+        {
+            throw new InvalidOperationException("运动控制已经关闭。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        if (!_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        ThrowIfExternalEmergencyStopActive();
+
+        if (IsAnyMotionWorkflowActiveExcept(allowedMovingAxisNos, axisNumbers))
+        {
+            throw new InvalidOperationException("当前存在运动、回零或停止流程，不能执行轴组回原。");
+        }
+
+        if (axisNumbers.Any(axisNo => axisNo >= _motionCard.AxisCount))
+        {
+            throw new InvalidOperationException(
+                $"轴组回原包含不可用硬件轴，控制卡当前只有 {_motionCard.AxisCount} 根轴。");
+        }
+
+        var axes = axisNumbers
+            .Select(axisNo => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == axisNo && axis.IsAvailable)
+                ?? throw new InvalidOperationException($"硬件轴 {axisNo} 当前不可用。"))
+            .ToArray();
+        foreach (var axis in axes)
+        {
+            var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+            ApplySnapshot(axis, snapshot);
+            ProcessSnapshotAlarms(axis, snapshot);
+            if (snapshot.IsMoving || snapshot.Alarm || snapshot.EmergencyInput)
+            {
+                throw new MotionCardException($"{axis.Name} 正在运动或存在报警/急停输入，不能启动轴组回原。");
+            }
+
+            if (!axis.StatusReadHealthy)
+            {
+                throw new MotionCardException($"{axis.Name} 状态读取异常，不能启动轴组回原。");
+            }
+
+            if (!axis.ServoOn)
+            {
+                throw new MotionCardException($"{axis.Name} 未使能，不能启动轴组回原。");
+            }
+
+            if (profileOverrides is null &&
+                (!lowVelocityOverride.HasValue || !highVelocityOverride.HasValue) &&
+                (!double.IsFinite(axis.JogSpeed) || axis.JogSpeed <= 0))
+            {
+                throw new InvalidOperationException($"{axis.Name} 的运行速度配置无效。");
+            }
+        }
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
+        _calibrationMotionCancellation = linkedCancellation;
+        _calibrationOperationActive = true;
+        try
+        {
+            foreach (var axis in axes)
+            {
+                linkedCancellation.Token.ThrowIfCancellationRequested();
+                var profile = profileOverrides?.GetValueOrDefault(axis.HardwareAxisNo)
+                    ?? new MotionHomeProfile
+                    {
+                        Enabled = true,
+                        Mode = homeMode,
+                        LowVelocity = lowVelocityOverride ?? axis.JogSpeed * TestHomeLowSpeedRatio,
+                        HighVelocity = highVelocityOverride ?? axis.JogSpeed,
+                        AccelerationSeconds = 0.1,
+                        DecelerationSeconds = 0.1,
+                        OffsetPosition = offsetPosition
+                    };
+                profile.Validate(requireEnabled: true);
+                _motionCard.Home(axis.HardwareAxisNo, profile);
+                axis.Homed = false;
+                axis.IsMoving = true;
+                axis.State = $"轴组回原：模式 {profile.Mode} 回零中";
+                StartHomeTracking(axis.HardwareAxisNo, deadline);
+            }
+
+            var modeSummary = profileOverrides is null
+                ? $"模式 {homeMode}"
+                : "逐轴模式";
+            SetCommandStage(CommandStage.Running, $"轴组{modeSummary}回原中");
+            await Task.WhenAll(axes.Select(axis => WaitForHomeAsync(axis, deadline, linkedCancellation.Token)));
+            foreach (var axis in axes)
+            {
+                var completedMode = profileOverrides?
+                                        .GetValueOrDefault(axis.HardwareAxisNo)?
+                                        .Mode
+                                    ?? homeMode;
+                axis.State = $"轴组回原：模式 {completedMode} 回零完成";
+            }
+
+            SetCommandStage(CommandStage.Stopped, $"轴组{modeSummary}回原完成");
+        }
+        catch (Exception exception)
+        {
+            foreach (var axis in axes)
+            {
+                IssueAxisStopWithEscalation(
+                    axis,
+                    axis.HardwareAxisNo,
+                    immediate: false,
+                    "EXTERNAL-MULTI-HOME",
+                    "轴组回原异常，正在安全停止");
+            }
+
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm(
+                    $"AXES-{string.Join("-", axisNumbers.Select(axisNo => axisNo.ToString("00")))}-EXTERNAL-HOME",
+                    FormatException(exception));
+            }
+
+            throw;
+        }
+        finally
+        {
+            foreach (var axis in axes)
+            {
+                ClearHomeTracking(axis.HardwareAxisNo);
+            }
+
+            if (ReferenceEquals(_calibrationMotionCancellation, linkedCancellation))
+            {
+                _calibrationMotionCancellation = null;
+            }
+
+            _calibrationOperationActive = false;
+            UpdateHomeEditorState();
+            PollMotionState();
+        }
+    }
+
     public async Task RunNinePointCalibrationAsync(
         NinePointMotionRequest request,
         Func<NinePointMotionPosition, CancellationToken, Task> captureAsync,
@@ -761,6 +2192,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException("运动控制卡尚未连接。 ");
         }
+
+        ThrowIfExternalEmergencyStopActive();
 
         if (IsAnyMotionWorkflowActive())
         {
@@ -985,21 +2418,40 @@ public partial class MotionControlPage : UserControl
         double velocity,
         double positionTolerance,
         int moveTimeoutMilliseconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double? yVelocityOverride = null,
+        int? linearInterpolationCoordinateSystemNo = null)
     {
         var beforeX = _motionCard.ReadAxis(xAxis.HardwareAxisNo);
         var beforeY = _motionCard.ReadAxis(yAxis.HardwareAxisNo);
         EnsureCalibrationAxisSafe(beforeX, "X");
         EnsureCalibrationAxisSafe(beforeY, "Y");
 
-        if (Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance)
+        var xNeedsMove = Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance;
+        var yNeedsMove = Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance;
+        if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo &&
+            (xNeedsMove || yNeedsMove))
         {
-            _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, velocity);
+            _motionCard.MoveLinearAbsolute(
+                coordinateSystemNo,
+                [xAxis.HardwareAxisNo, yAxis.HardwareAxisNo],
+                [targetX, targetY],
+                [velocity, yVelocityOverride ?? velocity]);
         }
-
-        if (Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance)
+        else
         {
-            _motionCard.MoveAbsolute(yAxis.HardwareAxisNo, targetY, velocity);
+            if (xNeedsMove)
+            {
+                _motionCard.MoveAbsolute(xAxis.HardwareAxisNo, targetX, velocity);
+            }
+
+            if (yNeedsMove)
+            {
+                _motionCard.MoveAbsolute(
+                    yAxis.HardwareAxisNo,
+                    targetY,
+                    yVelocityOverride ?? velocity);
+            }
         }
 
         xAxis.Target = targetX;
@@ -1030,7 +2482,7 @@ public partial class MotionControlPage : UserControl
                     $"Y={currentY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
             }
 
-            await Task.Delay(50, cancellationToken);
+            await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
         }
     }
 
@@ -1111,8 +2563,23 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private void StopCalibrationAxesNoThrow(AxisStatus xAxis, AxisStatus yAxis)
+    private void StopCalibrationAxesNoThrow(
+        AxisStatus xAxis,
+        AxisStatus yAxis,
+        int? linearInterpolationCoordinateSystemNo = null)
     {
+        if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo)
+        {
+            try
+            {
+                _motionCard.StopLinearInterpolation(coordinateSystemNo);
+            }
+            catch
+            {
+                // 继续逐轴停止，确保插补坐标系停止失败时仍能进入原有安全停止链。
+            }
+        }
+
         foreach (var axis in new[] { xAxis, yAxis }.DistinctBy(item => item.HardwareAxisNo))
         {
             try
@@ -1165,6 +2632,7 @@ public partial class MotionControlPage : UserControl
         try
         {
             var connection = _motionCard.Open();
+            _pressureSafety?.Start(_motionCard, IssueEmergencyStopAndNotify, OnPressureSafetyTrip);
             _connectedCardNo = connection.IsSimulation ? null : connection.CardNo;
             if (ViewModel is { } viewModel)
             {
@@ -1207,6 +2675,7 @@ public partial class MotionControlPage : UserControl
             ConfigureIoPoints(IoPointKind.DigitalInput);
             SetWorkbenchMode(MotionWorkbenchMode.ContinuousJog);
             SetCommandStage(CommandStage.Ready, "准备");
+            StartExternalEmergencyStopMonitor();
             PollMotionState();
             _pollTimer.Start();
         }
@@ -1738,7 +3207,7 @@ public partial class MotionControlPage : UserControl
     {
         var deadline = _activePositionDeadlineUtc
             ?? throw new InvalidOperationException("定位命令没有有效的超时截止时间。");
-        await Task.Delay(Math.Min(_motionOptions.PollIntervalMilliseconds, 100), cancellationToken);
+        await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1921,7 +3390,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionCard.EmergencyStop();
+            IssueEmergencyStopAndNotify();
             _homeSequenceCancellation?.Cancel();
             ClearAllHomeTracking();
             ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
@@ -1986,13 +3455,55 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionCard.EmergencyStop();
+            IssueEmergencyStopAndNotify();
             return true;
         }
         catch (Exception exception)
         {
             ActivateMotionSafetyLock(reason, exception, alarmCode);
             return false;
+        }
+    }
+
+    private void IssueEmergencyStopAndNotify()
+    {
+        // 必须在控制卡急停和各运动任务取消之前通知生产流程冻结IO。
+        // 否则运动任务可能先进入catch/finally并改写真空输出。
+        NotifyEmergencyStopIssuedNoThrow();
+        _motionCard.EmergencyStop();
+    }
+
+    private void NotifyEmergencyStopIssuedNoThrow()
+    {
+        var handlers = EmergencyStopIssued;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, EventArgs.Empty);
+            }
+            catch (Exception exception)
+            {
+                // 急停通知失败不能阻止真正的控制卡急停命令继续下发。
+                var details = $"急停前冻结生产IO的通知失败：{FormatException(exception)}";
+                if (Dispatcher.CheckAccess())
+                {
+                    RecordAlarm("EMERGENCY-STOP-NOTIFICATION-FAILED", details);
+                }
+                else
+                {
+                    _ = Dispatcher.BeginInvoke(
+                        DispatcherPriority.Send,
+                        new Action(() => RecordAlarm(
+                            "EMERGENCY-STOP-NOTIFICATION-FAILED",
+                            details)));
+                }
+            }
         }
     }
 
@@ -2073,7 +3584,7 @@ public partial class MotionControlPage : UserControl
                 break;
             }
 
-            Thread.Sleep(Math.Clamp(_motionOptions.PollIntervalMilliseconds / 2, 25, 100));
+            Thread.Sleep(_motionOptions.PollIntervalMilliseconds);
         }
 
         var axisText = string.Join(", ", pendingAxisNos.Select(axisNo => axisNo.ToString()));
@@ -2705,7 +4216,7 @@ public partial class MotionControlPage : UserControl
         {
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
                 ClearAllHomeTracking();
                 ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
                 foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
@@ -2731,6 +4242,79 @@ public partial class MotionControlPage : UserControl
             HomeAllButton.SetCurrentValue(IsEnabledProperty, CanRunHomeSequence());
             PollMotionState();
         }
+    }
+
+    public AxisStatus? LoadingXAxis => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == 1);
+
+    public AxisStatus? LoadingZ1Axis => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == 5);
+
+    public AxisStatus? LoadingZ2Axis => Axes?.FirstOrDefault(axis => axis.HardwareAxisNo == 7);
+
+    public bool ToggleLoadingZServos()
+    {
+        if (_closed || !_motionCard.IsOpen || ViewModel?.MotionControlsEnabled != true)
+        {
+            throw new InvalidOperationException("运动控制卡未连接或运动控制不可用。");
+        }
+
+        AxisStatus[] axes =
+        [
+            LoadingZ1Axis ?? throw new InvalidOperationException("上料Z1轴（轴5）不可用。"),
+            LoadingZ2Axis ?? throw new InvalidOperationException("上料Z2轴（轴7）不可用。")
+        ];
+        // 两轴全部检查通过后才下发命令，避免另一轴正在运动时只切换其中一轴。
+        foreach (var axis in axes)
+        {
+            ApplySnapshot(axis, _motionCard.ReadAxis(axis.HardwareAxisNo));
+            if (!axis.IsAvailable || !axis.StatusReadHealthy)
+            {
+                throw new InvalidOperationException($"上料Z轴（轴{axis.HardwareAxisNo}）状态读取异常，不能切换使能。");
+            }
+
+            if (axis.IsMoving || _homeSequenceCancellation is not null ||
+                IsAxisMotionWorkflowActive(axis.HardwareAxisNo))
+            {
+                throw new InvalidOperationException("上料Z轴正在运动、回零或等待停止确认，不能切换双Z使能。");
+            }
+        }
+
+        var enabled = !axes.All(axis => axis.ServoOn);
+        foreach (var axis in axes)
+        {
+            SetServo(axis, enabled);
+            if (!axis.StatusReadHealthy || axis.ServoOn != enabled)
+            {
+                throw new InvalidOperationException(
+                    $"上料双Z使能切换未全部完成：轴{axis.HardwareAxisNo}未确认，请检查两轴状态和报警信息。");
+            }
+        }
+
+        return enabled;
+    }
+
+    public bool ToggleLoadingXServo()
+    {
+        if (_closed || !_motionCard.IsOpen || ViewModel?.MotionControlsEnabled != true)
+        {
+            throw new InvalidOperationException("运动控制卡未连接或运动控制不可用。");
+        }
+
+        var axis = LoadingXAxis
+            ?? throw new InvalidOperationException("上料X轴（轴1）不可用。");
+        ApplySnapshot(axis, _motionCard.ReadAxis(axis.HardwareAxisNo));
+        if (!axis.IsAvailable || !axis.StatusReadHealthy)
+        {
+            throw new InvalidOperationException("上料X轴状态读取异常，不能切换使能。");
+        }
+
+        var enabled = !axis.ServoOn;
+        SetServo(axis, enabled);
+        if (!axis.StatusReadHealthy || axis.ServoOn != enabled)
+        {
+            throw new InvalidOperationException("上料X轴使能切换未完成，请检查运动状态和报警信息。");
+        }
+
+        return enabled;
     }
 
     private void ServoOn_Click(object sender, RoutedEventArgs e)
@@ -2764,11 +4348,24 @@ public partial class MotionControlPage : UserControl
 
     private void StopAll_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryIssueGlobalEmergencyStop("操作员请求全轴急停", "EMERGENCY-STOP-FAILED"))
+        _ = EmergencyStopAllAxes("操作员请求全轴急停");
+    }
+
+    public bool EmergencyStopAllAxes(string reason)
+    {
+        if (!TryIssueGlobalEmergencyStop(reason, "EMERGENCY-STOP-FAILED"))
         {
-            return;
+            return false;
         }
 
+        CompleteEmergencyStopStateAfterHardwareIssued();
+        return true;
+    }
+
+    private void CompleteEmergencyStopStateAfterHardwareIssued()
+    {
+        // 急停只停止运动轴。全轴急停下发时已先通知生产流程冻结 IO 状态，
+        // 此处再取消各运动任务，防止异步任务进入 finally 后改写真空吸、破真空等输出。
         _homeSequenceCancellation?.Cancel();
         _activeJogAxisNo = null;
         _activeJogInputOwner = null;
@@ -2787,6 +4384,7 @@ public partial class MotionControlPage : UserControl
         _emergencyStopPendingAxisNos.Clear();
         ClearAllHomeTracking();
         _positionMoveCancellation?.Cancel();
+        _calibrationMotionCancellation?.Cancel();
 
         ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
         foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
@@ -2821,7 +4419,7 @@ public partial class MotionControlPage : UserControl
             return;
         }
 
-        ViewModel?.AlarmRecords.Clear();
+        // 复位设备不删除历史；只能在报警记录页显式清空。
         // Keep active keys while a physical alarm is still present. Clearing them
         // here makes the following poll insert every active alarm straight back
         // into the history, so the operator sees no visible effect.
@@ -2830,34 +4428,68 @@ public partial class MotionControlPage : UserControl
 
     private async void TestOneKeyReset_Click(object sender, RoutedEventArgs e)
     {
-        if (_homeSequenceCancellation is not null || IsAnyMotionWorkflowActive())
+        var confirmation = MessageBox.Show(
+            Window.GetWindow(this),
+            "请确认各轴都在安全区域。\n\n确认后将执行一键复位测试。",
+            "一键复位安全确认",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+        if (confirmation != MessageBoxResult.OK)
         {
-            RecordAlarm("TEST-RESET-BUSY", "已有运动、回零或停止确认尚未结束，不能启动一键复位测试。");
             return;
         }
 
-        if (!EnsureConnected())
-        {
-            return;
-        }
-
-        Dictionary<int, AxisStatus> axes;
         try
         {
-            axes = PreflightTestOneKeyReset();
+            await RunOneKeyResetAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            if (exception is not OperationCanceledException)
+            {
+                RecordAlarm("TEST-RESET-UI", FormatException(exception));
+            }
+        }
+    }
+
+    public async Task RunOneKeyResetAsync(CancellationToken cancellationToken)
+    {
+        if (_homeSequenceCancellation is not null || IsAnyMotionWorkflowActive())
+        {
+            throw new InvalidOperationException("已有运动、回零或停止确认尚未结束，不能启动一键复位。");
+        }
+
+        if (_closed || !_motionCard.IsOpen)
+        {
+            throw new InvalidOperationException("运动控制卡尚未连接。");
+        }
+
+        if (_motionSafetyLock)
+        {
+            throw new InvalidOperationException($"运动安全锁已激活：{_motionSafetyLockReason ?? "停止安全链异常"}。");
+        }
+
+        ThrowIfExternalEmergencyStopActive();
+
+        Dictionary<int, AxisStatus> axes;
+        var resetStages = CreateTestOneKeyResetStages();
+        try
+        {
+            axes = PreflightTestOneKeyReset(resetStages);
         }
         catch (Exception exception)
         {
             RecordAlarm("TEST-RESET-PREFLIGHT", FormatException(exception));
-            return;
+            throw;
         }
 
-        _homeSequenceCancellation = new CancellationTokenSource();
+        _homeSequenceCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         TestOneKeyResetButton.SetCurrentValue(IsEnabledProperty, false);
         _commandStopwatch = Stopwatch.StartNew();
         try
         {
-            foreach (var stage in TestOneKeyResetStages)
+            foreach (var stage in resetStages)
             {
                 _homeSequenceCancellation.Token.ThrowIfCancellationRequested();
                 await RunTestHomeStageAsync(stage, axes, _homeSequenceCancellation.Token);
@@ -2871,12 +4503,14 @@ public partial class MotionControlPage : UserControl
             {
                 axis.State = "一键复位测试已取消";
             }
+
+            throw;
         }
         catch (Exception exception)
         {
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
                 ClearAllHomeTracking();
                 ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
                 foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
@@ -2894,6 +4528,7 @@ public partial class MotionControlPage : UserControl
 
             RecordAlarm("TEST-RESET", FormatException(exception));
             SetCommandStage(CommandStage.Failed, "一键复位测试失败");
+            throw;
         }
         finally
         {
@@ -2904,22 +4539,28 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private Dictionary<int, AxisStatus> PreflightTestOneKeyReset()
+    private Dictionary<int, AxisStatus> PreflightTestOneKeyReset(
+        IReadOnlyCollection<TestHomeStage> resetStages)
     {
-        var requestedAxisNumbers = TestOneKeyResetStages
-            .SelectMany(stage => stage.HardwareAxisNumbers)
+        var requestedAxisNumbers = resetStages
+            .SelectMany(stage => stage.Groups)
+            .SelectMany(group => group.HardwareAxisNumbers)
             .Distinct()
             .ToArray();
         var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
+        var snapshotsByHardwareNo = new Dictionary<int, MotionAxisSnapshot>();
 
-        foreach (var stage in TestOneKeyResetStages)
+        foreach (var stage in resetStages)
         {
-            CreateTestHomeProfile(stage).Validate(requireEnabled: true);
-            foreach (var hardwareAxisNo in stage.HardwareAxisNumbers)
+            foreach (var group in stage.Groups)
             {
-                if (!axisByHardwareNo.TryGetValue(hardwareAxisNo, out var axis) || !axis.IsAvailable)
+                CreateTestHomeProfile(group).Validate(requireEnabled: true);
+                foreach (var hardwareAxisNo in group.HardwareAxisNumbers)
                 {
-                    throw new MotionCardException($"一键复位测试需要的硬件轴 {hardwareAxisNo} 不可用。");
+                    if (!axisByHardwareNo.TryGetValue(hardwareAxisNo, out var axis) || !axis.IsAvailable)
+                    {
+                        throw new MotionCardException($"一键复位测试需要的硬件轴 {hardwareAxisNo} 不可用。");
+                    }
                 }
             }
         }
@@ -2930,11 +4571,13 @@ public partial class MotionControlPage : UserControl
             throw new MotionCardException($"EtherCAT 总线错误 0x{busError:X4}。");
         }
 
-        foreach (var axis in (Axes ?? []).Where(axis => axis.IsAvailable))
+        foreach (var hardwareAxisNo in requestedAxisNumbers)
         {
-            var snapshot = _motionCard.ReadAxis(axis.HardwareAxisNo);
+            var axis = axisByHardwareNo[hardwareAxisNo];
+            var snapshot = _motionCard.ReadAxis(hardwareAxisNo);
             ApplySnapshot(axis, snapshot);
             ProcessSnapshotAlarms(axis, snapshot);
+            snapshotsByHardwareNo[hardwareAxisNo] = snapshot;
             if (snapshot.IsMoving || snapshot.Alarm || snapshot.EmergencyInput)
             {
                 throw new MotionCardException($"{axis.Name} 正在运动或存在报警/急停输入，不能启动一键复位测试。");
@@ -2949,7 +4592,25 @@ public partial class MotionControlPage : UserControl
 
         if (requestedAxes.Values.Any(axis => !axis.ServoOn))
         {
-            throw new MotionCardException("一键复位测试前必须先使能硬件轴 0～12。");
+            throw new MotionCardException("一键复位测试前必须先使能本次复位涉及的硬件轴。");
+        }
+
+        foreach (var stage in resetStages)
+        {
+            foreach (var group in stage.Groups)
+            {
+                var profile = CreateTestHomeProfile(group);
+                foreach (var hardwareAxisNo in group.HardwareAxisNumbers)
+                {
+                    EnsureOneKeyResetAxisCanStart(
+                        stage,
+                        new TestHomeAxisCommand(
+                            requestedAxes[hardwareAxisNo],
+                            profile,
+                            group.CompletionTolerance),
+                        snapshotsByHardwareNo[hardwareAxisNo]);
+                }
+            }
         }
 
         return requestedAxes;
@@ -2960,41 +4621,177 @@ public partial class MotionControlPage : UserControl
         IReadOnlyDictionary<int, AxisStatus> axes,
         CancellationToken cancellationToken)
     {
-        var profile = CreateTestHomeProfile(stage);
         var deadline = DateTime.UtcNow.AddSeconds(_motionOptions.HomeTimeoutSeconds);
-        var stageAxes = stage.HardwareAxisNumbers.Select(axisNo => axes[axisNo]).ToArray();
+        var stageAxes = stage.Groups
+            .SelectMany(group => group.HardwareAxisNumbers.Select(axisNo =>
+                new TestHomeAxisCommand(
+                    axes[axisNo],
+                    CreateTestHomeProfile(group),
+                    group.CompletionTolerance)))
+            .ToArray();
+        var commandedAxes = new List<TestHomeAxisCommand>(stageAxes.Length);
 
-        foreach (var axis in stageAxes)
+        foreach (var item in stageAxes)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _motionCard.Home(axis.HardwareAxisNo, profile);
-            axis.Homed = false;
-            axis.IsMoving = true;
-            axis.State = $"一键复位测试：{stage.Name}回零中";
-            StartHomeTracking(axis.HardwareAxisNo, deadline);
+            var snapshot = _motionCard.ReadAxis(item.Axis.HardwareAxisNo);
+            ApplySnapshot(item.Axis, snapshot);
+            ProcessSnapshotAlarms(item.Axis, snapshot);
+            EnsureOneKeyResetAxisCanStart(stage, item, snapshot);
+
+            if (IsOneKeyResetAxisAtHome(item, snapshot))
+            {
+                item.Axis.State = $"一键复位：{stage.Name}当前仍在原点，跳过";
+                continue;
+            }
+
+            var isReturningAfterLeavingHome = snapshot.Homed;
+            _motionCard.Home(item.Axis.HardwareAxisNo, item.Profile);
+            commandedAxes.Add(item);
+            item.Axis.Homed = false;
+            item.Axis.IsMoving = true;
+            item.Axis.State = isReturningAfterLeavingHome
+                ? $"一键复位：{stage.Name}已离开原点，正在重新回原"
+                : $"一键复位：{stage.Name}回原中";
+            StartHomeTracking(item.Axis.HardwareAxisNo, deadline);
         }
 
-        SetCommandStage(CommandStage.Running, $"一键复位测试：{stage.Name}回零中");
-        await Task.WhenAll(stageAxes.Select(axis => WaitForHomeAsync(axis, deadline, cancellationToken)));
-        foreach (var axis in stageAxes)
+        if (commandedAxes.Count == 0)
         {
-            ClearHomeTracking(axis.HardwareAxisNo);
-            axis.State = $"一键复位测试：{stage.Name}回零完成";
+            SetCommandStage(CommandStage.Stopped, $"一键复位：{stage.Name}已在原点，跳过");
+            return;
+        }
+
+        SetCommandStage(CommandStage.Running, $"一键复位：{stage.Name}回原中");
+        await Task.WhenAll(commandedAxes.Select(item => WaitForHomeAsync(item.Axis, deadline, cancellationToken)));
+        foreach (var item in commandedAxes)
+        {
+            var snapshot = _motionCard.ReadAxis(item.Axis.HardwareAxisNo);
+            ApplySnapshot(item.Axis, snapshot);
+            ProcessSnapshotAlarms(item.Axis, snapshot);
+            EnsureOneKeyResetAxisCompleted(stage, item, snapshot);
+            ClearHomeTracking(item.Axis.HardwareAxisNo);
+            item.Axis.State = $"一键复位：{stage.Name}回原完成";
         }
     }
 
-    private static MotionHomeProfile CreateTestHomeProfile(TestHomeStage stage)
+    private static void EnsureOneKeyResetAxisCanStart(
+        TestHomeStage stage,
+        TestHomeAxisCommand item,
+        MotionAxisSnapshot snapshot)
+    {
+        var axisDescription = $"{item.Axis.Name}（硬件轴 {item.Axis.HardwareAxisNo}）";
+        if (snapshot.IsMoving ||
+            !snapshot.ServoEnabled ||
+            snapshot.Alarm ||
+            snapshot.EmergencyInput ||
+            snapshot.PositiveLimit ||
+            snapshot.NegativeLimit ||
+            snapshot.StopReason != 0)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}状态不允许执行{stage.Name}回原：" +
+                $"运动={snapshot.IsMoving}，使能={snapshot.ServoEnabled}，" +
+                $"报警=0x{snapshot.AxisErrorCode:X4}，正限位={snapshot.PositiveLimit}，" +
+                $"负限位={snapshot.NegativeLimit}，停止原因={snapshot.StopReason}。命令未下发。");
+        }
+
+        if (IsOneKeyResetAxisAtHome(item, snapshot))
+        {
+            // dmc_get_home_result 表示历史上曾成功回原；只有当前位置仍在目标容差内才可跳过。
+            return;
+        }
+
+        if (item.Profile.Mode == 33 && (snapshot.OriginInput || snapshot.NegativeLimit))
+        {
+            var activeInput = snapshot.NegativeLimit ? "负限位" : "原点输入";
+            throw new MotionCardException(
+                $"{axisDescription}尚未取得回原完成状态，但{activeInput}已有效；" +
+                "模式 33 会继续向负方向寻找编码器零位，已禁止启动以防撞机。");
+        }
+
+        if (item.Profile.Mode == 34 && (snapshot.OriginInput || snapshot.PositiveLimit))
+        {
+            var activeInput = snapshot.PositiveLimit ? "正限位" : "原点输入";
+            throw new MotionCardException(
+                $"{axisDescription}尚未取得回原完成状态，但{activeInput}已有效；" +
+                "模式 34 会继续向正方向寻找编码器零位，已禁止启动以防撞机。");
+        }
+    }
+
+    private static bool IsOneKeyResetAxisAtHome(
+        TestHomeAxisCommand item,
+        MotionAxisSnapshot snapshot)
+    {
+        return snapshot.Homed &&
+               Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition) <=
+               item.CompletionTolerance;
+    }
+
+    private static void EnsureOneKeyResetAxisCompleted(
+        TestHomeStage stage,
+        TestHomeAxisCommand item,
+        MotionAxisSnapshot snapshot)
+    {
+        var axisDescription = $"{item.Axis.Name}（硬件轴 {item.Axis.HardwareAxisNo}）";
+        if (snapshot.IsMoving || !snapshot.Homed || snapshot.Alarm || snapshot.EmergencyInput || snapshot.StopReason != 0)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}{stage.Name}回原结果无效：" +
+                $"运动={snapshot.IsMoving}，回原完成={snapshot.Homed}，" +
+                $"报警=0x{snapshot.AxisErrorCode:X4}，停止原因={snapshot.StopReason}。");
+        }
+
+        var positionError = Math.Abs(snapshot.FeedbackPosition - item.Profile.OffsetPosition);
+        if (positionError > item.CompletionTolerance)
+        {
+            throw new MotionCardException(
+                $"{axisDescription}{stage.Name}回原后的编码器位置误差为 {positionError:F0} 脉冲，" +
+                $"超过允许值 ±{item.CompletionTolerance:F0} 脉冲。");
+        }
+    }
+
+    private static MotionHomeProfile CreateTestHomeProfile(TestHomeGroup group)
     {
         return new MotionHomeProfile
         {
             Enabled = true,
-            Mode = stage.Mode,
-            LowVelocity = stage.HighVelocity * TestHomeLowSpeedRatio,
-            HighVelocity = stage.HighVelocity,
+            Mode = group.Mode,
+            LowVelocity = group.LowVelocity,
+            HighVelocity = group.HighVelocity,
             AccelerationSeconds = 0.1,
             DecelerationSeconds = 0.1,
-            OffsetPosition = stage.OffsetPosition
+            OffsetPosition = group.OffsetPosition
         };
+    }
+
+    private static TestHomeStage[] CreateTestOneKeyResetStages()
+    {
+        return
+        [
+            new("R/Z同时", [
+                new([6, 8, 10, 12], MotionCardOptions.GetOneKeyResetHomeMode(6), OneKeyResetRHomeVelocity, OneKeyResetRHomeVelocity),
+                new([5, 7, 9, 11], MotionCardOptions.GetOneKeyResetHomeMode(5), OneKeyResetZHomeVelocity, OneKeyResetZHomeVelocity)
+            ]),
+            new("上料X", [new([1], MotionCardOptions.GetOneKeyResetHomeMode(1), OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity)]),
+            new("上料Y/下料XY/三个测试站同时", [
+                new([2], MotionCardOptions.GetOneKeyResetHomeMode(2), OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new([3, 4], MotionCardOptions.GetOneKeyResetHomeMode(3), OneKeyResetXyHomeVelocity, OneKeyResetXyHomeVelocity),
+                new(
+                    [13, 14, 15],
+                    MotionCardOptions.GetOneKeyResetHomeMode(13),
+                    OneKeyResetTestStationHomeVelocity,
+                    OneKeyResetTestStationHomeVelocity)
+            ]),
+            new("DD马达", [
+                new(
+                    [0],
+                    MotionCardOptions.GetOneKeyResetHomeMode(0),
+                    OneKeyResetDdHomeVelocity,
+                    OneKeyResetDdHomeVelocity,
+                    OffsetPosition: 0)
+            ])
+        ];
     }
 
     private void IoMode_Click(object sender, RoutedEventArgs e)
@@ -3016,7 +4813,7 @@ public partial class MotionControlPage : UserControl
             return;
         }
 
-        if (ExecuteMotion(null, $"DO-{point.Channel}", () => _motionCard.WriteDigitalOutput(point.Channel, !point.IsOn)))
+        if (ExecuteMotion(null, $"DO-{point.BitNo}", () => _motionCard.WriteDigitalOutput(point.BitNo, !point.IsOn)))
         {
             PollIoState();
         }
@@ -3103,8 +4900,13 @@ public partial class MotionControlPage : UserControl
 
     private async Task WaitForHomeAsync(AxisStatus axis, DateTime deadline, CancellationToken cancellationToken)
     {
-        var issuedAt = DateTime.UtcNow;
+        var issuedAt = _homeIssuedAtUtc.TryGetValue(axis.HardwareAxisNo, out var trackedIssuedAt)
+            ? trackedIssuedAt
+            : DateTime.UtcNow;
+        var startConfirmationDeadline = issuedAt.AddMilliseconds(
+            Math.Max(1000, _motionOptions.PollIntervalMilliseconds * 3));
         var observedMoving = false;
+        var observedHomeResultCleared = false;
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -3122,7 +4924,15 @@ public partial class MotionControlPage : UserControl
                 observedMoving = true;
             }
 
-            if (!snapshot.IsMoving && snapshot.Homed)
+            if (!snapshot.Homed)
+            {
+                observedHomeResultCleared = true;
+            }
+
+            if (!snapshot.IsMoving && snapshot.Homed &&
+                (observedMoving ||
+                 observedHomeResultCleared ||
+                 DateTime.UtcNow >= startConfirmationDeadline))
             {
                 return;
             }
@@ -3130,7 +4940,7 @@ public partial class MotionControlPage : UserControl
             if (!snapshot.IsMoving && !snapshot.Homed &&
                 (snapshot.StopReason != 0 ||
                  observedMoving ||
-                 DateTime.UtcNow >= issuedAt.AddMilliseconds(Math.Max(1000, _motionOptions.PollIntervalMilliseconds * 3))))
+                 DateTime.UtcNow >= startConfirmationDeadline))
             {
                 throw new MotionCardException(
                     $"{axis.Name} 回零未完成即停止，停止原因 {snapshot.StopReason}。",
@@ -3246,6 +5056,213 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    private bool ExternalEmergencyStopMonitoringEnabled =>
+        _motionOptions.ExternalEmergencyStopEnabled && !_motionOptions.SimulationMode;
+
+    private bool ReadExternalEmergencyStopInputActive()
+    {
+        var state = _motionCard.ReadDigitalInputs(_motionOptions.ExternalEmergencyStopInputPort);
+        var inputHigh = (state & (1u << _motionOptions.ExternalEmergencyStopInputBit)) != 0;
+        return _motionOptions.ExternalEmergencyStopActiveLow ? !inputHigh : inputHigh;
+    }
+
+    private void StartExternalEmergencyStopMonitor()
+    {
+        if (!ExternalEmergencyStopMonitoringEnabled ||
+            _externalEmergencyStopMonitorCancellation is not null ||
+            _closed)
+        {
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _externalEmergencyStopMonitorCancellation = cancellation;
+        _externalEmergencyStopMonitorThread = new Thread(
+            () => MonitorExternalEmergencyStopInput(cancellation.Token))
+        {
+            IsBackground = true,
+            Name = "ExternalEmergencyStopMonitor",
+            Priority = ThreadPriority.AboveNormal
+        };
+        _externalEmergencyStopMonitorThread.Start();
+    }
+
+    private void StopExternalEmergencyStopMonitor()
+    {
+        var cancellation = _externalEmergencyStopMonitorCancellation;
+        _externalEmergencyStopMonitorCancellation = null;
+        _externalEmergencyStopMonitorThread = null;
+        cancellation?.Cancel();
+    }
+
+    private void MonitorExternalEmergencyStopInput(CancellationToken cancellationToken)
+    {
+        var lastActive = false;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var active = ReadExternalEmergencyStopInputActive();
+                _externalEmergencyStopInputActive = active;
+                if (active)
+                {
+                    if (Interlocked.CompareExchange(
+                            ref _externalEmergencyStopTriggerLatched,
+                            1,
+                            0) == 0)
+                    {
+                        IssueExternalEmergencyStopFromMonitor(
+                            "外部IO急停按钮触发",
+                            "EXTERNAL-EMERGENCY-STOP",
+                            $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位" +
+                            $"{_motionOptions.ExternalEmergencyStopInputBit}触发");
+                    }
+                }
+                else
+                {
+                    Interlocked.Exchange(ref _externalEmergencyStopTriggerLatched, 0);
+                    if (lastActive)
+                    {
+                        PostExternalEmergencyStopReleasedToUi();
+                    }
+                }
+
+                lastActive = active;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                // 急停输入失去可靠监控时采用失效安全策略：不等待UI，立即停止全部轴。
+                _externalEmergencyStopInputActive = true;
+                if (Interlocked.CompareExchange(
+                        ref _externalEmergencyStopTriggerLatched,
+                        1,
+                        0) == 0)
+                {
+                    IssueExternalEmergencyStopFromMonitor(
+                        "外部急停输入读取失败",
+                        "EXTERNAL-EMERGENCY-STOP-READ",
+                        "无法可靠读取外部急停输入",
+                        exception);
+                }
+            }
+
+            if (cancellationToken.WaitHandle.WaitOne(
+                    _motionOptions.PollIntervalMilliseconds))
+            {
+                break;
+            }
+        }
+    }
+
+    private void IssueExternalEmergencyStopFromMonitor(
+        string reason,
+        string alarmCode,
+        string details,
+        Exception? monitoringException = null)
+    {
+        Exception? stopException = null;
+        try
+        {
+            // 这条调用运行在独立监控线程：先冻结生产IO，再直接调用控制卡急停。
+            IssueEmergencyStopAndNotify();
+        }
+        catch (Exception exception)
+        {
+            stopException = exception;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Send,
+            new Action(() => CompleteExternalEmergencyStopOnUiThread(
+                reason,
+                alarmCode,
+                details,
+                monitoringException,
+                stopException)));
+    }
+
+    private void CompleteExternalEmergencyStopOnUiThread(
+        string reason,
+        string alarmCode,
+        string details,
+        Exception? monitoringException,
+        Exception? stopException)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        if (stopException is not null)
+        {
+            ActivateMotionSafetyLock(reason, stopException, $"{alarmCode}-STOP-FAILED");
+            return;
+        }
+
+        CompleteEmergencyStopStateAfterHardwareIssued();
+        var monitoringDetails = monitoringException is null
+            ? details
+            : $"{details}：{FormatException(monitoringException)}";
+        RecordAlarmOnce(
+            $"external-emergency-stop:{alarmCode}",
+            alarmCode,
+            $"{monitoringDetails}；已由独立20ms监控直接下发控制卡全局急停及全部EtherCAT轴逐轴立即停止。");
+        SetConnectionText(
+            monitoringException is null
+                ? "运动控制：外部急停已立即下发，正在确认全部轴停止"
+                : "运动控制：外部急停监控异常，已失效安全停止全部轴");
+    }
+
+    private void PostExternalEmergencyStopReleasedToUi()
+    {
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                if (_closed)
+                {
+                    return;
+                }
+
+                _activeAlarmKeys.Remove("external-emergency-stop:EXTERNAL-EMERGENCY-STOP");
+                if (!_motionSafetyLock)
+                {
+                    SetConnectionText("运动控制：外部急停按钮已释放");
+                }
+            }));
+    }
+
+    private void ThrowIfExternalEmergencyStopActive()
+    {
+        if (!ExternalEmergencyStopMonitoringEnabled || !_motionCard.IsOpen)
+        {
+            return;
+        }
+
+        try
+        {
+            _externalEmergencyStopInputActive = ReadExternalEmergencyStopInputActive();
+            _activeAlarmKeys.Remove("external-emergency-stop-read");
+        }
+        catch (Exception exception)
+        {
+            RecordAlarmOnce(
+                "external-emergency-stop-read",
+                "EXTERNAL-EMERGENCY-STOP-READ",
+                $"无法读取模块1001的外部急停输入，禁止启动运动：{FormatException(exception)}");
+            throw new InvalidOperationException("外部急停输入读取失败，禁止启动运动。", exception);
+        }
+
+        if (_externalEmergencyStopInputActive)
+        {
+            throw new InvalidOperationException("外部急停按钮仍处于按下状态，请释放按钮后再启动运动。");
+        }
+    }
+
     private void HandleAxisMonitoringFailure(AxisStatus axis, string reason)
     {
         if (!IsAxisMotionWorkflowActive(axis.HardwareAxisNo) && !axis.IsMoving)
@@ -3277,7 +5294,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionCard.EmergencyStop();
+            IssueEmergencyStopAndNotify();
             _homeSequenceCancellation?.Cancel();
             ClearAllHomeTracking();
             ArmAllHardwareAxisStopConfirmations(emergencyStopIssued: true);
@@ -3374,7 +5391,7 @@ public partial class MotionControlPage : UserControl
 
             try
             {
-                _motionCard.EmergencyStop();
+                IssueEmergencyStopAndNotify();
                 _homeSequenceCancellation?.Cancel();
                 ClearAllHomeTracking();
                 var availableAxes = (Axes ?? []).Where(axis => axis.IsAvailable).ToArray();
@@ -3432,20 +5449,20 @@ public partial class MotionControlPage : UserControl
             {
                 case IoPointKind.DigitalInput:
                 {
-                    var inputs = _motionCard.ReadDigitalInputs(_motionOptions.DigitalInputPort);
+                    var portStates = new Dictionary<int, uint>();
                     foreach (var point in viewModel.IoPoints)
                     {
-                        point.IsOn = (inputs & (1u << point.BitNo)) != 0;
+                        point.IsOn = ReadDigitalInputBit(point.BitNo, portStates);
                     }
 
                     break;
                 }
                 case IoPointKind.DigitalOutput:
                 {
-                    var outputs = _motionCard.ReadDigitalOutputs(_motionOptions.DigitalOutputPort);
+                    var portStates = new Dictionary<int, uint>();
                     foreach (var point in viewModel.IoPoints)
                     {
-                        point.IsOn = (outputs & (1u << point.BitNo)) != 0;
+                        point.IsOn = ReadDigitalOutputBit(point.BitNo, portStates);
                     }
 
                     break;
@@ -3499,11 +5516,12 @@ public partial class MotionControlPage : UserControl
             _ => 0
         };
 
-        // Digital port reads return a 32-bit image. Do not truncate the 32
-        // hardware points to the old 20-point dashboard limit.
+        var firstBit = 0;
+        // Digital I/O modules are displayed as a continuous list, while the
+        // hardware bit can start after controller-local I/O and cross ports.
         if (mode is IoPointKind.DigitalInput or IoPointKind.DigitalOutput)
         {
-            count = Math.Min(count, 32);
+            firstBit = GetDigitalIoStartBit(mode, count);
         }
         viewModel.IoPoints.Clear();
         for (var channel = 0; channel < count; channel++)
@@ -3521,6 +5539,9 @@ public partial class MotionControlPage : UserControl
             viewModel.IoPoints.Add(new IoPoint
             {
                 Channel = channel,
+                HardwareBitNo = mode is IoPointKind.DigitalInput or IoPointKind.DigitalOutput
+                    ? firstBit + channel
+                    : channel,
                 Kind = mode,
                 DefaultName = defaultName,
                 Name = string.IsNullOrWhiteSpace(displayName) ? defaultName : displayName
@@ -3531,6 +5552,44 @@ public partial class MotionControlPage : UserControl
         SetIoModeButtonState(DigitalOutputTab, mode == IoPointKind.DigitalOutput);
         SetIoModeButtonState(AnalogInputTab, mode == IoPointKind.AnalogInput);
         SetIoModeButtonState(AnalogOutputTab, mode == IoPointKind.AnalogOutput);
+    }
+
+    private bool ReadDigitalInputBit(int hardwareBitNo, Dictionary<int, uint> portStates)
+    {
+        var portNo = hardwareBitNo / 32;
+        var bitNo = hardwareBitNo % 32;
+        if (!portStates.TryGetValue(portNo, out var state))
+        {
+            state = _motionCard.ReadDigitalInputs(portNo);
+            portStates[portNo] = state;
+        }
+
+        return (state & (1u << bitNo)) != 0;
+    }
+
+    private bool ReadDigitalOutputBit(int hardwareBitNo, Dictionary<int, uint> portStates)
+    {
+        var portNo = hardwareBitNo / 32;
+        var bitNo = hardwareBitNo % 32;
+        if (!portStates.TryGetValue(portNo, out var state))
+        {
+            state = _motionCard.ReadDigitalOutputs(portNo);
+            portStates[portNo] = state;
+        }
+
+        return (state & (1u << bitNo)) != 0;
+    }
+
+    private int GetDigitalIoStartBit(IoPointKind kind, int availableCount)
+    {
+        var configuredStartBit = kind switch
+        {
+            IoPointKind.DigitalInput => _motionOptions.DigitalInputStartBit,
+            IoPointKind.DigitalOutput => _motionOptions.DigitalOutputStartBit,
+            _ => 0
+        };
+
+        return availableCount > configuredStartBit ? configuredStartBit : 0;
     }
 
     private static string GetIoNameKey(IoPointKind kind, int channel)
@@ -3620,6 +5679,21 @@ public partial class MotionControlPage : UserControl
 
     private void ApplySnapshot(AxisStatus axis, MotionAxisSnapshot snapshot)
     {
+        if (snapshot.EmergencyInput)
+        {
+            var firstActiveEmergencyInput = _activeEmergencyInputAxisNos.Count == 0;
+            _activeEmergencyInputAxisNos.Add(axis.HardwareAxisNo);
+            if (firstActiveEmergencyInput)
+            {
+                // 硬件急停输入同样只停止轴；先冻结生产收尾的 IO 写入。
+                NotifyEmergencyStopIssuedNoThrow();
+            }
+        }
+        else
+        {
+            _activeEmergencyInputAxisNos.Remove(axis.HardwareAxisNo);
+        }
+
         axis.Position = snapshot.FeedbackPosition;
         axis.Target = snapshot.TargetPosition;
         axis.Speed = snapshot.Speed;
@@ -3967,6 +6041,29 @@ public partial class MotionControlPage : UserControl
         }
     }
 
+    private bool EnsureProcessIoWriteReady()
+    {
+        if (_externalEmergencyStopInputActive)
+        {
+            RecordAlarmOnce(
+                "process-io-blocked-by-external-emergency-stop",
+                "PROCESS-IO-EXTERNAL-EMERGENCY-STOP",
+                "外部急停按钮仍处于按下状态，生产IO写入已冻结。");
+            return false;
+        }
+
+        if (_motionSafetyLock)
+        {
+            RecordAlarmOnce(
+                "process-io-blocked-by-safety-lock",
+                "PROCESS-IO-SAFETY-LOCK",
+                $"生产真空IO已被安全锁阻止：{_motionSafetyLockReason ?? "停止安全链异常"}。请确认机构安全并重启程序。");
+            return false;
+        }
+
+        return _motionCard.IsOpen;
+    }
+
     private bool EnsureConnected()
     {
         if (_calibrationOperationActive)
@@ -3989,7 +6086,19 @@ public partial class MotionControlPage : UserControl
 
         if (_motionCard.IsOpen)
         {
-            return true;
+            try
+            {
+                ThrowIfExternalEmergencyStopActive();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                RecordAlarmOnce(
+                    "motion-command-blocked-by-external-emergency-stop",
+                    "MOTION-EXTERNAL-EMERGENCY-STOP",
+                    FormatException(exception));
+                return false;
+            }
         }
 
         return false;
@@ -4057,6 +6166,7 @@ public partial class MotionControlPage : UserControl
         HomeEditorPanel.IsEnabled =
             ViewModel?.MotionControlsEnabled == true &&
             !_motionSafetyLock &&
+            !_externalEmergencyStopInputActive &&
             !IsAnyMotionWorkflowActive() &&
             SelectedAxis is { IsAvailable: true, StatusReadHealthy: true, IsMoving: false };
         UpdateHomeActionState();
@@ -4070,6 +6180,7 @@ public partial class MotionControlPage : UserControl
             _homeConfigurationSaveHealthy &&
             workflowIdle &&
             !_motionSafetyLock &&
+            !_externalEmergencyStopInputActive &&
             SelectedAxis?.CanHome == true);
         HomeAllButton?.SetCurrentValue(
             IsEnabledProperty,
@@ -4084,8 +6195,13 @@ public partial class MotionControlPage : UserControl
         var axisByHardwareNo = (Axes ?? []).ToDictionary(axis => axis.HardwareAxisNo);
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
+               !_externalEmergencyStopInputActive &&
                !IsAnyMotionWorkflowActive() &&
-               TestOneKeyResetStages.SelectMany(stage => stage.HardwareAxisNumbers).Distinct().All(axisNo =>
+               CreateTestOneKeyResetStages()
+                   .SelectMany(stage => stage.Groups)
+                   .SelectMany(group => group.HardwareAxisNumbers)
+                   .Distinct()
+                   .All(axisNo =>
                    axisByHardwareNo.TryGetValue(axisNo, out var axis) &&
                    axis.IsAvailable &&
                    axis.StatusReadHealthy &&
@@ -4100,6 +6216,7 @@ public partial class MotionControlPage : UserControl
         var sequence = _motionOptions.GetHomeSequence();
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
+               !_externalEmergencyStopInputActive &&
                !IsAnyMotionWorkflowActive() &&
                sequence.Count > 0 &&
                sequence.All(hardwareAxisNo =>
@@ -4121,6 +6238,44 @@ public partial class MotionControlPage : UserControl
                _homeDeadlines.Count > 0 ||
                _homeSequenceCancellation is not null ||
                (Axes?.Any(axis => axis.IsAvailable && axis.IsMoving) ?? false);
+    }
+
+    private bool IsAnyMotionWorkflowActiveExcept(
+        IReadOnlyCollection<int>? ignoredAxisNos,
+        int activeHardwareAxisNo)
+    {
+        return IsAnyMotionWorkflowActiveExcept(ignoredAxisNos, [activeHardwareAxisNo]);
+    }
+
+    private bool IsAnyMotionWorkflowActiveExcept(
+        IReadOnlyCollection<int>? ignoredAxisNos,
+        IReadOnlyCollection<int> activeHardwareAxisNos)
+    {
+        if (ignoredAxisNos is null || ignoredAxisNos.Count == 0)
+        {
+            return IsAnyMotionWorkflowActive();
+        }
+
+        var active = activeHardwareAxisNos
+            .Where(axisNo => axisNo >= 0)
+            .ToHashSet();
+        var ignored = ignoredAxisNos
+            .Where(axisNo => axisNo >= 0 && !active.Contains(axisNo))
+            .ToHashSet();
+        if (ignored.Count == 0)
+        {
+            return IsAnyMotionWorkflowActive();
+        }
+
+        return (_activeJogAxisNo is { } activeJogAxisNo && !ignored.Contains(activeJogAxisNo)) ||
+               (_activePositionAxisNo is { } activePositionAxisNo && !ignored.Contains(activePositionAxisNo)) ||
+               _pendingStopAxisNos.Any(axisNo => !ignored.Contains(axisNo)) ||
+               _homeDeadlines.Keys.Any(axisNo => !ignored.Contains(axisNo)) ||
+               _homeSequenceCancellation is not null ||
+               (Axes?.Any(axis =>
+                   axis.IsAvailable &&
+                   axis.IsMoving &&
+                   !ignored.Contains(axis.HardwareAxisNo)) ?? false);
     }
 
     private bool IsAxisMotionWorkflowActive(int hardwareAxisNo)
@@ -4150,6 +6305,7 @@ public partial class MotionControlPage : UserControl
 
     private void RecordAlarm(string code, string message)
     {
+        AlarmHistory.Record("运动控制", code, message);
         if (ViewModel is not { } viewModel)
         {
             return;
@@ -4158,6 +6314,7 @@ public partial class MotionControlPage : UserControl
         viewModel.AlarmRecords.Insert(0, new AlarmInfo
         {
             Time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            Source = "运动控制",
             Code = code,
             Message = message,
             Level = "报警",
@@ -4188,12 +6345,22 @@ public partial class MotionControlPage : UserControl
         };
     }
 
-    private sealed record TestHomeStage(
-        string Name,
+    private sealed record TestHomeGroup(
         int[] HardwareAxisNumbers,
         int Mode,
+        double LowVelocity,
         double HighVelocity,
-        double OffsetPosition = 0);
+        double OffsetPosition = 0,
+        double CompletionTolerance = OneKeyResetHomePositionTolerance);
+
+    private sealed record TestHomeAxisCommand(
+        AxisStatus Axis,
+        MotionHomeProfile Profile,
+        double CompletionTolerance);
+
+    private sealed record TestHomeStage(
+        string Name,
+        TestHomeGroup[] Groups);
 
     private static string FormatInitializationException(Exception exception)
     {

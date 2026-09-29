@@ -7,11 +7,22 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Interop;
+using ControlHub.Services.Persistence;
+using ControlHub.Services.Vision;
 
 namespace ControlHub.Views.Controls;
 
 public sealed class VisionMasterProcessHost : HwndHost
 {
+    private static readonly HashSet<string> VisionProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "VisionMasterHost",
+        "VisionMaster",
+        "VisionMasterServer",
+        "VisionMasterServerApp",
+        "vServerApp"
+    };
+
     private const int GwlStyle = -16;
     private const int SwShow = 5;
     private const int WmClose = 0x0010;
@@ -42,7 +53,10 @@ public sealed class VisionMasterProcessHost : HwndHost
     private IntPtr _hostWindow;
     private IntPtr _visionWindow;
     private IntPtr _activeDisplayWindow;
+    private readonly EmbeddedVisionWindowLayout _visionWindowLayout = new();
     private bool _disposed;
+    private string? _solutionPath;
+    private VisionProcedureNames _procedureNames = new();
 
     public event EventHandler? Started;
 
@@ -54,9 +68,29 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     public event EventHandler<VisionClickTargetFailedEventArgs>? ClickTargetFailed;
 
+    public event EventHandler<VisionManualNozzleCircleEventArgs>? ManualNozzleCircleReceived;
+
     public event EventHandler<CalibrationToolbarActionEventArgs>? CalibrationToolbarActionRequested;
 
     public event EventHandler<CalibrationSidebarActionEventArgs>? CalibrationSidebarActionRequested;
+
+    public string? SolutionPath => _solutionPath;
+
+    public VisionProcedureNames ProcedureNames => ProductRecipeStore.Clone(_procedureNames);
+
+    public void SetSolutionPath(string? solutionPath)
+    {
+        _solutionPath = string.IsNullOrWhiteSpace(solutionPath)
+            ? null
+            : Path.GetFullPath(solutionPath);
+    }
+
+    public void SetProcedureNames(VisionProcedureNames procedureNames)
+    {
+        ArgumentNullException.ThrowIfNull(procedureNames);
+        procedureNames.Validate();
+        _procedureNames = ProductRecipeStore.Clone(procedureNames);
+    }
 
     public async Task StartAsync()
     {
@@ -125,16 +159,36 @@ public sealed class VisionMasterProcessHost : HwndHost
         Process process;
         try
         {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                WorkingDirectory = Path.GetDirectoryName(executablePath)!,
+                UseShellExecute = false,
+                CreateNoWindow = false
+            };
+            startInfo.ArgumentList.Add("--embedded");
+            startInfo.ArgumentList.Add("--parent-pid");
+            startInfo.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--pipe-name");
+            startInfo.ArgumentList.Add(_pipeName);
+            startInfo.ArgumentList.Add("--event-pipe-name");
+            startInfo.ArgumentList.Add(_eventPipeName);
+            if (!string.IsNullOrWhiteSpace(_solutionPath))
+            {
+                startInfo.ArgumentList.Add("--solution-path");
+                startInfo.ArgumentList.Add(_solutionPath);
+            }
+            AddProcedureNameArgument(startInfo, "--inspection-procedure", _procedureNames.Inspection);
+            AddProcedureNameArgument(startInfo, "--nozzle-teaching-procedure", _procedureNames.NozzleTeaching);
+            AddProcedureNameArgument(startInfo, "--calibration-procedure", _procedureNames.Calibration);
+            AddProcedureNameArgument(startInfo, "--lower-calibration-procedure", _procedureNames.LowerCameraCalibration);
+            AddProcedureNameArgument(startInfo, "--rotation-point-procedure", _procedureNames.RotationPoint);
+            AddProcedureNameArgument(startInfo, "--rotation-center-procedure", _procedureNames.RotationCenter);
+            AddProcedureNameArgument(startInfo, "--lower-correction-procedure", _procedureNames.LowerCameraCorrection);
+
             process = new Process
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = executablePath,
-                    Arguments = $"--embedded --parent-pid {Environment.ProcessId} --pipe-name {_pipeName} --event-pipe-name {_eventPipeName}",
-                    WorkingDirectory = Path.GetDirectoryName(executablePath)!,
-                    UseShellExecute = false,
-                    CreateNoWindow = false
-                },
+                StartInfo = startInfo,
                 EnableRaisingEvents = true
             };
             process.Exited += VisionProcess_Exited;
@@ -188,6 +242,15 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
     }
 
+    private static void AddProcedureNameArgument(
+        ProcessStartInfo startInfo,
+        string optionName,
+        string procedureName)
+    {
+        startInfo.ArgumentList.Add(optionName);
+        startInfo.ArgumentList.Add(procedureName);
+    }
+
     public async Task RestartAsync()
     {
         await _lifecycleGate.WaitAsync();
@@ -207,12 +270,40 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
     }
 
+    public async Task<int> CloseAllVisionProcessesAsync()
+    {
+        // Do not wait for a currently hung startup timeout before honoring an operator stop.
+        lock (_syncRoot)
+        {
+            _startCancellation?.Cancel();
+        }
+
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_disposed)
+            {
+                return 0;
+            }
+
+            var ownedProcessWasRunning = HasRunningOwnedProcess();
+            StopProcess();
+            var remainingProcessCount = await Task.Run(StopRemainingVisionProcesses);
+            return remainingProcessCount + (ownedProcessWasRunning ? 1 : 0);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     public Task<string> PrepareNinePointCalibrationAsync(
         double centerX,
         double centerY,
         double offsetX,
         double offsetY,
         bool xFirst,
+        bool lowerCamera,
         string calibrationFilePath,
         CancellationToken cancellationToken)
     {
@@ -227,6 +318,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 offsetX.ToString("R", CultureInfo.InvariantCulture),
                 offsetY.ToString("R", CultureInfo.InvariantCulture),
                 xFirst ? "X" : "Y",
+                lowerCamera ? "Lower" : "Keep",
                 encodedPath),
             cancellationToken);
     }
@@ -250,9 +342,28 @@ public sealed class VisionMasterProcessHost : HwndHost
         return SendCalibrationCommandAsync("ACTIVATE_CALIBRATION_VIEW", cancellationToken);
     }
 
+    public Task<string> SetCalibrationProcedureAsync(
+        bool lowerCamera,
+        CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync(
+            $"SET_CALIBRATION_PROCEDURE\t{(lowerCamera ? "Lower" : "Standard")}",
+            cancellationToken);
+    }
+
+    public Task<string> ActivateInspectionViewAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("ACTIVATE_INSPECTION_VIEW", cancellationToken);
+    }
+
     public Task<string> DeactivateCalibrationViewAsync(CancellationToken cancellationToken)
     {
         return SendCalibrationCommandAsync("DEACTIVATE_CALIBRATION_VIEW", cancellationToken);
+    }
+
+    public Task<string> StartLivePreviewAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("START_LIVE_PREVIEW", cancellationToken);
     }
 
     public Task<string> CaptureCalibrationPointAsync(
@@ -281,6 +392,11 @@ public sealed class VisionMasterProcessHost : HwndHost
             cancellationToken);
     }
 
+    public Task<string> ClearNozzleTeachingDraftAsync(CancellationToken cancellationToken)
+    {
+        return SendCalibrationCommandAsync("CLEAR_NOZZLE_TEACHING_DRAFT", cancellationToken);
+    }
+
     public Task<string> ImportCalibrationFileAsync(
         string calibrationFilePath,
         CancellationToken cancellationToken)
@@ -298,6 +414,8 @@ public sealed class VisionMasterProcessHost : HwndHost
         bool chooseEnabled,
         bool importEnabled,
         bool loadProfileEnabled,
+        bool saveProfileEnabled,
+        bool simplifiedMode,
         CancellationToken cancellationToken)
     {
         var encodedPath = Convert.ToBase64String(
@@ -310,7 +428,21 @@ public sealed class VisionMasterProcessHost : HwndHost
                 pathEnabled ? "1" : "0",
                 chooseEnabled ? "1" : "0",
                 importEnabled ? "1" : "0",
-                loadProfileEnabled ? "1" : "0"),
+                loadProfileEnabled ? "1" : "0",
+                saveProfileEnabled ? "1" : "0",
+                simplifiedMode ? "1" : "0"),
+            cancellationToken);
+    }
+
+    public Task<string> ShowCalibrationSaveFeedbackAsync(
+        bool success,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        var encodedMessage = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(message?.Trim() ?? string.Empty));
+        return SendCalibrationCommandAsync(
+            $"SET_CALIBRATION_SAVE_FEEDBACK\t{(success ? "1" : "0")}\t{encodedMessage}",
             cancellationToken);
     }
 
@@ -341,6 +473,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.ClickTarget),
                 state.ClickMoveChecked ? "1" : "0",
                 Encode(state.ClickMoveStatus),
+                state.StartLivePreviewEnabled ? "1" : "0",
                 state.RecordCenterEnabled ? "1" : "0",
                 state.StartCalibrationEnabled ? "1" : "0",
                 state.CalibrationRunning ? "1" : "0",
@@ -354,8 +487,110 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.CenterVmColor),
                 Encode(state.NozzleStatusColor),
                 Encode(state.ClickMoveStatusColor),
-                Encode(state.WorkflowStatus)),
+                Encode(state.WorkflowStatus),
+                state.RecordNozzleDotPositionEnabled ? "1" : "0",
+                state.SimplifiedMode ? "1" : "0",
+                Encode(state.LowerCameraNozzleName),
+                state.RotationCenterEnabled ? "1" : "0",
+                state.RotationCenterRunning ? "1" : "0",
+                Encode(state.RotationCenterStatus),
+                state.LowerCameraCorrectionTestEnabled ? "1" : "0",
+                state.LowerCameraCorrectionTestRunning ? "1" : "0",
+                Encode(state.LowerCameraCorrectionTestStatus),
+                state.Nozzle2SaveEnabled ? "1" : "0",
+                state.LoadingServoEnabled ? "1" : "0",
+                Encode(state.LoadingXServoText),
+                Encode(state.LoadingZServoText),
+                state.RecognizedCenterMoveVisible ? "1" : "0",
+                state.RecognizedCenterMoveEnabled ? "1" : "0"),
             cancellationToken);
+    }
+
+    public async Task<VisionRotationPoint> CaptureRotationCenterPointAsync(
+        CancellationToken cancellationToken)
+    {
+        var response = await SendCalibrationCommandAsync(
+            "RUN_ROTATION_CENTER_CAPTURE",
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 2 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y))
+        {
+            throw new InvalidDataException("VisionMaster 返回的Blob质心点无效。");
+        }
+
+        return new VisionRotationPoint(x, y);
+    }
+
+    public async Task<VisionRotationCenterResult> CalculateRotationCenterAsync(
+        IReadOnlyList<VisionRotationPoint> points,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(points);
+        if (points.Count != 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+        {
+            throw new ArgumentException("计算旋转中心必须提供三个有效中心点。", nameof(points));
+        }
+
+        var commandParts = new List<string> { "CALCULATE_ROTATION_CENTER" };
+        foreach (var point in points)
+        {
+            commandParts.Add(point.X.ToString("R", CultureInfo.InvariantCulture));
+            commandParts.Add(point.Y.ToString("R", CultureInfo.InvariantCulture));
+        }
+
+        var response = await SendCalibrationCommandAsync(
+            string.Join("\t", commandParts),
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 2 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerX) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var centerY) ||
+            !double.IsFinite(centerX) ||
+            !double.IsFinite(centerY))
+        {
+            throw new InvalidDataException("VisionMaster 返回的旋转中心无效。");
+        }
+
+        return new VisionRotationCenterResult(centerX, centerY);
+    }
+
+    public async Task<VisionLowerCameraCorrectionResult> RunLowerCameraCorrectionAsync(
+        double circleCenterX,
+        double circleCenterY,
+        string calibrationFilePath,
+        CancellationToken cancellationToken)
+    {
+        if (!double.IsFinite(circleCenterX) || !double.IsFinite(circleCenterY))
+        {
+            throw new ArgumentOutOfRangeException(nameof(circleCenterX), "下相机旋转圆心必须是有效数字。");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var response = await SendCalibrationCommandAsync(
+            string.Join(
+                "\t",
+                "RUN_LOWER_CAMERA_CORRECTION",
+                circleCenterX.ToString("R", CultureInfo.InvariantCulture),
+                circleCenterY.ToString("R", CultureInfo.InvariantCulture),
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath))),
+            cancellationToken);
+        var parts = response.Split('\t');
+        if (parts.Length != 3 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var angle) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y) ||
+            !double.IsFinite(angle))
+        {
+            throw new InvalidDataException("VisionMaster 返回的下相机纠偏偏差或夹角无效。");
+        }
+
+        return new VisionLowerCameraCorrectionResult(x, y, angle);
     }
 
     public async Task<VisionPixelTransformResult> TransformPixelAsync(
@@ -410,54 +645,140 @@ public sealed class VisionMasterProcessHost : HwndHost
 
     /// <summary>
     /// 在按需加载的固定视觉方案中，单次执行
-    /// “找芯片流程 → Blob分析1”，返回结果表前两行的矩形与像素质心。
+    /// “找芯片流程 → Blob分析1”，返回结果表全部矩形与像素质心。
     /// </summary>
-    public async Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+    public Task<VisionRectangleBlobResult> RunRectangleBlobInspectionAsync(
+        CancellationToken cancellationToken)
+    {
+        return RunTwoPointBlobInspectionAsync("RUN_RECTANGLE_BLOB", cancellationToken);
+    }
+
+    /// <summary>
+    /// 手动触发固定方案中的“粗定位示教流程”，采集并显示吸嘴1、吸嘴2画面。
+    /// 返回的自动圆结果仅用于兼容通信；最终示教坐标由画面上的手动画圆事件提供。
+    /// </summary>
+    public async Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
+        CancellationToken cancellationToken)
+    {
+        string capability;
+        try
+        {
+            capability = await SendCalibrationCommandAsync(NozzleTeachingProtocol.QueryCommand, cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains(NozzleTeachingProtocol.QueryCommand, StringComparison.Ordinal))
+        {
+            throw CreateOutdatedNozzleHostException(exception);
+        }
+        if (capability != NozzleTeachingProtocol.CurrentImageFallback)
+        {
+            throw CreateOutdatedNozzleHostException();
+        }
+        return await RunTwoPointBlobInspectionAsync("RUN_NOZZLE_POINTS", cancellationToken);
+    }
+
+    private InvalidOperationException CreateOutdatedNozzleHostException(Exception? inner = null)
+    {
+        var path = _process?.StartInfo.FileName;
+        if (string.IsNullOrWhiteSpace(path)) path = ResolveHostExecutablePath();
+        return new InvalidOperationException(
+            "当前加载的视觉程序未更新，不支持算法失败后手动画圆。" +
+            "请停止调试，重新生成整个解决方案，再重新启动视觉。实际加载路径：" + path, inner);
+    }
+
+    public async Task<RecognizedCenterResult> RunRecognizedCenterAsync(string calibrationFilePath, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(calibrationFilePath);
+        var response = await SendCalibrationCommandAsync("RUN_RECOGNIZED_CENTER\t" +
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(calibrationFilePath)), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return RecognizedCenterResult.Parse(response);
+    }
+
+    private async Task<VisionRectangleBlobResult> RunTwoPointBlobInspectionAsync(
+        string command,
         CancellationToken cancellationToken)
     {
         var response = await SendCalibrationCommandAsync(
-            "RUN_RECTANGLE_BLOB",
+            command,
             cancellationToken);
         var parts = response.Split('\t');
-        if (parts.Length != 15 ||
-            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstX) ||
-            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstY) ||
-            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstLeft) ||
-            !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstTop) ||
-            !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstWidth) ||
-            !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var firstHeight) ||
-            !double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondX) ||
-            !double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondY) ||
-            !double.TryParse(parts[8], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondLeft) ||
-            !double.TryParse(parts[9], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondTop) ||
-            !double.TryParse(parts[10], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondWidth) ||
-            !double.TryParse(parts[11], NumberStyles.Float, CultureInfo.InvariantCulture, out var secondHeight) ||
-            !int.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out var imageWidth) ||
-            !int.TryParse(parts[13], NumberStyles.Integer, CultureInfo.InvariantCulture, out var imageHeight) ||
-            !double.IsFinite(firstX) ||
-            !double.IsFinite(firstY) ||
-            !double.IsFinite(firstLeft) ||
-            !double.IsFinite(firstTop) ||
-            !double.IsFinite(firstWidth) ||
-            !double.IsFinite(firstHeight) ||
-            !double.IsFinite(secondX) ||
-            !double.IsFinite(secondY) ||
-            !double.IsFinite(secondLeft) ||
-            !double.IsFinite(secondTop) ||
-            !double.IsFinite(secondWidth) ||
-            !double.IsFinite(secondHeight) ||
-            firstX < 0 || firstY < 0 || secondX < 0 || secondY < 0 ||
-            firstWidth <= 0 || firstHeight <= 0 || secondWidth <= 0 || secondHeight <= 0 ||
-            !((imageWidth > 0 && imageHeight > 0 && !string.IsNullOrWhiteSpace(parts[14])) ||
-              (imageWidth == 0 && imageHeight == 0 && string.IsNullOrWhiteSpace(parts[14]))))
+        var includesRotation = string.Equals(
+            command,
+            "RUN_RECTANGLE_BLOB",
+            StringComparison.Ordinal);
+        var fieldsPerResult = includesRotation ? 7 : 6;
+        if (parts.Length < 4 ||
+            !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var resultCount) ||
+            resultCount < 0 ||
+            parts.Length != 1L + (long)resultCount * fieldsPerResult + 3L)
         {
             throw new InvalidDataException("VisionMaster 返回的Blob检测图或矩形结果无效。");
         }
 
+        var rectangles = new List<VisionBlobRectangle>(resultCount);
+        for (var resultIndex = 0; resultIndex < resultCount; resultIndex++)
+        {
+            var offset = 1 + resultIndex * fieldsPerResult;
+            var rotationOffset = includesRotation ? 1 : 0;
+            var rotationDegrees = 0d;
+            if (!double.TryParse(parts[offset], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                !double.TryParse(parts[offset + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+                (includesRotation &&
+                 (!double.TryParse(parts[offset + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out rotationDegrees) ||
+                  !double.IsFinite(rotationDegrees))) ||
+                !double.TryParse(parts[offset + 2 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var left) ||
+                !double.TryParse(parts[offset + 3 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var top) ||
+                !double.TryParse(parts[offset + 4 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var width) ||
+                !double.TryParse(parts[offset + 5 + rotationOffset], NumberStyles.Float, CultureInfo.InvariantCulture, out var height) ||
+                !double.IsFinite(x) ||
+                !double.IsFinite(y) ||
+                !double.IsFinite(left) ||
+                !double.IsFinite(top) ||
+                !double.IsFinite(width) ||
+                !double.IsFinite(height) ||
+                x < 0 ||
+                y < 0 ||
+                width <= 0 ||
+                height <= 0)
+            {
+                throw new InvalidDataException(
+                    $"VisionMaster 返回的第{resultIndex + 1}个Blob矩形结果无效。");
+            }
+
+            rectangles.Add(new VisionBlobRectangle(
+                x,
+                y,
+                rotationDegrees,
+                left,
+                top,
+                width,
+                height));
+        }
+
+        var imageOffset = 1 + resultCount * fieldsPerResult;
+        if (!int.TryParse(
+                parts[imageOffset],
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var imageWidth) ||
+            !int.TryParse(
+                parts[imageOffset + 1],
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var imageHeight) ||
+            !((imageWidth > 0 &&
+               imageHeight > 0) ||
+              (imageWidth == 0 &&
+               imageHeight == 0 &&
+               string.IsNullOrWhiteSpace(parts[imageOffset + 2]))))
+        {
+            throw new InvalidDataException("VisionMaster 返回的Blob检测图信息无效。");
+        }
+
         return new VisionRectangleBlobResult(
-            new VisionBlobRectangle(firstX, firstY, firstLeft, firstTop, firstWidth, firstHeight),
-            new VisionBlobRectangle(secondX, secondY, secondLeft, secondTop, secondWidth, secondHeight),
-            parts[14],
+            rectangles,
+            parts[imageOffset + 2],
             imageWidth,
             imageHeight);
     }
@@ -676,6 +997,31 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void DispatchHostEvent(string message)
     {
         var parts = message.Split('\t');
+        if ((parts.Length == 3 || parts.Length == 5) &&
+            parts[0] == "MANUAL_NOZZLE_CIRCLE" &&
+            int.TryParse(parts[1], out var nozzleNumber) && nozzleNumber is 1 or 2)
+        {
+            VisionManualNozzleCircleEventArgs? result = null;
+            if (parts.Length == 3 && parts[2] == "CLEAR")
+            {
+                result = new(nozzleNumber, null);
+            }
+            else if (parts.Length == 5 &&
+                     double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) &&
+                     double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) &&
+                     double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var radius) &&
+                     double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(radius) &&
+                     x >= 0 && y >= 0 && radius > 0)
+            {
+                result = new(nozzleNumber, new VisionBlobRectangle(x, y, 0, x - radius, y - radius, radius * 2, radius * 2));
+            }
+            if (result is not null)
+            {
+                _ = Dispatcher.BeginInvoke(() => ManualNozzleCircleReceived?.Invoke(this, result));
+            }
+            return;
+        }
+
         if (parts.Length == 3 &&
             string.Equals(parts[0], "CALIBRATION_SIDEBAR_ACTION", StringComparison.Ordinal))
         {
@@ -933,6 +1279,7 @@ public sealed class VisionMasterProcessHost : HwndHost
         }
 
         _visionWindow = windowHandle;
+        _visionWindowLayout.Invalidate();
         _ = ShowWindow(windowHandle, SwShow);
         ResizeVisionWindow(throwOnFailure: true);
     }
@@ -940,6 +1287,14 @@ public sealed class VisionMasterProcessHost : HwndHost
     private void ResizeVisionWindow(bool throwOnFailure = false)
     {
         var displayHostWindow = GetActiveDisplayWindow();
+        if (!throwOnFailure)
+        {
+            // Layout/WM_SIZE callbacks run on the same dispatcher as production.
+            // The vision thread may be inside Run(true); never wait for it here.
+            _ = _visionWindowLayout.RequestResize(_visionWindow, displayHostWindow);
+            return;
+        }
+
         if (displayHostWindow == IntPtr.Zero || _visionWindow == IntPtr.Zero)
         {
             if (throwOnFailure)
@@ -993,6 +1348,12 @@ public sealed class VisionMasterProcessHost : HwndHost
             throw new Win32Exception("VisionMaster 窗口句柄已经失效。");
         }
 
+        if (GetParent(_visionWindow) == displayHostWindow)
+        {
+            return;
+        }
+
+        _visionWindowLayout.Invalidate();
         Marshal.SetLastPInvokeError(0);
         var previousParent = SetParent(_visionWindow, displayHostWindow);
         var setParentError = Marshal.GetLastPInvokeError();
@@ -1058,6 +1419,98 @@ public sealed class VisionMasterProcessHost : HwndHost
         {
             process.Dispose();
         }
+    }
+
+    private bool HasRunningOwnedProcess()
+    {
+        lock (_syncRoot)
+        {
+            return IsProcessRunning(_process);
+        }
+    }
+
+    private static int StopRemainingVisionProcesses()
+    {
+        var stoppedProcessCount = 0;
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.Id == Environment.ProcessId || !IsVisionProcess(process))
+                    {
+                        continue;
+                    }
+
+                    if (process.HasExited)
+                    {
+                        continue;
+                    }
+
+                    stoppedProcessCount++;
+                    var closeRequested = process.MainWindowHandle != IntPtr.Zero && process.CloseMainWindow();
+                    if (!closeRequested || !process.WaitForExit(2_000))
+                    {
+                        process.Kill(entireProcessTree: true);
+                        _ = process.WaitForExit(2_000);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The process exited between enumeration and shutdown.
+                }
+                catch (Win32Exception exception)
+                {
+                    throw new InvalidOperationException(
+                        $"无法关闭视觉进程 {process.ProcessName}（PID {process.Id}）：{exception.Message}",
+                        exception);
+                }
+            }
+        }
+
+        return stoppedProcessCount;
+    }
+
+    private static bool IsVisionProcess(Process process)
+    {
+        if (VisionProcessNames.Contains(process.ProcessName))
+        {
+            return true;
+        }
+
+        string? executablePath;
+        try
+        {
+            executablePath = process.MainModule?.FileName;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(executablePath);
+        while (!string.IsNullOrWhiteSpace(directory))
+        {
+            var directoryName = Path.GetFileName(directory);
+            if (directoryName.StartsWith("VisionMaster", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return false;
     }
 
     private void VisionProcess_Exited(object? sender, EventArgs e)
@@ -1264,11 +1717,18 @@ public sealed class VisionClickTargetFailedEventArgs(string message) : EventArgs
     public string Message { get; } = message;
 }
 
+public sealed class VisionManualNozzleCircleEventArgs(int nozzleNumber, VisionBlobRectangle? circle) : EventArgs
+{
+    public int NozzleNumber { get; } = nozzleNumber;
+    public VisionBlobRectangle? Circle { get; } = circle;
+}
+
 public enum CalibrationToolbarAction
 {
     SaveLocation,
     Import,
-    LoadProfile
+    LoadProfile,
+    SaveProfile
 }
 
 public sealed class CalibrationToolbarActionEventArgs(CalibrationToolbarAction action) : EventArgs
@@ -1298,6 +1758,7 @@ public sealed record CalibrationSidebarState(
     string ClickTarget,
     bool ClickMoveChecked,
     string ClickMoveStatus,
+    bool StartLivePreviewEnabled,
     bool RecordCenterEnabled,
     bool StartCalibrationEnabled,
     bool CalibrationRunning,
@@ -1311,7 +1772,31 @@ public sealed record CalibrationSidebarState(
     string CenterVmColor,
     string NozzleStatusColor,
     string ClickMoveStatusColor,
-    string WorkflowStatus);
+    string WorkflowStatus,
+    bool RecordNozzleDotPositionEnabled,
+    bool SimplifiedMode,
+    string LowerCameraNozzleName,
+    bool RotationCenterEnabled,
+    bool RotationCenterRunning,
+    string RotationCenterStatus,
+    bool LowerCameraCorrectionTestEnabled,
+    bool LowerCameraCorrectionTestRunning,
+    string LowerCameraCorrectionTestStatus,
+    bool Nozzle2SaveEnabled,
+    bool LoadingServoEnabled = false,
+    string LoadingXServoText = "上料X轴使能开关",
+    string LoadingZServoText = "上料双Z使能开关",
+    bool RecognizedCenterMoveVisible = false,
+    bool RecognizedCenterMoveEnabled = false);
+
+public sealed record VisionRotationPoint(double X, double Y);
+
+public sealed record VisionRotationCenterResult(double CenterX, double CenterY);
+
+public sealed record VisionLowerCameraCorrectionResult(
+    double CorrectionX,
+    double CorrectionY,
+    double MeasuredAngle);
 
 public sealed record VisionPixelTransformResult(
     double PixelX,
@@ -1326,14 +1811,25 @@ public sealed record VisionPixelTransformResult(
 public sealed record VisionBlobRectangle(
     double X,
     double Y,
+    double RotationDegrees,
     double Left,
     double Top,
     double Width,
     double Height);
 
 public sealed record VisionRectangleBlobResult(
-    VisionBlobRectangle Rectangle1,
-    VisionBlobRectangle Rectangle2,
+    IReadOnlyList<VisionBlobRectangle> Rectangles,
     string ImagePath,
     int ImageWidth,
-    int ImageHeight);
+    int ImageHeight)
+{
+    public VisionBlobRectangle Rectangle1 =>
+        Rectangles.Count >= 1
+            ? Rectangles[0]
+            : throw new InvalidOperationException("Blob结果中没有第1个矩形。");
+
+    public VisionBlobRectangle Rectangle2 =>
+        Rectangles.Count >= 2
+            ? Rectangles[1]
+            : throw new InvalidOperationException("Blob结果中没有第2个矩形。");
+}

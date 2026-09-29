@@ -5,6 +5,17 @@ namespace ControlHub.Services.Motion;
 
 public sealed class MotionCardOptions
 {
+    public const int DefaultPollIntervalMilliseconds = 5;
+    public const int DefaultZPressureEmergencyStopThreshold = 500;
+
+    public int ZPressureEmergencyStopThreshold { get; set; } = DefaultZPressureEmergencyStopThreshold;
+
+    public static void ValidateZPressureEmergencyStopThreshold(int value)
+    {
+        if (value is < 1 or > 32766)
+            throw new InvalidDataException("四轴压力急停阈值必须为 1–32766 的整数（6077 原始值）。");
+    }
+
     public int ConfigurationVersion { get; set; }
 
     public bool SimulationMode { get; init; }
@@ -13,11 +24,23 @@ public sealed class MotionCardOptions
 
     public int AxisCount { get; init; } = 16;
 
-    public int PollIntervalMilliseconds { get; init; } = 200;
+    public int PollIntervalMilliseconds { get; set; } = DefaultPollIntervalMilliseconds;
 
     public int DigitalInputPort { get; init; }
 
     public int DigitalOutputPort { get; init; }
+
+    public int DigitalInputStartBit { get; init; }
+
+    public int DigitalOutputStartBit { get; init; }
+
+    public bool ExternalEmergencyStopEnabled { get; init; }
+
+    public int ExternalEmergencyStopInputPort { get; init; }
+
+    public int ExternalEmergencyStopInputBit { get; init; } = 1;
+
+    public bool ExternalEmergencyStopActiveLow { get; init; } = true;
 
     public int SimulationDigitalInputCount { get; init; } = 32;
 
@@ -31,7 +54,7 @@ public sealed class MotionCardOptions
 
     public double AnalogOutputMaximum { get; init; } = 10;
 
-    public int ServoEnableTimeoutMilliseconds { get; init; } = 1500;
+    public int ServoEnableTimeoutMilliseconds { get; init; } = 5000;
 
     public int StopConfirmationTimeoutMilliseconds { get; init; } = 5000;
 
@@ -51,54 +74,114 @@ public sealed class MotionCardOptions
 
     public void ApplyMigrations()
     {
-        if (ConfigurationVersion >= 3)
+        if (ConfigurationVersion >= 6)
         {
             return;
         }
 
-        if (ConfigurationVersion < 2)
+        if (ConfigurationVersion < 3)
         {
-            var previousMoveProfiles = AxisMoveProfiles.ToArray();
-            AxisMoveProfiles.Clear();
-            foreach (var item in previousMoveProfiles)
+            if (ConfigurationVersion < 2)
             {
-                AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+                var previousMoveProfiles = AxisMoveProfiles.ToArray();
+                AxisMoveProfiles.Clear();
+                foreach (var item in previousMoveProfiles)
+                {
+                    AxisMoveProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+                }
+
+                var previousHomeProfiles = AxisHomeProfiles.ToArray();
+                AxisHomeProfiles.Clear();
+                foreach (var item in previousHomeProfiles)
+                {
+                    AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
+                }
+
+                HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
             }
 
-            var previousHomeProfiles = AxisHomeProfiles.ToArray();
-            AxisHomeProfiles.Clear();
-            foreach (var item in previousHomeProfiles)
+            AxisMoveProfiles[0] = new MotionMoveProfile
             {
-                AxisHomeProfiles[Math.Max(0, item.Key - 1)] = item.Value;
-            }
-
-            HomeSequence = HomeSequence.Select(axisNo => Math.Max(0, axisNo - 1)).ToArray();
+                StartVelocity = 0,
+                StopVelocity = 0,
+                AccelerationSeconds = 0.1,
+                DecelerationSeconds = 0.1,
+                STimeSeconds = 0,
+                DecelerationStopSeconds = 0.001,
+                WaitForCompletion = true,
+                CompletionTimeoutMilliseconds = 5000,
+                CompletionTolerance = 0.01,
+                AbsolutePositionMode = false
+            };
+            AxisHomeProfiles[0] = new MotionHomeProfile
+            {
+                Enabled = true,
+                Mode = 33,
+                LowVelocity = 10000,
+                HighVelocity = 40000,
+                AccelerationSeconds = 0.1,
+                DecelerationSeconds = 0.1,
+                OffsetPosition = 0
+            };
         }
 
-        AxisMoveProfiles[0] = new MotionMoveProfile
+        if (ConfigurationVersion < 4)
         {
-            StartVelocity = 0,
-            StopVelocity = 0,
-            AccelerationSeconds = 0.1,
-            DecelerationSeconds = 0.1,
-            STimeSeconds = 0,
-            DecelerationStopSeconds = 0.001,
-            WaitForCompletion = true,
-            CompletionTimeoutMilliseconds = 5000,
-            CompletionTolerance = 0.01,
-            AbsolutePositionMode = false
-        };
-        AxisHomeProfiles[0] = new MotionHomeProfile
+            ApplyOneKeyResetHomeModes();
+        }
+
+        PollIntervalMilliseconds = DefaultPollIntervalMilliseconds;
+        ConfigurationVersion = 6;
+    }
+
+    private void ApplyOneKeyResetHomeModes()
+    {
+        foreach (var axisNo in Enumerable.Range(0, Math.Min(AxisCount, 16)))
         {
-            Enabled = true,
-            Mode = 33,
-            LowVelocity = 10000,
-            HighVelocity = 40000,
-            AccelerationSeconds = 0.1,
-            DecelerationSeconds = 0.1,
-            OffsetPosition = 0
+            var existing = AxisHomeProfiles.GetValueOrDefault(axisNo);
+            var defaultVelocity = GetOneKeyResetHomeVelocity(axisNo);
+            AxisHomeProfiles[axisNo] = new MotionHomeProfile
+            {
+                Enabled = existing?.Enabled ?? true,
+                Mode = GetOneKeyResetHomeMode(axisNo),
+                LowVelocity = existing?.LowVelocity ?? defaultVelocity,
+                HighVelocity = existing?.HighVelocity ?? defaultVelocity,
+                AccelerationSeconds = existing?.AccelerationSeconds ?? 0.1,
+                DecelerationSeconds = existing?.DecelerationSeconds ?? 0.1,
+                OffsetPosition = existing?.OffsetPosition ?? 0
+            };
+        }
+    }
+
+    public static int GetOneKeyResetHomeMode(int hardwareAxisNo)
+    {
+        return hardwareAxisNo switch
+        {
+            0 => 33,
+            >= 1 and <= 4 => 1,
+            5 or 7 or 9 or 11 => -1,
+            6 or 8 or 10 or 12 => 33,
+            >= 13 and <= 15 => 21,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(hardwareAxisNo),
+                hardwareAxisNo,
+                "一键复位只配置硬件轴0到15。")
         };
-        ConfigurationVersion = 3;
+    }
+
+    public static double GetOneKeyResetHomeVelocity(int hardwareAxisNo)
+    {
+        return hardwareAxisNo switch
+        {
+            0 => 50_000d,
+            >= 1 and <= 4 => 100_000d,
+            >= 5 and <= 12 => 50_000d,
+            >= 13 and <= 15 => 100_000d,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(hardwareAxisNo),
+                hardwareAxisNo,
+                "一键复位只配置硬件轴0到15。")
+        };
     }
 
     public MotionHomeProfile GetHomeProfile(int hardwareAxisNo)
@@ -129,14 +212,15 @@ public sealed class MotionCardOptions
 
     public void Validate()
     {
+        ValidateZPressureEmergencyStopThreshold(ZPressureEmergencyStopThreshold);
         if (AxisCount is < 1 or > 64)
         {
             throw new InvalidDataException("AxisCount 必须在 1 到 64 之间。");
         }
 
-        if (PollIntervalMilliseconds is < 50 or > 5000)
+        if (PollIntervalMilliseconds is < DefaultPollIntervalMilliseconds or > 5000)
         {
-            throw new InvalidDataException("PollIntervalMilliseconds 必须在 50 到 5000 之间。");
+            throw new InvalidDataException("PollIntervalMilliseconds 必须在 5 到 5000 之间。");
         }
 
         if (DigitalInputPort is < 0 or > ushort.MaxValue)
@@ -147,6 +231,26 @@ public sealed class MotionCardOptions
         if (DigitalOutputPort is < 0 or > ushort.MaxValue)
         {
             throw new InvalidDataException("DigitalOutputPort 超出有效范围。");
+        }
+
+        if (DigitalInputStartBit is < 0 or > 31)
+        {
+            throw new InvalidDataException("DigitalInputStartBit 必须在 0 到 31 之间。");
+        }
+
+        if (DigitalOutputStartBit is < 0 or > 31)
+        {
+            throw new InvalidDataException("DigitalOutputStartBit 必须在 0 到 31 之间。");
+        }
+
+        if (ExternalEmergencyStopInputPort is < 0 or > ushort.MaxValue)
+        {
+            throw new InvalidDataException("ExternalEmergencyStopInputPort 超出有效范围。");
+        }
+
+        if (ExternalEmergencyStopInputBit is < 0 or > 31)
+        {
+            throw new InvalidDataException("ExternalEmergencyStopInputBit 必须在 0 到 31 之间。");
         }
 
         foreach (var count in new[]

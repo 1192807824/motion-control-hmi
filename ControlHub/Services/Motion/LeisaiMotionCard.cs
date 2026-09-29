@@ -3,22 +3,25 @@ using System.IO;
 
 namespace ControlHub.Services.Motion;
 
-public sealed class LeisaiMotionCard : IMotionCard
+public sealed class LeisaiMotionCard : IMotionCard, IPriorityPressureSampling
 {
     private const ushort EtherCatPort = 2;
+    private const ushort ExternalIoNodeId = 1001;
     private const ushort RingRedundancyDisconnectedWarning = 0x0228;
     private const ushort AllEtherCatAxesSentinel = 255;
     private const ushort EnabledStateMachine = 4;
 
-    private readonly object _sync = new();
+    private readonly MotionCardAccessGate _sync = new();
     private readonly MotionCardOptions _options;
+    private readonly Action? _ensureMotionAllowed;
     private ushort _cardNo;
     private int _detectedCardCount;
     private MotionCardDescriptor[] _detectedCards = [];
 
-    public LeisaiMotionCard(MotionCardOptions options)
+    public LeisaiMotionCard(MotionCardOptions options, Action? ensureMotionAllowed = null)
     {
         _options = options;
+        _ensureMotionAllowed = ensureMotionAllowed;
     }
 
     public bool IsOpen { get; private set; }
@@ -35,7 +38,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public MotionCardConnectionInfo Open()
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             if (IsOpen)
             {
@@ -148,7 +151,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Close()
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             if (!IsOpen)
             {
@@ -170,7 +173,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public ushort ReadBusErrorCode()
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             ushort errorCode = 0;
@@ -181,7 +184,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public MotionAxisSnapshot ReadAxis(int hardwareAxisNo)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             ushort stateMachine = 0;
@@ -246,9 +249,22 @@ public sealed class LeisaiMotionCard : IMotionCard
         }
     }
 
+    public int ReadActualTorque(int hardwareAxisNo)
+    {
+        using (_sync.Enter(MotionCardAccessPriority.Pressure))
+        {
+            var axis = GetAxis(hardwareAxisNo);
+            var torque = 0;
+            EnsureSuccess(LeisaiNative.nmc_get_torque(_cardNo, axis, ref torque), "nmc_get_torque");
+            return torque;
+        }
+    }
+
+    public IDisposable EnterPressureSampling() => _sync.Enter(MotionCardAccessPriority.Pressure);
+
     public uint ReadDigitalInputs(int portNo)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             if (portNo is < 0 or > ushort.MaxValue)
@@ -257,14 +273,21 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
 
             uint state = 0;
-            EnsureSuccess(LeisaiNative.dmc_read_inport_ex(_cardNo, (ushort)portNo, ref state), "dmc_read_inport_ex");
+            EnsureSuccess(
+                LeisaiNative.nmc_read_inport_extern(
+                    _cardNo,
+                    EtherCatPort,
+                    ExternalIoNodeId,
+                    (ushort)portNo,
+                    ref state),
+                "nmc_read_inport_extern");
             return state;
         }
     }
 
     public uint ReadDigitalOutputs(int portNo)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             if (portNo is < 0 or > ushort.MaxValue)
@@ -273,30 +296,43 @@ public sealed class LeisaiMotionCard : IMotionCard
             }
 
             uint state = 0;
-            EnsureSuccess(LeisaiNative.dmc_read_outport_ex(_cardNo, (ushort)portNo, ref state), "dmc_read_outport_ex");
+            EnsureSuccess(
+                LeisaiNative.nmc_read_outport_extern(
+                    _cardNo,
+                    EtherCatPort,
+                    ExternalIoNodeId,
+                    (ushort)portNo,
+                    ref state),
+                "nmc_read_outport_extern");
             return state;
         }
     }
 
     public void WriteDigitalOutput(int bitNo, bool enabled)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
-            if (bitNo < 0 || bitNo >= DigitalOutputCount)
+            var maximumBitNo = Math.Max(DigitalOutputCount, _options.DigitalOutputStartBit + DigitalOutputCount);
+            if (bitNo < 0 || bitNo >= maximumBitNo)
             {
                 throw new ArgumentOutOfRangeException(nameof(bitNo), $"数字输出点必须在 0 到 {DigitalOutputCount - 1} 之间。");
             }
 
             EnsureSuccess(
-                LeisaiNative.dmc_write_outbit(_cardNo, (ushort)bitNo, enabled ? (ushort)1 : (ushort)0),
-                "dmc_write_outbit");
+                LeisaiNative.nmc_write_outbit_extern(
+                    _cardNo,
+                    EtherCatPort,
+                    ExternalIoNodeId,
+                    (ushort)bitNo,
+                    enabled ? (ushort)1 : (ushort)0),
+                "nmc_write_outbit_extern");
         }
     }
 
     public double ReadAnalogInput(int channel)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             ValidateAnalogChannel(channel, AnalogInputCount, nameof(channel));
             double value = 0;
@@ -307,7 +343,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public double ReadAnalogOutput(int channel)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             ValidateAnalogChannel(channel, AnalogOutputCount, nameof(channel));
             double value = 0;
@@ -318,7 +354,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void WriteAnalogOutput(int channel, double value)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             ValidateAnalogChannel(channel, AnalogOutputCount, nameof(channel));
             if (!double.IsFinite(value) || value < _options.AnalogOutputMinimum || value > _options.AnalogOutputMaximum)
@@ -334,7 +370,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void ServoOn(int hardwareAxisNo, bool enabled)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             EnsureBusReady();
@@ -359,7 +395,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void SetAllServos(bool enabled)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             EnsureBusReady();
@@ -393,8 +429,12 @@ public sealed class LeisaiMotionCard : IMotionCard
                             continue;
                         }
 
-                        SetServoCommand(axis, true);
                         newlyEnabledAxes.Add(axis);
+                    }
+
+                    if (newlyEnabledAxes.Count > 0)
+                    {
+                        SetServoCommand(AllEtherCatAxesSentinel, true);
                     }
 
                     WaitForServoState(configuredAxes, true);
@@ -442,11 +482,7 @@ public sealed class LeisaiMotionCard : IMotionCard
                     EnsureAxisStopped(axis);
                 }
 
-                foreach (var axis in hardwareAxes)
-                {
-                    SetServoCommand(axis, false);
-                }
-
+                SetServoCommand(AllEtherCatAxesSentinel, false);
                 WaitForServoState(hardwareAxes, false);
             }
         }
@@ -459,7 +495,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void Home(int hardwareAxisNo, MotionHomeProfile profile)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             EnsureAxisReadyForDirection(axis, direction: 0);
@@ -477,13 +513,14 @@ public sealed class LeisaiMotionCard : IMotionCard
                     profile.DecelerationSeconds,
                     profile.OffsetPosition),
                 "nmc_set_home_profile");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_home_move(_cardNo, axis), "dmc_home_move");
         }
     }
 
     public void Jog(int hardwareAxisNo, double velocity)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             ValidateVelocity(velocity, allowSigned: true);
@@ -491,13 +528,14 @@ public sealed class LeisaiMotionCard : IMotionCard
             EnsureAxisStopped(axis);
             ConfigureMove(axis, Math.Abs(velocity));
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_vmove(_cardNo, axis, velocity >= 0 ? (ushort)1 : (ushort)0), "dmc_vmove");
         }
     }
 
     public void MoveRelative(int hardwareAxisNo, double distance, double velocity)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             if (!double.IsFinite(distance) || distance == 0)
@@ -510,13 +548,225 @@ public sealed class LeisaiMotionCard : IMotionCard
             EnsureAxisStopped(axis);
             ConfigureMove(axis, velocity);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, distance, 0), "dmc_pmove_unit");
+        }
+    }
+
+    public void MoveRelativeSynchronized(
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> distances,
+        IReadOnlyList<double> velocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(distances);
+        ArgumentNullException.ThrowIfNull(velocities);
+
+        if (hardwareAxisNos.Count == 0 ||
+            hardwareAxisNos.Count != distances.Count ||
+            hardwareAxisNos.Count != velocities.Count)
+        {
+            throw new ArgumentException("同步相对移动的轴号、脉冲和速度数量必须一致且不能为空。");
+        }
+
+        using (_sync.Enter())
+        {
+            var axisList = new ushort[hardwareAxisNos.Count];
+            var distanceList = new double[distances.Count];
+            var positionModeList = new ushort[hardwareAxisNos.Count];
+
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var distance = distances[index];
+                var velocity = velocities[index];
+                if (!double.IsFinite(distance) || distance == 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(distances), "同步相对位移必须是非零有限数值。");
+                }
+
+                ValidateVelocity(velocity, allowSigned: false);
+                var axis = GetAxis(hardwareAxisNos[index]);
+                EnsureAxisReadyForDirection(axis, Math.Sign(distance));
+                EnsureAxisStopped(axis);
+                ConfigureMove(axis, velocity);
+                EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+
+                axisList[index] = axis;
+                distanceList[index] = distance;
+                positionModeList[index] = 0;
+            }
+
+            _ensureMotionAllowed?.Invoke();
+            EnsureSuccess(
+                LeisaiNative.nmc_sync_pmove_unit(
+                    _cardNo,
+                    checked((ushort)axisList.Length),
+                    axisList,
+                    distanceList,
+                    positionModeList),
+                "nmc_sync_pmove_unit");
+        }
+    }
+
+    public void MoveLinearAbsolute(
+        int coordinateSystemNo,
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> targetPositions,
+        IReadOnlyList<double> maximumAxisVelocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(targetPositions);
+        ArgumentNullException.ThrowIfNull(maximumAxisVelocities);
+
+        if (coordinateSystemNo < 0 || coordinateSystemNo > ushort.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
+        }
+
+        if (hardwareAxisNos.Count != 2 ||
+            hardwareAxisNos.Count != targetPositions.Count ||
+            hardwareAxisNos.Count != maximumAxisVelocities.Count ||
+            hardwareAxisNos.Distinct().Count() != hardwareAxisNos.Count)
+        {
+            throw new ArgumentException("XY直线插补必须提供两根不同轴及对应的目标位置和最大速度。");
+        }
+
+        using (_sync.Enter())
+        {
+            EnsureOpen();
+            var coordinate = checked((ushort)coordinateSystemNo);
+            var coordinateDone = LeisaiNative.dmc_check_done_multicoor(_cardNo, coordinate);
+            if (coordinateDone is not (0 or 1))
+            {
+                throw NativeFailure("dmc_check_done_multicoor", coordinateDone);
+            }
+
+            if (coordinateDone == 0)
+            {
+                throw new MotionCardException(
+                    $"插补坐标系 {coordinateSystemNo} 正在运动，拒绝重复下发命令。",
+                    "插补坐标系忙检查");
+            }
+
+            var axisList = new ushort[hardwareAxisNos.Count];
+            var targets = new double[targetPositions.Count];
+            var distances = new double[targetPositions.Count];
+            var profiles = new MotionMoveProfile[hardwareAxisNos.Count];
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var target = targetPositions[index];
+                var axisVelocity = maximumAxisVelocities[index];
+                if (!double.IsFinite(target))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(targetPositions), "插补目标位置必须是有限数值。");
+                }
+
+                ValidateVelocity(axisVelocity, allowSigned: false);
+                var axis = GetAxis(hardwareAxisNos[index]);
+                double currentPosition = 0;
+                EnsureSuccess(
+                    LeisaiNative.dmc_get_position_unit(_cardNo, axis, ref currentPosition),
+                    "dmc_get_position_unit");
+                var distance = target - currentPosition;
+                EnsureAxisReadyForDirection(axis, Math.Sign(distance));
+                EnsureAxisStopped(axis);
+
+                var profile = _options.GetMoveProfile(axis);
+                profile.Validate();
+                if (profile.StartVelocity > axisVelocity || profile.StopVelocity > axisVelocity)
+                {
+                    throw new InvalidDataException(
+                        $"硬件轴 {axis} 的启动/停止速度不能大于插补最大轴速度 {axisVelocity:0.###}。");
+                }
+
+                EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+                EnsureSuccess(
+                    LeisaiNative.dmc_set_dec_stop_time(_cardNo, axis, profile.DecelerationStopSeconds),
+                    "dmc_set_dec_stop_time");
+                axisList[index] = axis;
+                targets[index] = target;
+                distances[index] = distance;
+                profiles[index] = profile;
+            }
+
+            var pathLength = Math.Sqrt(distances.Sum(distance => distance * distance));
+            if (!double.IsFinite(pathLength) || pathLength <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetPositions), "插补路径长度必须大于0。");
+            }
+
+            var activeComponents = Enumerable.Range(0, distances.Length)
+                .Where(index => Math.Abs(distances[index]) > 0)
+                .Select(index => new
+                {
+                    Index = index,
+                    Ratio = Math.Abs(distances[index]) / pathLength
+                })
+                .ToArray();
+            var maximumVectorVelocity = activeComponents.Min(component =>
+                maximumAxisVelocities[component.Index] / component.Ratio);
+            var minimumVectorVelocity = activeComponents.Min(component =>
+                profiles[component.Index].StartVelocity / component.Ratio);
+            var stopVectorVelocity = activeComponents.Min(component =>
+                profiles[component.Index].StopVelocity / component.Ratio);
+            minimumVectorVelocity = Math.Min(minimumVectorVelocity, maximumVectorVelocity);
+            stopVectorVelocity = Math.Min(stopVectorVelocity, maximumVectorVelocity);
+            var accelerationSeconds = profiles.Max(profile => profile.AccelerationSeconds);
+            var decelerationSeconds = profiles.Max(profile => profile.DecelerationSeconds);
+            var sTimeSeconds = profiles.Max(profile => profile.STimeSeconds);
+
+            EnsureSuccess(
+                LeisaiNative.dmc_set_vector_profile_unit(
+                    _cardNo,
+                    coordinate,
+                    minimumVectorVelocity,
+                    maximumVectorVelocity,
+                    accelerationSeconds,
+                    decelerationSeconds,
+                    stopVectorVelocity),
+                "dmc_set_vector_profile_unit");
+            EnsureSuccess(
+                LeisaiNative.dmc_set_vector_s_profile(
+                    _cardNo,
+                    coordinate,
+                    0,
+                    sTimeSeconds),
+                "dmc_set_vector_s_profile");
+            _ensureMotionAllowed?.Invoke();
+            EnsureSuccess(
+                LeisaiNative.dmc_line_unit(
+                    _cardNo,
+                    coordinate,
+                    checked((ushort)axisList.Length),
+                    axisList,
+                    targets,
+                    1),
+                "dmc_line_unit");
+        }
+    }
+
+    public void StopLinearInterpolation(int coordinateSystemNo, bool emergency = false)
+    {
+        if (coordinateSystemNo < 0 || coordinateSystemNo > ushort.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
+        }
+
+        using (_sync.Enter(MotionCardAccessPriority.EmergencyStop))
+        {
+            EnsureOpen();
+            EnsureSuccess(
+                LeisaiNative.dmc_stop_multicoor(
+                    _cardNo,
+                    checked((ushort)coordinateSystemNo),
+                    emergency ? (ushort)1 : (ushort)0),
+                "dmc_stop_multicoor");
         }
     }
 
     public void MoveAbsolute(int hardwareAxisNo, double position, double velocity)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             var axis = GetAxis(hardwareAxisNo);
             if (!double.IsFinite(position))
@@ -531,13 +781,14 @@ public sealed class LeisaiMotionCard : IMotionCard
             EnsureAxisStopped(axis);
             ConfigureMove(axis, velocity);
             EnsureSuccess(LeisaiNative.dmc_clear_stop_reason(_cardNo, axis), "dmc_clear_stop_reason");
+            _ensureMotionAllowed?.Invoke();
             EnsureSuccess(LeisaiNative.dmc_pmove_unit(_cardNo, axis, position, 1), "dmc_pmove_unit");
         }
     }
 
     public void Stop(int hardwareAxisNo, bool emergency = false)
     {
-        lock (_sync)
+        using (_sync.Enter(MotionCardAccessPriority.EmergencyStop))
         {
             StopCore(GetAxis(hardwareAxisNo), emergency);
         }
@@ -545,16 +796,48 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     public void EmergencyStop()
     {
-        lock (_sync)
+        using (_sync.Enter(MotionCardAccessPriority.EmergencyStop))
         {
             EnsureOpen();
-            EnsureSuccess(LeisaiNative.dmc_emg_stop(_cardNo), "dmc_emg_stop");
+            var failures = new List<(string Operation, int ErrorCode)>();
+
+            // DMC-E3064S现场使用的是EtherCAT总线轴。除控制卡全局急停外，
+            // 再对每根实际总线轴下发立即停止，避免全局接口返回成功但总线轴未停。
+            var globalResult = LeisaiNative.dmc_emg_stop(_cardNo);
+            if (globalResult != 0)
+            {
+                failures.Add(("dmc_emg_stop", globalResult));
+            }
+
+            for (var hardwareAxisNo = 0; hardwareAxisNo < AxisCount; hardwareAxisNo++)
+            {
+                var axis = checked((ushort)hardwareAxisNo);
+                var axisResult = LeisaiNative.dmc_stop(_cardNo, axis, 1);
+                if (axisResult != 0)
+                {
+                    failures.Add(($"dmc_stop(axis={hardwareAxisNo}, emergency=1)", axisResult));
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                var firstFailure = failures[0];
+                throw new MotionCardException(
+                    "全轴急停存在下发失败：" +
+                    string.Join(
+                        "；",
+                        failures.Select(failure =>
+                            $"{failure.Operation} 返回 {failure.ErrorCode} " +
+                            $"(0x{unchecked((ushort)failure.ErrorCode):X4})")),
+                    firstFailure.Operation,
+                    firstFailure.ErrorCode);
+            }
         }
     }
 
     public void ClearAlarms(IEnumerable<int> hardwareAxisNumbers)
     {
-        lock (_sync)
+        using (_sync.Enter())
         {
             EnsureOpen();
             EnsureSuccess(LeisaiNative.nmc_clear_errcode(_cardNo, EtherCatPort), "nmc_clear_errcode");
@@ -696,6 +979,7 @@ public sealed class LeisaiMotionCard : IMotionCard
 
     private void SetServoCommand(ushort axis, bool enabled)
     {
+        if (enabled) _ensureMotionAllowed?.Invoke();
         EnsureSuccess(
             enabled
                 ? LeisaiNative.nmc_set_axis_enable(_cardNo, axis)
@@ -734,7 +1018,10 @@ public sealed class LeisaiMotionCard : IMotionCard
                 }
             }
 
-            Thread.Sleep(20);
+            // 调用方持有 _sync；等待使能确认期间释放锁，让压力采集和急停能够进入。
+            _sync.SleepOutside(_options.PollIntervalMilliseconds);
+            EnsureOpen();
+            if (enabled) _ensureMotionAllowed?.Invoke();
         }
 
         throw new MotionCardException(

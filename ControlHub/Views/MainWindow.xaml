@@ -115,7 +115,11 @@
                         <Border Width="1" Height="24" Background="#44627D" Margin="20,0,18,0" />
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="当前配方" Foreground="#AFC1D2" FontSize="11" FontWeight="SemiBold" />
-                            <TextBlock Text="产品A_20240520" Foreground="#F2F7FB" FontSize="14" FontWeight="Bold" />
+                            <TextBlock x:Name="CurrentRecipeNameText"
+                                       Text="未应用配方"
+                                       Foreground="#F2F7FB"
+                                       FontSize="14"
+                                       FontWeight="Bold" />
                         </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -173,6 +177,16 @@
                             <TextBlock Text="视觉标定" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    <Button x:Name="UsbMicroscopeMenuButton" Style="{StaticResource MenuButton}" Click="UsbMicroscopeMenu_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <Image Width="20"
+                                   Height="20"
+                                   Margin="0,0,8,0"
+                                   Source="/Assets/Icons/TopMenu/ccd.png"
+                                   Stretch="Uniform" />
+                            <TextBlock Text="USB显微镜" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="ConnectionMenuButton" Style="{StaticResource MenuButton}" Click="ConnectionMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
@@ -183,7 +197,9 @@
                             <TextBlock Text="&#x8FDE;&#x63A5;&#x914D;&#x7F6E;" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource MenuButton}">
+                    <Button x:Name="ParameterSettingsMenuButton"
+                            Style="{StaticResource MenuButton}"
+                            Click="ParameterSettingsMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
                                    Height="20"
@@ -193,14 +209,16 @@
                             <TextBlock Text="参数设置" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource MenuButton}">
+                    <Button x:Name="BatchQueryMenuButton" Style="{StaticResource MenuButton}" Content="数据查询" Click="BatchQueryMenu_Click"
+                            ToolTip="进入专用查询和导出页面；切换前停止当前生产。生产中查询可使用主页的批次查询按钮。" />
+                    <Button x:Name="AlarmHistoryMenuButton" Style="{StaticResource MenuButton}" Click="AlarmHistoryMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
                                    Height="20"
                                    Margin="0,0,8,0"
                                    Source="/Assets/Icons/TopMenu/alarm-records.png"
                                    Stretch="Uniform" />
-                            <TextBlock Text="报警记录" VerticalAlignment="Center" />
+                            <TextBlock x:Name="AlarmHistoryMenuLabel" Text="报警记录" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource MenuButton}" Click="PermissionLogin_Click">
@@ -227,8 +245,18 @@
                                           Grid.Row="2"
                                           Visibility="Hidden" />
 
+            <pages:UsbMicroscopePage x:Name="UsbMicroscopeContent"
+                                     Grid.Row="2"
+                                     Visibility="Collapsed" />
+
             <pages:ConnectionConfigPage x:Name="ConnectionConfigContent"
                                         Grid.Row="2"
                                         Visibility="Collapsed" />
+
+            <pages:ParameterSettingsPage x:Name="ParameterSettingsContent"
+                                         Grid.Row="2"
+                                         Visibility="Collapsed" />
+            <pages:BatchQueryPage x:Name="BatchQueryContent" Grid.Row="2" Visibility="Collapsed" />
+            <pages:AlarmHistoryPage x:Name="AlarmHistoryContent" Grid.Row="2" Visibility="Collapsed" />
     </Grid>
 </Window>
