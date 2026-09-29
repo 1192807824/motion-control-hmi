@@ -625,7 +625,7 @@
                             </Grid>
                             <TextBlock x:Name="SidebarManualCircleStatusText"
                                        Margin="26,0,0,6"
-                                       Text="在各自画面的圆边上选 3 点，可单独重画和保存"
+                                       Text="换嘴时，只在该吸嘴画面的圆边上选 3 点，再保存对应结果"
                                        Foreground="#D5C5FF"
                                        FontSize="11"
                                        LineHeight="18"
@@ -647,7 +647,7 @@
                                         Click="CalibrationSidebarButton_Click" />
                             </Grid>
                             <TextBlock x:Name="SidebarNozzleStatusText"
-                                       Margin="26,0,0,0" Text="移动到示教下压位后，让两个吸嘴同时打点"
+                                       Margin="26,0,0,0" Text="换哪个吸嘴，就只示教该吸嘴；另一吸嘴数据保留。首次标定需分别完成两个吸嘴。"
                                        Foreground="#AFC0CD" FontSize="11" LineHeight="19"
                                        TextAlignment="Center" TextWrapping="Wrap" />
                         </StackPanel>

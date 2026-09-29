@@ -18,11 +18,52 @@ internal static class Program
     private static void Main()
     {
         CheckCircleGeometry();
+        CheckReplacementVerification();
         var directory = Path.Combine(Path.GetTempPath(), "nozzle-teaching-checks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         CheckIndependentResults(directory);
-        Console.WriteLine("PASS: three-point circle, invalid points, Z1/Z2 independent drafts and offsets, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
+        Console.WriteLine("PASS: three-point circle, invalid points, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
         Console.WriteLine("Test artifacts: " + directory);
+    }
+
+    private static void CheckReplacementVerification()
+    {
+        var page = (VisualCalibrationPage)RuntimeHelpers.GetUninitializedObject(typeof(VisualCalibrationPage));
+        bool Move(VisionTargetTool tool) => (bool)Invoke(page, "RecordNozzleVerification", tool)!;
+        void Save(int nozzle) => Invoke(page, "RegisterNozzleForVerification", nozzle);
+        void Reset() => Invoke(page, "ResetNozzleVerification");
+        string Pending() => (string)Invoke(page, "GetPendingNozzleVerificationMessage")!;
+
+        Save(1);
+        Require(Pending().Contains("待检查：吸嘴1"), "Replacing Z1 requests only Z1 verification");
+        Require(!Move(VisionTargetTool.Camera), "Camera alignment cannot verify a nozzle");
+        Require(!Move(VisionTargetTool.Nozzle2), "Untouched Z2 cannot complete Z1 verification");
+        Require(Move(VisionTargetTool.Nozzle1), "Z1 replacement completes without requiring a new Z2 move");
+
+        Reset();
+        Save(2);
+        Require(Pending().Contains("待检查：吸嘴2"), "Replacing Z2 requests only Z2 verification");
+        Require(Move(VisionTargetTool.Nozzle2), "Z2 replacement completes without checking Z1");
+
+        Reset();
+        Save(1);
+        Require(Move(VisionTargetTool.Nozzle1), "Only Z1 saved so far is complete");
+        Save(2);
+        Require(!Move(VisionTargetTool.Nozzle1), "Saving Z2 after Z1 verification requires a Z2 move");
+        Require(Move(VisionTargetTool.Nozzle2), "Previously checked Z1 need not be repeated");
+        Save(1);
+        Require(!Move(VisionTargetTool.Nozzle2), "Resaving Z1 invalidates its earlier move check");
+        Require(Move(VisionTargetTool.Nozzle1), "Resaved Z1 completes after a fresh move check");
+
+        Reset();
+        Save(1);
+        Save(2);
+        Require(!Move(VisionTargetTool.Nozzle2), "Saving both nozzles requires both checks");
+        Require(Pending().Contains("待检查：吸嘴1"), "Dual teaching reports the remaining nozzle");
+        Require(Move(VisionTargetTool.Nozzle1), "Dual teaching completes after both checks");
+        Reset();
+        Save(1);
+        Require(Move(VisionTargetTool.Nozzle1), "Reset discards the previous session's Z2 requirement");
     }
 
     private static void CheckCircleGeometry()
@@ -118,6 +159,17 @@ internal static class Program
         Invoke(page, "SaveCurrentCalibrationProfile");
         var restartedSettings = new VisualCalibrationSettingsStore(Path.Combine(directory, "settings.json")).Load();
         Require(restartedSettings.NozzleOffsetCalibrated && restartedSettings.Nozzle2OffsetCalibrated && restartedSettings.NozzleOffsetXPulses == 111 && restartedSettings.Nozzle2OffsetXPulses == -900, "Saved settings reload independently");
+        Invoke(page, "SetActiveNozzleOffset", VisionTargetTool.Nozzle1, 555d, -666d);
+        Invoke(page, "SaveCurrentCalibrationProfile");
+        var replacementProfile = store.Load(saved.FilePath);
+        var replacementSettings = new VisualCalibrationSettingsStore(Path.Combine(directory, "settings.json")).Load();
+        Require(replacementProfile.Nozzle1Calibrated && replacementProfile.Nozzle1OffsetXPulses == 555 && replacementProfile.Nozzle1OffsetYPulses == -666,
+            "Replacement Z1 offsets are persisted to the profile");
+        Require(replacementProfile.Nozzle2Calibrated && replacementProfile.Nozzle2OffsetXPulses == -900 && replacementProfile.Nozzle2OffsetYPulses == 800,
+            "Replacing Z1 preserves both Z2 coordinates and its calibration flag on disk");
+        Require(replacementSettings.NozzleOffsetXPulses == 555 && replacementSettings.NozzleOffsetYPulses == -666 &&
+                replacementSettings.Nozzle2OffsetCalibrated && replacementSettings.Nozzle2OffsetXPulses == -900 && replacementSettings.Nozzle2OffsetYPulses == 800,
+            "Restart after replacing Z1 retains the unchanged Z2 result");
         settings.NozzleOffsetCalibrated = false;
         settings.Nozzle2OffsetCalibrated = false;
         try

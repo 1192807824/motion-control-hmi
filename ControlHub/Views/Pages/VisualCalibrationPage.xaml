@@ -607,7 +607,7 @@
                                 <TextBlock x:Name="NozzleCalibrationStatusText"
                                            Margin="0,4,0,0"
                                            MinHeight="30"
-                                           Text="从参数配置读取示教下压位，移动后让两个吸嘴同时打点"
+                                           Text="换哪个吸嘴，就只为该吸嘴打点、三点画圆并保存；另一吸嘴数据保留。首次标定需分别完成两个吸嘴。"
                                            Foreground="#8FB2C9"
                                            FontSize="10"
                                            LineHeight="16"

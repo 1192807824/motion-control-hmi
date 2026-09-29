@@ -18,6 +18,12 @@ Coverage:
 - Saving either nozzle preserves the other's calibration flag and offsets.
 - A profile with only Z2 is valid; saving Z1 later retains Z2.
 - Profile and settings reload retain the separately saved results.
+- Replacing only Z1 or Z2 requires a point-move check only for that saved nozzle.
+- Saving both requires both checks; resaving one invalidates only its earlier check.
+- Moving the camera or the untouched nozzle cannot satisfy a pending replacement check.
+- Resetting the teaching context discards requirements from the previous context.
+
+Operator instructions: [更换单个吸嘴](../../ControlHub/NOZZLE_REPLACEMENT.md).
 
 Hardware verification: acquire the teaching pair, select three circle-edge points
 on Z1, save Z1, then do the same for Z2. Redraw only Z1 and confirm Z2's circle and

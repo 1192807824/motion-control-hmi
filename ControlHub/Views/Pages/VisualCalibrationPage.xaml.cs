@@ -76,6 +76,8 @@ public partial class VisualCalibrationPage : UserControl
     private bool _lowerCameraCorrectionTestRunning;
     private bool _nozzle1ClickVerified;
     private bool _nozzle2ClickVerified;
+    private bool _nozzle1VerificationRequired;
+    private bool _nozzle2VerificationRequired;
     private bool _suppressClickMoveModeEvent;
     private bool _suppressLowerCameraNozzleEvent;
     private MotionControlPage? _motionController;
@@ -513,8 +515,7 @@ public partial class VisualCalibrationPage : UserControl
         _recordedCenter = null;
         _nozzleDotPosition = null;
         Array.Clear(_pendingNozzlePoints);
-        _nozzle1ClickVerified = false;
-        _nozzle2ClickVerified = false;
+        ResetNozzleVerification();
         LoadCalibrationSettings();
         if (IsLowerCameraMode)
         {
@@ -1480,7 +1481,7 @@ public partial class VisualCalibrationPage : UserControl
             SaveCalibrationSettingsNoThrow();
             SetNozzleCalibrationStatus(
                 $"已移动到示教下压位：X={targetX:0.###}、Y={targetY:0.###} pulse。" +
-                "请让两个吸嘴同时打点，完成后点击“回拍照位”。",
+                "只更换一个吸嘴时，仅用该吸嘴打点；首次标定需两个吸嘴打点。完成后点击“回拍照位”。",
                 WorkflowStatus.Success);
         }
         catch (OperationCanceledException)
@@ -1551,13 +1552,12 @@ public partial class VisualCalibrationPage : UserControl
             UpdateNozzleTeachUi();
             UpdateCommandState();
             SetNozzleCalibrationStatus(
-                "正在采集两个吸嘴画面；采集完成后请在每张图上手动画圆…",
+                "正在采集吸嘴画面；换嘴时只需在更换的吸嘴画面上三点画圆…",
                 WorkflowStatus.Running);
 
             _ = await VisionHost.RunNozzlePointInspectionAsync(CancellationToken.None);
             SetNozzleCalibrationStatus(
-                "两个吸嘴画面已采集。在各自圆边上选取三个不共线的点；" +
-                "Z1、Z2 可分别重画、保存，之前保存的另一吸嘴结果继续保留。",
+                "画面已采集。只在需要示教的吸嘴圆边上选三个不共线的点，再保存对应 Z1 或 Z2 结果；另一吸嘴已保存的数据保留。",
                 WorkflowStatus.Ready);
         }
         catch (Exception exception)
@@ -1658,9 +1658,12 @@ public partial class VisualCalibrationPage : UserControl
                 {
                     _pendingNozzlePoints[nozzleNumber - 1] = null;
                 }
-                if (nozzleNumber == 1) _nozzle1ClickVerified = false;
-                else _nozzle2ClickVerified = false;
+                RegisterNozzleForVerification(nozzleNumber);
+                SelectClickTargetTool(tool);
                 SetNozzleCalibrationStatus($"Z{nozzleNumber} 结果已保存：\n{profilePath.FilePath}\n另一吸嘴的已保存结果保留。", WorkflowStatus.Success);
+                SetClickMoveStatus(
+                    $"已选中吸嘴{nozzleNumber}。请开启点击移动，点选目标并检查实际对准效果。" + GetPendingNozzleVerificationMessage(),
+                    WorkflowStatus.Ready);
             }
             catch
             {
@@ -1833,8 +1836,7 @@ public partial class VisualCalibrationPage : UserControl
             _nozzleDotPosition = null;
             Array.Clear(_pendingNozzlePoints);
             ResetActiveNozzleCalibration();
-            _nozzle1ClickVerified = false;
-            _nozzle2ClickVerified = false;
+            ResetNozzleVerification();
             _visionCalibration.Save();
             UpdateCalibrationProfilePathDisplay();
             UpdateNozzleTeachUi();
@@ -1980,8 +1982,7 @@ public partial class VisualCalibrationPage : UserControl
                     center.Y);
                 _nozzleDotPosition = null;
                 Array.Clear(_pendingNozzlePoints);
-                _nozzle1ClickVerified = false;
-                _nozzle2ClickVerified = false;
+                ResetNozzleVerification();
             }
             CalibrationFilePathTextBox.Text = fullPath;
             SaveCalibrationSettingsNoThrow();
@@ -2386,6 +2387,52 @@ public partial class VisualCalibrationPage : UserControl
 
     }
 
+    private void ResetNozzleVerification()
+    {
+        _nozzle1ClickVerified = false;
+        _nozzle2ClickVerified = false;
+        _nozzle1VerificationRequired = false;
+        _nozzle2VerificationRequired = false;
+    }
+
+    private void RegisterNozzleForVerification(int nozzleNumber)
+    {
+        // 仅成功保存的吸嘴加入本次检查；再次保存后必须重新点选检查。
+        if (nozzleNumber == 1)
+        {
+            _nozzle1VerificationRequired = true;
+            _nozzle1ClickVerified = false;
+        }
+        else if (nozzleNumber == 2)
+        {
+            _nozzle2VerificationRequired = true;
+            _nozzle2ClickVerified = false;
+        }
+    }
+
+    private bool RecordNozzleVerification(VisionTargetTool targetTool)
+    {
+        if (targetTool == VisionTargetTool.Nozzle1) _nozzle1ClickVerified = true;
+        else if (targetTool == VisionTargetTool.Nozzle2) _nozzle2ClickVerified = true;
+        else return false;
+
+        return (!_nozzle1VerificationRequired || _nozzle1ClickVerified) &&
+               (!_nozzle2VerificationRequired || _nozzle2ClickVerified);
+    }
+
+    private string GetPendingNozzleVerificationMessage()
+    {
+        var pending1 = _nozzle1VerificationRequired && !_nozzle1ClickVerified;
+        var pending2 = _nozzle2VerificationRequired && !_nozzle2ClickVerified;
+        return (pending1, pending2) switch
+        {
+            (true, true) => "本次需检查吸嘴1和吸嘴2。",
+            (true, false) => "本次待检查：吸嘴1。",
+            (false, true) => "本次待检查：吸嘴2。",
+            _ => "请确认吸嘴实际对准目标。"
+        };
+    }
+
     private async void VisionHost_ClickTargetReceived(object? sender, VisionClickTargetEventArgs e)
     {
         if (EnableClickMoveCheckBox.IsChecked != true || _clickMoveRunning || _calibrationRunning)
@@ -2456,28 +2503,15 @@ public partial class VisualCalibrationPage : UserControl
                 DefaultPositionTolerancePulses,
                 CalculateDirectMoveTimeout(moveDeltaX, moveDeltaY, velocity),
                 _clickMoveCancellation.Token);
-            if (targetTool == VisionTargetTool.Nozzle1)
-            {
-                _nozzle1ClickVerified = true;
-            }
-            else if (targetTool == VisionTargetTool.Nozzle2)
-            {
-                _nozzle2ClickVerified = true;
-            }
-
-            finishNozzleVerification =
-                targetTool != VisionTargetTool.Camera &&
-                _nozzle1ClickVerified &&
-                _nozzle2ClickVerified;
+            finishNozzleVerification = !IsLowerCameraMode && RecordNozzleVerification(targetTool);
 
             var verificationMessage = targetTool switch
             {
                 VisionTargetTool.Camera when IsLowerCameraMode => "点哪里移动到哪里已完成。",
                 VisionTargetTool.Camera => "相机中心已对准目标。",
                 _ when finishNozzleVerification =>
-                    "双吸嘴验证完成，正在退出点击移动。",
-                _ when _nozzle1ClickVerified => "请继续验证吸嘴2。",
-                _ => "请继续验证吸嘴1。"
+                    "本次吸嘴点选检查已完成，正在退出点击移动。请确认实际对准效果。",
+                _ => GetPendingNozzleVerificationMessage()
             };
             SetClickMoveStatus(
                 $"{targetName}移动完成：X={actual.ActualX:0.###}、Y={actual.ActualY:0.###}；" +
@@ -2506,7 +2540,7 @@ public partial class VisualCalibrationPage : UserControl
             if (await ConfigureClickMoveModeAsync(false))
             {
                 SetClickMoveStatus(
-                    "双吸嘴验证完成，请点击顶部“保存配置”。",
+                    "本次吸嘴点选检查已完成，请确认实际对准效果；已保存的示教结果无需重复保存。",
                     WorkflowStatus.Success);
             }
         }
@@ -3434,8 +3468,7 @@ public partial class VisualCalibrationPage : UserControl
         }
         _nozzleDotPosition = null;
         Array.Clear(_pendingNozzlePoints);
-        _nozzle1ClickVerified = false;
-        _nozzle2ClickVerified = false;
+        ResetNozzleVerification();
 
         StepXPulsesTextBox.Text = FormatPositiveSetting(profile.StepXPulses, 100_000);
         StepYPulsesTextBox.Text = FormatPositiveSetting(profile.StepYPulses, 100_000);
