@@ -1,4 +1,7 @@
 using System.IO;
+using System.IO.Pipes;
+using System.Diagnostics;
+using System.Text;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -15,16 +18,85 @@ internal static class Program
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (args.Contains("--fake-host-process"))
+        {
+            Console.ReadLine();
+            return;
+        }
         CheckCircleGeometry();
         CheckReplacementVerification();
         CheckAlgorithmFailureRecovery();
+        CheckRunningHostCapability();
         var directory = Path.Combine(Path.GetTempPath(), "nozzle-teaching-checks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         CheckIndependentResults(directory);
-        Console.WriteLine("PASS: three-point circle, invalid points, algorithm NG/exception recovery, missing-current-image rejection, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
+        Console.WriteLine("PASS: live host capability handshake (current/legacy/mismatched), three-point circle, invalid points, algorithm NG/exception recovery, missing-current-image rejection, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
         Console.WriteLine("Test artifacts: " + directory);
+    }
+
+    private static void CheckRunningHostCapability()
+    {
+        foreach (var mode in new[] { "old", "wrong", "current" })
+        {
+            using var host = new VisionMasterProcessHost();
+            // A dedicated child of this test satisfies the process-alive guard; it only waits on stdin.
+            using var process = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--fake-host-process")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true
+            })!;
+            Set(host, "_process", process);
+            try
+            {
+                var pipeName = (string)typeof(VisionMasterProcessHost).GetField("_pipeName", Private)!.GetValue(host)!;
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var requests = new List<string>();
+                var server = Task.Run(async () =>
+                {
+                    for (var i = 0; i < (mode == "current" ? 2 : 1); i++)
+                    {
+                        using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
+                            PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                        await pipe.WaitForConnectionAsync(timeout.Token);
+                        using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 1024, leaveOpen: true);
+                        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
+                        var command = await reader.ReadLineAsync(timeout.Token);
+                        requests.Add(command!);
+                        var message = i == 1 ? "0\t0\t0\t" : mode switch
+                        {
+                            "old" => "不支持的视觉标定命令：GET_NOZZLE_TEACHING_CAPABILITY",
+                            "wrong" => "NOZZLE_LEGACY",
+                            _ => "NOZZLE_MANUAL_IMAGE_V2"
+                        };
+                        await writer.WriteLineAsync((mode == "old" ? "ERR\t" : "OK\t") +
+                            Convert.ToBase64String(Encoding.UTF8.GetBytes(message)));
+                    }
+                });
+                try
+                {
+                    _ = host.RunNozzlePointInspectionAsync(timeout.Token).GetAwaiter().GetResult();
+                    Require(mode == "current", "Legacy vision host must not run teaching");
+                }
+                catch (InvalidOperationException exception) when (mode != "current")
+                {
+                    Require(exception.Message.Contains("视觉程序未更新") && exception.Message.Contains(process.StartInfo.FileName),
+                        "Legacy host reports its actual loaded executable path");
+                }
+                server.GetAwaiter().GetResult();
+                Require(requests[0] == "GET_NOZZLE_TEACHING_CAPABILITY", "Check the running host, not a file inferred from build configuration");
+                Require(mode != "current" || requests.SequenceEqual(new[] { "GET_NOZZLE_TEACHING_CAPABILITY", "RUN_NOZZLE_POINTS" }),
+                    "A current host proceeds to teaching after the capability response");
+            }
+            finally
+            {
+                Set(host, "_process", null!);
+                process.StandardInput.Close();
+                if (!process.WaitForExit(5000)) process.Kill();
+            }
+        }
     }
 
     private static void CheckAlgorithmFailureRecovery()

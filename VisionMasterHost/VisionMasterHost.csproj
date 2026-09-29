@@ -111,6 +111,8 @@
   <ItemGroup>
     <Compile Include="..\ControlHub\Services\Vision\EmbeddedVisionWindowLayout.cs"
              Link="EmbeddedVisionWindowLayout.cs" />
+    <Compile Include="..\ControlHub\Services\Vision\NozzleTeachingProtocol.cs"
+             Link="NozzleTeachingProtocol.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -356,6 +356,7 @@ public partial class MainWindow : Window
             "TRANSFORM_PIXEL" => TransformPixel(parts),
             "RUN_RECTANGLE_BLOB" => RunRectangleBlobInspection(parts),
             "RUN_NOZZLE_POINTS" => RunNozzlePointInspection(parts),
+            NozzleTeachingProtocol.QueryCommand => NozzleTeachingProtocol.CurrentImageFallback,
             "RUN_RECOGNIZED_CENTER" => RunRecognizedCenter(parts),
             "CLEAR_NOZZLE_TEACHING_DRAFT" => ClearNozzleTeachingDraft(),
             "RUN_ROTATION_CENTER_CAPTURE" => RunRotationCenterCapture(parts),

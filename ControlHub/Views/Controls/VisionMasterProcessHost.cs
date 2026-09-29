@@ -657,10 +657,33 @@ public sealed class VisionMasterProcessHost : HwndHost
     /// 手动触发固定方案中的“粗定位示教流程”，采集并显示吸嘴1、吸嘴2画面。
     /// 返回的自动圆结果仅用于兼容通信；最终示教坐标由画面上的手动画圆事件提供。
     /// </summary>
-    public Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
+    public async Task<VisionRectangleBlobResult> RunNozzlePointInspectionAsync(
         CancellationToken cancellationToken)
     {
-        return RunTwoPointBlobInspectionAsync("RUN_NOZZLE_POINTS", cancellationToken);
+        string capability;
+        try
+        {
+            capability = await SendCalibrationCommandAsync(NozzleTeachingProtocol.QueryCommand, cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains(NozzleTeachingProtocol.QueryCommand, StringComparison.Ordinal))
+        {
+            throw CreateOutdatedNozzleHostException(exception);
+        }
+        if (capability != NozzleTeachingProtocol.CurrentImageFallback)
+        {
+            throw CreateOutdatedNozzleHostException();
+        }
+        return await RunTwoPointBlobInspectionAsync("RUN_NOZZLE_POINTS", cancellationToken);
+    }
+
+    private InvalidOperationException CreateOutdatedNozzleHostException(Exception? inner = null)
+    {
+        var path = _process?.StartInfo.FileName;
+        if (string.IsNullOrWhiteSpace(path)) path = ResolveHostExecutablePath();
+        return new InvalidOperationException(
+            "当前加载的视觉程序未更新，不支持算法失败后手动画圆。" +
+            "请停止调试，重新生成整个解决方案，再重新启动视觉。实际加载路径：" + path, inner);
     }
 
     public async Task<RecognizedCenterResult> RunRecognizedCenterAsync(string calibrationFilePath, CancellationToken cancellationToken)

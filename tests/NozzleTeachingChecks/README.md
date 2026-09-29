@@ -24,6 +24,9 @@ Coverage:
 - Resetting the teaching context discards requirements from the previous context.
 - Procedure-level NG and SDK execution exceptions become teaching warnings so the
   current image can still be displayed; missing current-image results remain errors.
+- A fake pipe peer exercises the real host client: current capability proceeds to
+  teaching, unsupported/mismatched capability reports the loaded executable path.
+  The child process is this test executable waiting on stdin, not a vision process.
 
 Additional hardware verification: run coarse teaching with only one nozzle dot,
 and force position correction / circle finding to fail. Both teaching panels must
