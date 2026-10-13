@@ -68,9 +68,8 @@ internal static class Program
         Require(status.Text.Contains("0～65535") && button.IsEnabled, "Invalid input feedback and button recovery");
         foreach (var element in new FrameworkElement[] { button, input, status })
         {
-            var position = element.TransformToAncestor(page).Transform(new Point());
-            Require(position.Y >= 0 && position.Y + element.ActualHeight <= 854 && element.ActualWidth > 30,
-                "Homepage write controls are visible");
+            Require(element.ActualWidth == 0 && element.ActualHeight == 0,
+                "Temporarily hidden 5018 controls occupy no homepage space");
         }
         if (args.Length > 0)
         {
@@ -82,6 +81,6 @@ internal static class Program
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image));
             using var file = File.Create(args[0]); encoder.Save(file);
         }
-        Console.WriteLine("PASS: UINT16 bounds, four-axis same-value writes, partial failures, readback mismatch, homepage visibility and validation feedback. No hardware writes.");
+        Console.WriteLine("PASS: UINT16 bounds, four-axis same-value writes, partial failures, readback mismatch, hidden homepage controls and validation feedback. No hardware writes.");
     }
 }

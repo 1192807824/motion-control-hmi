@@ -1395,7 +1395,7 @@
                     </Button>
 
                     <DockPanel Grid.Row="6">
-                    <Border DockPanel.Dock="Top" Margin="0,10,0,0" Padding="8" Background="#10283A" BorderBrush="#345269" BorderThickness="1" CornerRadius="4">
+                    <Border Visibility="Collapsed" DockPanel.Dock="Top" Margin="0,10,0,0" Padding="8" Background="#10283A" BorderBrush="#345269" BorderThickness="1" CornerRadius="4">
                         <StackPanel>
                             <TextBlock Text="驱动器 0x5018:00 · UINT" Foreground="#EAF2F7" FontWeight="Bold" FontSize="12" Margin="0,0,0,5" />
                             <TextBlock Text="四个Z轴：5 / 7 / 9 / 11，同值写入" Foreground="#AFC0CD" FontSize="11" Margin="0,0,0,5" />
