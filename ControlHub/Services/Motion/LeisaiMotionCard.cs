@@ -262,6 +262,38 @@ public sealed class LeisaiMotionCard : IMotionCard, IPriorityPressureSampling
 
     public IDisposable EnterPressureSampling() => _sync.Enter(MotionCardAccessPriority.Pressure);
 
+    public ushort WriteZAxis5018(int hardwareAxisNo, ushort value)
+    {
+        DriveObject5018.ValidateAxis(hardwareAxisNo);
+        ushort slave = 0, subSlave = 0;
+        return DriveObject5018.WriteAndVerify(value, requested =>
+        {
+            using (_sync.Enter())
+            {
+                var axis = GetAxis(hardwareAxisNo);
+                EnsureBusReady();
+                EnsureAxisStopped(axis);
+                _ensureMotionAllowed?.Invoke();
+                EnsureSuccess(LeisaiNative.nmc_get_axis_node_address(_cardNo, axis, ref slave, ref subSlave), "nmc_get_axis_node_address");
+                // 多轴从站的厂家对象偏移不能按轴号猜测。
+                if (subSlave != 0) throw new MotionCardException($"轴{hardwareAxisNo}的从站子地址为{subSlave}（从站{slave}），需核对该通道0x5018对象映射，未写入。");
+                EnsureSuccess(LeisaiNative.nmc_set_node_od(_cardNo, EtherCatPort, slave,
+                    DriveObject5018.Index, DriveObject5018.SubIndex, DriveObject5018.BitLength, requested), "nmc_set_node_od(0x5018:00)");
+            }
+        }, () =>
+        {
+            // 写与回读之间释放通信权，压力采集和急停可优先进入。
+            using (_sync.Enter())
+            {
+                EnsureOpen();
+                uint actual = 0;
+                EnsureSuccess(LeisaiNative.nmc_get_node_od(_cardNo, EtherCatPort, slave,
+                    DriveObject5018.Index, DriveObject5018.SubIndex, DriveObject5018.BitLength, ref actual), "nmc_get_node_od(0x5018:00)");
+                return actual;
+            }
+        });
+    }
+
     public uint ReadDigitalInputs(int portNo)
     {
         using (_sync.Enter())

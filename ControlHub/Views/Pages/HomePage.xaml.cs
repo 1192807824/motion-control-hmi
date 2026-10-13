@@ -7889,6 +7889,7 @@ public partial class HomePage : UserControl
             _motionController is not null &&
             _visualCalibrationController is not null;
         var commandsIdle =
+            !_drive5018Writing &&
             !_oneKeyResetRunning &&
             !_presetPositionMoveRunning &&
             !_startSequenceRunning;

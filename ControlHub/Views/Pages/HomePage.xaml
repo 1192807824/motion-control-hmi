@@ -1394,7 +1394,25 @@
                         </Grid>
                     </Button>
 
-                    <Border Grid.Row="6"
+                    <DockPanel Grid.Row="6">
+                    <Border DockPanel.Dock="Top" Margin="0,10,0,0" Padding="8" Background="#10283A" BorderBrush="#345269" BorderThickness="1" CornerRadius="4">
+                        <StackPanel>
+                            <TextBlock Text="驱动器 0x5018:00 · UINT" Foreground="#EAF2F7" FontWeight="Bold" FontSize="12" Margin="0,0,0,5" />
+                            <ComboBox x:Name="Drive5018AxisComboBox" SelectedIndex="0" Height="26" Margin="0,0,0,5">
+                                <ComboBoxItem Content="第一套 Z1（轴5）" Tag="5" />
+                                <ComboBoxItem Content="第一套 Z2（轴7）" Tag="7" />
+                                <ComboBoxItem Content="第二套 Z1（轴9）" Tag="9" />
+                                <ComboBoxItem Content="第二套 Z2（轴11）" Tag="11" />
+                            </ComboBox>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBox x:Name="Drive5018ValueTextBox" Height="27" Padding="5,2" Background="#0B1D2B" Foreground="White" BorderBrush="#3D6684" ToolTip="UINT无符号16位整数，范围0～65535" />
+                                <Button x:Name="WriteDrive5018Button" Grid.Column="1" Content="写入5018" Margin="6,0,0,0" Padding="10,3" Click="WriteDrive5018_Click" />
+                            </Grid>
+                            <TextBlock x:Name="Drive5018StatusText" Text="输入0～65535；写入后回读核对" Foreground="#AFC0CD" FontSize="11" Margin="0,5,0,0" TextWrapping="Wrap" MaxHeight="44" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+                    <Border
                             Margin="0,14,0,0"
                             Background="#0B1D2B"
                             BorderBrush="#2D4A61"
@@ -1430,6 +1448,8 @@
                                             VerticalContentAlignment="Stretch" />
                         </Grid>
                     </Border>
+
+                    </DockPanel>
 
                     <ScrollViewer x:Name="ParameterSettingsPanel"
                                   Grid.Row="7"

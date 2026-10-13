@@ -10,6 +10,16 @@ internal static class LeisaiNative
     internal static extern short nmc_get_torque(ushort cardNo, ushort axis, ref int torque);
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_get_axis_node_address(ushort cardNo, ushort axis, ref ushort slaveAddress, ref ushort subSlaveAddress);
+
+    // 雷赛手册：ValLength以bit计；DWORD为32位容器，UINT对象使用16 bit。
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_set_node_od(ushort cardNo, ushort port, ushort node, ushort index, ushort subIndex, ushort bitLength, uint value);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern short nmc_get_node_od(ushort cardNo, ushort port, ushort node, ushort index, ushort subIndex, ushort bitLength, ref uint value);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern short dmc_board_init();
 
     [DllImport(DllName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]

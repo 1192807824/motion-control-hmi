@@ -29,6 +29,7 @@ public sealed class DdInterlockedMotionCard(IMotionCard inner, Action ensureDdCa
     public ushort ReadBusErrorCode() => inner.ReadBusErrorCode();
     public MotionAxisSnapshot ReadAxis(int hardwareAxisNo) => inner.ReadAxis(hardwareAxisNo);
     public int ReadActualTorque(int hardwareAxisNo) => inner.ReadActualTorque(hardwareAxisNo);
+    public ushort WriteZAxis5018(int hardwareAxisNo, ushort value) => inner.WriteZAxis5018(hardwareAxisNo, value);
     public IDisposable? EnterPressureSampling() => (inner as IPriorityPressureSampling)?.EnterPressureSampling();
     public uint ReadDigitalInputs(int portNo) => inner.ReadDigitalInputs(portNo);
     public uint ReadDigitalOutputs(int portNo) => inner.ReadDigitalOutputs(portNo);
