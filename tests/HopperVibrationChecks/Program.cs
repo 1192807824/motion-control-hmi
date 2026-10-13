@@ -49,7 +49,11 @@ internal static class Program
         var client = (VibrationFeederTcpClient)typeof(ConnectionConfigPage).GetField("_tcpClient", Hidden)!.GetValue(page)!;
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        await client.ConnectAsync(new VibrationFeederSettings { Host = "127.0.0.1", Port = ((IPEndPoint)listener.LocalEndpoint).Port });
+        vm.FeederSettings.Host = "127.0.0.1";
+        vm.FeederSettings.Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        vm.FeederSettings.DirectionalVibrationFrequency = 10;
+        var connecting = (Task)typeof(ConnectionConfigPage).GetMethod("ConnectFeederAsync", Hidden)!
+            .Invoke(page, [vm.FeederSettings])!;
         using var peer = await listener.AcceptTcpClientAsync();
         var stream = peer.GetStream();
         var packets = new List<string>();
@@ -98,6 +102,32 @@ internal static class Program
             using var timeout = new CancellationTokenSource(3000);
             while (!condition()) await Task.Delay(10, timeout.Token);
         }
+
+        await connecting.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitFor(() => Snapshot().Length >= 4);
+        Require(client.IsConnected && Snapshot().Length == 4, "Connection initializes vibration parameters.");
+        Require(!Snapshot().Any(packet => packet.StartsWith("&06,") || packet.StartsWith("&07,")),
+            "Startup connection sends neither brightness nor light-on commands.");
+        Clear();
+        vm.FeederSettings.LightOnBrightness = 42;
+        await ((Task)typeof(ConnectionConfigPage).GetMethod("ApplyLightBrightnessAsync", Hidden)!
+            .Invoke(page, ["test brightness while off"])!);
+        Require(Snapshot().Length == 0, "Changing brightness while off sends no light commands.");
+        Require(new VibrationFeederSettingsStore().Load().LightOnBrightness == 42, "Off-state brightness is saved.");
+        Require(await page.SetCalibrationLightAsync(true), "Explicit manual light-on succeeds.");
+        await WaitFor(() => Snapshot().Length >= 2);
+        Require(Snapshot().SequenceEqual(new[] { "&07,1$", "&06,42,XX$" }), "Explicit light-on applies saved brightness.");
+        Require(await page.SetCalibrationLightAsync(false), "Manual light-off succeeds.");
+        await WaitFor(() => Snapshot().Length >= 3);
+        Clear();
+        vm.FeederSettings.LightOnBrightness = 43;
+        Require(await page.SetProductionLightAsync(true), "Production light-on succeeds.");
+        await WaitFor(() => Snapshot().Length >= 2);
+        Require(Snapshot().SequenceEqual(new[] { "&07,1$", "&06,43,XX$" }), "Production applies latest brightness.");
+        Require(await page.SetProductionLightAsync(false), "Production light-off succeeds.");
+        await WaitFor(() => Snapshot().Length >= 3);
+        Clear();
+        Console.WriteLine("PASS: connection leaves light untouched, off-state brightness is saved, explicit lighting still works.");
 
         Inputs("28", "50", "120");
         var pulseClock = System.Diagnostics.Stopwatch.StartNew();

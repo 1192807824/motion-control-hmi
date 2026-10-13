@@ -810,12 +810,11 @@ public partial class ConnectionConfigPage : UserControl
         try
         {
             await _tcpClient.ConnectAsync(settings, _lifetimeCancellation.Token);
+            // 连接时不下发亮度，避免控制器收到亮度指令后自动点亮光源。
+            // 当前亮度由实际开灯操作下发。
             if (!await EnsureProductionVibrationSettingsAppliedAsync(
                     settings,
-                    _lifetimeCancellation.Token) ||
-                !await EnsureFeederBrightnessAppliedAsync(
-                    settings,
-                    "连接初始化光源亮度"))
+                    _lifetimeCancellation.Token))
             {
                 _tcpClient.Close();
                 throw new InvalidOperationException("振动盘生产参数初始化失败。");
@@ -1622,6 +1621,12 @@ public partial class ConnectionConfigPage : UserControl
         }
 
         _settingsStore.Save(settings);
+        // 关灯时只保存设置；下一次手动或生产开灯时再应用亮度。
+        if (!_vibrationFeederLightEnabled)
+        {
+            return;
+        }
+
         if (await SendAsciiProtocolCommandAsync(
                 $"&06,{normalizedBrightness:00},XX$",
                 $"{actionName} {normalizedBrightness:00}%"))
