@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Media;
 using ControlHub.Services.Motion;
 
@@ -15,24 +14,23 @@ public partial class HomePage
         try
         {
             var value = DriveObject5018.ParseValue(Drive5018ValueTextBox.Text);
-            var axis = int.Parse(((ComboBoxItem)Drive5018AxisComboBox.SelectedItem).Tag.ToString()!);
             if (_startSequenceRunning || _oneKeyCollectRunning || _oneKeyResetRunning || _presetPositionMoveRunning)
                 throw new InvalidOperationException("请等待当前生产、复位或移动流程结束后写入。");
             var controller = _motionController ?? throw new InvalidOperationException("运动控制卡尚未连接。");
             _drive5018Writing = true;
             UpdateHomeCommandState();
             WriteDrive5018Button.IsEnabled = false;
-            Drive5018AxisComboBox.IsEnabled = Drive5018ValueTextBox.IsEnabled = false;
-            SetDrive5018Status($"轴{axis}正在写入{value}并回读…", null);
-            var actual = await controller.WriteZAxis5018Async(axis, value);
-            SetDrive5018Status($"写入成功：轴{axis}，回读值 {actual}（{DateTime.Now:HH:mm:ss}）", true);
+            Drive5018ValueTextBox.IsEnabled = false;
+            SetDrive5018Status($"四个Z轴正在写入{value}并逐轴回读…", null);
+            var results = await controller.WriteAllZAxes5018Async(value);
+            SetDrive5018Status(DriveObject5018.DescribeResults(results), results.Count == 4 && results.All(result => result.Error is null));
         }
         catch (Exception exception) { SetDrive5018Status(exception.Message, false); }
         finally
         {
             _drive5018Writing = false;
             WriteDrive5018Button.IsEnabled = true;
-            Drive5018AxisComboBox.IsEnabled = Drive5018ValueTextBox.IsEnabled = true;
+            Drive5018ValueTextBox.IsEnabled = true;
             UpdateHomeCommandState();
         }
     }
