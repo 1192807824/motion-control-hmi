@@ -50,8 +50,8 @@ public partial class VisualCalibrationPage
             {
                 "AlignUp" => (0d, distance),
                 "AlignDown" => (0d, -distance),
-                "AlignLeft" => (-distance, 0d),
-                "AlignRight" => (distance, 0d),
+                "AlignLeft" => (distance, 0d),
+                "AlignRight" => (-distance, 0d),
                 _ => throw new InvalidOperationException("微调方向无效。")
             };
             var controller = _motionController!;
