@@ -327,13 +327,8 @@ internal static class Program
         page.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
         page.RefreshTeachingPositions();
         Require(((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Unloading an idle page preserves the correction session");
-        // The preserved session still rejects XY movement from another menu.
-        try
-        {
-            session.CalculateOffset(new(1, 2, 1100, 2000), 10);
-            throw new Exception("External movement should invalidate saving the old alignment");
-        }
-        catch (InvalidOperationException) { }
+        Require(session.CalculateOffset(new(1, 2, 1100, 1950)) == (200d, 150d),
+            "Preserved alignment uses current XY without a 10-pulse position-change restriction");
         using (var cancellation = new CancellationTokenSource())
         {
             Set(page, "_clickMoveRunning", true);

@@ -3559,7 +3559,7 @@ public partial class VisualCalibrationPage : UserControl
     private void VisualCalibrationPage_Unloaded(object sender, RoutedEventArgs e)
     {
         // Preserve a completed alignment when navigating away. An interrupted move
-        // cannot be resumed; the next jog/save also validates actual XY feedback.
+        // cannot be resumed; jog/save still require stationary, ready axes.
         if (_clickMoveRunning) _nozzleAlignmentCorrection = null;
         _clickMoveCancellation?.Cancel();
         StopManualJog("离开视觉标定页");

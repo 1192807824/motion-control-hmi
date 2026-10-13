@@ -101,18 +101,17 @@ internal static class Program
             Require(!session.Matches(Calibration with { AxisSet = VisionCalibrationAxisSet.Second }, target.Tool), "Other XY set rejected");
             Require(!session.Matches(Calibration with { CalibrationFilePath = "other.xml" }, target.Tool), "Other calibration file rejected");
             Require(!session.Matches(Calibration with { Nozzle1OffsetX = 0, Nozzle2OffsetX = 0 }, target.Tool), "Recalibration invalidates correction");
-            session.EnsurePositionUnchanged(arrived, 10);
-            Reject<InvalidOperationException>(() => session.EnsurePositionUnchanged(arrived with { ActualX = arrived.ActualX + 11 }, 10));
-            Reject<InvalidOperationException>(() => session.RecordMove(arrived with { ActualY = double.NaN }));
-            Reject<InvalidOperationException>(() => session.RecordMove(arrived with { XHardwareAxisNo = 3 }));
-            session.RecordMove(arrived with { ActualX = arrived.ActualX + 100 });
+            Reject<InvalidOperationException>(() => session.CalculateOffset(arrived with { ActualY = double.NaN }));
+            Reject<InvalidOperationException>(() => session.CalculateOffset(arrived with { XHardwareAxisNo = 3 }));
             var aligned = arrived with { ActualX = arrived.ActualX + 75, ActualY = arrived.ActualY - 50 };
-            session.RecordMove(aligned);
-            var offset = session.CalculateOffset(aligned, 10);
+            var offset = session.CalculateOffset(aligned);
             var oldX = target.Tool == VisionTargetTool.Nozzle1 ? Calibration.Nozzle1OffsetX : Calibration.Nozzle2OffsetX;
             var oldY = target.Tool == VisionTargetTool.Nozzle1 ? Calibration.Nozzle1OffsetY : Calibration.Nozzle2OffsetY;
             Require(offset == (oldX + 77, oldY - 53), "Correction uses signed actual delta from the original target");
-            Require(session.CalculateOffset(aligned, 10) == offset, "Repeated calculation does not accumulate correction");
+            Require(session.CalculateOffset(aligned) == offset, "Repeated calculation does not accumulate correction");
+            foreach (var delta in new[] { -10000d, -11d, 0d, 11d, 10000d })
+                Require(session.CalculateOffset(new(1, 2, target.X + delta, target.Y - delta)) == (oldX + delta, oldY - delta),
+                    "Current XY can change beyond 10 pulses in either direction without blocking correction");
             var updated = target.Tool == VisionTargetTool.Nozzle1
                 ? Calibration with { Nozzle1OffsetX = offset.X, Nozzle1OffsetY = offset.Y }
                 : Calibration with { Nozzle2OffsetX = offset.X, Nozzle2OffsetY = offset.Y };

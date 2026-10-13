@@ -56,7 +56,6 @@ public partial class VisualCalibrationPage
             };
             var controller = _motionController!;
             var current = controller.CaptureCalibrationCenter(1, 2);
-            session.EnsurePositionUnchanged(current, DefaultPositionTolerancePulses);
             SetClickMoveStatus($"{GetToolDisplayName(session.Tool)}正在微调XY…", WorkflowStatus.Running);
             var actual = await controller.MoveCalibrationAxesToAsync(1, 2,
                 current.ActualX + dx, current.ActualY + dy, velocity,
@@ -64,7 +63,6 @@ public partial class VisualCalibrationPage
                 CalculateDirectMoveTimeout(dx, dy, velocity), token);
             token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(_nozzleAlignmentCorrection, session)) return;
-            session.RecordMove(actual);
             SetClickMoveStatus($"微调到位：X={actual.ActualX:0.###}，Y={actual.ActualY:0.###} pulse。对准后保存微调结果。", WorkflowStatus.Ready);
         }
         catch (Exception exception)
@@ -93,7 +91,7 @@ public partial class VisualCalibrationPage
         try
         {
             var actual = _motionController!.CaptureCalibrationCenter(1, 2);
-            var offset = session.CalculateOffset(actual, DefaultPositionTolerancePulses);
+            var offset = session.CalculateOffset(actual);
             SetActiveNozzleOffset(session.Tool, offset.X, offset.Y);
             SaveCurrentCalibrationProfile();
             RecordNozzleVerification(session.Tool);

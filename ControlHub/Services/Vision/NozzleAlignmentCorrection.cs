@@ -7,14 +7,12 @@ public sealed class NozzleAlignmentCorrection
 {
     private readonly VisionCalibrationSnapshot _calibration;
     private readonly VisionMotionTarget _target;
-    private CalibrationCenterPosition _lastPosition;
 
     public NozzleAlignmentCorrection(VisionCalibrationSnapshot calibration, VisionMotionTarget target,
         CalibrationCenterPosition actual)
     {
         _calibration = calibration;
         _target = target;
-        _lastPosition = actual;
         if (!Matches(calibration, target.Tool) || !double.IsFinite(target.X) || !double.IsFinite(target.Y))
             throw new InvalidOperationException("微调仅支持第一套XY已标定的吸嘴。");
         ValidatePosition(actual);
@@ -37,24 +35,9 @@ public sealed class NozzleAlignmentCorrection
             _ => false
         });
 
-    public void EnsurePositionUnchanged(CalibrationCenterPosition actual, double tolerance)
+    public (double X, double Y) CalculateOffset(CalibrationCenterPosition actual)
     {
         ValidatePosition(actual);
-        if (!double.IsFinite(tolerance) || tolerance < 0 ||
-            Math.Abs(actual.ActualX - _lastPosition.ActualX) > tolerance ||
-            Math.Abs(actual.ActualY - _lastPosition.ActualY) > tolerance)
-            throw new InvalidOperationException("XY位置已在本次微调之外发生变化，请重新识别中心点。");
-    }
-
-    public void RecordMove(CalibrationCenterPosition actual)
-    {
-        ValidatePosition(actual);
-        _lastPosition = actual;
-    }
-
-    public (double X, double Y) CalculateOffset(CalibrationCenterPosition actual, double tolerance)
-    {
-        EnsurePositionUnchanged(actual, tolerance);
         // Use the original commanded target, not the arrived position or accumulated button distances.
         // This includes the final feedback correction and never adds the same correction twice.
         var x = (Tool == VisionTargetTool.Nozzle1 ? _calibration.Nozzle1OffsetX : _calibration.Nozzle2OffsetX)
