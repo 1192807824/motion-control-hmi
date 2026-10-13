@@ -502,7 +502,10 @@ public sealed class VisionMasterProcessHost : HwndHost
                 Encode(state.LoadingXServoText),
                 Encode(state.LoadingZServoText),
                 state.RecognizedCenterMoveVisible ? "1" : "0",
-                state.RecognizedCenterMoveEnabled ? "1" : "0"),
+                state.RecognizedCenterMoveEnabled ? "1" : "0",
+                Encode(state.AlignmentDistance),
+                state.AlignmentEnabled ? "1" : "0",
+                Encode(state.AlignmentSaveText)),
             cancellationToken);
     }
 
@@ -1787,7 +1790,10 @@ public sealed record CalibrationSidebarState(
     string LoadingXServoText = "上料X轴使能开关",
     string LoadingZServoText = "上料双Z使能开关",
     bool RecognizedCenterMoveVisible = false,
-    bool RecognizedCenterMoveEnabled = false);
+    bool RecognizedCenterMoveEnabled = false,
+    string AlignmentDistance = "100",
+    bool AlignmentEnabled = false,
+    string AlignmentSaveText = "保存微调结果");
 
 public sealed record VisionRotationPoint(double X, double Y);
 

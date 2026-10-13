@@ -111,6 +111,7 @@ public partial class VisualCalibrationPage : UserControl
         get => ParseCalibrationMode(_uiSettings.ActiveCalibrationMode, ActiveAxisSet);
         set
         {
+            _nozzleAlignmentCorrection = null;
             _uiSettings.ActiveCalibrationMode = ToSettingsValue(value);
             _visionCalibration.ActiveAxisSet = value == VisualCalibrationMode.Second
                 ? VisionCalibrationAxisSet.Second
@@ -2076,6 +2077,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void CalibrationFilePath_Changed(object sender, TextChangedEventArgs e)
     {
+        _nozzleAlignmentCorrection = null;
         ScheduleCalibrationSettingsSave();
         if (_settingsLoaded && IsLowerCameraMode)
         {
@@ -2153,6 +2155,18 @@ public partial class VisualCalibrationPage : UserControl
             case "RecognizedCenterMove":
                 RecognizedCenterMove_Click(this, new RoutedEventArgs());
                 break;
+            case "AlignUp":
+            case "AlignDown":
+            case "AlignLeft":
+            case "AlignRight":
+                _ = JogNozzleAlignmentAsync(e.Action);
+                break;
+            case "SaveNozzleAlignment":
+                SaveNozzleAlignment_Click(this, new RoutedEventArgs());
+                break;
+            case "AlignmentDistance":
+                NozzleAlignmentDistanceTextBox.Text = e.Value;
+                break;
             case "CalculateRotationCenter":
                 CalculateRotationCenter_Click(this, new RoutedEventArgs());
                 break;
@@ -2211,6 +2225,7 @@ public partial class VisualCalibrationPage : UserControl
 
     private void ClickTargetTool_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        _nozzleAlignmentCorrection = null;
         if (!_settingsLoaded)
         {
             return;
@@ -3542,6 +3557,8 @@ public partial class VisualCalibrationPage : UserControl
 
     private void VisualCalibrationPage_Unloaded(object sender, RoutedEventArgs e)
     {
+        _nozzleAlignmentCorrection = null;
+        _clickMoveCancellation?.Cancel();
         StopManualJog("离开视觉标定页");
         _rotationCenterCancellation?.Cancel();
         _lowerCameraCorrectionTestCancellation?.Cancel();
@@ -3989,6 +4006,7 @@ public partial class VisualCalibrationPage : UserControl
         StopClickMoveButton.IsEnabled = _clickMoveRunning;
         RecognizedCenterMoveButton.Visibility = ActiveCalibrationMode == VisualCalibrationMode.First ? Visibility.Visible : Visibility.Collapsed;
         RecognizedCenterMoveButton.IsEnabled = CanMoveRecognizedCenter();
+        UpdateNozzleAlignmentState();
         UpdateNozzleTeachUi();
         ScheduleCalibrationToolbarSync();
         ScheduleCalibrationSidebarSync();
@@ -4126,7 +4144,10 @@ public partial class VisualCalibrationPage : UserControl
                     _motionController?.LoadingZ2Axis?.ServoOn == true
                         ? "解除上料双Z使能" : "上料双Z使能",
                     ActiveCalibrationMode == VisualCalibrationMode.First,
-                    RecognizedCenterMoveButton.IsEnabled);
+                    RecognizedCenterMoveButton.IsEnabled,
+                    NozzleAlignmentDistanceTextBox.Text,
+                    NozzleAlignmentPanel.IsEnabled,
+                    SaveNozzleAlignmentButton.Content?.ToString() ?? "保存微调结果");
                 try
                 {
                     await VisionHost.SetCalibrationSidebarStateAsync(state, CancellationToken.None);

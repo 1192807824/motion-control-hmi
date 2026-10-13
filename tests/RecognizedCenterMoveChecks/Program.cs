@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using ControlHub.Services.Motion;
+using ControlHub.Services.Persistence;
 using ControlHub.Services.Vision;
 using VisionMasterHost;
 
@@ -43,6 +44,7 @@ internal static class Program
         var second = RecognizedCenterMove.Plan(Result, Position, Calibration, VisionTargetTool.Nozzle2);
         Require(first == new VisionMotionTarget(98700, 201600, VisionTargetTool.Nozzle1), "Nozzle 1 applies signed center delta and its offset");
         Require(second == new VisionMotionTarget(91900, 212800, VisionTargetTool.Nozzle2), "Nozzle 2 uses its independent offset");
+        CheckAlignmentCorrection(first, second);
         Reject<InvalidOperationException>(() => RecognizedCenterMove.Plan(Result, Position, Calibration, VisionTargetTool.Camera));
         Reject<InvalidOperationException>(() => RecognizedCenterMove.Plan(Result, Position, Calibration with { Nozzle1Calibrated = false }, VisionTargetTool.Nozzle1));
         Reject<InvalidOperationException>(() => RecognizedCenterMove.Plan(Result, Position, Calibration with { Nozzle2Calibrated = false }, VisionTargetTool.Nozzle2));
@@ -83,7 +85,65 @@ internal static class Program
         await RejectAsync<InvalidDataException>(() => RecognizedCenterMove.ExecuteAsync(Calibration,
             VisionTargetTool.Nozzle1, Capture, _ => Task.FromResult(Result with { PixelX = -1 }), Move, CancellationToken.None));
         Require(moves == 0, "Invalid detection never moves");
-        Console.WriteLine("PASS: protocol parsing, independent nozzle targets, first XY restriction, invalid results, recognition failure, cancellation, position drift. No hardware accessed.");
+        Console.WriteLine("PASS: protocol parsing, independent nozzle targets, first XY restriction, invalid results, recognition failure, cancellation, position drift, signed XY fine correction, stale session rejection, corrected profile save/reload. No hardware accessed.");
+    }
+
+    private static void CheckAlignmentCorrection(VisionMotionTarget first, VisionMotionTarget second)
+    {
+        foreach (var target in new[] { first, second })
+        {
+            // Arrived feedback can differ from the commanded target. The saved offset must include it.
+            var arrived = new CalibrationCenterPosition(1, 2, target.X + 2, target.Y - 3);
+            var session = new NozzleAlignmentCorrection(Calibration, target, arrived);
+            Require(session.Matches(Calibration, target.Tool), "Original nozzle calibration remains valid");
+            Require(!session.Matches(Calibration, target.Tool == VisionTargetTool.Nozzle1 ? VisionTargetTool.Nozzle2 : VisionTargetTool.Nozzle1),
+                "Switching nozzles invalidates the correction");
+            Require(!session.Matches(Calibration with { AxisSet = VisionCalibrationAxisSet.Second }, target.Tool), "Other XY set rejected");
+            Require(!session.Matches(Calibration with { CalibrationFilePath = "other.xml" }, target.Tool), "Other calibration file rejected");
+            Require(!session.Matches(Calibration with { Nozzle1OffsetX = 0, Nozzle2OffsetX = 0 }, target.Tool), "Recalibration invalidates correction");
+            session.EnsurePositionUnchanged(arrived, 10);
+            Reject<InvalidOperationException>(() => session.EnsurePositionUnchanged(arrived with { ActualX = arrived.ActualX + 11 }, 10));
+            Reject<InvalidOperationException>(() => session.RecordMove(arrived with { ActualY = double.NaN }));
+            Reject<InvalidOperationException>(() => session.RecordMove(arrived with { XHardwareAxisNo = 3 }));
+            session.RecordMove(arrived with { ActualX = arrived.ActualX + 100 });
+            var aligned = arrived with { ActualX = arrived.ActualX + 75, ActualY = arrived.ActualY - 50 };
+            session.RecordMove(aligned);
+            var offset = session.CalculateOffset(aligned, 10);
+            var oldX = target.Tool == VisionTargetTool.Nozzle1 ? Calibration.Nozzle1OffsetX : Calibration.Nozzle2OffsetX;
+            var oldY = target.Tool == VisionTargetTool.Nozzle1 ? Calibration.Nozzle1OffsetY : Calibration.Nozzle2OffsetY;
+            Require(offset == (oldX + 77, oldY - 53), "Correction uses signed actual delta from the original target");
+            Require(session.CalculateOffset(aligned, 10) == offset, "Repeated calculation does not accumulate correction");
+            var updated = target.Tool == VisionTargetTool.Nozzle1
+                ? Calibration with { Nozzle1OffsetX = offset.X, Nozzle1OffsetY = offset.Y }
+                : Calibration with { Nozzle2OffsetX = offset.X, Nozzle2OffsetY = offset.Y };
+            Require(!session.Matches(updated, target.Tool), "A saved correction cannot be reused with the new calibration");
+            var next = RecognizedCenterMove.Plan(Result, Position, updated, target.Tool);
+            Require(next.X == aligned.ActualX && next.Y == aligned.ActualY, "Next recognition moves directly to the corrected target");
+            var otherTool = target.Tool == VisionTargetTool.Nozzle1 ? VisionTargetTool.Nozzle2 : VisionTargetTool.Nozzle1;
+            Require(RecognizedCenterMove.Plan(Result, Position, updated, otherTool) == (otherTool == VisionTargetTool.Nozzle1 ? first : second),
+                "Other nozzle target remains unchanged");
+
+            var directory = Path.Combine(Path.GetTempPath(), "nozzle-alignment-check-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var xml = Path.Combine(directory, "calibration.xml");
+            File.WriteAllText(xml, "test fixture; not used for transformation");
+            var profile = new VisionCalibrationProfile
+            {
+                CalibrationFilePath = xml,
+                Nozzle1Calibrated = true, Nozzle2Calibrated = true,
+                Nozzle1OffsetXPulses = updated.Nozzle1OffsetX, Nozzle1OffsetYPulses = updated.Nozzle1OffsetY,
+                Nozzle2OffsetXPulses = updated.Nozzle2OffsetX, Nozzle2OffsetYPulses = updated.Nozzle2OffsetY
+            };
+            var store = new VisionCalibrationProfileStore();
+            var path = Path.Combine(directory, "nozzles.json");
+            store.Save(path, profile);
+            var reloaded = store.Load(path);
+            Require(reloaded.Nozzle1OffsetXPulses == updated.Nozzle1OffsetX && reloaded.Nozzle1OffsetYPulses == updated.Nozzle1OffsetY &&
+                reloaded.Nozzle2OffsetXPulses == updated.Nozzle2OffsetX && reloaded.Nozzle2OffsetYPulses == updated.Nozzle2OffsetY,
+                "Saved profile reloads corrected and untouched nozzle offsets");
+        }
+        Reject<InvalidOperationException>(() => new NozzleAlignmentCorrection(Calibration, first with { Tool = VisionTargetTool.Camera }, Position));
+        Reject<InvalidOperationException>(() => new NozzleAlignmentCorrection(Calibration with { Nozzle1Calibrated = false }, first, Position));
     }
 
     private static void Require(bool condition, string message)

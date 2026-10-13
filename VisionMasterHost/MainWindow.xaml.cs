@@ -1286,7 +1286,7 @@ public partial class MainWindow : Window
     {
         // 旧版侧栏状态包含 40 个字段；加入上料 X/双 Z 使能按钮后为 43 个字段。
         // 同时兼容两种长度，避免整条状态被拒绝后中心位一直显示默认的“未配置”。
-        if (parts.Count is not (40 or 43 or 45))
+        if (parts.Count is not (40 or 43 or 45 or 48))
         {
             throw new InvalidDataException("标定侧栏状态参数不正确。");
         }
@@ -1384,6 +1384,14 @@ public partial class MainWindow : Window
             SidebarStopClickMoveButton.IsEnabled = parts[25] == "1";
             SidebarRecognizedCenterMoveButton.Visibility = parts.Count >= 45 && parts[43] == "1" ? Visibility.Visible : Visibility.Collapsed;
             SidebarRecognizedCenterMoveButton.IsEnabled = parts.Count >= 45 && parts[44] == "1";
+            SidebarNozzleAlignmentPanel.Visibility = parts.Count >= 48 && parts[43] == "1"
+                ? Visibility.Visible : Visibility.Collapsed;
+            SidebarNozzleAlignmentPanel.IsEnabled = parts.Count >= 48 && parts[46] == "1";
+            if (parts.Count >= 48)
+            {
+                SetText(SidebarAlignmentDistanceTextBox, Decode(parts[45]));
+                SidebarSaveNozzleAlignmentButton.Content = Decode(parts[47]);
+            }
             SidebarCenterVmText.Foreground = ParseBrush(Decode(parts[26]), Brushes.LimeGreen);
             SidebarNozzleStatusText.Foreground = ParseBrush(Decode(parts[27]), Brushes.LightSteelBlue);
             SidebarClickMoveStatusText.Foreground = ParseBrush(Decode(parts[28]), Brushes.LightSteelBlue);
