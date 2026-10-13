@@ -16,7 +16,9 @@ public partial class VisualCalibrationPage
 
     private void UpdateNozzleAlignmentState()
     {
-        if (!_nozzleAlignmentOperation && (!CanMoveRecognizedCenter() ||
+        // Menu re-entry synchronizes the current procedure. Disable controls while it runs,
+        // but retain the completed alignment; real mode changes explicitly clear it.
+        if (!_nozzleAlignmentOperation && (!CanMoveRecognizedCenter(ignoreProcedureSynchronization: true) ||
             _nozzleAlignmentCorrection?.Matches(_visionCalibration.GetSnapshot(), GetSelectedTargetTool()) != true))
             _nozzleAlignmentCorrection = null;
         NozzleAlignmentPanel.Visibility = ActiveCalibrationMode == VisualCalibrationMode.First
@@ -113,10 +115,11 @@ public partial class VisualCalibrationPage
 
     private void NozzleAlignmentDistance_Changed(object sender, TextChangedEventArgs e) => ScheduleCalibrationSidebarSync();
 
-    private bool CanMoveRecognizedCenter() =>
+    private bool CanMoveRecognizedCenter(bool ignoreProcedureSynchronization = false) =>
         ActiveCalibrationMode == VisualCalibrationMode.First && !_shutdown && _hostReady &&
         _motionController is not null && !_closingVisionProcesses && !_calibrationRunning && !_centerSyncRunning &&
-        !_clickMoveRunning && !_clickMoveConfigurationRunning && !_calibrationProcedureSwitchRunning &&
+        !_clickMoveRunning && !_clickMoveConfigurationRunning &&
+        (ignoreProcedureSynchronization || !_calibrationProcedureSwitchRunning) &&
         !_livePreviewStarting && !_calibrationFileImporting && !_nozzlePointFinding && !_nozzlePointSaving &&
         !_rotationCenterRunning && !_lowerCameraCorrectionTestRunning && _manualJogAxisNo is null &&
         EnableClickMoveCheckBox.IsChecked != true && GetSelectedTargetTool() != VisionTargetTool.Camera &&

@@ -315,6 +315,38 @@ internal static class Program
         Set(page, "_nozzleAlignmentOperation", false);
         Invoke(page, "UpdateCommandState");
         Require(((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Move completion re-enables adjustment controls");
+        // Returning through the menu temporarily resynchronizes the same vision procedure.
+        Set(page, "_calibrationProcedureSwitchRunning", true);
+        Invoke(page, "UpdateCommandState");
+        Require(!((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Procedure synchronization temporarily disables controls");
+        Require(ReferenceEquals(typeof(VisualCalibrationPage).GetField("_nozzleAlignmentCorrection", Private)!.GetValue(page), session),
+            "Returning to the same menu must retain successful recognition during procedure synchronization");
+        Set(page, "_calibrationProcedureSwitchRunning", false);
+        page.RefreshTeachingPositions();
+        Require(((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Returning to the calibration menu restores adjustment controls");
+        page.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+        page.RefreshTeachingPositions();
+        Require(((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Unloading an idle page preserves the correction session");
+        // The preserved session still rejects XY movement from another menu.
+        try
+        {
+            session.CalculateOffset(new(1, 2, 1100, 2000), 10);
+            throw new Exception("External movement should invalidate saving the old alignment");
+        }
+        catch (InvalidOperationException) { }
+        using (var cancellation = new CancellationTokenSource())
+        {
+            Set(page, "_clickMoveRunning", true);
+            Set(page, "_nozzleAlignmentOperation", true);
+            Set(page, "_clickMoveCancellation", cancellation);
+            page.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+            Require(cancellation.IsCancellationRequested, "Leaving during a move still requests cancellation");
+            Require(typeof(VisualCalibrationPage).GetField("_nozzleAlignmentCorrection", Private)!.GetValue(page) is null,
+                "An interrupted move must not preserve a correction session");
+        }
+        Set(page, "_clickMoveRunning", false);
+        Set(page, "_nozzleAlignmentOperation", false);
+        Set(page, "_nozzleAlignmentCorrection", session);
         Invoke(page, "SelectClickTargetTool", VisionTargetTool.Nozzle2);
         Invoke(page, "UpdateCommandState");
         Require(!((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Switching nozzle requires a fresh successful recognition");

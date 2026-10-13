@@ -607,6 +607,7 @@ public partial class VisualCalibrationPage : UserControl
         }
         catch (Exception exception)
         {
+            _nozzleAlignmentCorrection = null;
             SetWorkflowStatus($"切换视觉标定流程失败：{exception.Message}", WorkflowStatus.Error);
         }
         finally
@@ -3557,7 +3558,9 @@ public partial class VisualCalibrationPage : UserControl
 
     private void VisualCalibrationPage_Unloaded(object sender, RoutedEventArgs e)
     {
-        _nozzleAlignmentCorrection = null;
+        // Preserve a completed alignment when navigating away. An interrupted move
+        // cannot be resumed; the next jog/save also validates actual XY feedback.
+        if (_clickMoveRunning) _nozzleAlignmentCorrection = null;
         _clickMoveCancellation?.Cancel();
         StopManualJog("离开视觉标定页");
         _rotationCenterCancellation?.Cancel();
