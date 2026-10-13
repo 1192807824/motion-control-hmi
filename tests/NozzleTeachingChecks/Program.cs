@@ -32,7 +32,8 @@ internal static class Program
         var directory = Path.Combine(Path.GetTempPath(), "nozzle-teaching-checks-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         CheckIndependentResults(directory);
-        Console.WriteLine("PASS: live host capability handshake (current/legacy/mismatched), three-point circle, invalid points, algorithm NG/exception recovery, missing-current-image rejection, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results. No hardware or user settings accessed.");
+        CheckAlignmentControls(directory);
+        Console.WriteLine("PASS: live host capability handshake (current/legacy/mismatched), three-point circle, invalid points, algorithm NG/exception recovery, missing-current-image rejection, Z1/Z2 independent drafts and offsets, replacement verification, event validation, partial profile save/load, persisted results, alignment control enable/disable lifecycle. No hardware opened or user settings changed.");
         Console.WriteLine("Test artifacts: " + directory);
     }
 
@@ -275,6 +276,49 @@ internal static class Program
             throw new Exception("Empty profile should fail");
         }
         catch (TargetInvocationException e) when (e.InnerException is InvalidOperationException) { }
+    }
+
+    private static void CheckAlignmentControls(string directory)
+    {
+        var xml = Path.Combine(directory, "alignment.xml");
+        File.WriteAllText(xml, "<calibration />");
+        var settings = new VisualCalibrationSettings
+        {
+            ActiveAxisSet = "First", ActiveCalibrationMode = "First", CalibrationFilePath = xml,
+            NozzleOffsetCalibrated = true, Nozzle2OffsetCalibrated = true,
+            NozzleOffsetXPulses = 100, NozzleOffsetYPulses = 200
+        };
+        var service = (VisionCalibrationService)RuntimeHelpers.GetUninitializedObject(typeof(VisionCalibrationService));
+        Set(service, "<Settings>k__BackingField", settings);
+        Set(service, "_store", new VisualCalibrationSettingsStore(Path.Combine(directory, "alignment-settings.json")));
+        // Construct the real XAML tree without loading it into a window or starting hardware.
+        var page = new VisualCalibrationPage();
+        Set(page, "_settingsLoaded", false);
+        Set(page, "_visionCalibration", service);
+        Set(page, "_uiSettings", settings);
+        ((TextBox)page.FindName("CalibrationFilePathTextBox")).Text = xml;
+        Invoke(page, "SelectClickTargetTool", VisionTargetTool.Nozzle1);
+        Set(page, "_motionController", RuntimeHelpers.GetUninitializedObject(typeof(MotionControlPage)));
+        Set(page, "_hostReady", true);
+        Set(page, "_calibrationSidebarSyncRunning", true);
+        Set(page, "_calibrationToolbarSyncRunning", true);
+        var session = new NozzleAlignmentCorrection(service.GetSnapshot(), new(1000, 2000, VisionTargetTool.Nozzle1), new(1, 2, 1000, 2000));
+        Set(page, "_nozzleAlignmentCorrection", session);
+        Invoke(page, "UpdateCommandState");
+        Require(((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Recognized success enables actual XAML adjustment panel");
+        Require(ReferenceEquals(typeof(VisualCalibrationPage).GetField("_nozzleAlignmentCorrection", Private)!.GetValue(page), session), "UI refresh retains correction");
+        Set(page, "_nozzleAlignmentOperation", true);
+        Set(page, "_clickMoveRunning", true);
+        Invoke(page, "UpdateCommandState");
+        Require(!((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Moving disables adjustment controls");
+        Set(page, "_clickMoveRunning", false);
+        Set(page, "_nozzleAlignmentOperation", false);
+        Invoke(page, "UpdateCommandState");
+        Require(((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Move completion re-enables adjustment controls");
+        Invoke(page, "SelectClickTargetTool", VisionTargetTool.Nozzle2);
+        Invoke(page, "UpdateCommandState");
+        Require(!((Panel)page.FindName("NozzleAlignmentPanel")).IsEnabled, "Switching nozzle requires a fresh successful recognition");
+        ((ControlHub.Views.Controls.VisionMasterProcessHost)page.FindName("VisionHost")).Dispose();
     }
 
     private static void Set(object target, string name, object value) => target.GetType().GetField(name, Private)!.SetValue(target, value);
