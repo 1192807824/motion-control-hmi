@@ -2151,6 +2151,15 @@ public partial class HomePage : UserControl
 
             // 读取位置2的 Y 轴目标脉冲。
             var position2Y = ParseFiniteCoordinate(PresetPosition2YTextBox.Text, "位置 2 Y 轴绝对脉冲");
+            _applyResumedPlacementPositions = positions =>
+            {
+                position1X = positions.Position1X;
+                position1Y = positions.Position1Y;
+                position2X = positions.Position2X;
+                position2Y = positions.Position2Y;
+                velocity = GetProductionAxisMotionSettings(VisionCalibrationService.FirstSetXHardwareAxisNo).RunVelocity;
+                firstSetYVelocity = GetProductionAxisMotionSettings(VisionCalibrationService.FirstSetYHardwareAxisNo).RunVelocity;
+            };
 
             // DD 马达每次转动的脉冲固定写在代码中，不再从界面输入读取。
             var axis0PulseDistance = DdMotorPulsePerTurn;
@@ -2638,6 +2647,7 @@ public partial class HomePage : UserControl
 
                 var position1Target = new LowerCameraPlacementTarget(position1X, position1Y, 0d, 0d);
                 var position2Target = new LowerCameraPlacementTarget(position2X, position2Y, 0d, 0d);
+                var placementBase = new SecondSetXyPositions(position1X, position1Y, position2X, position2Y);
                 var position1TargetDescription = "原设定目标";
                 var position2TargetDescription = "原设定目标";
                 double? nozzle1OriginalR = null;
@@ -2711,6 +2721,11 @@ public partial class HomePage : UserControl
                 {
                 if (nozzle1HasPart)
                 {
+                    position1Target = position1Target with
+                    {
+                        X = position1Target.X + position1X - placementBase.Position1X,
+                        Y = position1Target.Y + position1Y - placementBase.Position1Y
+                    };
                     SetStartProductionStatus(
                         $"第{cycleNumber}轮：Z1/Z2均已回到配置安全位，" +
                         $"正在按{position1TargetDescription}前往1工位(X={position1Target.X:0.###}, Y={position1Target.Y:0.###}" +
@@ -2761,6 +2776,11 @@ public partial class HomePage : UserControl
 
                 if (nozzle2HasPart)
                 {
+                    position2Target = position2Target with
+                    {
+                        X = position2Target.X + position2X - placementBase.Position2X,
+                        Y = position2Target.Y + position2Y - placementBase.Position2Y
+                    };
                     SetStartProductionStatus(
                         (nozzle1HasPart
                             ? $"第{cycleNumber}轮：Z1已破真空并开始沿-Z回安全位，"
@@ -3000,6 +3020,7 @@ public partial class HomePage : UserControl
             _binDropPositions = null;
             _lowerCameraPhotoPositions = null;
             _productionAxisMotionSettings = null;
+            _applyResumedPlacementPositions = null;
             _testStationSettings = null;
             _sm7110AcceptanceRange = null;
             _productionXyLinearInterpolationEnabled = false;
@@ -3203,7 +3224,7 @@ public partial class HomePage : UserControl
         _productionResumeSignal = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         SetStartProductionStatus(
-            "暂停请求已接收：到安全节点后暂停，再次点击可继续。参数修改在下次重新开始时生效。",
+            "暂停请求已接收：到安全节点后暂停。修改运动/仪表参数后点击继续，校验通过后用于后续动作。",
             Color.FromRgb(242, 181, 68));
         UpdateHomeCommandState();
         return true;
@@ -3218,11 +3239,21 @@ public partial class HomePage : UserControl
             return false;
         }
 
+        try
+        {
+            ApplyPausedProductionParameters();
+        }
+        catch (Exception exception)
+        {
+            SetStartProductionStatus($"继续运行失败，保持暂停：{exception.Message}", Color.FromRgb(242, 122, 128));
+            return false;
+        }
+
         _productionPauseRequested = false;
         var resumeSignal = _productionResumeSignal;
         _productionResumeSignal = null;
         SetStartProductionStatus(
-            "正在从暂停位置继续运行…",
+            "新参数已生效，正在从暂停位置继续运行…",
             Color.FromRgb(73, 209, 125));
         UpdateHomeCommandState();
         resumeSignal?.TrySetResult(true);
@@ -3243,7 +3274,7 @@ public partial class HomePage : UserControl
         }
 
         SetStartProductionStatus(
-            "生产流程已在安全节点暂停；点击“继续运行”接着执行。参数修改在下次重新开始时生效。",
+            "生产流程已在安全节点暂停；修改运动/仪表参数后点击“继续运行”，后续动作使用新参数。",
             Color.FromRgb(242, 181, 68));
         StopUphTracking();
         await resumeSignal.Task.WaitAsync(cancellationToken);
@@ -3668,6 +3699,18 @@ public partial class HomePage : UserControl
                 ? binDropPositions.Resolve(nozzle1Bin, SecondSetNozzle1UnloadStation)
                 : default;
 
+            async Task WaitForUpdatedUnloadParametersAsync()
+            {
+                await WaitIfProductionPausedAsync(cancellationToken);
+                var currentZ = GetProductionZPositions();
+                nozzle1ZPositions = currentZ.SecondSetNozzle1;
+                nozzle2ZPositions = currentZ.SecondSetNozzle2;
+                xyPositions = GetSecondSetXyPositions();
+                var currentBins = GetBinDropPositions();
+                nozzle1BinCenter = pickWithNozzle1 ? currentBins.Resolve(nozzle1Bin, SecondSetNozzle1UnloadStation) : default;
+                nozzle2BinCenter = pickWithNozzle2 ? currentBins.Resolve(nozzle2Bin, SecondSetNozzle2UnloadStation) : default;
+            }
+
             if (pickWithNozzle2)
             {
                 await MoveSecondSetUnloadAxesToAsync(
@@ -3675,7 +3718,7 @@ public partial class HomePage : UserControl
                     xyPositions.Position1X,
                     xyPositions.Position1Y,
                     cancellationToken);
-                await WaitIfProductionPausedAsync(cancellationToken);
+                await WaitForUpdatedUnloadParametersAsync();
             }
 
             var nozzle2OverlapTasks = SecondSetNozzle2PickupOverlapTasks.Completed;
@@ -3699,7 +3742,7 @@ public partial class HomePage : UserControl
                             nozzle2ZPositions.Safe,
                             cancellationToken);
                     }
-                    await WaitIfProductionPausedAsync(cancellationToken);
+                    await WaitForUpdatedUnloadParametersAsync();
                 }
 
                 if (pickWithNozzle1)
@@ -3710,7 +3753,7 @@ public partial class HomePage : UserControl
                         xyPositions.Position2Y,
                         cancellationToken,
                         pickWithNozzle2 ? SecondSetPickupOverlapPeerAxisNos : null);
-                    await WaitIfProductionPausedAsync(cancellationToken);
+                    await WaitForUpdatedUnloadParametersAsync();
 
                     // XY到达14工位后，先确认Z1预下降已完成，再走完剩余行程取料。
                     await nozzle2OverlapTasks.Nozzle1PreDropTask;
@@ -3721,7 +3764,7 @@ public partial class HomePage : UserControl
                         nozzle1ZPositions.Safe,
                         cancellationToken,
                         pickWithNozzle2 ? SecondSetPickupOverlapPeerAxisNos : null);
-                    await WaitIfProductionPausedAsync(cancellationToken);
+                    await WaitForUpdatedUnloadParametersAsync();
                 }
 
                 // DD取料安全门：两根Z轴都完成回安全位后，才允许释放工位并进入BIN放料。
@@ -3759,7 +3802,7 @@ public partial class HomePage : UserControl
                     nozzle1BinCenter.X,
                     nozzle1BinCenter.Y + SecondSetNozzleBinYOffset,
                     cancellationToken);
-                await WaitIfProductionPausedAsync(cancellationToken);
+                await WaitForUpdatedUnloadParametersAsync();
                 await PlaceWithNozzleAsync(
                     VisionCalibrationAxisSet.Second,
                     1,
@@ -3767,7 +3810,7 @@ public partial class HomePage : UserControl
                     nozzle1ZPositions.Safe,
                     cancellationToken);
                 RecordCompletedUphUnit();
-                await WaitIfProductionPausedAsync(cancellationToken);
+                await WaitForUpdatedUnloadParametersAsync();
             }
 
             if (pickWithNozzle2)
@@ -3777,7 +3820,7 @@ public partial class HomePage : UserControl
                     nozzle2BinCenter.X,
                     nozzle2BinCenter.Y - SecondSetNozzleBinYOffset,
                     cancellationToken);
-                await WaitIfProductionPausedAsync(cancellationToken);
+                await WaitForUpdatedUnloadParametersAsync();
                 await PlaceWithNozzleAsync(
                     VisionCalibrationAxisSet.Second,
                     2,
@@ -3785,7 +3828,7 @@ public partial class HomePage : UserControl
                     nozzle2ZPositions.Safe,
                     cancellationToken);
                 RecordCompletedUphUnit();
-                await WaitIfProductionPausedAsync(cancellationToken);
+                await WaitForUpdatedUnloadParametersAsync();
             }
 
             CloseAllNozzleVacuumOutputs(VisionCalibrationAxisSet.Second);
@@ -3797,7 +3840,7 @@ public partial class HomePage : UserControl
                 xyPositions.Position1X,
                 xyPositions.Position1Y,
                 cancellationToken);
-            await WaitIfProductionPausedAsync(cancellationToken);
+            await WaitForUpdatedUnloadParametersAsync();
         }
         catch (OperationCanceledException)
         {
@@ -4167,9 +4210,9 @@ public partial class HomePage : UserControl
         }
 
         var returningAxes = axisTargets.Keys.ToArray();
-        var returnTargets = activeStationParameters.ToDictionary(
-            pair => pair.Key,
-            pair => pair.Value.WaitPosition);
+        var returnTargets = requiredTestStations.ToDictionary(
+            pair => pair.Value,
+            pair => GetTestStationSettings(pair.Key).WaitPosition);
         UpdateCarouselStationDisplay(
             carouselStations,
             returningAxes,
@@ -4183,7 +4226,7 @@ public partial class HomePage : UserControl
             TestStationMoveTimeoutMilliseconds,
             ProductionHandlingAxisNos,
             HomePageCompletionTolerance,
-            velocityOverrides: pressVelocities);
+            velocityOverrides: GetProductionAxisVelocities(returningAxes));
 
         if (measurementFailure is not null)
         {
@@ -4250,25 +4293,30 @@ public partial class HomePage : UserControl
                 _testRetryCount,
                 async (retryNumber, token) =>
                 {
+                    await WaitIfProductionPausedAsync(token);
                     var motionController = _motionController
                         ?? throw new InvalidOperationException("主页尚未连接运动控制组件，不能执行机械复测。");
                     var axisNo = TestStationAxisByStation[stationNumber];
-                    var velocities = GetProductionAxisVelocities([axisNo]);
                     // 复测动作只移动失败站；串行使用运动控制组件，其它站的仪表测量仍可继续。
                     await _testStationRetryMotionLock.WaitAsync(token);
                     try
                     {
+                        var returningToWait = true;
+                        settings = GetTestStationSettings(stationNumber);
                         await TestStationRetestSequence.RunAsync(axisNo, settings.WaitPosition, settings.PressPosition,
                             _testStationDwellMilliseconds,
                             async (axis, target, movementToken) =>
                             {
                                 await WaitIfProductionPausedAsync(movementToken);
+                                var current = GetTestStationSettings(stationNumber);
+                                var currentTarget = returningToWait ? current.WaitPosition : current.PressPosition;
+                                returningToWait = false;
                                 await motionController.MoveAxesAbsoluteAsync(
-                                    new Dictionary<int, double> { [axis] = target }, movementToken,
+                                    new Dictionary<int, double> { [axis] = currentTarget }, movementToken,
                                     TestStationMoveTimeoutMilliseconds, ProductionHandlingAxisNos,
-                                    HomePageCompletionTolerance, velocityOverrides: velocities);
+                                    HomePageCompletionTolerance, velocityOverrides: GetProductionAxisVelocities([axis]));
                             },
-                            (milliseconds, delayToken) => Task.Delay(milliseconds, delayToken),
+                            (milliseconds, delayToken) => Task.Delay(_testStationDwellMilliseconds, delayToken),
                             phase => SetTestStationRuntimeDisplay(stationNumber,
                                 $"重试 {retryNumber}/{_testRetryCount} · {phase}", "机械复测",
                                 $"{instrumentName} · 轴{axisNo} · {phase}", Color.FromRgb(242, 181, 68)), token);
@@ -4285,6 +4333,8 @@ public partial class HomePage : UserControl
 
             async Task<TestStationMeasurementResult> MeasureOnceAsync(CancellationToken token)
             {
+                await WaitIfProductionPausedAsync(token);
+                range = settings.Instrument == TestStationInstrument.E4981A ? _e4981ARetryRange : null;
                 attempts++;
                 switch (settings.Instrument)
                 {
@@ -4387,7 +4437,8 @@ public partial class HomePage : UserControl
             passed,
             passed,
             result.Value,
-            SM7110Reading: result);
+            SM7110Reading: result,
+            AppliedSM7110Range: range);
     }
 
     private void AdvanceCarouselOccupancy(CarouselStationState[] carouselStations)
@@ -6744,7 +6795,10 @@ public partial class HomePage : UserControl
                 ParseFiniteCoordinate(SecondSetNozzle2SafeZPositionTextBox.Text, "第二套吸嘴2安全Z高度")));
     }
 
-    private ProductionZDwellTimes ReadProductionZDwellTimes()
+    private ProductionZDwellTimes ReadProductionZDwellTimes() =>
+        ReadProductionZDwellTimesForPositions(GetProductionZPositions());
+
+    private ProductionZDwellTimes ReadProductionZDwellTimesForPositions(ProductionZPositions positions)
     {
         var releaseLiftPulses = ParseNonNegativeCoordinate(
             FirstSetNozzle1XyReleaseLiftTextBox.Text,
@@ -6758,7 +6812,6 @@ public partial class HomePage : UserControl
         var secondSetNozzle1PreDropPulses = ParseNonNegativeCoordinate(
             SecondSetNozzle1PreDropTextBox.Text,
             "下料吸嘴1预下降量");
-        var positions = GetProductionZPositions();
         ValidateFirstSetNozzle1XyReleaseLift(
             positions.FirstSetNozzle1,
             releaseLiftPulses);
@@ -7929,7 +7982,7 @@ public partial class HomePage : UserControl
             !_oneKeyResetRunning &&
             !_presetPositionMoveRunning &&
             !_startSequenceRunning;
-        // Edits are saved for the next start; the paused task retains its startup snapshot.
+        // Drafts remain separate until ResumeProduction validates and applies them together.
         var parametersEditable = commandsIdle ||
             (_startSequenceRunning && _productionPauseRequested &&
              !_productionStopRequested && !_oneKeyCollectRunning);
@@ -8053,10 +8106,10 @@ public partial class HomePage : UserControl
             _oneKeyCollectRunning
                 ? Color.FromRgb(255, 98, 110)
                 : Color.FromRgb(56, 163, 197));
-        FirstSetTeachingCenterXTextBox.IsEnabled = parametersEditable;
-        FirstSetTeachingCenterYTextBox.IsEnabled = parametersEditable;
-        FirstSetTeachingPressPositionXTextBox.IsEnabled = parametersEditable;
-        FirstSetTeachingPressPositionYTextBox.IsEnabled = parametersEditable;
+        FirstSetTeachingCenterXTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingCenterYTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingPressPositionXTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingPressPositionYTextBox.IsEnabled = commandsIdle;
         RecordFirstSetTeachingCenterButton.IsEnabled =
             _motionController is not null && commandsIdle;
         RecordFirstSetTeachingPressPositionButton.IsEnabled =
@@ -8075,19 +8128,19 @@ public partial class HomePage : UserControl
         PresetPosition1YTextBox.IsEnabled = parametersEditable;
         PresetPosition2XTextBox.IsEnabled = parametersEditable;
         PresetPosition2YTextBox.IsEnabled = parametersEditable;
-        UpperCameraCorrectionCheckBox.IsEnabled = parametersEditable;
-        LowerCameraCorrection1CheckBox.IsEnabled = parametersEditable;
-        LowerCameraRotationDelayCheckBox.IsEnabled = parametersEditable;
-        XyLinearInterpolationCheckBox.IsEnabled = parametersEditable;
-        VisionPickupCountTextBox.IsEnabled = parametersEditable;
-        LowerCameraPhotoPosition1XTextBox.IsEnabled = parametersEditable;
-        LowerCameraPhotoPosition1YTextBox.IsEnabled = parametersEditable;
-        LowerCameraPhotoPosition2XTextBox.IsEnabled = parametersEditable;
-        LowerCameraPhotoPosition2YTextBox.IsEnabled = parametersEditable;
-        LowerCameraNozzle1RotationCenterXTextBox.IsEnabled = parametersEditable;
-        LowerCameraNozzle1RotationCenterYTextBox.IsEnabled = parametersEditable;
-        LowerCameraNozzle2RotationCenterXTextBox.IsEnabled = parametersEditable;
-        LowerCameraNozzle2RotationCenterYTextBox.IsEnabled = parametersEditable;
+        UpperCameraCorrectionCheckBox.IsEnabled = commandsIdle;
+        LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
+        LowerCameraRotationDelayCheckBox.IsEnabled = commandsIdle;
+        XyLinearInterpolationCheckBox.IsEnabled = commandsIdle;
+        VisionPickupCountTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;
+        LowerCameraPhotoPosition2YTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle1RotationCenterXTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle1RotationCenterYTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle2RotationCenterXTextBox.IsEnabled = commandsIdle;
+        LowerCameraNozzle2RotationCenterYTextBox.IsEnabled = commandsIdle;
         foreach (var editors in _productionAxisMotionEditors.Values)
         {
             editors.SetEnabled(parametersEditable);
@@ -8105,8 +8158,8 @@ public partial class HomePage : UserControl
         foreach (var definition in TestStationDefinitions)
         {
             var editors = GetTestStationPositionEditors(definition.StationNumber);
-            editors.PressPosition.IsEnabled = commandsIdle;
-            editors.WaitPosition.IsEnabled = commandsIdle;
+            editors.PressPosition.IsEnabled = parametersEditable;
+            editors.WaitPosition.IsEnabled = parametersEditable;
             var controls = GetTestStationConfigurationControls(definition.StationNumber);
             controls.EnabledToggle.IsEnabled = commandsIdle;
             controls.InstrumentComboBox.IsEnabled = commandsIdle;
@@ -8898,7 +8951,8 @@ public partial class HomePage : UserControl
         bool E4981ALossRejected = false,
         string? E4981ALossFailureReason = null,
         E4981AMeasurementResult? E4981AReading = null,
-        SM7110MeasurementResult? SM7110Reading = null)
+        SM7110MeasurementResult? SM7110Reading = null,
+        SM7110AcceptanceRange? AppliedSM7110Range = null)
     {
         // 产品分料判定独立于当前仪表的重试判定；SM7110合格不能覆盖E4981A的NG。
         public bool IsUnmeasured => E4981AReading is { IsSuccessful: false };

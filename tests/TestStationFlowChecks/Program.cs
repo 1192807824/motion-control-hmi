@@ -21,6 +21,7 @@ internal static partial class Program
         {
             _ = new Application();
             CheckProductionNavigationAndPause();
+            CheckResumeParameterApplication();
             return;
         }
 

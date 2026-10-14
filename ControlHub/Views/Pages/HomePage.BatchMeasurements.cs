@@ -83,7 +83,7 @@ public partial class HomePage
         var sm = result.SM7110Reading;
         if (e is null && sm is null) throw new InvalidOperationException("测试结果缺少原始采集数据。");
         static double? Finite(double? value) => value.HasValue && double.IsFinite(value.Value) ? value : null;
-        var range = sm is null ? null : _sm7110AcceptanceRange;
+        var range = sm is null ? null : result.AppliedSM7110Range ?? _sm7110AcceptanceRange;
         var record = new BatchMeasurement
         {
             BatchNumber = _activeBatchNumber, ProductId = state.ProductId, StationNumber = station,

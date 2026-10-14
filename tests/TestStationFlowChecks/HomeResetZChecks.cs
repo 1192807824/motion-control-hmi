@@ -82,6 +82,7 @@ public class ResetRecordingCard : DispatchProxy
 {
     public readonly Dictionary<int, double> Positions = [];
     public readonly List<(int Axis, double Target)> Moves = [];
+    public readonly List<double> MoveVelocities = [];
     public readonly List<string> Trace = [];
     public readonly HashSet<int> Stops = [];
     private readonly HashSet<int> _homePending = [];
@@ -116,6 +117,7 @@ public class ResetRecordingCard : DispatchProxy
                 var moveAxis = (int)args![0]!;
                 var target = (double)args[1]!;
                 Moves.Add((moveAxis, target));
+                MoveVelocities.Add((double)args[2]!);
                 Trace.Add($"move:{moveAxis}");
                 Positions[moveAxis] = target;
                 _moving.Add(moveAxis);

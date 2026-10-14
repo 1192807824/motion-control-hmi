@@ -20,6 +20,7 @@ internal static partial class Program
         var root = Path.Combine(Path.GetTempPath(), "production-navigation-" + Guid.NewGuid().ToString("N"));
         Set(home, "_homeSettingsStore", new HomePageSettingsStore(Path.Combine(root, "settings.json")));
         Set(home, "_batchStore", new BatchMeasurementStore(root));
+        home.ApplyRecipeSettings(CreateResumeTestSettings());
         AlarmHistory.Initialize(new AlarmHistoryStore(Path.Combine(root, "alarms.db")));
         var cancellation = new CancellationTokenSource();
         var completion = new TaskCompletionSource<bool>();
@@ -52,12 +53,17 @@ internal static partial class Program
         var signal = (TaskCompletionSource<bool>)typeof(HomePage).GetField("_productionResumeSignal", Private)!.GetValue(home)!;
         retry.Text = "invalid";
         Require(button.IsEnabled, "Editing parameters disabled resume for the already-running task.");
+        Invoke(home, "StartProduction_Click", button, new RoutedEventArgs());
+        Require(!signal.Task.IsCompleted && (bool)typeof(HomePage).GetField("_productionPauseRequested", Private)!.GetValue(home)!,
+            "Invalid edited parameters must retain the pause and its resume signal.");
         retry.Text = "4";
         Require((int)typeof(HomePage).GetField("_testRetryCount", Private)!.GetValue(home)! == 3,
             "Paused edits mutated the current production snapshot.");
         Invoke(home, "StartProduction_Click", button, new RoutedEventArgs());
         Require(signal.Task.IsCompletedSuccessfully && !cancellation.IsCancellationRequested && home.IsProductionActive &&
             !retry.IsEnabled, "Resume did not release the existing flow and freeze editors again.");
+        Require((int)typeof(HomePage).GetField("_testRetryCount", Private)!.GetValue(home)! == 4,
+            "Resume did not publish the edited retry count.");
         Invoke(home, "StartProduction_Click", button, new RoutedEventArgs());
         Require((bool)typeof(HomePage).GetField("_productionPauseRequested", Private)!.GetValue(home)!, "Second pause failed.");
         Invoke(home, "MotionController_EmergencyStopIssued", window, EventArgs.Empty);
@@ -70,5 +76,20 @@ internal static partial class Program
         Require(!button.IsEnabled && vision.IsEnabled, "New starts must retain validation; calibration must unlock after production.");
         cancellation.Dispose();
         Console.WriteLine("PASS: running/paused menu navigation, camera procedure protection, edit/resume snapshot, repeated pause and emergency-stop rejection. Window never shown; no hardware opened.");
+    }
+
+    private static HomePageSettings CreateResumeTestSettings()
+    {
+        var settings = new HomePageSettings { LowerCameraCorrectionEnabled = false, UpperCameraCorrectionEnabled = false };
+        foreach (var property in typeof(HomePageSettings).GetProperties().Where(p => p.PropertyType == typeof(double?)))
+            property.SetValue(settings, 0d);
+        settings.NozzleZVelocity = 1000;
+        settings.SM7110LowerLimit = 1e9;
+        settings.SM7110MaximumTestSeconds = 1;
+        settings.ProductionAxisMotionSettings = Enumerable.Range(0, 16).ToDictionary(i => i,
+            _ => new ProductionAxisMotionSettings { RunVelocity = 1000 });
+        settings.TestStationSettings = new[] { 5, 6, 7 }.ToDictionary(i => i,
+            _ => new TestStationSettings { Enabled = false, Instrument = TestStationInstrument.None });
+        return settings;
     }
 }

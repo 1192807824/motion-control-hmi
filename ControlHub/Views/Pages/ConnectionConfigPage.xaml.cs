@@ -138,6 +138,20 @@ public partial class ConnectionConfigPage : UserControl
 
     public bool IsSM7110Connected => _serialClient.IsConnected;
 
+    public void ValidateProductionInstrumentParameters(IReadOnlyCollection<TestStationInstrument> instruments)
+    {
+        if (instruments.Contains(TestStationInstrument.E4981A))
+        {
+            if (!IsE4981AConnected) throw new InvalidOperationException("E4981A未连接。");
+            _ = E4981AProtocol.BuildSetupCommands(TcpSettings ?? throw new InvalidOperationException("E4981A参数未加载。"));
+        }
+        if (instruments.Contains(TestStationInstrument.SM7110))
+        {
+            if (!IsSM7110Connected) throw new InvalidOperationException("SM7110未连接。");
+            SM7110Protocol.ValidateSettings(SerialSettings ?? throw new InvalidOperationException("SM7110参数未加载。"));
+        }
+    }
+
     public bool IsVibrationFeederLightEnabled =>
         _tcpClient.IsConnected && _vibrationFeederLightEnabled;
 
