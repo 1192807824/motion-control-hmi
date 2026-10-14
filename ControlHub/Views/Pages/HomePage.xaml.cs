@@ -3082,20 +3082,25 @@ public partial class HomePage : UserControl
     {
         var connectionController = _connectionConfigController
             ?? throw new InvalidOperationException("振动盘控制组件未连接，无法执行自动震动。");
+        // 每次序列开始时读取，勾选变化只影响下一次震动，不改变已运行的序列。
+        var skipFinalScatter = FinishingPickupCheckBox.IsChecked == true;
+        var sequenceName = skipFinalScatter
+            ? "震散 → 向左 → 上下聚拢100 ms（收尾取料）"
+            : "震散 → 向左 → 上下聚拢100 ms → 再震散";
         SetStartProductionStatus(
-            $"第{cycleNumber}轮：{reason}，正在执行“震散 → 向左 → 上下聚拢100 ms → 再震散”…",
+            $"第{cycleNumber}轮：{reason}，正在执行“{sequenceName}”…",
             Color.FromRgb(242, 181, 68));
         var vibrationCompleted = await connectionController.RunProductionScatterThenLeftAsync(
-            cancellationToken);
+            cancellationToken, skipFinalScatter);
         if (!vibrationCompleted)
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException(
-                "“震散 → 向左 → 上下聚拢 → 再震散”未完成，请检查振动盘连接和方向震动参数。");
+                $"“{sequenceName}”未完成，请检查振动盘连接和方向震动参数。");
         }
 
         SetStartProductionStatus(
-            $"第{cycleNumber}轮：{reason}，“震散 → 向左 → 上下聚拢 → 再震散”完成，下一轮重新拍照。",
+            $"第{cycleNumber}轮：{reason}，“{sequenceName}”完成，下一轮重新拍照。",
             Color.FromRgb(73, 209, 125));
     }
 

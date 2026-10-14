@@ -1256,9 +1256,11 @@ public partial class ConnectionConfigPage : UserControl
     /// 自动生产专用补料序列：震散、向左移入拍照视野、上下聚拢，最后再震散。
     /// 四段均使用连接配置页当前的方向震动频率和振幅；两次震散及向左使用配置时长，
     /// 上下聚拢固定执行100 ms。
+    /// 收尾取料时省略最后一次震散，保留前三段及各段停止等待。
     /// </summary>
     public async Task<bool> RunProductionScatterThenLeftAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool skipFinalScatter = false)
     {
         if (!_tcpClient.IsConnected)
         {
@@ -1284,9 +1286,12 @@ public partial class ConnectionConfigPage : UserControl
         _vibrationSequenceRunning = true;
         try
         {
+            var sequenceName = skipFinalScatter
+                ? "震散 -> 向左 -> 上下聚拢（收尾取料）"
+                : "震散 -> 向左 -> 上下聚拢 -> 再震散";
             AddLog(
-                $"生产震动开始：震散 -> 向左 -> 上下聚拢 -> 再震散，频率 {settings.DirectionalVibrationFrequency}，" +
-                $"振幅 {settings.DirectionalVibrationAmplitude}%，两次震散及向左各 " +
+                $"生产震动开始：{sequenceName}，频率 {settings.DirectionalVibrationFrequency}，" +
+                $"振幅 {settings.DirectionalVibrationAmplitude}%，震散及向左各 " +
                 $"{settings.DirectionalVibrationDurationMilliseconds} ms，上下聚拢 " +
                 $"{ProductionUpDownGatherDurationMilliseconds} ms");
             if (!await EnsureProductionVibrationSettingsAppliedAsync(
@@ -1314,17 +1319,17 @@ public partial class ConnectionConfigPage : UserControl
                     ProductionUpDownGatherDurationMilliseconds,
                     "生产震动-上下聚拢",
                     operationCancellation.Token) ||
-                !await RunVibrationPulseAsync(
+                (!skipFinalScatter && !await RunVibrationPulseAsync(
                     parameterCommand: null,
                     "&03,04$",
                     settings.DirectionalVibrationDurationMilliseconds,
                     "生产震动-收尾震散",
-                    operationCancellation.Token))
+                    operationCancellation.Token)))
             {
                 return false;
             }
 
-            AddLog("生产震动完成：震散 -> 向左 -> 上下聚拢 -> 再震散");
+            AddLog($"生产震动完成：{sequenceName}");
             return true;
         }
         catch (OperationCanceledException) when (

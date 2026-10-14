@@ -1395,6 +1395,14 @@
                     </Button>
 
                     <DockPanel Grid.Row="6">
+                    <CheckBox x:Name="FinishingPickupCheckBox"
+                              DockPanel.Dock="Top"
+                              Content="收尾取料"
+                              Margin="0,12,0,0"
+                              Foreground="#62B5FF"
+                              FontSize="14"
+                              FontWeight="Bold"
+                              ToolTip="从下一次震动起执行：震散 → 向左 → 上下聚拢100毫秒；省略最后一次震散，直到手动取消勾选。" />
                     <Border Visibility="Collapsed" DockPanel.Dock="Top" Margin="0,10,0,0" Padding="8" Background="#10283A" BorderBrush="#345269" BorderThickness="1" CornerRadius="4">
                         <StackPanel>
                             <TextBlock Text="驱动器 0x5018:00 · UINT" Foreground="#EAF2F7" FontWeight="Bold" FontSize="12" Margin="0,0,0,5" />

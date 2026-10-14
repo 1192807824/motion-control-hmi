@@ -189,6 +189,37 @@ internal static class Program
         }
         Console.WriteLine("PASS: configured scatter/left/gather/scatter sequence, final stop and final-pulse cancellation.");
 
+        for (var finishingCycle = 0; finishingCycle < 2; finishingCycle++)
+        {
+            Clear();
+            sequenceClock.Restart();
+            Require(await page.RunProductionScatterThenLeftAsync(CancellationToken.None, skipFinalScatter: true),
+                "Finishing pickup completes on consecutive cycles.");
+            await WaitFor(() => Snapshot().LastOrDefault() == "&04$");
+            Require(Snapshot().Where(packet => packet.StartsWith("&03,") || packet == "&04$")
+                .SequenceEqual(new[] { "&03,04$", "&04$", "&03,03$", "&04$", "&03,06$", "&04$" }),
+                "Finishing pickup omits only the final scatter and stops after gather.");
+            Require(sequenceClock.ElapsedMilliseconds >= 2 * 130 + 100 + 3 * 50 - 20,
+                "Finishing pickup still waits for gather and stop-settle intervals.");
+        }
+        Clear();
+        Require(await page.RunProductionScatterThenLeftAsync(CancellationToken.None, skipFinalScatter: false),
+            "Disabling finishing pickup restores normal production.");
+        Require(Snapshot().Count(packet => packet == "&03,04$") == 2,
+            "Normal production restores the final scatter.");
+        Clear();
+        using (var gatherCancellation = new CancellationTokenSource())
+        {
+            var sequence = page.RunProductionScatterThenLeftAsync(gatherCancellation.Token, skipFinalScatter: true);
+            await WaitFor(() => Snapshot().Contains("&03,06$"));
+            gatherCancellation.Cancel();
+            Require(!await sequence, "Cancelling finishing gather must not report completion.");
+            await WaitFor(() => Snapshot().LastOrDefault() == "&04$");
+            Require(Snapshot().Count(packet => packet.StartsWith("&03,")) == 3,
+                "Cancelling finishing gather stops without a final scatter.");
+        }
+        Console.WriteLine("PASS: finishing pickup stays at three stages, restores four stages when disabled, and stops on cancellation.");
+
         // Production has a fixed recipe, independent of the manual controls and their production interlock.
         long productionStartAt = 0, productionZeroAt = 0, productionStopAt = 0;
         void TrackProductionTiming(object? sender, NotifyCollectionChangedEventArgs args)
