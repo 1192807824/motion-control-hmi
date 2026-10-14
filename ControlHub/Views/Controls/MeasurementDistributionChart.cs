@@ -12,7 +12,7 @@ public sealed class MeasurementDistributionChart : FrameworkElement
     public Color QueryAccent { get; set; } = Color.FromRgb(103, 185, 255);
     private string _title = "";
     private string _unit = "";
-    private int _total, _passed;
+    private int _total, _passed, _ng, _unmeasured;
     private MeasurementDistribution _distribution = MeasurementDistribution.Calculate([]);
     private static Brush Brush(string color) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
     private static readonly Brush TextBrush = Brush("#EAF2F8"), Muted = Brush("#9FB1BF"), Blue = Brush("#62B5FF"), Green = Brush("#36CFA0");
@@ -20,8 +20,10 @@ public sealed class MeasurementDistributionChart : FrameworkElement
     public void SetData(string title, string unit, IEnumerable<BatchMeasurement> source)
     {
         var rows = source.ToArray();
-        _title = title; _unit = unit; _total = rows.Length; _passed = rows.Count(row => row.StationPassed);
-        _distribution = MeasurementDistribution.Calculate(rows.Where(row => row.ValidReading && row.Value.HasValue).Select(row => row.Value!.Value));
+        _title = title; _unit = unit; _total = rows.Length; _passed = rows.Count(row => row.CountsAsOk);
+        _ng = rows.Count(row => row.CountsAsNg);
+        _unmeasured = rows.Count(row => row.IsUnmeasured);
+        _distribution = MeasurementDistribution.Calculate(rows.Where(row => row.HasDistributionSample).Select(row => row.Value!.Value));
         InvalidateVisual();
     }
 
@@ -40,7 +42,7 @@ public sealed class MeasurementDistributionChart : FrameworkElement
             dc.DrawText(text, new Point(x, y));
         }
         Label(_title, UseQueryStyle ? 18 : 14, 12, TextBrush, UseQueryStyle ? 15 : 13);
-        Label($"采集 {_total:N0}  ·  OK {_passed} / NG {_total - _passed}  ·  有效样本 {_distribution.Count}", UseQueryStyle ? 18 : 14, 36, Muted, UseQueryStyle ? 12 : 11);
+        Label($"采集 {_total:N0} · OK {_passed} / NG {_ng} · 未测到 {_unmeasured} · 样本 {_distribution.Count}", UseQueryStyle ? 18 : 14, 36, Muted, UseQueryStyle ? 12 : 11);
         var d = _distribution;
         if (d.Count == 0)
         {

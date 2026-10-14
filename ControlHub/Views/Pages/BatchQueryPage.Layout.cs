@@ -179,9 +179,10 @@ public sealed partial class BatchQueryPage
     {
         _metricRecords.Text = rows.Count.ToString("N0");
         _metricProducts.Text = rows.Select(row => row.ProductId).Distinct().Count().ToString("N0");
-        _metricYield.Text = rows.Count == 0 ? "—" : (100d * rows.Count(row => row.StationPassed) / rows.Count).ToString("0.0") + "%";
-        _metricNg.Text = rows.Count(row => !row.StationPassed).ToString("N0");
-        _resultCaption.Text = rows.Count == 0 ? "暂无数据" : $"{rows.Count:N0} 条记录  ·  双击查看完整信息";
+        var measuredCount = rows.Count(row => !row.IsUnmeasured);
+        _metricYield.Text = measuredCount == 0 ? "—" : (100d * rows.Count(row => row.CountsAsOk) / measuredCount).ToString("0.0") + "%";
+        _metricNg.Text = rows.Count(row => row.CountsAsNg).ToString("N0");
+        _resultCaption.Text = rows.Count == 0 ? "暂无数据" : $"{rows.Count:N0} 条记录 · 未测到 {rows.Count(row => row.IsUnmeasured)} 条 · 双击查看完整信息";
         _emptyMessage.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 

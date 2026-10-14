@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 
 namespace ControlHub.Services.Persistence;
 
-public sealed record BatchMeasurement
+public sealed partial record BatchMeasurement
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public string BatchNumber { get; init; } = "";
@@ -30,8 +30,8 @@ public sealed record BatchMeasurement
     public double? LowerLimit { get; init; }
     public double? UpperLimit { get; init; }
     public double? MaximumTestSeconds { get; init; }
-    public string StationResult => StationPassed ? "OK" : "NG";
-    public string ProductResult => ProductPassedSoFar ? "OK（截至本站）" : "NG";
+    public string StationResult => IsUnmeasured ? "未测到" : StationPassed ? "OK" : "NG";
+    public string ProductResult => IsUnmeasured ? "未测到" : ProductPassedSoFar ? "OK（截至本站）" : "NG";
     public string LocalTime => MeasuredAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff");
 }
 

@@ -17,6 +17,16 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--unmeasured-only"])
+        {
+            _ = new Application();
+            CheckUnmeasuredStatistics();
+            CheckE4981AFaultRetriesAsync().GetAwaiter().GetResult();
+            CheckE4981ALossRoutingAsync().GetAwaiter().GetResult();
+            CheckRejectedProductSkip();
+            return;
+        }
+
         if (args is ["--home-reset-z-only"])
         {
             _ = new Application();
@@ -181,8 +191,8 @@ internal static partial class Program
         var result = Invoke(null, "ClassifyE4981AMeasurement", input)!;
         Require((string?)result.GetType().GetProperty("Bin")!.GetValue(result) == bin, "Wrong destination BIN.");
         Require((bool)result.GetType().GetProperty("Passed")!.GetValue(result)! == passed, "Wrong pass/fail result.");
-        Require((bool)Property(result, "IsNg")! == (bin == "BIN0"), "BIN0 must be NG independently of measurement validity.");
-        Require((string)Property(result, "ResultLabel")! == (bin == "BIN0" ? "NG · BIN0" : bin), "E4981A badge must label BIN0 as NG.");
+        Require((bool)Property(result, "IsNg")! == (input.IsSuccessful && bin == "BIN0"), "Only measured BIN0 counts as NG.");
+        Require((string)Property(result, "ResultLabel")! == (!input.IsSuccessful ? "未测到 · 0号盒" : bin == "BIN0" ? "NG · BIN0" : bin), "E4981A badge must distinguish unmeasured from NG.");
     }
 
     private static async Task CheckRetriesAsync()
@@ -337,7 +347,9 @@ internal static partial class Program
         foreach (var d in new[] { 49.9, 50, 100, 750, 750.1, double.NaN, double.PositiveInfinity })
         {
             var result = E4981AProtocol.ApplyLossLimit(screenshot with { DissipationFactor = d, Bin = 2 }, settings);
-            Require(result.LossRejected == !(d >= 50 && d <= 750), "Loss range boundaries/invalid values handled incorrectly.");
+            Require(result.LossRejected == (double.IsFinite(d) && !(d >= 50 && d <= 750)),
+                "Only a valid loss reading outside the range is NG; missing readings are unmeasured.");
+            Require(result.IsSuccessful == double.IsFinite(d), "Non-finite loss must be unmeasured.");
         }
         var range = CreateNested("SM7110AcceptanceRange", 100d, 200d, "R");
         foreach (var instrumentBin in new[] { 0, 1, 2, 3, 10 })

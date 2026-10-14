@@ -117,7 +117,7 @@ public partial class HomePage
             $"测试完成 · {result.StatusDescription}",
             result.ResultLabel,
             result.DisplayText,
-            result.Passed && !result.IsNg
+            result.IsUnmeasured ? Color.FromRgb(242, 181, 68) : result.Passed && !result.IsNg
                 ? Color.FromRgb(73, 209, 125)
                 : Color.FromRgb(242, 122, 128));
     }

@@ -4036,8 +4036,10 @@ public partial class HomePage : UserControl
         foreach (var station in GetEnabledTestStationAxisByStation().Keys
                      .Where(station => carouselStations[station].Occupied && !requiredTestStations.ContainsKey(station)))
         {
-            SetTestStationRuntimeDisplay(station, "第一站最终NG，跳过测试", "已跳过",
-                "不下压、不测量 · NG→0号盒", Color.FromRgb(242, 122, 128));
+            var unmeasured = carouselStations[station].E4981AUnmeasured;
+            SetTestStationRuntimeDisplay(station, unmeasured ? "第一站未测到，跳过测试" : "第一站最终NG，跳过测试", "已跳过",
+                unmeasured ? "不下压、不测量 · 未测到→0号盒" : "不下压、不测量 · NG→0号盒",
+                unmeasured ? Color.FromRgb(242, 181, 68) : Color.FromRgb(242, 122, 128));
         }
         var activeStationParameters = requiredTestStations
             .ToDictionary(
@@ -4049,7 +4051,7 @@ public partial class HomePage : UserControl
         if (axisTargets.Count == 0)
         {
             SetStartProductionStatus(
-                "当前无待测料（空工位或第一站最终NG），跳过本次下压。",
+                "当前无待测料（空工位或第一站结果送0号盒），跳过本次下压。",
                 Color.FromRgb(159, 177, 191));
             return 0;
         }
@@ -4148,7 +4150,7 @@ public partial class HomePage : UserControl
                     "已收到结果，正在上抬",
                     "上抬",
                     measurement.DisplayText,
-                    measurement.Passed && !measurement.IsNg
+                    measurement.IsUnmeasured ? Color.FromRgb(242, 181, 68) : measurement.Passed && !measurement.IsNg
                         ? Color.FromRgb(73, 209, 125)
                         : Color.FromRgb(242, 122, 128));
             }
@@ -4198,7 +4200,7 @@ public partial class HomePage : UserControl
                 $"测试完成 · {measurementResult.Value.StatusDescription}",
                 measurementResult.Value.ResultLabel,
                 measurementResult.Value.DisplayText,
-                measurementResult.Value.Passed && !measurementResult.Value.IsNg
+                measurementResult.Value.IsUnmeasured ? Color.FromRgb(242, 181, 68) : measurementResult.Value.Passed && !measurementResult.Value.IsNg
                     ? Color.FromRgb(73, 209, 125)
                     : Color.FromRgb(242, 122, 128));
         }
@@ -4332,7 +4334,7 @@ public partial class HomePage : UserControl
     private static TestStationMeasurementResult ClassifyE4981AMeasurement(
         E4981AMeasurementResult result)
     {
-        // 仪表已明确返回测量失败时按不良品流转，即使该次结果不含比较器BIN。
+        // 未测到仍送0号盒，但单独记录，不计为NG。
         // 正常测量缺少BIN仍属于配置异常，不能把未分档的产品当作正常生产结果。
         if (result.IsSuccessful && result.Bin is null)
         {
@@ -4345,9 +4347,10 @@ public partial class HomePage : UserControl
             : "BIN0";
         return new TestStationMeasurementResult(
             bin,
+            !result.IsSuccessful ? $"未测到 · {result.StatusDescription} · 送0号盒" :
             $"C={result.CapacitanceNf:0.######}nF · D={result.DissipationFactor:G6} · " +
             (result.LossRejected ? $"{result.LossFailureReason} · NG→BIN0" : $"{bin}（仪表：{result.BinDescription}）"),
-            result.LossRejected ? "NG · 损耗超限"
+            !result.IsSuccessful ? $"未测到 · {result.StatusDescription}" : result.LossRejected ? "NG · 损耗超限"
                 : result.IsSuccessful && bin == "BIN0" ? "NG · 未落入BIN1～BIN3" : result.StatusDescription,
             result.IsSuccessful && !result.LossRejected,
             E4981ALossRejected: result.LossRejected,
@@ -4445,17 +4448,18 @@ public partial class HomePage : UserControl
             {
                 var waitingForSM7110 = state.Tested && !state.HasFinalE4981ARejection &&
                     IsSM7110TestEnabled() && state.SM7110Passed is null;
-                var rejected = state.Bin == "BIN0" || state.E4981ALossRejected || state.SM7110Passed == false;
+                var unmeasured = state.E4981AUnmeasured;
+                var rejected = !unmeasured && (state.Bin == "BIN0" || state.E4981ALossRejected || state.SM7110Passed == false);
                 var complete = state.Tested && !waitingForSM7110;
-                var stateColor = rejected ? Color.FromRgb(242, 122, 128)
+                var stateColor = unmeasured ? Color.FromRgb(242, 181, 68) : rejected ? Color.FromRgb(242, 122, 128)
                     : complete ? Color.FromRgb(73, 209, 125) : Color.FromRgb(242, 181, 68);
                 card.Background = new SolidColorBrush(
-                    rejected ? Color.FromRgb(61, 31, 35)
+                    unmeasured ? Color.FromRgb(53, 45, 24) : rejected ? Color.FromRgb(61, 31, 35)
                     : complete ? Color.FromRgb(21, 61, 47) : Color.FromRgb(53, 45, 24));
                 card.BorderBrush = new SolidColorBrush(stateColor);
                 if (resultText is not null)
                 {
-                    resultText.Text = rejected ? "NG → 0号盒"
+                    resultText.Text = unmeasured ? "未测到 → 0号盒" : rejected ? "NG → 0号盒"
                         : waitingForSM7110 ? "待SM判定" : complete ? "已测试" : CarouselStatusLoaded;
                     resultText.Foreground = new SolidColorBrush(stateColor);
                 }
@@ -4463,7 +4467,7 @@ public partial class HomePage : UserControl
                 if (objectText is not null)
                 {
                     objectText.Text = state.Tested
-                        ? state.E4981ALossRejected ? "损耗超限" : rejected ? "NG · BIN0"
+                        ? unmeasured ? "未测到" : state.E4981ALossRejected ? "损耗超限" : rejected ? "NG · BIN0"
                             : state.SM7110Passed == true ? $"OK · {state.Bin}" : state.Bin ?? "BIN?"
                         : TestStationAxisByStation.ContainsKey(station) ? "待测试" : "有物体";
                     objectText.Foreground = new SolidColorBrush(stateColor);
@@ -4532,6 +4536,8 @@ public partial class HomePage : UserControl
 
         public bool E4981ALossRejected { get; private set; }
 
+        public bool E4981AUnmeasured { get; private set; }
+
         public string? E4981ALossFailureReason { get; private set; }
 
         public bool HasFinalE4981ARejection => Tested && Bin is ("BIN0" or "BIN1" or "BIN2" or "BIN3") &&
@@ -4548,6 +4554,7 @@ public partial class HomePage : UserControl
             SM7110Passed = null;
             SM7110Value = null;
             E4981ALossRejected = false;
+            E4981AUnmeasured = false;
             E4981ALossFailureReason = null;
         }
 
@@ -4565,6 +4572,7 @@ public partial class HomePage : UserControl
             if (result.SM7110Passed is null)
             {
                 E4981ALossRejected = result.E4981ALossRejected;
+                E4981AUnmeasured = result.IsUnmeasured;
                 E4981ALossFailureReason = result.E4981ALossFailureReason;
             }
             if (result.SM7110Passed.HasValue)
@@ -8876,9 +8884,11 @@ public partial class HomePage : UserControl
         SM7110MeasurementResult? SM7110Reading = null)
     {
         // 产品分料判定独立于当前仪表的重试判定；SM7110合格不能覆盖E4981A的NG。
-        public bool IsNg => Bin == "BIN0" || E4981ALossRejected || SM7110Passed == false;
+        public bool IsUnmeasured => E4981AReading is { IsSuccessful: false };
 
-        public string ResultLabel => IsNg ? "NG · BIN0" : SM7110Passed switch
+        public bool IsNg => !IsUnmeasured && (Bin == "BIN0" || E4981ALossRejected || SM7110Passed == false);
+
+        public string ResultLabel => IsUnmeasured ? "未测到 · 0号盒" : IsNg ? "NG · BIN0" : SM7110Passed switch
         {
             true => $"OK · {Bin}",
             false => $"NG · {Bin}",
