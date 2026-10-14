@@ -50,15 +50,28 @@ public sealed class VisualCalibrationSettingsStore
             WriteIndented = true
         }));
     }
+
 }
 
 public sealed class VisualCalibrationSettings
 {
+    public string ActiveAxisSet { get; set; } = "First";
+
+    public string ActiveCalibrationMode { get; set; } = "";
+
+    public int ManualJogNozzle { get; set; } = 1;
+
+    public double ManualJogXyVelocityPulsesPerSecond { get; set; } = 100_000;
+
+    public double ManualJogZVelocityPulsesPerSecond { get; set; } = 50_000;
+
+    public double ManualJogRVelocityPulsesPerSecond { get; set; } = 50_000;
+
     public double StepXPulses { get; set; } = 100_000;
 
     public double StepYPulses { get; set; } = 100_000;
 
-    public double VelocityPulsesPerSecond { get; set; } = 100_000;
+    public double VelocityPulsesPerSecond { get; set; } = 200_000;
 
     public int SettleMilliseconds { get; set; } = 300;
 
@@ -81,4 +94,59 @@ public sealed class VisualCalibrationSettings
     public double Nozzle2OffsetYPulses { get; set; }
 
     public string ClickTargetTool { get; set; } = "Camera";
+
+    public double SecondStepXPulses { get; set; } = 100_000;
+
+    public double SecondStepYPulses { get; set; } = 100_000;
+
+    public double SecondVelocityPulsesPerSecond { get; set; } = 200_000;
+
+    public int SecondSettleMilliseconds { get; set; } = 300;
+
+    public string SecondMovePriority { get; set; } = "X";
+
+    public string SecondCalibrationFilePath { get; set; } = "";
+
+    public string SecondCalibrationProfilePath { get; set; } = "";
+
+    public bool SecondNozzleOffsetCalibrated { get; set; }
+
+    public double SecondNozzleOffsetXPulses { get; set; }
+
+    public double SecondNozzleOffsetYPulses { get; set; }
+
+    public bool SecondNozzle2OffsetCalibrated { get; set; }
+
+    public double SecondNozzle2OffsetXPulses { get; set; }
+
+    public double SecondNozzle2OffsetYPulses { get; set; }
+
+    public string SecondClickTargetTool { get; set; } = "Camera";
+
+    public double LowerCameraStepXPulses { get; set; } = 100_000;
+
+    public double LowerCameraStepYPulses { get; set; } = 100_000;
+
+    public double LowerCameraVelocityPulsesPerSecond { get; set; } = 200_000;
+
+    public int LowerCameraSettleMilliseconds { get; set; } = 300;
+
+    public string LowerCameraMovePriority { get; set; } = "X";
+
+    public int LowerCameraActiveNozzle { get; set; } = 1;
+
+    public double? LowerCameraArrivalPosition1X { get; set; }
+
+    public double? LowerCameraArrivalPosition1Y { get; set; }
+
+    public double? LowerCameraArrivalPosition2X { get; set; }
+
+    public double? LowerCameraArrivalPosition2Y { get; set; }
+
+    public string LowerCameraCalibrationFilePath { get; set; } = "";
+
+    public string LowerCameraNozzle1CalibrationFilePath { get; set; } = "";
+
+    public string LowerCameraNozzle2CalibrationFilePath { get; set; } = "";
+
 }

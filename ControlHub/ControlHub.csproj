@@ -1,3 +1,4 @@
+﻿
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -10,15 +11,21 @@
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <NoWarn>$(NoWarn);NU1702</NoWarn>
+    <!-- F5 must run the copy target even when only the external vision host changed. -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FlashCap" Version="1.11.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.20" />
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
     <PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\VisionMasterHost\VisionMasterHost.csproj"
-                      ReferenceOutputAssembly="false" />
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="VisionMasterHostTargetPath" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,21 +40,32 @@
           TargetPath="LTDMC.dll" />
   </ItemGroup>
 
-  <Target Name="CopyVisionMasterHost" AfterTargets="Build">
+  <Target Name="CollectVisionMasterHostFiles" DependsOnTargets="ResolveProjectReferences">
+    <!-- Use the referenced project's actual output, including its VS platform and OutputPath.
+         A hard-coded bin/$(Configuration)/net48 path can silently copy an older executable. -->
+    <Error Condition="'@(VisionMasterHostTargetPath)' == ''"
+           Text="未获得本次 VisionMasterHost 编译输出，请重新生成整个解决方案。" />
+    <PropertyGroup>
+      <_VisionMasterHostOutputDirectory>@(VisionMasterHostTargetPath->'%(RootDir)%(Directory)')</_VisionMasterHostOutputDirectory>
+    </PropertyGroup>
     <ItemGroup>
-      <VisionMasterHostFiles Include="$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48\**\*" />
+      <VisionMasterHostFiles Include="$(_VisionMasterHostOutputDirectory)**\*"
+                             Exclude="$(_VisionMasterHostOutputDirectory)VisionMasterHost\**\*" />
     </ItemGroup>
+    <Error Condition="!Exists('%(VisionMasterHostTargetPath.FullPath)')"
+           Text="VisionMasterHost 编译文件不存在：%(VisionMasterHostTargetPath.FullPath)。请启用视觉项目的生成并重新生成解决方案。" />
+    <Message Importance="High" Text="复制本次视觉程序：@(VisionMasterHostTargetPath) -> $(OutDir)VisionMasterHost\" />
+  </Target>
+
+  <Target Name="CopyVisionMasterHost" AfterTargets="Build" DependsOnTargets="CollectVisionMasterHostFiles">
     <Copy SourceFiles="@(VisionMasterHostFiles)"
           DestinationFiles="@(VisionMasterHostFiles->'$(OutDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyVisionMasterHostToPublish" AfterTargets="Publish">
-    <ItemGroup>
-      <VisionMasterHostPublishFiles Include="$(MSBuildProjectDirectory)\..\VisionMasterHost\bin\$(Configuration)\net48\**\*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(VisionMasterHostPublishFiles)"
-          DestinationFiles="@(VisionMasterHostPublishFiles->'$(PublishDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"
+  <Target Name="CopyVisionMasterHostToPublish" AfterTargets="Publish" DependsOnTargets="CollectVisionMasterHostFiles">
+    <Copy SourceFiles="@(VisionMasterHostFiles)"
+          DestinationFiles="@(VisionMasterHostFiles->'$(PublishDir)VisionMasterHost\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
 

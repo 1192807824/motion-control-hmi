@@ -590,7 +590,7 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <Button x:Name="HomeCurrentButton" Content="当前轴回原点" Style="{StaticResource FlatButton}" Height="62" Background="#E97906" ToolTip="{Binding SelectedAxis.HomeConfigurationSummary}" Click="Home_Click" />
                                 <Button x:Name="HomeAllButton" Content="按次序回原点" Style="{StaticResource FlatButton}" Height="52" Margin="0,12,0,0" Click="HomeAll_Click" />
-                                <Button x:Name="TestOneKeyResetButton" Content="一键复位测试" Style="{StaticResource FlatButton}" Height="52" Margin="0,12,0,0" Background="#B45309" IsEnabled="False" AutomationProperties.Name="按固定测试参数执行一键复位" ToolTip="R轴 6/8/10/12 → Z轴 5/7/9/11 → 上料Y 2 → 上料X 1 → 下料X 3 → 下料Y 4 → D马达 0（偏移600）" Click="TestOneKeyReset_Click" />
+                                <Button x:Name="TestOneKeyResetButton" Content="一键复位测试" Style="{StaticResource FlatButton}" Height="52" Margin="0,12,0,0" Background="#B45309" IsEnabled="False" AutomationProperties.Name="按固定测试参数执行一键复位" ToolTip="R速度50000、Z速度10000同时 → 上料X速度100000 → 上料Y、下料XY与测试站13/14/15速度100000同时 → DD马达速度50000" Click="TestOneKeyReset_Click" />
                                 <Grid Margin="0,12,0,0">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                     <Button Grid.Column="0" Content="单轴减速停" Style="{StaticResource FlatButton}" Height="52" Background="#52697B" AutomationProperties.Name="当前运动轴减速停止" Click="LocalStop_Click" />
@@ -789,10 +789,10 @@
             <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="10">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <DockPanel><TextBlock Text="报警记录（最近）" Style="{StaticResource SectionTitle}" /><Button Content="清除报警" Style="{StaticResource FlatButton}" Height="26" HorizontalAlignment="Right" Click="ClearAlarm_Click" /></DockPanel>
+                    <DockPanel><TextBlock Text="报警历史（最近200条）" Style="{StaticResource SectionTitle}" /><Button Content="复位设备报警" Style="{StaticResource FlatButton}" Height="26" HorizontalAlignment="Right" Click="ClearAlarm_Click" ToolTip="仅复位设备，不删除报警历史" /></DockPanel>
                     <DataGrid x:Name="AlarmDataGrid" Grid.Row="1" ItemsSource="{Binding AlarmRecords}" Margin="0,6,0,0" LostKeyboardFocus="AlarmDataGrid_LostKeyboardFocus">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="时间" Binding="{Binding Time}" Width="160" />
+                            <DataGridTextColumn Header="时间" Binding="{Binding LocalTime}" Width="190" />
                             <DataGridTextColumn Header="代码" Binding="{Binding Code}" Width="120" />
                             <DataGridTextColumn Header="报警信息" Binding="{Binding Message}" Width="*" />
                         </DataGrid.Columns>
