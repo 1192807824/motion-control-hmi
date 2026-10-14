@@ -17,6 +17,13 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--navigation-pause-only"])
+        {
+            _ = new Application();
+            CheckProductionNavigationAndPause();
+            return;
+        }
+
         if (args is ["--unmeasured-only"])
         {
             _ = new Application();

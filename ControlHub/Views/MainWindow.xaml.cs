@@ -35,6 +35,13 @@ public partial class MainWindow : Window
         HomeContent.AttachUsbMicroscopeController(UsbMicroscopeContent);
         HomeContent.AttachVisionCalibrationController(VisualCalibrationContent);
         HomeContent.AttachConnectionConfigController(ConnectionConfigContent);
+        HomeContent.ProductionStateChanged += (_, _) =>
+        {
+            // Browsing calibration must not switch the camera procedure used by production.
+            VisualCalibrationContent.IsEnabled = !HomeContent.IsProductionActive;
+            VisualCalibrationContent.ToolTip = HomeContent.IsProductionActive
+                ? "生产流程仍在运行或暂停中，可查看此页；标定操作需结束生产后执行。" : null;
+        };
         ParameterSettingsContent.AttachSettingsContent(HomeContent.DetachParameterSettingsPanel());
 
         _viewModel = new MainWindowViewModel();
@@ -92,17 +99,20 @@ public partial class MainWindow : Window
 
     private async void MotionMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        if (!await PreparePageNavigationAsync())
         {
             return;
         }
         ShowMotionPage();
     }
 
+    private Task<bool> PreparePageNavigationAsync() => HomeContent.IsProductionActive
+        ? Task.FromResult(true)
+        : VisualCalibrationContent.DeactivateCalibrationViewAsync();
+
     private async void HomeMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        if (!await PreparePageNavigationAsync())
         {
             return;
         }
@@ -112,9 +122,9 @@ public partial class MainWindow : Window
 
     private async void VisualCalibrationMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
         VisualCalibrationContent.RefreshTeachingPositions();
         ShowVisualCalibrationPage();
+        if (HomeContent.IsProductionActive) return;
         try
         {
             await VisualCalibrationContent.ActivateCalibrationViewAsync();
@@ -133,8 +143,7 @@ public partial class MainWindow : Window
 
     private async void UsbMicroscopeMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        if (!await PreparePageNavigationAsync())
         {
             return;
         }
@@ -145,8 +154,7 @@ public partial class MainWindow : Window
 
     private async void ConnectionMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        if (!await PreparePageNavigationAsync())
         {
             return;
         }
@@ -155,8 +163,7 @@ public partial class MainWindow : Window
 
     private async void ParameterSettingsMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync())
+        if (!await PreparePageNavigationAsync())
         {
             return;
         }
@@ -166,8 +173,7 @@ public partial class MainWindow : Window
 
     private async void BatchQueryMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync()) return;
+        if (!await PreparePageNavigationAsync()) return;
         ShowBatchQueryPage();
         await BatchQueryContent.ActivateAsync(HomeContent.CurrentBatchNumber);
     }
@@ -199,8 +205,7 @@ public partial class MainWindow : Window
 
     private async void AlarmHistoryMenu_Click(object sender, RoutedEventArgs e)
     {
-        await HomeContent.DeactivateProductionAsync();
-        if (!await VisualCalibrationContent.DeactivateCalibrationViewAsync()) return;
+        if (!await PreparePageNavigationAsync()) return;
         ShowBatchQueryPage();
         BatchQueryContent.Visibility = Visibility.Collapsed;
         BatchQueryMenuButton.Style = (Style)Resources["MenuButton"];
@@ -222,7 +227,7 @@ public partial class MainWindow : Window
             _viewModel.AlarmRecords.Clear();
             foreach (var alarm in result.Records) _viewModel.AlarmRecords.Add(alarm);
             _alarmRevision = revision;
-            AlarmHistoryMenuButton.ToolTip = AlarmHistory.LastError ?? "查询全部历史报警，可按日期筛选。切换前停止当前生产。";
+            AlarmHistoryMenuButton.ToolTip = AlarmHistory.LastError ?? "查询全部历史报警，可按日期筛选。切换菜单不影响当前生产。";
             AlarmHistoryMenuLabel.Text = AlarmHistory.LastError is null ? "报警记录" : "报警记录（保存异常）";
         }
         catch (Exception exception)

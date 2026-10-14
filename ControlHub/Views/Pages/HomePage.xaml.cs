@@ -654,6 +654,10 @@ public partial class HomePage : UserControl
                     : Color.FromRgb(111, 129, 144));
     }
 
+    public bool IsProductionActive => _startSequenceRunning;
+
+    public event EventHandler? ProductionStateChanged;
+
     public async Task DeactivateProductionAsync()
     {
         var completion = _productionCompletion;
@@ -681,6 +685,12 @@ public partial class HomePage : UserControl
 
         try
         {
+            if (_startSequenceRunning)
+            {
+                // Restore the display only; activating inspection would stop vision execution.
+                visualCalibrationController.AttachInspectionDisplayHost(BlobInspectionVisionDisplayHost.HostWindow);
+                return;
+            }
             await visualCalibrationController.ActivateInspectionViewAsync(
                 BlobInspectionVisionDisplayHost.HostWindow);
         }
@@ -3193,7 +3203,7 @@ public partial class HomePage : UserControl
         _productionResumeSignal = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         SetStartProductionStatus(
-            "暂停请求已接收：当前动作完成并到达安全节点后暂停；再次点击可继续。",
+            "暂停请求已接收：到安全节点后暂停，再次点击可继续。参数修改在下次重新开始时生效。",
             Color.FromRgb(242, 181, 68));
         UpdateHomeCommandState();
         return true;
@@ -3233,7 +3243,7 @@ public partial class HomePage : UserControl
         }
 
         SetStartProductionStatus(
-            "生产流程已在安全节点暂停；点击“继续运行”将从下一步接着执行。",
+            "生产流程已在安全节点暂停；点击“继续运行”接着执行。参数修改在下次重新开始时生效。",
             Color.FromRgb(242, 181, 68));
         StopUphTracking();
         await resumeSignal.Task.WaitAsync(cancellationToken);
@@ -7830,6 +7840,7 @@ public partial class HomePage : UserControl
 
     private void UpdateHomeCommandState()
     {
+        ProductionStateChanged?.Invoke(this, EventArgs.Empty);
         if (StartProductionButton is null ||
             StartProductionTitleText is null ||
             OneKeyResetButton is null ||
@@ -7918,6 +7929,10 @@ public partial class HomePage : UserControl
             !_oneKeyResetRunning &&
             !_presetPositionMoveRunning &&
             !_startSequenceRunning;
+        // Edits are saved for the next start; the paused task retains its startup snapshot.
+        var parametersEditable = commandsIdle ||
+            (_startSequenceRunning && _productionPauseRequested &&
+             !_productionStopRequested && !_oneKeyCollectRunning);
         UpdateObservationCompensationCommandState(commandsIdle && !_oneKeyCollectRunning);
         var allProductionAxisParametersValid = AllProductionAxisParametersValid();
         var ddAxisParametersValid = ProductionAxisParametersValid(0);
@@ -7992,7 +8007,9 @@ public partial class HomePage : UserControl
             TryParseCoordinate(Bin3PositionXTextBox.Text, out _) &&
             TryParseCoordinate(Bin3PositionYTextBox.Text, out _);
         StartProductionButton.IsEnabled =
-            !_oneKeyCollectRunning &&
+            _startSequenceRunning
+            ? !_oneKeyCollectRunning && !_productionStopRequested
+            : !_oneKeyCollectRunning &&
             visionControllersReady &&
             allProductionAxisParametersValid &&
             allTestStationParametersValid &&
@@ -8003,7 +8020,7 @@ public partial class HomePage : UserControl
             allLowerCameraRotationCentersValid &&
             ObservationCompensationInputsValid() &&
             allBinDropPositionsValid &&
-            (_startSequenceRunning ? !_productionStopRequested : commandsIdle);
+            commandsIdle;
         StartProductionTitleText.Text = _startSequenceRunning
             ? (_productionStopRequested
                 ? "正在停止"
@@ -8036,10 +8053,10 @@ public partial class HomePage : UserControl
             _oneKeyCollectRunning
                 ? Color.FromRgb(255, 98, 110)
                 : Color.FromRgb(56, 163, 197));
-        FirstSetTeachingCenterXTextBox.IsEnabled = commandsIdle;
-        FirstSetTeachingCenterYTextBox.IsEnabled = commandsIdle;
-        FirstSetTeachingPressPositionXTextBox.IsEnabled = commandsIdle;
-        FirstSetTeachingPressPositionYTextBox.IsEnabled = commandsIdle;
+        FirstSetTeachingCenterXTextBox.IsEnabled = parametersEditable;
+        FirstSetTeachingCenterYTextBox.IsEnabled = parametersEditable;
+        FirstSetTeachingPressPositionXTextBox.IsEnabled = parametersEditable;
+        FirstSetTeachingPressPositionYTextBox.IsEnabled = parametersEditable;
         RecordFirstSetTeachingCenterButton.IsEnabled =
             _motionController is not null && commandsIdle;
         RecordFirstSetTeachingPressPositionButton.IsEnabled =
@@ -8054,36 +8071,36 @@ public partial class HomePage : UserControl
             commandsIdle &&
             TryParseCoordinate(FirstSetTeachingPressPositionXTextBox.Text, out _) &&
             TryParseCoordinate(FirstSetTeachingPressPositionYTextBox.Text, out _);
-        PresetPosition1XTextBox.IsEnabled = commandsIdle;
-        PresetPosition1YTextBox.IsEnabled = commandsIdle;
-        PresetPosition2XTextBox.IsEnabled = commandsIdle;
-        PresetPosition2YTextBox.IsEnabled = commandsIdle;
-        UpperCameraCorrectionCheckBox.IsEnabled = commandsIdle;
-        LowerCameraCorrection1CheckBox.IsEnabled = commandsIdle;
-        LowerCameraRotationDelayCheckBox.IsEnabled = commandsIdle;
-        XyLinearInterpolationCheckBox.IsEnabled = commandsIdle;
-        VisionPickupCountTextBox.IsEnabled = commandsIdle;
-        LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
-        LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
-        LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;
-        LowerCameraPhotoPosition2YTextBox.IsEnabled = commandsIdle;
-        LowerCameraNozzle1RotationCenterXTextBox.IsEnabled = commandsIdle;
-        LowerCameraNozzle1RotationCenterYTextBox.IsEnabled = commandsIdle;
-        LowerCameraNozzle2RotationCenterXTextBox.IsEnabled = commandsIdle;
-        LowerCameraNozzle2RotationCenterYTextBox.IsEnabled = commandsIdle;
+        PresetPosition1XTextBox.IsEnabled = parametersEditable;
+        PresetPosition1YTextBox.IsEnabled = parametersEditable;
+        PresetPosition2XTextBox.IsEnabled = parametersEditable;
+        PresetPosition2YTextBox.IsEnabled = parametersEditable;
+        UpperCameraCorrectionCheckBox.IsEnabled = parametersEditable;
+        LowerCameraCorrection1CheckBox.IsEnabled = parametersEditable;
+        LowerCameraRotationDelayCheckBox.IsEnabled = parametersEditable;
+        XyLinearInterpolationCheckBox.IsEnabled = parametersEditable;
+        VisionPickupCountTextBox.IsEnabled = parametersEditable;
+        LowerCameraPhotoPosition1XTextBox.IsEnabled = parametersEditable;
+        LowerCameraPhotoPosition1YTextBox.IsEnabled = parametersEditable;
+        LowerCameraPhotoPosition2XTextBox.IsEnabled = parametersEditable;
+        LowerCameraPhotoPosition2YTextBox.IsEnabled = parametersEditable;
+        LowerCameraNozzle1RotationCenterXTextBox.IsEnabled = parametersEditable;
+        LowerCameraNozzle1RotationCenterYTextBox.IsEnabled = parametersEditable;
+        LowerCameraNozzle2RotationCenterXTextBox.IsEnabled = parametersEditable;
+        LowerCameraNozzle2RotationCenterYTextBox.IsEnabled = parametersEditable;
         foreach (var editors in _productionAxisMotionEditors.Values)
         {
-            editors.SetEnabled(commandsIdle);
+            editors.SetEnabled(parametersEditable);
         }
 
-        TestStationDwellTextBox.IsEnabled = commandsIdle;
+        TestStationDwellTextBox.IsEnabled = parametersEditable;
         BatchNumberTextBox.IsEnabled = commandsIdle;
-        TestRetryCountTextBox.IsEnabled = commandsIdle;
-        E4981ARetryLowerTextBox.IsEnabled = commandsIdle;
-        E4981ARetryUpperTextBox.IsEnabled = commandsIdle;
-        SM7110LowerLimitTextBox.IsEnabled = commandsIdle;
-        SM7110UpperLimitTextBox.IsEnabled = commandsIdle;
-        SM7110MaximumTimeTextBox.IsEnabled = commandsIdle;
+        TestRetryCountTextBox.IsEnabled = parametersEditable;
+        E4981ARetryLowerTextBox.IsEnabled = parametersEditable;
+        E4981ARetryUpperTextBox.IsEnabled = parametersEditable;
+        SM7110LowerLimitTextBox.IsEnabled = parametersEditable;
+        SM7110UpperLimitTextBox.IsEnabled = parametersEditable;
+        SM7110MaximumTimeTextBox.IsEnabled = parametersEditable;
         SM7110LimitModeComboBox.IsEnabled = commandsIdle;
         foreach (var definition in TestStationDefinitions)
         {
@@ -8095,37 +8112,37 @@ public partial class HomePage : UserControl
             controls.InstrumentComboBox.IsEnabled = commandsIdle;
         }
 
-        FirstSetNozzle1PickupZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle1DropZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle1SafeZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle2PickupZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle2DropZPositionTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle2SafeZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1PickupZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1DropZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1SafeZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2PickupZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2DropZPositionTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle2SafeZPositionTextBox.IsEnabled = commandsIdle;
-        VacuumPickupDwellTextBox.IsEnabled = commandsIdle;
-        VacuumBreakPulseTextBox.IsEnabled = commandsIdle;
-        VacuumValveSwitchDelayTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle1XyReleaseLiftTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle2PreDropTextBox.IsEnabled = commandsIdle;
-        FirstSetNozzle2PlacePreDropTextBox.IsEnabled = commandsIdle;
-        SecondSetNozzle1PreDropTextBox.IsEnabled = commandsIdle;
-        SecondSetPosition1XTextBox.IsEnabled = commandsIdle;
-        SecondSetPosition1YTextBox.IsEnabled = commandsIdle;
-        SecondSetPosition2XTextBox.IsEnabled = commandsIdle;
-        SecondSetPosition2YTextBox.IsEnabled = commandsIdle;
-        Bin0PositionXTextBox.IsEnabled = commandsIdle;
-        Bin0PositionYTextBox.IsEnabled = commandsIdle;
-        Bin1PositionXTextBox.IsEnabled = commandsIdle;
-        Bin1PositionYTextBox.IsEnabled = commandsIdle;
-        Bin2PositionXTextBox.IsEnabled = commandsIdle;
-        Bin2PositionYTextBox.IsEnabled = commandsIdle;
-        Bin3PositionXTextBox.IsEnabled = commandsIdle;
-        Bin3PositionYTextBox.IsEnabled = commandsIdle;
+        FirstSetNozzle1PickupZPositionTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle1DropZPositionTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle1SafeZPositionTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle2PickupZPositionTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle2DropZPositionTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle2SafeZPositionTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle1PickupZPositionTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle1DropZPositionTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle1SafeZPositionTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle2PickupZPositionTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle2DropZPositionTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle2SafeZPositionTextBox.IsEnabled = parametersEditable;
+        VacuumPickupDwellTextBox.IsEnabled = parametersEditable;
+        VacuumBreakPulseTextBox.IsEnabled = parametersEditable;
+        VacuumValveSwitchDelayTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle1XyReleaseLiftTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle2PreDropTextBox.IsEnabled = parametersEditable;
+        FirstSetNozzle2PlacePreDropTextBox.IsEnabled = parametersEditable;
+        SecondSetNozzle1PreDropTextBox.IsEnabled = parametersEditable;
+        SecondSetPosition1XTextBox.IsEnabled = parametersEditable;
+        SecondSetPosition1YTextBox.IsEnabled = parametersEditable;
+        SecondSetPosition2XTextBox.IsEnabled = parametersEditable;
+        SecondSetPosition2YTextBox.IsEnabled = parametersEditable;
+        Bin0PositionXTextBox.IsEnabled = parametersEditable;
+        Bin0PositionYTextBox.IsEnabled = parametersEditable;
+        Bin1PositionXTextBox.IsEnabled = parametersEditable;
+        Bin1PositionYTextBox.IsEnabled = parametersEditable;
+        Bin2PositionXTextBox.IsEnabled = parametersEditable;
+        Bin2PositionYTextBox.IsEnabled = parametersEditable;
+        Bin3PositionXTextBox.IsEnabled = parametersEditable;
+        Bin3PositionYTextBox.IsEnabled = parametersEditable;
         RecordPresetPosition1Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordPresetPosition2Button.IsEnabled = _motionController is not null && commandsIdle;
         RecordLowerCameraPhotoPosition1Button.IsEnabled = _motionController is not null && commandsIdle;

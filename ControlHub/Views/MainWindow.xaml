@@ -210,7 +210,7 @@
                         </StackPanel>
                     </Button>
                     <Button x:Name="BatchQueryMenuButton" Style="{StaticResource MenuButton}" Content="数据查询" Click="BatchQueryMenu_Click"
-                            ToolTip="进入专用查询和导出页面；切换前停止当前生产。生产中查询可使用主页的批次查询按钮。" />
+                            ToolTip="进入专用查询和导出页面；切换菜单不影响当前生产。" />
                     <Button x:Name="AlarmHistoryMenuButton" Style="{StaticResource MenuButton}" Click="AlarmHistoryMenu_Click">
                         <StackPanel Orientation="Horizontal">
                             <Image Width="20"
