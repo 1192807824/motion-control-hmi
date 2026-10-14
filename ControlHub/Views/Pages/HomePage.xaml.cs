@@ -7877,7 +7877,8 @@ public partial class HomePage : UserControl
                 [SecondSetNozzle1ZHardwareAxisNo] = -4_000d,
                 [SecondSetNozzle2ZHardwareAxisNo] = -4_000d
             },
-            cancellationToken);
+            cancellationToken,
+            minimumCompletionTolerance: HomePageCompletionTolerance);
     }
 
     private VisionCalibrationSnapshot EnsureFirstSetToolsReady()

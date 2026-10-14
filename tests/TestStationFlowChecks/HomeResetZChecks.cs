@@ -75,6 +75,24 @@ internal static partial class Program
         catch (MotionCardException) { }
         Require(recorder.Stops.Contains(5) && recorder.Stops.Contains(11), "Failed positioning did not stop commanded axes.");
         Console.WriteLine("PASS: homing rejection prevents parking; Z positioning failure propagates and stops axes. No hardware opened.");
+
+        recorder.FailMove = false;
+        foreach (var offset in new[] { -100d, -50d, 50d, 100d })
+        {
+            recorder.MoveFeedbackOffset = offset;
+            Wait(Run());
+            Require(new[] { 5, 7, 9, 11 }.All(axis => recorder.Positions[axis] == -4000 + offset),
+                "Reset rejected stopped feedback within the established 100-pulse tolerance.");
+        }
+        recorder.MoveFeedbackOffset = 101;
+        try { Wait(Run()); throw new Exception("Outside-tolerance feedback was accepted."); }
+        catch (TimeoutException exception)
+        {
+            Require(exception.Message.Contains("轴5") && exception.Message.Contains("轴11") &&
+                exception.Message.Contains("-3899") && exception.Message.Contains("101") && exception.Message.Contains("已停止"),
+                "Timeout must identify the axes and their actual feedback/error.");
+        }
+        Console.WriteLine("PASS: stopped feedback within ±100 completes; 101-pulse error still times out with per-axis diagnostics.");
     }
 }
 
@@ -90,6 +108,7 @@ public class ResetRecordingCard : DispatchProxy
     public bool HoldMoves;
     public bool BlockReset;
     public bool FailMove;
+    public double MoveFeedbackOffset;
 
     protected override object? Invoke(MethodInfo? method, object?[]? args)
     {
@@ -119,7 +138,7 @@ public class ResetRecordingCard : DispatchProxy
                 Moves.Add((moveAxis, target));
                 MoveVelocities.Add((double)args[2]!);
                 Trace.Add($"move:{moveAxis}");
-                Positions[moveAxis] = target;
+                Positions[moveAxis] = target + MoveFeedbackOffset;
                 _moving.Add(moveAxis);
                 return null;
             case nameof(IMotionCard.Stop):

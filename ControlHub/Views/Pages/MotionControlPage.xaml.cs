@@ -1816,7 +1816,13 @@ public partial class MotionControlPage : UserControl
                 if (DateTime.UtcNow >= deadline)
                 {
                     throw new TimeoutException(
-                        $"同步绝对位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。");
+                        $"同步绝对位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。" +
+                        string.Join("；", moves.Zip(snapshots).Where(pair => pair.Second.IsMoving ||
+                                Math.Abs(pair.Second.FeedbackPosition - pair.First.Target) > pair.First.Tolerance)
+                            .Select(pair => $"轴{pair.First.Axis.HardwareAxisNo}：目标{pair.First.Target:0.###}，" +
+                                $"反馈{pair.Second.FeedbackPosition:0.###}，" +
+                                $"偏差{pair.Second.FeedbackPosition - pair.First.Target:0.###} pulse，" +
+                                $"容差±{pair.First.Tolerance:0.###}，{(pair.Second.IsMoving ? "仍在运动" : "已停止")}")));
                 }
 
                 SetCommandStage(CommandStage.Running, "轴组同步运动中");
