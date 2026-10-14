@@ -99,7 +99,9 @@ public sealed class BatchMeasurementStore
         {
             DataSource = DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
+            // A pooled read-only preview must not supply a read-only shared cache to writers.
+            // WAL provides concurrency between connections with private caches.
+            Cache = SqliteCacheMode.Private,
             Pooling = true,
             DefaultTimeout = 10
         }.ToString();
