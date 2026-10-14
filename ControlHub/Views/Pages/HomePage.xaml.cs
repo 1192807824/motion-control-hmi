@@ -7744,7 +7744,7 @@ public partial class HomePage : UserControl
         var confirmation = MessageBox.Show(
             Window.GetWindow(this),
             "请确认所有机构都在安全区域，并且本次复位涉及的硬件轴已使能。\n\n" +
-            "复位顺序：R/Z同时 → 上料X → 上料Y、下料XY、三个测试站同时 → DD马达。",
+            "复位顺序：R/Z同时 → 上料X → 上料Y、下料XY、三个测试站同时 → DD马达 → 四个Z轴到绝对位置-4000。",
             "一键复位安全确认",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -7772,10 +7772,10 @@ public partial class HomePage : UserControl
                 ?? throw new InvalidOperationException("主页尚未连接运动控制组件。");
 
             _oneKeyResetRunning = true;
-            SetOneKeyResetStatus("正在执行：R/Z → 上料X → Y/下料XY/测试站同时 → DD…", Color.FromRgb(242, 181, 68));
+            SetOneKeyResetStatus("正在执行：R/Z → 上料X → Y/下料XY/测试站同时 → DD → 四Z到-4000…", Color.FromRgb(242, 181, 68));
             UpdateHomeCommandState();
-            await motionController.RunOneKeyResetAsync(CancellationToken.None);
-            SetOneKeyResetStatus("一键复位完成", Color.FromRgb(73, 209, 125));
+            await RunHomeOneKeyResetAsync(motionController, CancellationToken.None);
+            SetOneKeyResetStatus("一键复位完成，四个Z轴已到-4000", Color.FromRgb(73, 209, 125));
         }
         catch (OperationCanceledException)
         {
@@ -7790,6 +7790,23 @@ public partial class HomePage : UserControl
             _oneKeyResetRunning = false;
             UpdateHomeCommandState();
         }
+    }
+
+    private async Task RunHomeOneKeyResetAsync(
+        MotionControlPage motionController, CancellationToken cancellationToken)
+    {
+        await motionController.RunOneKeyResetAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        SetOneKeyResetStatus("回原完成，四个Z轴正在移动到-4000…", Color.FromRgb(242, 181, 68));
+        await motionController.MoveAxesAbsoluteAsync(
+            new Dictionary<int, double>
+            {
+                [FirstSetNozzle1ZHardwareAxisNo] = -4_000d,
+                [FirstSetNozzle2ZHardwareAxisNo] = -4_000d,
+                [SecondSetNozzle1ZHardwareAxisNo] = -4_000d,
+                [SecondSetNozzle2ZHardwareAxisNo] = -4_000d
+            },
+            cancellationToken);
     }
 
     private VisionCalibrationSnapshot EnsureFirstSetToolsReady()

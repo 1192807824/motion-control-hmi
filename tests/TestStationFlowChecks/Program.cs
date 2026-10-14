@@ -17,6 +17,13 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--home-reset-z-only"])
+        {
+            _ = new Application();
+            CheckHomeResetZParking();
+            return;
+        }
+
         if (args is ["--production-z-start-only"])
         {
             CheckProductionZStartInterlock();
