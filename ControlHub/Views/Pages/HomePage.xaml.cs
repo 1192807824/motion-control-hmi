@@ -78,7 +78,7 @@ public partial class HomePage : UserControl
     private const double DefaultLowerCameraNozzleRotationSign = -1d;
     private const double DdMotorPulsePerTurn = 22_500d;
     private const double Axis0Velocity = 10_000d;
-    private const double HomePageCompletionTolerance = 100d;
+    private const double HomePageCompletionTolerance = 150d;
     private const double DefaultTestStationPressPosition = 250_000d;
     private const double DefaultTestStationWaitPosition = 200_000d;
     private const int SecondSetNozzle2UnloadStation = 13;
