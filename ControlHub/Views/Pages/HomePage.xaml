@@ -199,8 +199,9 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="60" />
             <RowDefinition Height="8" />
-            <RowDefinition Height="76" />
-            <RowDefinition Height="8" />
+            <!-- 四个 Z 轴压力实时监控暂不启用；恢复功能时改回 76 / 8。 -->
+            <RowDefinition Height="0" />
+            <RowDefinition Height="0" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -261,7 +262,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="14,8">
+        <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="14,8" Visibility="Collapsed">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="240" />
@@ -1461,7 +1462,9 @@
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel>
+                            <!-- 四个 Z 轴压力阈值设置暂不启用，保留控件便于后续恢复。 -->
                             <Border Margin="0,8,0,8" Padding="9,9" Background="#12283A"
+                                    Visibility="Collapsed"
                                     BorderBrush="#2D4A61" BorderThickness="1" CornerRadius="3">
                                 <StackPanel>
                                     <TextBlock Text="四轴压力安全保护" Foreground="#EAF2F7" FontSize="13" FontWeight="Bold" />

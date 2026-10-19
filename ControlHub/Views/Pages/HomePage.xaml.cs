@@ -232,7 +232,8 @@ public partial class HomePage : UserControl
     {
         _parameterPositionConfirmation = parameterPositionConfirmation ?? ShowParameterPositionConfirmation;
         InitializeComponent();
-        InitializePressureMonitor();
+        // 四个 Z 轴压力实时显示暂不启用。
+        // InitializePressureMonitor();
         _uphRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(1)
@@ -567,7 +568,8 @@ public partial class HomePage : UserControl
         }
 
         _motionController = motionController;
-        LoadPressureThresholdInput();
+        // 四个 Z 轴压力阈值参数暂不加载或开放保存。
+        // LoadPressureThresholdInput();
         _motionController.AttachDdTestStationInterlock(ReadDdTestStationWaitPositions);
         _motionController.EmergencyStopIssued += MotionController_EmergencyStopIssued;
         UpdateHomeCommandState();

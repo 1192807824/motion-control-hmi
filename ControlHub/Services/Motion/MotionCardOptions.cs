@@ -212,7 +212,8 @@ public sealed class MotionCardOptions
 
     public void Validate()
     {
-        ValidateZPressureEmergencyStopThreshold(ZPressureEmergencyStopThreshold);
+        // 四个 Z 轴压力参数限制暂不启用；保留配置字段以兼容已有配置文件。
+        // ValidateZPressureEmergencyStopThreshold(ZPressureEmergencyStopThreshold);
         if (AxisCount is < 1 or > 64)
         {
             throw new InvalidDataException("AxisCount 必须在 1 到 64 之间。");

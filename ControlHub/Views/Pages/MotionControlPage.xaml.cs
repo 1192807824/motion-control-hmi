@@ -262,9 +262,14 @@ public partial class MotionControlPage : UserControl
         RelativeModeRadio.IsChecked = !Tuning.AbsolutePositionMode;
         AbsoluteModeRadio.IsChecked = Tuning.AbsolutePositionMode;
 
-        _pressureSafety = _motionOptions.SimulationMode ? null : new ZAxisPressureSafety(_motionOptions.ZPressureEmergencyStopThreshold);
+        // 四个 Z 轴压力实时检测及超限保护暂不启用。
+        // 恢复时再创建 ZAxisPressureSafety，并同步恢复 Loaded 中的 Start 调用。
+        _pressureSafety = null;
+        // _pressureSafety = _motionOptions.SimulationMode ? null :
+        //     new ZAxisPressureSafety(_motionOptions.ZPressureEmergencyStopThreshold);
         _motionCard = new DdInterlockedMotionCard(
-            MotionCardFactory.Create(_motionOptions, _pressureSafety is null ? null : _pressureSafety.ThrowIfMotionBlocked),
+            // 压力保护禁用期间不向运动卡注入压力反馈/阈值启动限制。
+            MotionCardFactory.Create(_motionOptions),
             EnsureDdTestStationsSafe);
         _pollTimer = new DispatcherTimer
         {
@@ -282,32 +287,18 @@ public partial class MotionControlPage : UserControl
 
     // 主页高优先级刷新专用：所有分支均只读内存，绝不在UI线程调用SDK。
     public ZAxisPressureReading[] ReadZAxisPressures() =>
-        _closed ? ZAxisPressureMonitor.Unavailable("未连接") :
-        _pressureSafety?.Readings ?? ZAxisPressureMonitor.Unavailable(
-            _motionOptions.SimulationMode ? "模拟模式" : "保护初始化");
+        ZAxisPressureMonitor.Unavailable("功能已停用");
 
-    public string PressureSafetyStatus => _closed ? "压力保护已停止" :
-        _pressureSafety?.Status ?? "模拟模式 · 未启用硬件保护";
+    public string PressureSafetyStatus => "四轴压力检测及超限保护已停用";
 
-    public string PressureSafetyDetails => _pressureSafety?.TripReason ??
-        $"独立线程目标等待间隔1 ms；原始值 > {ZPressureEmergencyStopThreshold}触发，等于阈值不触发。Windows与SDK不保证硬实时停机。";
+    public string PressureSafetyDetails => "当前版本不采集四个 Z 轴压力，也不按压力阈值限制运动。";
 
     public int ZPressureEmergencyStopThreshold => _motionOptions.ZPressureEmergencyStopThreshold;
 
     public void SaveZPressureEmergencyStopThreshold(int threshold)
     {
-        MotionCardOptions.ValidateZPressureEmergencyStopThreshold(threshold);
-        if (_closed || _configurationError is not null)
-            throw new InvalidOperationException("运动配置不可用，无法保存压力阈值。");
-        var previous = _motionOptions.ZPressureEmergencyStopThreshold;
-        _motionOptions.ZPressureEmergencyStopThreshold = threshold;
-        try { _motionOptionsStore.Save(_motionOptions); }
-        catch
-        {
-            _motionOptions.ZPressureEmergencyStopThreshold = previous;
-            throw;
-        }
-        _pressureSafety?.ConfigureThreshold(threshold);
+        // 四个 Z 轴压力参数限制暂不启用，保留入口便于后续恢复界面绑定。
+        throw new InvalidOperationException("四轴压力检测及参数限制当前已停用。");
     }
 
     private void OnPressureSafetyTrip(PressureSafetyTrip trip)
@@ -2638,7 +2629,8 @@ public partial class MotionControlPage : UserControl
         try
         {
             var connection = _motionCard.Open();
-            _pressureSafety?.Start(_motionCard, IssueEmergencyStopAndNotify, OnPressureSafetyTrip);
+            // 四个 Z 轴压力实时检测及超限急停暂不启动。
+            // _pressureSafety?.Start(_motionCard, IssueEmergencyStopAndNotify, OnPressureSafetyTrip);
             _connectedCardNo = connection.IsSimulation ? null : connection.CardNo;
             if (ViewModel is { } viewModel)
             {
