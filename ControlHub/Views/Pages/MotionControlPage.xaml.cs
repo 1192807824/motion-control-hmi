@@ -768,7 +768,7 @@ public partial class MotionControlPage : UserControl
         var completed = false;
         try
         {
-            await MoveCalibrationAxesAsync(
+            var settled = await MoveCalibrationAxesAsync(
                 xAxis,
                 yAxis,
                 targetX,
@@ -779,12 +779,6 @@ public partial class MotionControlPage : UserControl
                 linkedCancellation.Token,
                 yVelocityOverride,
                 linearInterpolationCoordinateSystemNo);
-            var settled = ReadSettledCalibrationPosition(
-                xAxis,
-                yAxis,
-                targetX,
-                targetY,
-                positionTolerance);
             completed = true;
             return new CalibrationCenterPosition(
                 xHardwareAxisNo,
@@ -892,7 +886,7 @@ public partial class MotionControlPage : UserControl
         var completed = false;
         try
         {
-            await MoveCalibrationAxesAsync(
+            var settled = await MoveCalibrationAxesAsync(
                 xAxis,
                 yAxis,
                 targetX,
@@ -901,12 +895,6 @@ public partial class MotionControlPage : UserControl
                 positionTolerance,
                 moveTimeoutMilliseconds,
                 linkedCancellation.Token);
-            var settled = ReadSettledCalibrationPosition(
-                xAxis,
-                yAxis,
-                targetX,
-                targetY,
-                positionTolerance);
             completed = true;
             return new CalibrationCenterPosition(
                 xHardwareAxisNo,
@@ -2407,7 +2395,7 @@ public partial class MotionControlPage : UserControl
         return snapshot;
     }
 
-    private async Task MoveCalibrationAxesAsync(
+    private async Task<(double X, double Y)> MoveCalibrationAxesAsync(
         AxisStatus xAxis,
         AxisStatus yAxis,
         double targetX,
@@ -2469,7 +2457,10 @@ public partial class MotionControlPage : UserControl
             var yInPosition = Math.Abs(currentY.FeedbackPosition - targetY) <= positionTolerance;
             if (!currentX.IsMoving && !currentY.IsMoving && xInPosition && yInPosition)
             {
-                return;
+                // Return the exact snapshots that satisfied the completion condition. Reading the
+                // hardware again in the caller creates a race at the tolerance boundary: the first
+                // sample can be valid while the immediately following sample is a few pulses outside.
+                return (currentX.FeedbackPosition, currentY.FeedbackPosition);
             }
 
             if (DateTime.UtcNow >= deadline)
