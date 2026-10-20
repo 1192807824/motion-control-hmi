@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -62,15 +63,24 @@ internal static class Program
             "The real name-edit handler saves independently");
         Require(File.ReadAllText(motionPath) == before, "Editing an IO name must not rewrite motion parameters");
 
-        page.ApplyRecipeMotionSettings(new MotionRecipeSettings
-        {
-            IoPointNames = new() { ["DigitalOutput:24"] = "旧配方备注" }
-        });
+        var recipes = new ProductRecipeStore(Path.Combine(directory, "recipes"));
+        var recipe = recipes.Create("不保存IO的配方");
+        var legacyJson = JsonNode.Parse(recipes.Serialize(recipe))!;
+        legacyJson["Motion"]!["IoPointNames"] = JsonNode.Parse("""
+            {"DigitalOutput:24":"旧配方备注"}
+            """);
+        var legacyRecipe = recipes.DeserializeForExistingRecipe(legacyJson.ToJsonString(), recipe.Id);
+        page.ApplyRecipeMotionSettings(legacyRecipe.Motion);
         Require(options.IoPointNames["DigitalOutput:24"] == "现场吸气备注" &&
                 store.Load().IoPointNames["DigitalOutput:24"] == "现场吸气备注",
             "Applying an old recipe preserves live and persisted machine remarks");
-        Require(page.CaptureRecipeMotionSettings().IoPointNames.Count == 0,
-            "New recipes must not capture machine wiring names");
+        recipe.Motion = page.CaptureRecipeMotionSettings();
+        recipes.Save(recipe);
+        var savedRecipePath = Path.Combine(directory, "recipes", recipe.Id, ProductRecipeStore.RecipeFileName);
+        Require(!File.ReadAllText(savedRecipePath).Contains("IoPointNames", StringComparison.Ordinal),
+            "Saved recipe JSON must not contain even an empty IO names field");
+        Require(!recipes.Serialize(legacyRecipe).Contains("IoPointNames", StringComparison.Ordinal),
+            "Resaving/exporting an old recipe must strip its ignored IO field");
 
         // An invalid store destination must report failure and roll the editor back.
         var blockedPath = Path.Combine(directory, "blocked");

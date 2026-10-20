@@ -96,6 +96,8 @@ and product recipes. The first load migrates existing `IoPointNames` from
 `motion-settings.json`; later loads prefer this file, including an intentionally
 empty dictionary. It uses atomic replacement and a `.bak` backup and is ignored
 by Git. Recipe switching must not restore old I/O names.
+Recipe JSON must not contain I/O fields, even empty ones. Legacy I/O fields are
+ignored when reading old recipes and disappear when those recipes are saved again.
 
 Build and publish seed `motion-settings.json` only when the destination is absent.
 Never copy repository defaults over an existing operator configuration based on
