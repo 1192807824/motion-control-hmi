@@ -18,7 +18,7 @@ internal static class Program
         CheckPageIntegration();
         CheckNormalShutdown();
         CheckFullShutdown();
-        Console.WriteLine("PASS: state colors, active-high outputs, alarm/mute/rearm, real reset button under busy/safety-lock conditions, emergency ordering, partial write retries and process IO isolation. Simulated hardware only.");
+        Console.WriteLine("PASS: state colors, buzzer disabled for all states and manual commands, reset, emergency ordering, shutdown verification, write retries and process IO isolation. Simulated hardware only.");
     }
 
     private static void CheckController()
@@ -46,7 +46,7 @@ internal static class Program
         signals.UpdateActiveFaults(["axis:1"]);
         signals.ReportAlarm("AXIS-1");
         signals.Apply(card);
-        CheckOutputs(raw, red: true, green: false, yellow: false, buzzer: true);
+        CheckOutputs(raw, red: true, green: false, yellow: false, buzzer: false);
         signals.SilenceBuzzer();
         signals.Apply(card);
         signals.ResetLatchedAlarms();
@@ -55,12 +55,12 @@ internal static class Program
         CheckOutputs(raw, red: true, green: false, yellow: false, buzzer: false);
         signals.UpdateActiveFaults(["axis:1", "axis:2"]);
         signals.Apply(card);
-        Require(raw.High(0), "A different new fault must rearm the buzzer");
+        Require(!raw.High(0), "A different new fault must keep the disabled buzzer off");
         signals.SilenceBuzzer();
         signals.UpdateActiveFaults([]);
         signals.UpdateActiveFaults(["axis:1"]);
         signals.Apply(card);
-        Require(raw.High(0), "A resolved fault recurring must rearm the buzzer");
+        Require(!raw.High(0), "A recurring fault must keep the disabled buzzer off");
         signals.UpdateActiveFaults([]);
         signals.SilenceBuzzer();
         signals.Apply(card);
@@ -73,7 +73,7 @@ internal static class Program
         raw.FailBit = 29;
         try { signals.Apply(card); throw new Exception("Output failure was hidden"); }
         catch (AggregateException) { }
-        Require(raw.High(0), "A failed red output must not prevent the independent buzzer write");
+        Require(!raw.High(0), "A failed lamp output must not open the buzzer");
         raw.FailBit = null;
         signals.Apply(card);
         Require(raw.High(29), "Failed output must retry rather than be cached as successful");
@@ -98,6 +98,15 @@ internal static class Program
         var home = new HomePage();
         home.AttachMotionController(motion);
         Pump();
+        Require(motion.SetDigitalOutputHardwareBit(0, true) && !raw.High(0), "Hardware-bit API must not enable disabled buzzer");
+        Require(motion.SetDigitalOutputChannel(0, true) && !raw.High(0), "Channel API must not enable disabled buzzer");
+        var manualOutput = new System.Windows.Controls.Button
+        {
+            DataContext = new ControlHub.Models.IoPoint
+            { Channel = 0, HardwareBitNo = 0, Kind = ControlHub.Models.IoPointKind.DigitalOutput }
+        };
+        Call(motion, "DigitalOutput_Click", manualOutput, new RoutedEventArgs());
+        Require(!raw.High(0), "Manual IO button must not enable disabled buzzer");
         CheckOutputs(raw, red: false, green: false, yellow: true, buzzer: false);
         Set(home, "_startSequenceRunning", true);
         Call(home, "UpdateHomeCommandState");
@@ -124,7 +133,7 @@ internal static class Program
         motion.ReportMachineSignalAlarm("TEST-ALARM");
         Require(raw.Writes.Count == before, "Alarm recording must not perform IO before the safety stop");
         Pump();
-        CheckOutputs(raw, red: true, green: false, yellow: false, buzzer: true);
+        CheckOutputs(raw, red: true, green: false, yellow: false, buzzer: false);
         Set(motion, "_motionSafetyLock", true);
         Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
         Pump();
@@ -132,7 +141,7 @@ internal static class Program
         Require((bool)Get(motion, "_motionSafetyLock")!, "Silence must not release the motion safety lock");
         motion.ReportMachineSignalAlarm("NEW-FAULT");
         Pump();
-        Require(raw.High(0), "A new alarm after mute must sound again");
+        Require(!raw.High(0), "A new alarm must leave the disabled buzzer off");
         Set(motion, "_calibrationOperationActive", true);
         var clears = raw.ClearCount;
         Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
@@ -152,7 +161,7 @@ internal static class Program
         raw.AxisAlarm = true;
         Call(motion, "PollMotionState");
         Pump();
-        Require(raw.High(0), "A hardware fault recurring after recovery must sound again");
+        Require(!raw.High(0), "A recurring hardware fault must leave the disabled buzzer off");
 
         Set(home, "_startSequenceRunning", true);
         Call(home, "UpdateHomeCommandState");
@@ -162,7 +171,8 @@ internal static class Program
         Require(raw.Calls.SequenceEqual(new[] { "EmergencyStop" }), "Hardware emergency stop must precede indicator IO");
         Require((bool)Get(home, "_preserveIoOnEmergencyStop")!, "Emergency notification must still freeze process IO");
         Pump();
-        Require(raw.High(29) && raw.High(0), "Emergency stop must indicate red with buzzer");
+        Require(raw.High(29) && !raw.High(0), "Emergency stop must indicate red without opening the disabled buzzer");
+        Require(!raw.Writes.Any(write => write.Bit == 0 && write.High), "Program must never write Y00=1");
         Require((raw.Inner.ReadDigitalOutputs(0) & 0x1ffffffe) == processBefore,
             "Startup/state changes, reset/mute and emergency signaling must preserve every process output");
     }
@@ -206,7 +216,7 @@ internal static class Program
         raw.IgnoreBuzzerOff = false;
         failed.ReportAlarm("REAL-SHUTDOWN-FAILURE");
         failed.Apply(card);
-        Require(raw.High(29) && raw.High(0), "Failed shutdown must not disable real fault indication");
+        Require(raw.High(29) && !raw.High(0), "Failed shutdown must show red and keep the buzzer off");
         failed.Shutdown(card);
         Require(!raw.High(0), "Retry can close buzzer after failed shutdown");
     }

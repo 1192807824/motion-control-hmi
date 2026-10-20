@@ -19,7 +19,6 @@ public sealed class MachineSignalController
 
     private readonly HashSet<string> _latchedAlarms = [];
     private HashSet<string> _activeFaults = [];
-    private readonly HashSet<string> _silenced = [];
     private readonly Dictionary<int, bool> _writtenOutputs = [];
     private MachineOperatingState _operatingState;
     private bool _shutdown;
@@ -37,21 +36,17 @@ public sealed class MachineSignalController
     public void UpdateActiveFaults(IEnumerable<string> faults)
     {
         var next = faults.Select(fault => "active:" + fault).ToHashSet(StringComparer.Ordinal);
-        foreach (var resolved in _activeFaults.Except(next)) _silenced.Remove(resolved);
         _activeFaults = next;
     }
 
     public void SilenceBuzzer()
     {
-        _silenced.UnionWith(_latchedAlarms);
-        _silenced.UnionWith(_activeFaults);
         // 操作员也可能从数字输出页手动打开蜂鸣，消音时必须实际写0。
         _writtenOutputs.Remove(BuzzerBit);
     }
 
     public void ResetLatchedAlarms()
     {
-        _silenced.ExceptWith(_latchedAlarms);
         _latchedAlarms.Clear();
     }
 
@@ -82,10 +77,10 @@ public sealed class MachineSignalController
         get
         {
             var fault = _latchedAlarms.Count > 0 || _activeFaults.Count > 0;
-            var buzzer = _latchedAlarms.Concat(_activeFaults).Any(key => !_silenced.Contains(key));
             return new Dictionary<int, bool>
             {
-                [BuzzerBit] = !_shutdown && buzzer,
+                // 现场暂时禁用蜂鸣器；任何运行、故障、急停状态都不打开Y00。
+                [BuzzerBit] = false,
                 [RedBit] = !_shutdown && fault,
                 [GreenBit] = !_shutdown && !fault && _operatingState == MachineOperatingState.Running,
                 [YellowBit] = !_shutdown && !fault && _operatingState != MachineOperatingState.Running
