@@ -401,6 +401,7 @@ public partial class MotionControlPage : UserControl
             return false;
         }
 
+        ShutdownMachineSignals();
         _closed = true;
         _pressureSafety?.Stop();
         StopExternalEmergencyStopMonitor();
@@ -3458,7 +3459,16 @@ public partial class MotionControlPage : UserControl
         // 必须在控制卡急停和各运动任务取消之前通知生产流程冻结IO。
         // 否则运动任务可能先进入catch/finally并改写真空输出。
         NotifyEmergencyStopIssuedNoThrow();
-        _motionCard.EmergencyStop();
+        try
+        {
+            _motionCard.EmergencyStop();
+        }
+        finally
+        {
+            // 不让灯/蜂鸣器的通讯延迟抢在真正的硬件急停之前。
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Send,
+                new Action(() => ReportMachineSignalAlarm("EMERGENCY-STOP")));
+        }
     }
 
     private void NotifyEmergencyStopIssuedNoThrow()
@@ -4390,28 +4400,39 @@ public partial class MotionControlPage : UserControl
 
     private void ClearAlarm_Click(object sender, RoutedEventArgs e)
     {
-        if (IsAnyMotionWorkflowActive())
+        _alarmResetInProgress = true;
+        try
         {
-            RecordAlarm(
-                "CLEAR-ALARM-BUSY",
-                "运动、回零或停止确认期间不能清除报警和停止原因。请先确认所有轴已停止。");
-            return;
-        }
+            // 消音不依赖运动是否空闲，也不解除安全锁或改写任何工艺IO。
+            SilenceMachineBuzzer();
+            if (IsAnyMotionWorkflowActive())
+            {
+                RecordAlarm(
+                    "CLEAR-ALARM-BUSY",
+                    "蜂鸣已消音；运动、回零或停止确认期间不能复位设备报警。请先确认所有轴已停止。",
+                    signal: false);
+                return;
+            }
 
-        if (!ExecuteMotion(
-                null,
-                "CLEAR-ALARM",
-                () => _motionCard.ClearAlarms(
-                    (Axes ?? []).Where(axis => axis.IsAvailable).Select(axis => axis.HardwareAxisNo))))
+            if (!ExecuteMotion(
+                    null,
+                    "CLEAR-ALARM",
+                    () => _motionCard.ClearAlarms(
+                        (Axes ?? []).Where(axis => axis.IsAvailable).Select(axis => axis.HardwareAxisNo))))
+            {
+                return;
+            }
+
+            // 复位设备不删除历史；实际报警键继续由状态轮询维护。
+            _machineSignals.ResetLatchedAlarms();
+            PollMotionState();
+        }
+        finally
         {
-            return;
+            // 即使设备报警暂时无法复位，本次点击仍消除现有蜂鸣。
+            SilenceMachineBuzzer();
+            _alarmResetInProgress = false;
         }
-
-        // 复位设备不删除历史；只能在报警记录页显式清空。
-        // Keep active keys while a physical alarm is still present. Clearing them
-        // here makes the following poll insert every active alarm straight back
-        // into the history, so the operator sees no visible effect.
-        PollMotionState();
     }
 
     private async void TestOneKeyReset_Click(object sender, RoutedEventArgs e)
@@ -5022,6 +5043,7 @@ public partial class MotionControlPage : UserControl
             PollHiddenStopConfirmations();
             PollIoState();
             UpdateCommandRuntime();
+            _activeAlarmKeys.Remove("poll-general");
         }
         catch (Exception exception)
         {
@@ -5040,6 +5062,7 @@ public partial class MotionControlPage : UserControl
             EnforceSafetyDeadlines(DateTime.UtcNow);
             HomeAllButton?.SetCurrentValue(IsEnabledProperty, CanRunHomeSequence());
             UpdateHomeEditorState();
+            RefreshMachineSignals();
             _polling = false;
         }
     }
@@ -6291,9 +6314,10 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private void RecordAlarm(string code, string message)
+    private void RecordAlarm(string code, string message, bool signal = true)
     {
         AlarmHistory.Record("运动控制", code, message);
+        if (signal) ReportMachineSignalAlarm(code);
         if (ViewModel is not { } viewModel)
         {
             return;

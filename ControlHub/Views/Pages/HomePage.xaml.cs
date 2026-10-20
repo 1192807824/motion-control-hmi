@@ -7902,6 +7902,11 @@ public partial class HomePage : UserControl
 
     private void UpdateHomeCommandState()
     {
+        _motionController?.SetMachineOperatingState(
+            _productionStopRequested ? MachineOperatingState.Stopping :
+            _productionPauseRequested ? MachineOperatingState.Paused :
+            _oneKeyResetRunning ? MachineOperatingState.Resetting :
+            _startSequenceRunning ? MachineOperatingState.Running : MachineOperatingState.Standby);
         RefreshCarouselUpperVacuumControl();
         ProductionStateChanged?.Invoke(this, EventArgs.Empty);
         if (StartProductionButton is null ||
@@ -8254,14 +8259,22 @@ public partial class HomePage : UserControl
         }
 
         StartProductionHintText.Text = message;
-        if (color == Color.FromRgb(242, 122, 128)) AlarmHistory.Record("生产流程", "PRODUCTION", message);
+        if (color == Color.FromRgb(242, 122, 128))
+        {
+            AlarmHistory.Record("生产流程", "PRODUCTION", message);
+            _motionController?.ReportMachineSignalAlarm("PRODUCTION");
+        }
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
     }
 
     private void SetOneKeyCollectStatus(string message, Color color)
     {
-        if (color == Color.FromRgb(242, 122, 128)) AlarmHistory.Record("生产收料", "COLLECT", message);
+        if (color == Color.FromRgb(242, 122, 128))
+        {
+            AlarmHistory.Record("生产收料", "COLLECT", message);
+            _motionController?.ReportMachineSignalAlarm("COLLECT");
+        }
         OneKeyCollectHintText.Text = message;
         OneKeyCollectHintText.ToolTip = message;
         OneKeyCollectHintText.Foreground = new SolidColorBrush(color);
@@ -8420,7 +8433,11 @@ public partial class HomePage : UserControl
 
     private void SetOneKeyResetStatus(string message, Color color)
     {
-        if (color == Color.FromRgb(242, 122, 128)) AlarmHistory.Record("一键复位", "RESET", message);
+        if (color == Color.FromRgb(242, 122, 128))
+        {
+            AlarmHistory.Record("一键复位", "RESET", message);
+            _motionController?.ReportMachineSignalAlarm("RESET");
+        }
         OneKeyResetHintText.Text = message;
         OneKeyResetHintText.ToolTip = message;
         OneKeyResetHintText.Foreground = new SolidColorBrush(color);
