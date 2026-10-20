@@ -33,12 +33,24 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="motion-settings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="motion-settings.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     <None Update="Native\x86\LTDMC.dll"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest"
           TargetPath="LTDMC.dll" />
   </ItemGroup>
+
+  <!-- 现场配置只在首次生成时初始化，后续编译/发布保留操作员已保存的参数与备注。 -->
+  <Target Name="InitializeMotionSettingsForBuild" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\motion-settings.json"
+          DestinationFiles="$(OutDir)motion-settings.json"
+          Condition="!Exists('$(OutDir)motion-settings.json')" />
+  </Target>
+  <Target Name="InitializeMotionSettingsForPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\motion-settings.json"
+          DestinationFiles="$(PublishDir)motion-settings.json"
+          Condition="!Exists('$(PublishDir)motion-settings.json')" />
+  </Target>
 
   <Target Name="CollectVisionMasterHostFiles" DependsOnTargets="ResolveProjectReferences">
     <!-- Use the referenced project's actual output, including its VS platform and OutputPath.

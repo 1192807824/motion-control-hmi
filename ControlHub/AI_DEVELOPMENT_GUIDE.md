@@ -89,6 +89,18 @@ been established.
 
 The application stores JSON files beside the executable.
 
+### `io-point-names.json`
+
+Stores machine-local I/O names and remarks independently from motion defaults
+and product recipes. The first load migrates existing `IoPointNames` from
+`motion-settings.json`; later loads prefer this file, including an intentionally
+empty dictionary. It uses atomic replacement and a `.bak` backup and is ignored
+by Git. Recipe switching must not restore old I/O names.
+
+Build and publish seed `motion-settings.json` only when the destination is absent.
+Never copy repository defaults over an existing operator configuration based on
+file timestamps. Keep these local JSON files when deploying application updates.
+
 ### `axis-settings.json`
 
 Stores axis UI settings by axis number:

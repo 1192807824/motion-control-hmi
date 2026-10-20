@@ -359,6 +359,7 @@ public sealed class MotionRecipeSettings
 
     public int[] HomeSequence { get; set; } = [];
 
+    // 兼容旧配方结构；IO备注现在属于设备本地配置，不再随配方保存或应用。
     public Dictionary<string, string> IoPointNames { get; set; } = [];
 }
 

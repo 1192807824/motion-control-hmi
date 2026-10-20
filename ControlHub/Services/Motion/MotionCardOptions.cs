@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using ControlHub.Services.Persistence;
 
 namespace ControlHub.Services.Motion;
 
@@ -290,14 +291,7 @@ public sealed class MotionCardOptions
             throw new InvalidDataException("HomeTimeoutSeconds 必须在 1 到 3600 之间。");
         }
 
-        if (IoPointNames is null ||
-            IoPointNames.Count > 256 ||
-            IoPointNames.Any(item =>
-                string.IsNullOrWhiteSpace(item.Key) || item.Key.Length > 64 ||
-                string.IsNullOrWhiteSpace(item.Value) || item.Value.Length > 64))
-        {
-            throw new InvalidDataException("I/O 名称配置无效：键和值不能为空，且长度不能超过 64 个字符。");
-        }
+        ValidateIoPointNames(IoPointNames);
 
         MoveProfile.Validate();
         foreach (var item in AxisMoveProfiles)
@@ -330,6 +324,16 @@ public sealed class MotionCardOptions
         if (HomeSequence.Distinct().Count() != HomeSequence.Length)
         {
             throw new InvalidDataException("HomeSequence 不能包含重复轴号。");
+        }
+    }
+
+    public static void ValidateIoPointNames(IReadOnlyDictionary<string, string>? names)
+    {
+        if (names is null || names.Count > 256 || names.Any(item =>
+                string.IsNullOrWhiteSpace(item.Key) || item.Key.Length > 64 ||
+                string.IsNullOrWhiteSpace(item.Value) || item.Value.Length > 64))
+        {
+            throw new InvalidDataException("I/O 名称配置无效：键和值不能为空，且长度不能超过 64 个字符。");
         }
     }
 }
@@ -459,13 +463,26 @@ public sealed class MotionHomeProfile
 public sealed class MotionCardOptionsStore
 {
     private readonly string _filePath;
+    private readonly IoPointNamesStore _ioPointNamesStore;
 
     public MotionCardOptionsStore(string? filePath = null)
     {
         _filePath = filePath ?? Path.Combine(AppContext.BaseDirectory, "motion-settings.json");
+        _ioPointNamesStore = new IoPointNamesStore(Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(_filePath))!, "io-point-names.json"));
     }
 
     public MotionCardOptions Load()
+    {
+        var options = LoadMotionOptions();
+        options.IoPointNames = _ioPointNamesStore.LoadOrMigrate(options.IoPointNames);
+        return options;
+    }
+
+    public void SaveIoPointNames(IReadOnlyDictionary<string, string> names) =>
+        _ioPointNamesStore.Save(names);
+
+    private MotionCardOptions LoadMotionOptions()
     {
         if (!File.Exists(_filePath))
         {

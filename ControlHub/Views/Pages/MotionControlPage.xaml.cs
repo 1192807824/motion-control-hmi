@@ -138,8 +138,7 @@ public partial class MotionControlPage : UserControl
             AxisMoveProfiles = ProductRecipeStore.Clone(_motionOptions.AxisMoveProfiles),
             DefaultHomeProfile = ProductRecipeStore.Clone(_motionOptions.HomeProfile),
             AxisHomeProfiles = ProductRecipeStore.Clone(_motionOptions.AxisHomeProfiles),
-            HomeSequence = _motionOptions.HomeSequence.ToArray(),
-            IoPointNames = new Dictionary<string, string>(_motionOptions.IoPointNames)
+            HomeSequence = _motionOptions.HomeSequence.ToArray()
         };
     }
 
@@ -220,7 +219,7 @@ public partial class MotionControlPage : UserControl
 
         _motionOptions.HomeTimeoutSeconds = settings.HomeTimeoutSeconds;
         _motionOptions.HomeSequence = settings.HomeSequence.ToArray();
-        _motionOptions.IoPointNames = new Dictionary<string, string>(settings.IoPointNames);
+        // IO名称属于设备接线备注，切换产品配方时保留现场名称。
         _motionOptions.Validate();
         _motionOptionsStore.Save(_motionOptions);
 
@@ -2910,7 +2909,7 @@ public partial class MotionControlPage : UserControl
 
         try
         {
-            _motionOptionsStore.Save(_motionOptions);
+            _motionOptionsStore.SaveIoPointNames(_motionOptions.IoPointNames);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or InvalidDataException)
