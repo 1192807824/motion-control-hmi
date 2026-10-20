@@ -90,9 +90,19 @@ public partial class MotionControlPage
         RefreshMachineSignals(retryImmediately: true);
     }
 
-    private void ShutdownMachineSignals()
+    private bool TryShutdownMachineSignals(out string failureMessage)
     {
-        _machineSignals.Shutdown();
-        RefreshMachineSignals(retryImmediately: true);
+        failureMessage = "";
+        try
+        {
+            _machineSignals.Shutdown(_motionCard);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            failureMessage = $"退出前未能确认蜂鸣器和三色灯关闭，控制卡保持连接，请检查IO后重试。\n\n{FormatException(exception)}";
+            RecordAlarm("SHUTDOWN-SIGNAL-FAILED", failureMessage);
+            return false;
+        }
     }
 }

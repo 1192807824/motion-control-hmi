@@ -350,7 +350,7 @@ public partial class MotionControlPage : UserControl
         {
             try
             {
-                IssueEmergencyStopAndNotify();
+                IssueHardwareEmergencyStopAndNotify(signalAlarm: false);
             }
             catch (Exception exception)
             {
@@ -401,7 +401,7 @@ public partial class MotionControlPage : UserControl
             return false;
         }
 
-        ShutdownMachineSignals();
+        if (!TryShutdownMachineSignals(out failureMessage)) return false;
         _closed = true;
         _pressureSafety?.Stop();
         StopExternalEmergencyStopMonitor();
@@ -3456,6 +3456,11 @@ public partial class MotionControlPage : UserControl
 
     private void IssueEmergencyStopAndNotify()
     {
+        IssueHardwareEmergencyStopAndNotify(signalAlarm: true);
+    }
+
+    private void IssueHardwareEmergencyStopAndNotify(bool signalAlarm)
+    {
         // 必须在控制卡急停和各运动任务取消之前通知生产流程冻结IO。
         // 否则运动任务可能先进入catch/finally并改写真空输出。
         NotifyEmergencyStopIssuedNoThrow();
@@ -3466,8 +3471,9 @@ public partial class MotionControlPage : UserControl
         finally
         {
             // 不让灯/蜂鸣器的通讯延迟抢在真正的硬件急停之前。
-            _ = Dispatcher.BeginInvoke(DispatcherPriority.Send,
-                new Action(() => ReportMachineSignalAlarm("EMERGENCY-STOP")));
+            if (signalAlarm)
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.Send,
+                    new Action(() => ReportMachineSignalAlarm("EMERGENCY-STOP")));
         }
     }
 

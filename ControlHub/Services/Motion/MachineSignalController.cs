@@ -55,10 +55,26 @@ public sealed class MachineSignalController
         _latchedAlarms.Clear();
     }
 
-    public void Shutdown()
+    public void Shutdown(IMotionCard card)
     {
-        _shutdown = true;
         _writtenOutputs.Clear();
+        try
+        {
+            WriteOutputs(card, new Dictionary<int, bool>
+            {
+                [BuzzerBit] = false, [RedBit] = false, [GreenBit] = false, [YellowBit] = false
+            });
+            const uint signalMask = (1u << BuzzerBit) | (1u << RedBit) | (1u << GreenBit) | (1u << YellowBit);
+            if (card.IsOpen && (card.ReadDigitalOutputs(0) & signalMask) != 0)
+                throw new InvalidOperationException("退出前蜂鸣器/三色灯关闭回读不符。");
+            _shutdown = true;
+        }
+        catch
+        {
+            // 退出被阻止后仍须继续显示真正的故障，不能提前永久屏蔽报警。
+            _writtenOutputs.Clear();
+            throw;
+        }
     }
 
     public IReadOnlyDictionary<int, bool> DesiredOutputs
@@ -79,13 +95,17 @@ public sealed class MachineSignalController
 
     public void Apply(IMotionCard card)
     {
+        WriteOutputs(card, DesiredOutputs);
+    }
+
+    private void WriteOutputs(IMotionCard card, IReadOnlyDictionary<int, bool> desired)
+    {
         if (!card.IsOpen)
         {
             _writtenOutputs.Clear();
             return;
         }
 
-        var desired = DesiredOutputs;
         List<Exception> failures = [];
         // 先熄灭旧灯/消音，再点亮目标灯，避免正常切换时两种颜色重叠。
         foreach (var (bit, high) in desired.OrderBy(item => item.Value))

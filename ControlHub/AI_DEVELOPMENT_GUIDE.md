@@ -166,6 +166,9 @@ When adding real device/runtime data:
 - The motion page's Reset Device Alarms button mutes the current buzzer even
   when motion prevents a device reset. Persistent hardware faults stay red;
   a different or recurring fault sounds again. Resetting does not erase history.
+- Normal application shutdown uses the same hardware safe stop but must not
+  enqueue an emergency alarm. Before disconnecting, force Y00/Y29/Y30/Y31 off
+  and verify their output readback; an off-write/readback failure blocks closing.
 
 - Use `IMotionCard` from `Services/Motion`.
 - The current implementation is `LeisaiMotionCard`.
