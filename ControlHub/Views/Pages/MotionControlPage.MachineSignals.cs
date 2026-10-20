@@ -27,7 +27,8 @@ public partial class MotionControlPage
         }
         if (_closed) return;
         _machineSignals.ReportAlarm(code);
-        if (_alarmResetInProgress) _machineSignals.SilenceBuzzer();
+        // 急停可能改变板卡输出状态，必须重新下发Y00=1，不能只相信旧缓存。
+        if (_alarmResetInProgress || code == "EMERGENCY-STOP") _machineSignals.SilenceBuzzer();
         QueueMachineSignalRefresh();
     }
 

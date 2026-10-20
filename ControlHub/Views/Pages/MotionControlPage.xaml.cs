@@ -1863,7 +1863,7 @@ public partial class MotionControlPage : UserControl
         }
 
         var hardwareBitNo = GetDigitalIoStartBit(IoPointKind.DigitalOutput, count) + channel;
-        _motionCard.WriteDigitalOutput(hardwareBitNo, enabled && hardwareBitNo != MachineSignalController.BuzzerBit);
+        _motionCard.WriteDigitalOutput(hardwareBitNo, MachineSignalController.NormalizeOutputLevel(hardwareBitNo, enabled));
         PollIoState();
         return true;
     }
@@ -1882,7 +1882,7 @@ public partial class MotionControlPage : UserControl
             return false;
         }
 
-        _motionCard.WriteDigitalOutput(bitNo, enabled && bitNo != MachineSignalController.BuzzerBit);
+        _motionCard.WriteDigitalOutput(bitNo, MachineSignalController.NormalizeOutputLevel(bitNo, enabled));
         PollIoState();
         return true;
     }
@@ -4829,7 +4829,7 @@ public partial class MotionControlPage : UserControl
         }
 
         if (ExecuteMotion(null, $"DO-{point.BitNo}", () => _motionCard.WriteDigitalOutput(
-                point.BitNo, !point.IsOn && point.BitNo != MachineSignalController.BuzzerBit)))
+                point.BitNo, MachineSignalController.NormalizeOutputLevel(point.BitNo, !point.IsOn))))
         {
             PollIoState();
         }

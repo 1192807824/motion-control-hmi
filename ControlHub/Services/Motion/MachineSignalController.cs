@@ -9,10 +9,11 @@ public enum MachineOperatingState
     Stopping
 }
 
-/// <summary>高电平有效：Y29红、Y30绿、Y31黄、Y00蜂鸣器。仅管理这四个输出。</summary>
+/// <summary>Y29红/Y30绿/Y31黄为高电平亮；Y00蜂鸣器为低电平响、高电平关闭。</summary>
 public sealed class MachineSignalController
 {
     public const int BuzzerBit = 0;
+    public const bool BuzzerOffLevel = true;
     public const int RedBit = 29;
     public const int GreenBit = 30;
     public const int YellowBit = 31;
@@ -22,6 +23,10 @@ public sealed class MachineSignalController
     private readonly Dictionary<int, bool> _writtenOutputs = [];
     private MachineOperatingState _operatingState;
     private bool _shutdown;
+
+    // 蜂鸣器按现场要求保持禁用，所有入口统一使用实际的关闭电平。
+    public static bool NormalizeOutputLevel(int bit, bool requestedLevel) =>
+        bit == BuzzerBit ? BuzzerOffLevel : requestedLevel;
 
     public void SetOperatingState(MachineOperatingState state)
     {
@@ -41,7 +46,7 @@ public sealed class MachineSignalController
 
     public void SilenceBuzzer()
     {
-        // 操作员也可能从数字输出页手动打开蜂鸣，消音时必须实际写0。
+        // 蜂鸣器低电平有效，消音时必须实际写1。
         _writtenOutputs.Remove(BuzzerBit);
     }
 
@@ -57,10 +62,11 @@ public sealed class MachineSignalController
         _writtenOutputs.Clear();
         WriteOutputs(card, new Dictionary<int, bool>
         {
-            [BuzzerBit] = false, [RedBit] = false, [GreenBit] = false, [YellowBit] = false
+            [BuzzerBit] = BuzzerOffLevel, [RedBit] = false, [GreenBit] = false, [YellowBit] = false
         });
         const uint signalMask = (1u << BuzzerBit) | (1u << RedBit) | (1u << GreenBit) | (1u << YellowBit);
-        if (card.IsOpen && (card.ReadDigitalOutputs(0) & signalMask) != 0)
+        const uint shutdownLevels = 1u << BuzzerBit;
+        if (card.IsOpen && (card.ReadDigitalOutputs(0) & signalMask) != shutdownLevels)
         {
             _writtenOutputs.Clear();
             throw new InvalidOperationException("退出前蜂鸣器/三色灯关闭回读不符。");
@@ -74,8 +80,8 @@ public sealed class MachineSignalController
             var fault = _latchedAlarms.Count > 0 || _activeFaults.Count > 0;
             return new Dictionary<int, bool>
             {
-                // 现场暂时禁用蜂鸣器；任何运行、故障、急停状态都不打开Y00。
-                [BuzzerBit] = false,
+                // 现场暂时禁用蜂鸣器，始终保持Y00=1（关闭）。
+                [BuzzerBit] = BuzzerOffLevel,
                 [RedBit] = !_shutdown && fault,
                 [GreenBit] = !_shutdown && !fault && _operatingState == MachineOperatingState.Running,
                 [YellowBit] = !_shutdown && !fault && _operatingState != MachineOperatingState.Running
@@ -97,8 +103,8 @@ public sealed class MachineSignalController
         }
 
         List<Exception> failures = [];
-        // 先熄灭旧灯/消音，再点亮目标灯，避免正常切换时两种颜色重叠。
-        foreach (var (bit, high) in desired.OrderBy(item => item.Value))
+        // 先关闭蜂鸣器，再熄灭旧灯，最后点亮目标灯。
+        foreach (var (bit, high) in desired.OrderBy(item => item.Key == BuzzerBit ? 0 : item.Value ? 2 : 1))
         {
             if (_writtenOutputs.TryGetValue(bit, out var previous) && previous == high) continue;
             try

@@ -155,10 +155,11 @@ When adding real device/runtime data:
 
 ## Motion layer notes
 
-- Machine indicators use active-high outputs: Y29 red, Y30 green, Y31 yellow,
-  Y00 buzzer. Running/collecting is green; standby, pause, reset and stopping
+- Y29 red, Y30 green and Y31 yellow lamps use active-high outputs. The Y00
+  buzzer is ACTIVE-LOW: 0 sounds, 1 is silent, as confirmed on the machine.
+  Running/collecting is green; standby, pause, reset and stopping
   are yellow; an alarm or emergency stop is red. The buzzer is temporarily
-  disabled by operator request: Y00 must always be written 0, including manual
+  disabled by operator request: Y00 must always be written 1, including manual
   output commands. Do not restore automatic buzzing without an explicit request.
 - `MachineSignalController` owns only those four bits. Indicator updates must
   run after hardware emergency-stop commands, including when the home's
@@ -169,7 +170,8 @@ When adding real device/runtime data:
   when motion prevents a device reset. Persistent hardware faults stay red.
   Resetting does not erase history.
 - Normal application shutdown uses the same hardware safe stop but must not
-  enqueue an emergency alarm. Before disconnecting, force Y00/Y29/Y30/Y31 off
+  enqueue an emergency alarm. Before disconnecting, write Y00=1 (silent) and
+  Y29/Y30/Y31=0 (lamps off)
   and read back their output state for diagnostics. Indicator write/readback
   failures are logged without blocking exit or reactivating indicators. Only
   the existing motion-stop and configuration-save checks may block closing.
