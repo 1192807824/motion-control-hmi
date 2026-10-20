@@ -1741,15 +1741,19 @@ public partial class MotionControlPage : UserControl
         _calibrationOperationActive = true;
         try
         {
+            var commandStartPositions = new Dictionary<int, double>();
+            var commandProgressObserved = new HashSet<int>();
             foreach (var move in moves)
             {
                 var current = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
                 ApplySnapshot(move.Axis, current);
-                if (IsWithinCompletion(move.Axis.HardwareAxisNo, current.FeedbackPosition, move.Target, move.Tolerance))
+                if (current.CommandPosition == move.Target &&
+                    IsWithinCompletion(move.Axis.HardwareAxisNo, current.FeedbackPosition, move.Target, move.Tolerance))
                 {
                     continue;
                 }
 
+                commandStartPositions[move.Axis.HardwareAxisNo] = current.CommandPosition;
                 _motionCard.MoveAbsolute(move.Axis.HardwareAxisNo, move.Target, move.Velocity);
                 commandedAxes.Add(move.Axis);
                 move.Axis.IsMoving = true;
@@ -1787,7 +1791,13 @@ public partial class MotionControlPage : UserControl
                     }
 
                     snapshots.Add(snapshot);
-                    if (snapshot.IsMoving ||
+                    var axisNo = move.Axis.HardwareAxisNo;
+                    var commandAccepted = !commandStartPositions.TryGetValue(axisNo, out var startPosition) ||
+                                          startPosition == move.Target;
+                    if (snapshot.IsMoving || (commandStartPositions.ContainsKey(axisNo) && snapshot.CommandPosition != startPosition))
+                        commandProgressObserved.Add(axisNo);
+                    commandAccepted |= commandProgressObserved.Contains(axisNo);
+                    if (!commandAccepted || snapshot.IsMoving ||
                         !IsWithinCompletion(move.Axis.HardwareAxisNo, snapshot.FeedbackPosition, move.Target, move.Tolerance))
                     {
                         allAtTarget = false;
@@ -2422,8 +2432,11 @@ public partial class MotionControlPage : UserControl
         EnsureCalibrationAxisSafe(beforeX, "X");
         EnsureCalibrationAxisSafe(beforeY, "Y");
 
-        var xNeedsMove = Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance;
-        var yNeedsMove = Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance;
+        // 到位容差只用于完成判定。目标改变时仍须下发，不能因反馈已落在容差内而跳过新目标。
+        var xNeedsMove = beforeX.CommandPosition != targetX ||
+                         Math.Abs(beforeX.FeedbackPosition - targetX) > positionTolerance;
+        var yNeedsMove = beforeY.CommandPosition != targetY ||
+                         Math.Abs(beforeY.FeedbackPosition - targetY) > positionTolerance;
         if (linearInterpolationCoordinateSystemNo is { } coordinateSystemNo &&
             (xNeedsMove || yNeedsMove))
         {
@@ -2451,6 +2464,8 @@ public partial class MotionControlPage : UserControl
 
         xAxis.Target = targetX;
         yAxis.Target = targetY;
+        var xCommandProgressObserved = !xNeedsMove || beforeX.CommandPosition == targetX;
+        var yCommandProgressObserved = !yNeedsMove || beforeY.CommandPosition == targetY;
         var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
 
         while (true)
@@ -2465,7 +2480,10 @@ public partial class MotionControlPage : UserControl
 
             var xInPosition = Math.Abs(currentX.FeedbackPosition - targetX) <= positionTolerance;
             var yInPosition = Math.Abs(currentY.FeedbackPosition - targetY) <= positionTolerance;
-            if (!currentX.IsMoving && !currentY.IsMoving && xInPosition && yInPosition)
+            xCommandProgressObserved |= currentX.IsMoving || currentX.CommandPosition != beforeX.CommandPosition;
+            yCommandProgressObserved |= currentY.IsMoving || currentY.CommandPosition != beforeY.CommandPosition;
+            if (xCommandProgressObserved && yCommandProgressObserved &&
+                !currentX.IsMoving && !currentY.IsMoving && xInPosition && yInPosition)
             {
                 // Return the exact snapshots that satisfied the completion condition. Reading the
                 // hardware again in the caller creates a race at the tolerance boundary: the first
@@ -2477,8 +2495,8 @@ public partial class MotionControlPage : UserControl
             {
                 throw new TimeoutException(
                     $"视觉坐标运动超时（允许误差±{positionTolerance:0.###} pulse）。" +
-                    $"X轴{currentX.HardwareAxisNo}={currentX.FeedbackPosition:0.###}/{targetX:0.###}，偏差{currentX.FeedbackPosition - targetX:0.###}，运动={currentX.IsMoving}；" +
-                    $"Y轴{currentY.HardwareAxisNo}={currentY.FeedbackPosition:0.###}/{targetY:0.###}，偏差{currentY.FeedbackPosition - targetY:0.###}，运动={currentY.IsMoving}。");
+                    $"X轴{currentX.HardwareAxisNo}：请求目标{targetX:0.###}，指令位置{currentX.CommandPosition:0.###}，反馈{currentX.FeedbackPosition:0.###}，偏差{currentX.FeedbackPosition - targetX:0.###}，运动={currentX.IsMoving}；" +
+                    $"Y轴{currentY.HardwareAxisNo}：请求目标{targetY:0.###}，指令位置{currentY.CommandPosition:0.###}，反馈{currentY.FeedbackPosition:0.###}，偏差{currentY.FeedbackPosition - targetY:0.###}，运动={currentY.IsMoving}。");
             }
 
             await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
@@ -2505,8 +2523,8 @@ public partial class MotionControlPage : UserControl
         {
             throw new InvalidOperationException(
                 $"机构稳定等待后偏离目标（允许误差±{tolerance:0.###} pulse）。" +
-                $"X轴{settledX.HardwareAxisNo}={settledX.FeedbackPosition:0.###}/{targetX:0.###}，偏差{settledX.FeedbackPosition - targetX:0.###}，运动={settledX.IsMoving}；" +
-                $"Y轴{settledY.HardwareAxisNo}={settledY.FeedbackPosition:0.###}/{targetY:0.###}，偏差{settledY.FeedbackPosition - targetY:0.###}，运动={settledY.IsMoving}。");
+                $"X轴{settledX.HardwareAxisNo}：请求目标{targetX:0.###}，指令位置{settledX.CommandPosition:0.###}，反馈{settledX.FeedbackPosition:0.###}，偏差{settledX.FeedbackPosition - targetX:0.###}，运动={settledX.IsMoving}；" +
+                $"Y轴{settledY.HardwareAxisNo}：请求目标{targetY:0.###}，指令位置{settledY.CommandPosition:0.###}，反馈{settledY.FeedbackPosition:0.###}，偏差{settledY.FeedbackPosition - targetY:0.###}，运动={settledY.IsMoving}。");
         }
 
         return (settledX.FeedbackPosition, settledY.FeedbackPosition);

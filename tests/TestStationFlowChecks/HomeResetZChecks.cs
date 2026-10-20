@@ -77,28 +77,35 @@ internal static partial class Program
         Console.WriteLine("PASS: homing rejection prevents parking; Z positioning failure propagates and stops axes. No hardware opened.");
 
         recorder.FailMove = false;
-        foreach (var offset in new[] { -100d, -50d, 50d, 100d })
+        foreach (var offset in new[] { -150d, -100d, -50d, 50d, 100d, 150d })
         {
             recorder.MoveFeedbackOffset = offset;
             Wait(Run());
             Require(new[] { 5, 7, 9, 11 }.All(axis => recorder.Positions[axis] == -4000 + offset),
-                "Reset rejected stopped feedback within the established 100-pulse tolerance.");
+                "Reset rejected stopped feedback within the production parking tolerance of 150 pulses.");
         }
-        recorder.MoveFeedbackOffset = 101;
+        recorder.MoveFeedbackOffset = 151;
+        // Begin from home so this case actually issues a new park command with the injected offset.
+        foreach (var axis in new[] { 5, 7, 9, 11 })
+        {
+            recorder.Positions[axis] = 0;
+            recorder.CommandPositions[axis] = 0;
+        }
         try { Wait(Run()); throw new Exception("Outside-tolerance feedback was accepted."); }
         catch (TimeoutException exception)
         {
             Require(exception.Message.Contains("轴5") && exception.Message.Contains("轴11") &&
-                exception.Message.Contains("-3899") && exception.Message.Contains("101") && exception.Message.Contains("已停止"),
+                exception.Message.Contains("-3849") && exception.Message.Contains("151") && exception.Message.Contains("已停止"),
                 "Timeout must identify the axes and their actual feedback/error.");
         }
-        Console.WriteLine("PASS: stopped feedback within ±100 completes; 101-pulse error still times out with per-axis diagnostics.");
+        Console.WriteLine("PASS: stopped parking feedback within ±150 completes; 151-pulse error still times out with per-axis diagnostics.");
     }
 }
 
 public class ResetRecordingCard : DispatchProxy
 {
     public readonly Dictionary<int, double> Positions = [];
+    public readonly Dictionary<int, double> CommandPositions = [];
     public readonly List<(int Axis, double Target)> Moves = [];
     public readonly List<double> MoveVelocities = [];
     public readonly List<string> Trace = [];
@@ -109,6 +116,16 @@ public class ResetRecordingCard : DispatchProxy
     public bool BlockReset;
     public bool FailMove;
     public double MoveFeedbackOffset;
+    public readonly Dictionary<int, double> MoveFeedbackOffsets = [];
+    public bool DelayCommandAcceptance;
+    private readonly Dictionary<int, double> _pendingTargets = [];
+
+    private void AcceptMove(int axis, double target)
+    {
+        CommandPositions[axis] = target;
+        Positions[axis] = target + MoveFeedbackOffsets.GetValueOrDefault(axis, MoveFeedbackOffset);
+        _moving.Add(axis);
+    }
 
     protected override object? Invoke(MethodInfo? method, object?[]? args)
     {
@@ -118,10 +135,12 @@ public class ResetRecordingCard : DispatchProxy
             case "get_AxisCount": return 16;
             case nameof(IMotionCard.ReadAxis):
                 var axis = (int)args![0]!;
+                if (!DelayCommandAcceptance && _pendingTargets.Remove(axis, out var pendingTarget)) AcceptMove(axis, pendingTarget);
                 var homing = _homePending.Remove(axis);
                 var moving = _moving.Contains(axis);
                 var position = Positions.GetValueOrDefault(axis);
-                var snapshot = new MotionAxisSnapshot(axis, position, position, position, 0,
+                var commandPosition = CommandPositions.GetValueOrDefault(axis, position);
+                var snapshot = new MotionAxisSnapshot(axis, commandPosition, position, commandPosition, 0,
                     homing || (moving && HoldMoves), true, !homing, BlockReset && axis == 0,
                     false, false, false, false, 4, 0, 0, (ushort)(FailMove && moving && axis == 9 ? 1 : 0));
                 if (moving && !HoldMoves) _moving.Remove(axis);
@@ -130,6 +149,7 @@ public class ResetRecordingCard : DispatchProxy
                 var homeAxis = (int)args![0]!;
                 Trace.Add($"home:{homeAxis}");
                 Positions[homeAxis] = ((MotionHomeProfile)args[1]!).OffsetPosition;
+                CommandPositions[homeAxis] = Positions[homeAxis];
                 _homePending.Add(homeAxis);
                 return null;
             case nameof(IMotionCard.MoveAbsolute):
@@ -138,8 +158,8 @@ public class ResetRecordingCard : DispatchProxy
                 Moves.Add((moveAxis, target));
                 MoveVelocities.Add((double)args[2]!);
                 Trace.Add($"move:{moveAxis}");
-                Positions[moveAxis] = target + MoveFeedbackOffset;
-                _moving.Add(moveAxis);
+                if (DelayCommandAcceptance) _pendingTargets[moveAxis] = target;
+                else AcceptMove(moveAxis, target);
                 return null;
             case nameof(IMotionCard.Stop):
                 Stops.Add((int)args![0]!);

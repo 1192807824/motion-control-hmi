@@ -163,6 +163,10 @@ When adding real device/runtime data:
 - XY timeout/stability errors must include the actual tolerance, feedback error
   and moving flags, so an old limit or a moving axis is distinguishable from
   stopped feedback just outside the current tolerance.
+- Completion tolerance does not authorize skipping a changed command target.
+  A new absolute target must reach the card even if current feedback is within
+  the arrival window. Diagnostics must label requested target, command position
+  and encoder feedback separately; they are different quantities.
 
 - Y29 red, Y30 green and Y31 yellow lamps use active-high outputs. The Y00
   buzzer is ACTIVE-LOW: 0 sounds, 1 is silent, as confirmed on the machine.

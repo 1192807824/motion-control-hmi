@@ -37,6 +37,7 @@ internal static partial class Program
 
         var (motion, card, recorder, _) = Create();
         recorder.Positions[13] = 125;
+        recorder.MoveFeedbackOffset = 125;
         var waits = new Dictionary<int, double> { [13] = 0, [14] = 0, [15] = 0 };
         var oldResult = Finish(motion.MoveAxesAbsoluteAsync(new Dictionary<int, double> { [13] = 0 },
             CancellationToken.None, minimumCompletionTolerance: 150));
@@ -49,25 +50,46 @@ internal static partial class Program
         var returning = motion.MoveAxesAbsoluteAsync(new Dictionary<int, double> { [13] = 0 },
             CancellationToken.None, minimumCompletionTolerance: 150,
             completionUpperBounds: new Dictionary<int, double> { [13] = 100 });
-        Require(!returning.IsCompleted && recorder.Moves.Count == 1,
+        Require(!returning.IsCompleted && recorder.Moves.Count == 2,
             "+125 must issue the return command and keep waiting even when the profile tolerance is 1000");
         recorder.Positions[13] = 100;
         Require(Finish(returning).Single().FeedbackPosition == 100, "Return completes at the actual DD-safe boundary");
         DdTestStationInterlock.EnsureSafe(waits, card.ReadAxis);
+        recorder.MoveFeedbackOffset = -125;
         recorder.Positions[13] = -125;
         var safeSide = motion.MoveAxesAbsoluteAsync(new Dictionary<int, double> { [13] = 0 },
             CancellationToken.None, minimumCompletionTolerance: 150,
             completionUpperBounds: new Dictionary<int, double> { [13] = 100 });
-        Require(safeSide.IsCompletedSuccessfully, "Safe-side feedback must not acquire a new artificial 100-pulse lower bound");
+        Require(Finish(safeSide).Single().FeedbackPosition == -125,
+            "Safe-side feedback must not acquire a new artificial 100-pulse lower bound");
         DdTestStationInterlock.EnsureSafe(waits, card.ReadAxis);
+
+        var (delayed, _, delayedRecorder, _) = Create();
+        delayedRecorder.Positions[1] = 1000;
+        delayedRecorder.Positions[2] = 2000;
+        delayedRecorder.DelayCommandAcceptance = true;
+        var delayedXy = delayed.MoveCalibrationAxesToAsync(1, 2, 1010, 2010, 10000, 150, 1000, CancellationToken.None);
+        Require(!delayedXy.IsCompleted, "Old feedback inside tolerance must not complete a new command before it starts");
+        delayedRecorder.DelayCommandAcceptance = false;
+        Require(Finish(delayedXy).ActualX == 1010, "XY completes after the new command is actually observed");
+        delayedRecorder.Positions[13] = 50;
+        delayedRecorder.DelayCommandAcceptance = true;
+        var delayedGroup = delayed.MoveAxesAbsoluteAsync(new Dictionary<int, double> { [13] = 0 },
+            CancellationToken.None, minimumCompletionTolerance: 150);
+        Require(!delayedGroup.IsCompleted, "Group move must also wait for new-command progress inside tolerance");
+        delayedRecorder.DelayCommandAcceptance = false;
+        Require(Finish(delayedGroup).Single().CommandPosition == 0, "Group returns the observed new command position");
 
         var (xy, _, xyRecorder, vm) = Create();
         xyRecorder.Positions[1] = 1655998;
         xyRecorder.Positions[2] = 946155;
         var actual = Finish(xy.MoveCalibrationAxesToAsync(1, 2, 1655920.114, 946038.684,
             10000, 150, 100, CancellationToken.None));
-        Require(actual.ActualX == 1655998 && actual.ActualY == 946155,
-            "User's first XY sample is within 150 and must pass when stopped");
+        Require(actual.ActualX == 1655920.114 && actual.ActualY == 946038.684 &&
+                xyRecorder.Moves.Contains((1, 1655920.114)) && xyRecorder.Moves.Contains((2, 946038.684)),
+            "New XY targets must actually be sent even when prior feedback is already within 150");
+        xyRecorder.Positions[1] = 1655998;
+        xyRecorder.Positions[2] = 946155;
         try
         {
             typeof(MotionControlPage).GetMethod("ReadSettledCalibrationPosition", Private)!.Invoke(xy,
@@ -82,7 +104,8 @@ internal static partial class Program
         }
         xyRecorder.Positions[1] = 1634695;
         xyRecorder.Positions[2] = 1074220;
-        xyRecorder.MoveFeedbackOffset = -151.593;
+        xyRecorder.MoveFeedbackOffsets[1] = 1.402;
+        xyRecorder.MoveFeedbackOffsets[2] = -151.593;
         try
         {
             Finish(xy.MoveCalibrationAxesToAsync(1, 2, 1634693.598, 1074371.593,
@@ -92,7 +115,8 @@ internal static partial class Program
         catch (TimeoutException exception)
         {
             Require(exception.Message.Contains("±150") && exception.Message.Contains("-151.593") &&
-                exception.Message.Contains("运动=False"), "Timeout must distinguish stopped feedback error from an axis still moving");
+                exception.Message.Contains("运动=False") && exception.Message.Contains("指令位置") &&
+                exception.Message.Contains("请求目标"), "Timeout must distinguish command, requested target, feedback and moving state");
         }
         Console.WriteLine("PASS: DD +125 arrival mismatch, upper safety bound despite wide profiles, safe-side feedback, and both reported XY samples with actionable diagnostics. No hardware opened.");
     }
