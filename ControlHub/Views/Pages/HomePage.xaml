@@ -1396,6 +1396,24 @@
                     </Button>
 
                     <DockPanel Grid.Row="6">
+                    <Button x:Name="CarouselUpperVacuumButton"
+                            DockPanel.Dock="Top"
+                            Height="52"
+                            Margin="0,10,0,0"
+                            Style="{StaticResource OperationButton}"
+                            Background="#244358"
+                            BorderBrush="#52758D"
+                            IsEnabled="False"
+                            Click="CarouselUpperVacuum_Click"
+                            ToolTip="手动开关工位上方吸；自动运行时由流程控制">
+                        <StackPanel VerticalAlignment="Center" Margin="12,0">
+                            <TextBlock Text="工位上方吸"
+                                       Foreground="White" FontSize="16" FontWeight="Bold" />
+                            <TextBlock x:Name="CarouselUpperVacuumStateText"
+                                       Text="未连接" Foreground="#D8E8F3" FontSize="11"
+                                       Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Button>
                     <CheckBox x:Name="FinishingPickupCheckBox"
                               DockPanel.Dock="Top"
                               Content="收尾取料"

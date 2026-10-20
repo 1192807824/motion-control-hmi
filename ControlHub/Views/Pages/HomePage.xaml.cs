@@ -232,6 +232,7 @@ public partial class HomePage : UserControl
     {
         _parameterPositionConfirmation = parameterPositionConfirmation ?? ShowParameterPositionConfirmation;
         InitializeComponent();
+        InitializeCarouselUpperVacuumControl();
         // 四个 Z 轴压力实时显示暂不启用。
         // InitializePressureMonitor();
         _uphRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -7901,6 +7902,7 @@ public partial class HomePage : UserControl
 
     private void UpdateHomeCommandState()
     {
+        RefreshCarouselUpperVacuumControl();
         ProductionStateChanged?.Invoke(this, EventArgs.Empty);
         if (StartProductionButton is null ||
             StartProductionTitleText is null ||
