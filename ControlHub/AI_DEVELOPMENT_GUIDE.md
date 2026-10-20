@@ -155,6 +155,15 @@ When adding real device/runtime data:
 
 ## Motion layer notes
 
+- Test-station returns (including mechanical retests) must satisfy the DD
+  interlock's live upper bound, feedback <= wait + 100 pulses, before reporting
+  completion. The general ±150 production tolerance or a wider axis profile
+  must not override this upper bound. Retain the existing safe coordinate
+  direction; do not impose a new lower safety bound or relax the DD interlock.
+- XY timeout/stability errors must include the actual tolerance, feedback error
+  and moving flags, so an old limit or a moving axis is distinguishable from
+  stopped feedback just outside the current tolerance.
+
 - Y29 red, Y30 green and Y31 yellow lamps use active-high outputs. The Y00
   buzzer is ACTIVE-LOW: 0 sounds, 1 is silent, as confirmed on the machine.
   Running/collecting is green; standby, pause, reset and stopping

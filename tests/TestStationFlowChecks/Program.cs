@@ -52,6 +52,7 @@ internal static partial class Program
         {
             _ = new Application();
             CheckDdTestStationInterlock();
+            CheckArrivalSafetyBounds();
             return;
         }
 
@@ -192,6 +193,7 @@ internal static partial class Program
         CheckSM7110GigohmUnits();
         CheckProductionZStartInterlock();
         CheckDdTestStationInterlock();
+        CheckArrivalSafetyBounds();
     }
 
     private static void CheckResult(E4981AMeasurementResult input, string bin, bool passed)

@@ -1614,9 +1614,17 @@ public partial class MotionControlPage : UserControl
         IReadOnlyCollection<int>? allowedMovingAxisNos = null,
         double? minimumCompletionTolerance = null,
         double? velocityOverride = null,
-        IReadOnlyDictionary<int, double>? velocityOverrides = null)
+        IReadOnlyDictionary<int, double>? velocityOverrides = null,
+        IReadOnlyDictionary<int, double>? completionUpperBounds = null)
     {
         ArgumentNullException.ThrowIfNull(targetPositions);
+        if (completionUpperBounds is not null && completionUpperBounds.Any(pair =>
+                !targetPositions.ContainsKey(pair.Key) || !double.IsFinite(pair.Value)))
+            throw new ArgumentException("完成反馈上限必须对应本次目标轴且为有限数值。", nameof(completionUpperBounds));
+
+        bool IsWithinCompletion(int axisNo, double feedback, double target, double tolerance) =>
+            double.IsFinite(feedback) && Math.Abs(feedback - target) <= tolerance &&
+            (completionUpperBounds is null || !completionUpperBounds.TryGetValue(axisNo, out var upper) || feedback <= upper);
 
         var axisTargets = targetPositions
             .GroupBy(pair => pair.Key)
@@ -1737,7 +1745,7 @@ public partial class MotionControlPage : UserControl
             {
                 var current = _motionCard.ReadAxis(move.Axis.HardwareAxisNo);
                 ApplySnapshot(move.Axis, current);
-                if (Math.Abs(current.FeedbackPosition - move.Target) <= move.Tolerance)
+                if (IsWithinCompletion(move.Axis.HardwareAxisNo, current.FeedbackPosition, move.Target, move.Tolerance))
                 {
                     continue;
                 }
@@ -1780,7 +1788,7 @@ public partial class MotionControlPage : UserControl
 
                     snapshots.Add(snapshot);
                     if (snapshot.IsMoving ||
-                        Math.Abs(snapshot.FeedbackPosition - move.Target) > move.Tolerance)
+                        !IsWithinCompletion(move.Axis.HardwareAxisNo, snapshot.FeedbackPosition, move.Target, move.Tolerance))
                     {
                         allAtTarget = false;
                     }
@@ -1797,11 +1805,13 @@ public partial class MotionControlPage : UserControl
                     throw new TimeoutException(
                         $"同步绝对位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。" +
                         string.Join("；", moves.Zip(snapshots).Where(pair => pair.Second.IsMoving ||
-                                Math.Abs(pair.Second.FeedbackPosition - pair.First.Target) > pair.First.Tolerance)
+                                !IsWithinCompletion(pair.First.Axis.HardwareAxisNo, pair.Second.FeedbackPosition, pair.First.Target, pair.First.Tolerance))
                             .Select(pair => $"轴{pair.First.Axis.HardwareAxisNo}：目标{pair.First.Target:0.###}，" +
                                 $"反馈{pair.Second.FeedbackPosition:0.###}，" +
                                 $"偏差{pair.Second.FeedbackPosition - pair.First.Target:0.###} pulse，" +
-                                $"容差±{pair.First.Tolerance:0.###}，{(pair.Second.IsMoving ? "仍在运动" : "已停止")}")));
+                                $"容差±{pair.First.Tolerance:0.###}，{(pair.Second.IsMoving ? "仍在运动" : "已停止")}" +
+                                (completionUpperBounds is not null && completionUpperBounds.TryGetValue(pair.First.Axis.HardwareAxisNo, out var limit)
+                                    ? $"，DD安全反馈上限{limit:0.###}" : ""))));
                 }
 
                 SetCommandStage(CommandStage.Running, "轴组同步运动中");
@@ -2466,8 +2476,9 @@ public partial class MotionControlPage : UserControl
             if (DateTime.UtcNow >= deadline)
             {
                 throw new TimeoutException(
-                    $"视觉坐标运动超时。X={currentX.FeedbackPosition:0.###}/{targetX:0.###}，" +
-                    $"Y={currentY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
+                    $"视觉坐标运动超时（允许误差±{positionTolerance:0.###} pulse）。" +
+                    $"X轴{currentX.HardwareAxisNo}={currentX.FeedbackPosition:0.###}/{targetX:0.###}，偏差{currentX.FeedbackPosition - targetX:0.###}，运动={currentX.IsMoving}；" +
+                    $"Y轴{currentY.HardwareAxisNo}={currentY.FeedbackPosition:0.###}/{targetY:0.###}，偏差{currentY.FeedbackPosition - targetY:0.###}，运动={currentY.IsMoving}。");
             }
 
             await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);
@@ -2493,8 +2504,9 @@ public partial class MotionControlPage : UserControl
             Math.Abs(settledY.FeedbackPosition - targetY) > tolerance)
         {
             throw new InvalidOperationException(
-                $"机构稳定等待后偏离目标。X={settledX.FeedbackPosition:0.###}/{targetX:0.###}，" +
-                $"Y={settledY.FeedbackPosition:0.###}/{targetY:0.###}。 ");
+                $"机构稳定等待后偏离目标（允许误差±{tolerance:0.###} pulse）。" +
+                $"X轴{settledX.HardwareAxisNo}={settledX.FeedbackPosition:0.###}/{targetX:0.###}，偏差{settledX.FeedbackPosition - targetX:0.###}，运动={settledX.IsMoving}；" +
+                $"Y轴{settledY.HardwareAxisNo}={settledY.FeedbackPosition:0.###}/{targetY:0.###}，偏差{settledY.FeedbackPosition - targetY:0.###}，运动={settledY.IsMoving}。");
         }
 
         return (settledX.FeedbackPosition, settledY.FeedbackPosition);

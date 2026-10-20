@@ -4234,7 +4234,9 @@ public partial class HomePage : UserControl
             TestStationMoveTimeoutMilliseconds,
             ProductionHandlingAxisNos,
             HomePageCompletionTolerance,
-            velocityOverrides: GetProductionAxisVelocities(returningAxes));
+            velocityOverrides: GetProductionAxisVelocities(returningAxes),
+            completionUpperBounds: returnTargets.ToDictionary(pair => pair.Key,
+                pair => pair.Value + DdTestStationInterlock.WaitPositionTolerancePulses));
 
         if (measurementFailure is not null)
         {
@@ -4317,12 +4319,17 @@ public partial class HomePage : UserControl
                             {
                                 await WaitIfProductionPausedAsync(movementToken);
                                 var current = GetTestStationSettings(stationNumber);
+                                var isWaitMove = returningToWait;
                                 var currentTarget = returningToWait ? current.WaitPosition : current.PressPosition;
                                 returningToWait = false;
                                 await motionController.MoveAxesAbsoluteAsync(
                                     new Dictionary<int, double> { [axis] = currentTarget }, movementToken,
                                     TestStationMoveTimeoutMilliseconds, ProductionHandlingAxisNos,
-                                    HomePageCompletionTolerance, velocityOverrides: GetProductionAxisVelocities([axis]));
+                                    HomePageCompletionTolerance,
+                                    velocityOverrides: GetProductionAxisVelocities([axis]),
+                                    completionUpperBounds: isWaitMove
+                                        ? new Dictionary<int, double> { [axis] = currentTarget + DdTestStationInterlock.WaitPositionTolerancePulses }
+                                        : null);
                             },
                             (milliseconds, delayToken) => Task.Delay(_testStationDwellMilliseconds, delayToken),
                             phase => SetTestStationRuntimeDisplay(stationNumber,

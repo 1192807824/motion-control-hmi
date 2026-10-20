@@ -35,7 +35,8 @@ public static class DdTestStationInterlock
             }
         }
         if (failures.Count > 0)
-            throw new InvalidOperationException($"禁止启动DD马达：三个测试站必须停稳，且实时位置均≤各自等待位+{WaitPositionTolerancePulses:G9} pulse。\n\n" +
-                string.Join("\n", failures) + "\n\n请先将测试站抬到等待位或更高位置并停稳，再重新启动。");
+            throw new InvalidOperationException("禁止启动DD马达：" + string.Join("；", failures) +
+                $"\n\n三个测试站必须停稳，且实时位置均≤各自等待位+{WaitPositionTolerancePulses:G9} pulse。" +
+                "\n\n请先将测试站抬到等待位或更高位置并停稳，再重新启动。");
     }
 }
