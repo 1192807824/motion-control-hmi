@@ -196,9 +196,7 @@ internal static class Program
 
         // Even an externally/manual switched buzzer must be closed before disconnect.
         raw.Inner.WriteDigitalOutput(0, true);
-        var shutdown = typeof(MotionControlPage).GetMethod("TryShutdownMachineSignals", Private)!;
-        object?[] args = [null];
-        Require((bool)shutdown.Invoke(motion, args)!, "Signal shutdown must verify outputs off");
+        Call(motion, "ShutdownMachineSignalsNoThrow");
         CheckOutputs(raw, red: false, green: false, yellow: false, buzzer: false);
         Set(motion, "_closed", true);
         motion.ReportMachineSignalAlarm("LATE-CALLBACK");
@@ -216,7 +214,7 @@ internal static class Program
         raw.IgnoreBuzzerOff = false;
         failed.ReportAlarm("REAL-SHUTDOWN-FAILURE");
         failed.Apply(card);
-        Require(raw.High(29) && !raw.High(0), "Failed shutdown must show red and keep the buzzer off");
+        Require(!raw.High(29) && !raw.High(0), "Indicator shutdown must stay off after a diagnostic failure");
         failed.Shutdown(card);
         Require(!raw.High(0), "Retry can close buzzer after failed shutdown");
     }
@@ -248,12 +246,29 @@ internal static class Program
         var failedMotion = new MotionControlPage();
         Set(failedMotion, "_motionCard", failedCard);
         Set(failedMotion, "_motionOptionsStore", new MotionCardOptionsStore(Path.Combine(directory, "failed", "motion-settings.json")));
-        Require(!failedMotion.TryShutdown(out error) && error.Contains("蜂鸣器"), "Failed off verification must block close with a useful error");
-        Require(failedCard.IsOpen && !(bool)Get(failedMotion, "_closed")!, "Failed close must keep hardware connection available for retry");
-        failedRaw.IgnoreBuzzerOff = false;
-        Require(failedMotion.TryShutdown(out error), $"Close retry failed: {error}");
+        Require(failedMotion.TryShutdown(out error), $"Indicator readback mismatch must not block exit: {error}");
         Pump();
-        Require(failedRaw.SignalsAtClose == 0, "Retry must also verify output off before close");
+        Require(!failedCard.IsOpen && (bool)Get(failedMotion, "_closed")!, "Readback diagnostics must allow disconnect after motion stops");
+        Require(!failedRaw.Writes.Any(write => write.Bit == 0 && write.High), "Readback error must never enable disabled buzzer");
+
+        var writeFailureCard = DispatchProxy.Create<IMotionCard, RecordingCard>();
+        var writeFailureRaw = (RecordingCard)(object)writeFailureCard;
+        writeFailureRaw.Inner.Open();
+        writeFailureRaw.FailBit = 29;
+        var writeFailureMotion = new MotionControlPage();
+        Set(writeFailureMotion, "_motionCard", writeFailureCard);
+        Set(writeFailureMotion, "_motionOptionsStore", new MotionCardOptionsStore(Path.Combine(directory, "write-failure", "motion-settings.json")));
+        Require(writeFailureMotion.TryShutdown(out error), $"Indicator write failure must not block exit: {error}");
+        Require(!writeFailureCard.IsOpen, "Indicator write failure must still disconnect after safe stop");
+
+        var stopFailureCard = DispatchProxy.Create<IMotionCard, RecordingCard>();
+        var stopFailureRaw = (RecordingCard)(object)stopFailureCard;
+        stopFailureRaw.Inner.Open();
+        stopFailureRaw.FailEmergencyStop = true;
+        var stopFailureMotion = new MotionControlPage();
+        Set(stopFailureMotion, "_motionCard", stopFailureCard);
+        Require(!stopFailureMotion.TryShutdown(out error) && error.Contains("全轴急停"), "Real hardware stop failure must still block exit");
+        Require(stopFailureCard.IsOpen, "Hardware connection must remain open if safe stop failed");
     }
 
     private static void CheckOutputs(RecordingCard raw, bool red, bool green, bool yellow, bool buzzer) =>
@@ -280,6 +295,7 @@ public class RecordingCard : DispatchProxy
     public bool AxisAlarm { get; set; }
     public int ClearCount { get; private set; }
     public bool IgnoreBuzzerOff { get; set; }
+    public bool FailEmergencyStop { get; set; }
     public uint? SignalsAtClose { get; private set; }
     public bool High(int bit) => (Inner.ReadDigitalOutputs(0) & (1u << bit)) != 0;
 
@@ -294,7 +310,11 @@ public class RecordingCard : DispatchProxy
             if (bit == FailBit) throw new MotionCardException("Injected signal output failure");
             if (IgnoreBuzzerOff && bit == 0 && !high) return null;
         }
-        if (method.Name == nameof(IMotionCard.EmergencyStop)) Calls.Add("EmergencyStop");
+        if (method.Name == nameof(IMotionCard.EmergencyStop))
+        {
+            Calls.Add("EmergencyStop");
+            if (FailEmergencyStop) throw new MotionCardException("Injected hardware stop failure");
+        }
         if (method.Name == nameof(IMotionCard.ClearAlarms)) ClearCount++;
         if (method.Name == nameof(IMotionCard.Close)) SignalsAtClose = Inner.ReadDigitalOutputs(0) & 0xe0000001;
         if (method.Name == nameof(IMotionCard.ReadAxis) && AxisAlarm)

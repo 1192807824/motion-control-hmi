@@ -52,23 +52,18 @@ public sealed class MachineSignalController
 
     public void Shutdown(IMotionCard card)
     {
+        // 退出阶段的指示IO异常只作诊断，不能恢复灯光/蜂鸣状态或阻止退出。
+        _shutdown = true;
         _writtenOutputs.Clear();
-        try
+        WriteOutputs(card, new Dictionary<int, bool>
         {
-            WriteOutputs(card, new Dictionary<int, bool>
-            {
-                [BuzzerBit] = false, [RedBit] = false, [GreenBit] = false, [YellowBit] = false
-            });
-            const uint signalMask = (1u << BuzzerBit) | (1u << RedBit) | (1u << GreenBit) | (1u << YellowBit);
-            if (card.IsOpen && (card.ReadDigitalOutputs(0) & signalMask) != 0)
-                throw new InvalidOperationException("退出前蜂鸣器/三色灯关闭回读不符。");
-            _shutdown = true;
-        }
-        catch
+            [BuzzerBit] = false, [RedBit] = false, [GreenBit] = false, [YellowBit] = false
+        });
+        const uint signalMask = (1u << BuzzerBit) | (1u << RedBit) | (1u << GreenBit) | (1u << YellowBit);
+        if (card.IsOpen && (card.ReadDigitalOutputs(0) & signalMask) != 0)
         {
-            // 退出被阻止后仍须继续显示真正的故障，不能提前永久屏蔽报警。
             _writtenOutputs.Clear();
-            throw;
+            throw new InvalidOperationException("退出前蜂鸣器/三色灯关闭回读不符。");
         }
     }
 

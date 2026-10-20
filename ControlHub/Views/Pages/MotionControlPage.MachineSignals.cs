@@ -90,19 +90,17 @@ public partial class MotionControlPage
         RefreshMachineSignals(retryImmediately: true);
     }
 
-    private bool TryShutdownMachineSignals(out string failureMessage)
+    private void ShutdownMachineSignalsNoThrow()
     {
-        failureMessage = "";
         try
         {
             _machineSignals.Shutdown(_motionCard);
-            return true;
         }
         catch (Exception exception)
         {
-            failureMessage = $"退出前未能确认蜂鸣器和三色灯关闭，控制卡保持连接，请检查IO后重试。\n\n{FormatException(exception)}";
-            RecordAlarm("SHUTDOWN-SIGNAL-FAILED", failureMessage);
-            return false;
+            RecordAlarm("SHUTDOWN-SIGNAL-IO",
+                $"退出时关闭蜂鸣器/三色灯的写入或回读异常，运动轴已确认停止，继续退出：{FormatException(exception)}",
+                signal: false);
         }
     }
 }

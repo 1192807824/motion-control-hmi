@@ -401,7 +401,7 @@ public partial class MotionControlPage : UserControl
             return false;
         }
 
-        if (!TryShutdownMachineSignals(out failureMessage)) return false;
+        ShutdownMachineSignalsNoThrow();
         _closed = true;
         _pressureSafety?.Stop();
         StopExternalEmergencyStopMonitor();

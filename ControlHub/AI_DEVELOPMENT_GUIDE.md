@@ -170,7 +170,9 @@ When adding real device/runtime data:
   Resetting does not erase history.
 - Normal application shutdown uses the same hardware safe stop but must not
   enqueue an emergency alarm. Before disconnecting, force Y00/Y29/Y30/Y31 off
-  and verify their output readback; an off-write/readback failure blocks closing.
+  and read back their output state for diagnostics. Indicator write/readback
+  failures are logged without blocking exit or reactivating indicators. Only
+  the existing motion-stop and configuration-save checks may block closing.
 
 - Use `IMotionCard` from `Services/Motion`.
 - The current implementation is `LeisaiMotionCard`.
