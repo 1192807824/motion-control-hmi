@@ -101,9 +101,15 @@ internal static partial class Program
         Invoke(page, "PrepareProductionBatch");
         var charts = Field<UniformGrid>(page, "DistributionChartsPanel");
         Require(charts.Children.Count == 2, "Two stations must show two charts");
+        var firstChart = charts.Children[0];
+        var secondChart = charts.Children[1];
+        for (var refresh = 0; refresh < 1000; refresh++) Invoke(page, "RefreshDistributionCharts");
+        Require(ReferenceEquals(firstChart, charts.Children[0]) && ReferenceEquals(secondChart, charts.Children[1]),
+            "Repeated measurement refreshes must reuse the station charts");
         Field<ToggleButton>(page, "Station2EnabledToggle").IsChecked = false;
         Invoke(page, "RefreshDistributionCharts");
         Require(charts.Children.Count == 1, "One station must show one chart");
+        Require(ReferenceEquals(firstChart, charts.Children[0]), "Disabling another station must retain the active chart");
         Field<ToggleButton>(page, "Station2EnabledToggle").IsChecked = true;
 
         var states = (Array)Invoke(null, "CreateCarouselStationStates")!;

@@ -125,7 +125,9 @@ public partial class HomePage
     private void RefreshDistributionCharts()
     {
         if (DistributionChartsPanel is null || _loadingPresetPositions) return;
-        DistributionChartsPanel.Children.Clear();
+        var existingCharts = DistributionChartsPanel.Children.OfType<MeasurementDistributionChart>()
+            .ToDictionary(chart => (int)chart.Tag);
+        var activeCharts = new List<MeasurementDistributionChart>();
         foreach (var definition in TestStationDefinitions)
         {
             var station = definition.StationNumber;
@@ -134,15 +136,25 @@ public partial class HomePage
             if (controls.EnabledToggle.IsChecked != true || instrument == TestStationInstrument.None) continue;
             var name = FormatTestStationInstrument(instrument);
             var mode = instrument == TestStationInstrument.E4981A ? "C" : SM7110LimitModeComboBox.SelectedValue as string ?? "R";
-            var records = _batchMeasurements.Where(row => row.StationNumber == station && row.Instrument == name && row.MeasurementMode == mode).ToArray();
+            var records = _batchMeasurements.Where(row => row.StationNumber == station && row.Instrument == name && row.MeasurementMode == mode);
             var unit = instrument == TestStationInstrument.E4981A ? "nF" : new SM7110MeasurementResult(0, 0, mode, "").DisplayUnit;
-            var chart = new MeasurementDistributionChart { Margin = new Thickness(0, 3, 0, 3), MinHeight = 170 };
+            if (!existingCharts.TryGetValue(station, out var chart))
+                chart = new MeasurementDistributionChart { Tag = station, Margin = new Thickness(0, 3, 0, 3), MinHeight = 170 };
             chart.SetData($"工位 {station} · {name} · {(mode == "C" ? "电容" : mode == "R" ? "最终电阻" : mode)}", unit, records);
-            DistributionChartsPanel.Children.Add(chart);
+            activeCharts.Add(chart);
         }
-        if (DistributionChartsPanel.Children.Count == 0)
+        if (activeCharts.Count == 0)
+        {
+            if (DistributionChartsPanel.Children.Count == 1 && DistributionChartsPanel.Children[0] is TextBlock) return;
+            DistributionChartsPanel.Children.Clear();
             DistributionChartsPanel.Children.Add(new TextBlock { Text = "请先启用测试工位", Foreground = Brushes.LightGray,
                 VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center });
+        }
+        else if (!DistributionChartsPanel.Children.Cast<UIElement>().SequenceEqual(activeCharts))
+        {
+            DistributionChartsPanel.Children.Clear();
+            foreach (var chart in activeCharts) DistributionChartsPanel.Children.Add(chart);
+        }
     }
 
     public void ShowBatchQuery()

@@ -67,6 +67,7 @@ public partial class ConnectionConfigPage : UserControl
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly SemaphoreSlim _protocolWriteLock = new(1, 1);
     private readonly DispatcherTimer _brightnessSendTimer;
+    private readonly HashSet<ListBox> _pendingLogScrolls = [];
     private bool _closed;
     private bool _feederClosing;
     private int? _lastHopperVibrationFrequency;
@@ -1721,7 +1722,7 @@ public partial class ConnectionConfigPage : UserControl
             viewModel.FeederConnectionLogs.RemoveAt(0);
         }
 
-        ConnectionLogListBox.ScrollIntoView(logItem);
+        ScheduleLogScroll(ConnectionLogListBox);
     }
 
     private void AddTcpLog(string message, bool isAlarm = false)
@@ -1738,7 +1739,7 @@ public partial class ConnectionConfigPage : UserControl
         {
             viewModel.TcpConnectionLogs.RemoveAt(0);
         }
-        TcpConnectionLogListBox.ScrollIntoView(logItem);
+        ScheduleLogScroll(TcpConnectionLogListBox);
     }
 
     private void AddSerialLog(string message, bool isAlarm = false)
@@ -1755,7 +1756,20 @@ public partial class ConnectionConfigPage : UserControl
         {
             viewModel.SerialConnectionLogs.RemoveAt(0);
         }
-        SerialConnectionLogListBox.ScrollIntoView(logItem);
+        ScheduleLogScroll(SerialConnectionLogListBox);
+    }
+
+    private void ScheduleLogScroll(ListBox listBox)
+    {
+        // ScrollIntoView can update the entire window's layout. Hidden logs must
+        // not force production charts to render for every instrument response.
+        if (_closed || !listBox.IsVisible || !_pendingLogScrolls.Add(listBox)) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _pendingLogScrolls.Remove(listBox);
+            if (!_closed && listBox.IsVisible && listBox.Items.Count > 0)
+                listBox.ScrollIntoView(listBox.Items[listBox.Items.Count - 1]);
+        }));
     }
 
     private void SetFeederStatus(string status)

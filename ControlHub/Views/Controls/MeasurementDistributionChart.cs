@@ -14,8 +14,31 @@ public sealed class MeasurementDistributionChart : FrameworkElement
     private string _unit = "";
     private int _total, _passed, _ng, _unmeasured;
     private MeasurementDistribution _distribution = MeasurementDistribution.Calculate([]);
-    private static Brush Brush(string color) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-    private static readonly Brush TextBrush = Brush("#EAF2F8"), Muted = Brush("#9FB1BF"), Blue = Brush("#62B5FF"), Green = Brush("#36CFA0");
+    // Drawing resources are immutable: share them across frames and chart instances.
+    private static readonly Brush TextBrush = CreateBrush("#EAF2F8"), Muted = CreateBrush("#9FB1BF"), Blue = CreateBrush("#62B5FF"), Green = CreateBrush("#36CFA0");
+    private static readonly Brush BackgroundBrush = CreateBrush("#10283A"), QueryBackgroundBrush = CreateBrush("#112638"), HistogramBrush = CreateBrush("#286197");
+    private static readonly Pen BorderPen = CreatePen(CreateBrush("#345269"), 1), QueryBorderPen = CreatePen(CreateBrush("#294257"), 1);
+    private static readonly Pen GridPen = CreatePen(CreateBrush("#29465C"), 1), CurvePen = CreatePen(Green, 2);
+    private static readonly Typeface LabelTypeface = new("Microsoft YaHei UI");
+    private SolidColorBrush? _queryAccentBrush;
+    private Brush? _queryHistogramBrush;
+    private Pen? _queryCurvePen;
+
+    private static SolidColorBrush CreateBrush(string color) => CreateBrush((Color)ColorConverter.ConvertFromString(color));
+
+    private static SolidColorBrush CreateBrush(Color color, double opacity = 1)
+    {
+        var brush = new SolidColorBrush(color) { Opacity = opacity };
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Pen CreatePen(Brush brush, double thickness)
+    {
+        var pen = new Pen(brush, thickness);
+        pen.Freeze();
+        return pen;
+    }
 
     public void SetData(string title, string unit, IEnumerable<BatchMeasurement> source)
     {
@@ -32,12 +55,20 @@ public sealed class MeasurementDistributionChart : FrameworkElement
         base.OnRender(dc);
         var w = ActualWidth; var h = ActualHeight;
         if (w < 150 || h < 120) return;
-        var accent = UseQueryStyle ? new SolidColorBrush(QueryAccent) : Green;
-        dc.DrawRoundedRectangle(Brush(UseQueryStyle ? "#112638" : "#10283A"), new Pen(Brush(UseQueryStyle ? "#294257" : "#345269"), 1), new Rect(1, 1, w - 2, h - 2), 8, 8);
+        if (UseQueryStyle && (_queryAccentBrush is null || _queryAccentBrush.Color != QueryAccent))
+        {
+            _queryAccentBrush = CreateBrush(QueryAccent);
+            _queryHistogramBrush = CreateBrush(QueryAccent, 0.38);
+            _queryCurvePen = CreatePen(_queryAccentBrush, 2.5);
+        }
+        var accent = UseQueryStyle ? _queryAccentBrush! : Green;
+        var histogramBrush = UseQueryStyle ? _queryHistogramBrush! : HistogramBrush;
+        dc.DrawRoundedRectangle(UseQueryStyle ? QueryBackgroundBrush : BackgroundBrush, UseQueryStyle ? QueryBorderPen : BorderPen, new Rect(1, 1, w - 2, h - 2), 8, 8);
+        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         void Label(string value, double x, double y, Brush brush, double size = 11, double? width = null)
         {
             var text = new FormattedText(value, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                new Typeface("Microsoft YaHei UI"), size, brush, VisualTreeHelper.GetDpi(this).PixelsPerDip)
+                LabelTypeface, size, brush, pixelsPerDip)
                 { MaxTextWidth = Math.Max(1, width ?? w - x - 12), MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
             dc.DrawText(text, new Point(x, y));
         }
@@ -68,13 +99,13 @@ public sealed class MeasurementDistributionChart : FrameworkElement
         for (var i = 0; i <= 3; i++)
         {
             var y = plot.Bottom - plot.Height * i / 3;
-            dc.DrawLine(new Pen(Brush("#29465C"), 1), new Point(plot.Left, y), new Point(plot.Right, y));
+            dc.DrawLine(GridPen, new Point(plot.Left, y), new Point(plot.Right, y));
             Label((maxY * i / 3).ToString("0.#"), 5, y - 8, Muted, 9, 37);
         }
         for (var i = 0; i < bins; i++)
         {
             var height = counts[i] / maxY * plot.Height;
-            dc.DrawRectangle(UseQueryStyle ? new SolidColorBrush(QueryAccent) { Opacity = 0.38 } : Brush("#286197"), null, new Rect(plot.Left + i * plot.Width / bins + 1,
+            dc.DrawRectangle(histogramBrush, null, new Rect(plot.Left + i * plot.Width / bins + 1,
                 plot.Bottom - height, Math.Max(1, plot.Width / bins - 2), height));
         }
         if (canFit)
@@ -91,7 +122,8 @@ public sealed class MeasurementDistributionChart : FrameworkElement
                     if (i == 0) context.BeginFigure(point, false, false); else context.LineTo(point, true, false);
                 }
             }
-            dc.DrawGeometry(null, new Pen(accent, UseQueryStyle ? 2.5 : 2), geometry);
+            geometry.Freeze();
+            dc.DrawGeometry(null, UseQueryStyle ? _queryCurvePen! : CurvePen, geometry);
         }
         Label(low.ToString("G5"), plot.Left, plot.Bottom + 4, Muted, 10, plot.Width / 3);
         Label(high.ToString("G5") + " " + _unit, Math.Max(plot.Left, plot.Right - 115), plot.Bottom + 4, Muted, 10);
