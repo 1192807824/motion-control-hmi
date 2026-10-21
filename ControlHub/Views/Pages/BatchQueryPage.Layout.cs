@@ -78,6 +78,12 @@ public sealed partial class BatchQueryPage
         var tableHeading = new DockPanel { Margin = new Thickness(16, 0, 14, 0) };
         _details.Style = (Style)FindResource("QueryButton"); _details.Height = 30; _details.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(_details, Dock.Right); tableHeading.Children.Add(_details);
+        foreach (var button in new[] { _next, _previous })
+        {
+            button.Style = (Style)FindResource("QueryButton"); button.Height = 30;
+            button.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(button, Dock.Right); tableHeading.Children.Add(button);
+        }
         var caption = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         caption.Children.Add(Label("采集明细", 15, "#ECF4FB"));
         _resultCaption.Foreground = Ink("#7899B3"); _resultCaption.FontSize = 11; _resultCaption.Margin = new Thickness(12, 0, 0, 0);
@@ -127,7 +133,8 @@ public sealed partial class BatchQueryPage
             if (ItemsControl.ContainerFromElement(_table, e.OriginalSource as DependencyObject) is DataGridRow) ShowRecordDetails();
         };
         _details.Click += (_, _) => ShowRecordDetails();
-        UpdateSummary([]);
+        UpdateSummary(new(), 0);
+        UpdateCommands();
         ShowEmptyCharts();
         return root;
     }
@@ -164,7 +171,7 @@ public sealed partial class BatchQueryPage
         var textStyle = new Style(typeof(TextBlock));
         textStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
         textStyle.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
-        textStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new Binding(property)));
+        textStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new Binding(property) { Mode = BindingMode.OneTime }));
         if (numeric)
         {
             textStyle.Setters.Add(new Setter(TextBlock.FontFamilyProperty, new FontFamily("Consolas")));
@@ -172,18 +179,21 @@ public sealed partial class BatchQueryPage
             textStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, Ink("#B5DDFF")));
         }
         _table.Columns.Add(new DataGridTextColumn { Header = header, Width = width, MinWidth = width, Binding = new Binding(property)
-            { StringFormat = format, TargetNullValue = "—" }, ElementStyle = textStyle });
+            { StringFormat = format, TargetNullValue = "—", Mode = BindingMode.OneTime }, ElementStyle = textStyle });
     }
 
-    private void UpdateSummary(IReadOnlyList<BatchMeasurement> rows)
+    private void UpdateSummary(BatchMeasurementStatistics statistics, int products)
     {
-        _metricRecords.Text = rows.Count.ToString("N0");
-        _metricProducts.Text = rows.Select(row => row.ProductId).Distinct().Count().ToString("N0");
-        var measuredCount = rows.Count(row => !row.IsUnmeasured);
-        _metricYield.Text = measuredCount == 0 ? "—" : (100d * rows.Count(row => row.CountsAsOk) / measuredCount).ToString("0.0") + "%";
-        _metricNg.Text = rows.Count(row => row.CountsAsNg).ToString("N0");
-        _resultCaption.Text = rows.Count == 0 ? "暂无数据" : $"{rows.Count:N0} 条记录 · 未测到 {rows.Count(row => row.IsUnmeasured)} 条 · 双击查看完整信息";
-        _emptyMessage.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var groups = statistics.Groups.Values;
+        var unmeasured = groups.Sum(g => g.Unmeasured);
+        _metricRecords.Text = statistics.Count.ToString("N0");
+        _metricProducts.Text = products.ToString("N0");
+        var measuredCount = statistics.Count - unmeasured;
+        _metricYield.Text = measuredCount == 0 ? "—" : (100d * groups.Sum(g => g.Passed) / measuredCount).ToString("0.0") + "%";
+        _metricNg.Text = groups.Sum(g => g.Ng).ToString("N0");
+        _resultCaption.Text = statistics.Count == 0 ? "暂无数据" : $"共 {statistics.Count:N0} 条 · 第 {_pageIndex + 1}/{Math.Max(1, (statistics.Count + PageSize - 1) / PageSize)} 页 · 未测到 {unmeasured} 条";
+        _table.ToolTip = "每页最多500条，点击列标题仅排序当前页；双击查看完整记录。";
+        _emptyMessage.Visibility = statistics.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ShowEmptyCharts()

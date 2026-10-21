@@ -13,6 +13,7 @@ public sealed class MeasurementDistributionChart : FrameworkElement
     private string _title = "";
     private string _unit = "";
     private int _total, _passed, _ng, _unmeasured;
+    private MeasurementSummary? _summary;
     private MeasurementDistribution _distribution = MeasurementDistribution.Calculate([]);
     // Drawing resources are immutable: share them across frames and chart instances.
     private static readonly Brush TextBrush = CreateBrush("#EAF2F8"), Muted = CreateBrush("#9FB1BF"), Blue = CreateBrush("#62B5FF"), Green = CreateBrush("#36CFA0");
@@ -42,11 +43,19 @@ public sealed class MeasurementDistributionChart : FrameworkElement
 
     public void SetData(string title, string unit, IEnumerable<BatchMeasurement> source)
     {
-        var rows = source.ToArray();
-        _title = title; _unit = unit; _total = rows.Length; _passed = rows.Count(row => row.CountsAsOk);
-        _ng = rows.Count(row => row.CountsAsNg);
-        _unmeasured = rows.Count(row => row.IsUnmeasured);
-        _distribution = MeasurementDistribution.Calculate(rows.Where(row => row.HasDistributionSample).Select(row => row.Value!.Value));
+        var summary = new MeasurementSummary();
+        foreach (var row in source) summary.Add(row);
+        SetSummary(title, unit, summary);
+    }
+
+    public void SetSummary(string title, string unit, MeasurementSummary? summary)
+    {
+        if (ReferenceEquals(_summary, summary) && _total == (summary?.Count ?? 0) && _title == title && _unit == unit) return;
+        _summary = summary;
+        _title = title; _unit = unit;
+        _total = summary?.Count ?? 0; _passed = summary?.Passed ?? 0;
+        _ng = summary?.Ng ?? 0; _unmeasured = summary?.Unmeasured ?? 0;
+        _distribution = summary?.Distribution ?? MeasurementDistribution.Calculate([]);
         InvalidateVisual();
     }
 
@@ -82,15 +91,16 @@ public sealed class MeasurementDistributionChart : FrameworkElement
         }
         Label($"均值 {d.Mean:G6} {_unit}   ·   标准差 {d.StandardDeviation:G5} {_unit}", UseQueryStyle ? 18 : 14, 55, UseQueryStyle ? accent : Muted, UseQueryStyle ? 12 : 11);
         if (!double.IsFinite(d.StandardDeviation)) { Label("数值跨度过大，无法拟合", 24, h / 2, Muted); return; }
-        var low = Math.Min(d.Minimum, d.Mean - 3.5 * d.StandardDeviation);
-        var high = Math.Max(d.Maximum, d.Mean + 3.5 * d.StandardDeviation);
+        var low = d.HistogramCounts is not null ? d.HistogramLow : Math.Min(d.Minimum, d.Mean - 3.5 * d.StandardDeviation);
+        var high = d.HistogramCounts is not null ? d.HistogramHigh : Math.Max(d.Maximum, d.Mean + 3.5 * d.StandardDeviation);
         if (low == high) { var padding = Math.Max(Math.Abs(low) * 0.05, 0.001); low -= padding; high += padding; }
         var span = high - low;
         if (!double.IsFinite(span) || span <= 0) return;
         var plot = new Rect(UseQueryStyle ? 56 : 45, UseQueryStyle ? 91 : 83, Math.Max(1, w - (UseQueryStyle ? 82 : 65)), Math.Max(1, h - (UseQueryStyle ? 140 : 123)));
-        var bins = Math.Clamp((int)Math.Ceiling(Math.Sqrt(d.Count)), 5, 20);
-        var counts = new int[bins];
-        foreach (var value in d.Values) counts[Math.Clamp((int)((value - low) / span * bins), 0, bins - 1)]++;
+        var bins = d.HistogramCounts?.Length ?? Math.Clamp((int)Math.Ceiling(Math.Sqrt(d.Count)), 5, 20);
+        var counts = d.HistogramCounts ?? new int[bins];
+        if (d.HistogramCounts is null)
+            foreach (var value in d.Values) counts[Math.Clamp((int)((value - low) / span * bins), 0, bins - 1)]++;
         var binWidth = span / bins;
         var canFit = d.Count >= 2 && d.StandardDeviation > 0;
         var peak = canFit ? d.Count * binWidth / (d.StandardDeviation * Math.Sqrt(2 * Math.PI)) : 0;

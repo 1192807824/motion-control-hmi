@@ -28,6 +28,16 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--storage-soak", var storedCount])
+        {
+            RunStorageSoak(int.Parse(storedCount));
+            return;
+        }
+        if (args is ["--memory-soak", var count])
+        {
+            RunMemorySoak(int.Parse(count));
+            return;
+        }
         if (args is ["--create-demo"])
         {
             CreateDemo();
@@ -85,6 +95,7 @@ internal static partial class Program
         Require(statistics.Count == 3 && statistics.Mean == 2 && statistics.StandardDeviation == 1, "Statistics incorrect");
         Require(MeasurementDistribution.Calculate([7, 7]).StandardDeviation == 0, "Constant data failed");
         Require(MeasurementDistribution.Calculate([]).Count == 0, "Empty data failed");
+        CheckIncrementalStatistics();
         Console.WriteLine("PASS: SQLite signature, JSON migration, durable restart, batch isolation, concurrent commits, validation and sample statistics.");
 
         _ = new Application();
@@ -137,6 +148,9 @@ internal static partial class Program
         result = Invoke(null, "ClassifySM7110Measurement", sm, "BIN2", range)!;
         Wait((Task)Invoke(page, "SaveStationMeasurementAsync", 6, product, result, 1)!);
         var captured = store.ReadBatch("QA-CAPTURE");
+        var restored = store.ReadBatchStatistics("QA-CAPTURE");
+        Require(restored.Count == captured.Count && restored.Find(5, "E4981A", "C", "nF")!.Count == 1 &&
+            restored.Find(6, "SM7110", "R", "GΩ")!.Count == 3, "Streamed batch summary lost records or station grouping");
         Require(captured.Count == 4 && captured[0].Attempts == 2, "Retries duplicated records");
         Require(captured[0].Value == 1 && captured[0].DissipationFactor == 0.02, "E4981A nF/D capture failed");
         Require(captured[1].Value == 52 && captured[1].LowerLimit == 50 && captured[1].Unit == "GΩ" && captured[1].StationPassed,
@@ -158,13 +172,13 @@ internal static partial class Program
         Set(page, "_batchStore", blockedStore);
         try { Wait((Task)Invoke(page, "SaveStationMeasurementAsync", 6, product, result, 1)!); throw new Exception("Write failure hidden"); }
         catch (InvalidOperationException ex) when (ex.Message.Contains("数据保存失败")) { }
-        Require(Field<List<BatchMeasurement>>(page, "_batchMeasurements").Count == 4, "Failed write counted as saved");
+        Require(Field<BatchMeasurementStatistics>(page, "_batchStatistics").Count == 4, "Failed write counted as saved");
         Set(page, "_batchStore", store);
         Console.WriteLine("PASS: write failure propagates and unsaved records are not counted.");
 
         // Render the actual home view with synthetic records only; never connect hardware.
         var random = new Random(42);
-        var preview = Field<List<BatchMeasurement>>(page, "_batchMeasurements");
+        var preview = Field<BatchMeasurementStatistics>(page, "_batchStatistics");
         for (var i = 0; i < 150; i++)
         {
             var z = Math.Sqrt(-2 * Math.Log(random.NextDouble())) * Math.Cos(2 * Math.PI * random.NextDouble());
@@ -192,8 +206,8 @@ internal static partial class Program
     {
         T QueryField<T>(string name) => (T)typeof(BatchQueryPage).GetField(name, Flags)!.GetValue(page)!;
         Task Query() => (Task)typeof(BatchQueryPage).GetMethod("QueryAsync", Flags)!.Invoke(page, null)!;
-        Task<IReadOnlyList<BatchMeasurement>> ExportRows(string batch) =>
-            (Task<IReadOnlyList<BatchMeasurement>>)typeof(BatchQueryPage).GetMethod("ReadExportRowsAsync", Flags)!.Invoke(page, [batch])!;
+        Task<int> ExportBatch(string batch, string path) =>
+            (Task<int>)typeof(BatchQueryPage).GetMethod("ExportBatchAsync", Flags)!.Invoke(page, [batch, path])!;
         void Update() => typeof(BatchQueryPage).GetMethod("UpdateCommands", Flags)!.Invoke(page, null);
         var input = QueryField<TextBox>("_batch");
         var export = QueryField<Button>("_export");
@@ -201,9 +215,9 @@ internal static partial class Program
             "Query must enable exporting the full captured batch");
         store.Append(captured[0] with { Id = Guid.NewGuid() });
         Require(QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 4, "Query snapshot changed under export");
-        IReadOnlyList<BatchMeasurement>? exportRows = null;
-        Wait(ExportRows("QA-CAPTURE").ContinueWith(task => exportRows = task.GetAwaiter().GetResult(), TaskScheduler.Default));
-        Require(exportRows!.Count == 5, "Batch export did not reload every current row from SQLite");
+        var exportTask = ExportBatch("QA-CAPTURE", Path.Combine(root, "streamed-current-batch.csv"));
+        Wait(exportTask);
+        Require(exportTask.Result == 5, "Streaming export did not read every current row from SQLite");
         Wait(Query());
         Require(QueryField<IReadOnlyList<BatchMeasurement>>("_records").Count == 5, "Refresh must include newly captured records");
         input.Text = "QA-2"; Update();

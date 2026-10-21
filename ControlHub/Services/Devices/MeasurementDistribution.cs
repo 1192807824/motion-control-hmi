@@ -3,6 +3,9 @@ namespace ControlHub.Services.Devices;
 public sealed record MeasurementDistribution(int Count, double Mean, double StandardDeviation,
     double Minimum, double Maximum, double[] Values)
 {
+    public double HistogramLow { get; init; }
+    public double HistogramHigh { get; init; }
+    public int[]? HistogramCounts { get; init; }
     public static MeasurementDistribution Calculate(IEnumerable<double> source)
     {
         var values = source.Where(double.IsFinite).ToArray();

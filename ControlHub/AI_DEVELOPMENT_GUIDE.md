@@ -238,6 +238,30 @@ When adding real device/runtime data:
 
 ## Build and verification
 
+### Long-running batch memory
+
+- Production records are committed to SQLite before updating displayed totals.
+  Do not cache complete batches or all numeric samples in `HomePage`.
+- `BatchMeasurementStatistics` keeps counts, Welford sample statistics, and 16
+  histogram counters per station/instrument/mode/unit. Expanded ranges merge adjacent
+  bins at twice the width; the original individual readings remain in SQLite.
+  Memory for the live chart must not grow with the number of measurements.
+- Restore batch statistics with a streaming reader only on batch load/restart.
+  Per-result updates must be incremental; never copy or rescan the entire batch.
+- Query details are paged (at most 500 records); metrics and charts cover the
+  entire batch. Export streams every database record directly to an atomic CSV
+  temporary file, independent of the currently displayed page.
+- Only raw receive-log previews may be coalesced/dropped under UI backpressure.
+  Never apply the lossy preview buffer to instrument commands, parsed responses,
+  stored measurements, disconnect handling or alarms.
+- Production diagnostics rotate three log segments and record process/GC memory,
+  native GUI handles and batch counts. An OOM throw site alone does not identify
+  the retaining object or prove that a particular allocation caused the leak.
+- Hardware-free checks: `BatchMeasurementChecks` (including `--memory-soak 30000`
+  and `--storage-soak 30000`), `TestStationFlowChecks`, and
+  `VisionWindowResponsivenessChecks`. Soaks do not validate vendor native DLLs
+  or the deployed machine's rendering/driver behavior.
+
 Normal solution build:
 
 ```powershell

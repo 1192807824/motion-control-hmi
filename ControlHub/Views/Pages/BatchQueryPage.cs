@@ -30,6 +30,10 @@ public sealed partial class BatchQueryPage : UserControl
     private IReadOnlyList<BatchMeasurement> _records = [];
     private string _queriedBatch = "";
     private bool _busy;
+    private const int PageSize = 500;
+    private int _pageIndex, _totalRecords;
+    private readonly Button _previous = new() { Content = "上一页", Margin = new Thickness(6, 0, 0, 0) };
+    private readonly Button _next = new() { Content = "下一页", Margin = new Thickness(6, 0, 0, 0) };
 
     public BatchQueryPage() : this(new BatchMeasurementStore()) { }
     public BatchQueryPage(BatchMeasurementStore store)
@@ -39,6 +43,8 @@ public sealed partial class BatchQueryPage : UserControl
 
         Content = BuildView();
         _query.Click += async (_, _) => await QueryAsync();
+        _previous.Click += async (_, _) => await QueryPageAsync(_pageIndex - 1);
+        _next.Click += async (_, _) => await QueryPageAsync(_pageIndex + 1);
         _export.Click += async (_, _) => await ExportAsync();
         _clear.Click += async (_, _) =>
         {
@@ -61,38 +67,42 @@ public sealed partial class BatchQueryPage : UserControl
         else _batch.Focus();
     }
 
-    private async Task QueryAsync()
+    private Task QueryAsync() => QueryPageAsync(0);
+
+    private async Task QueryPageAsync(int pageIndex)
     {
         if (_busy) return;
         var version = ++_queryVersion;
         _busy = true; _records = []; _queriedBatch = "";
-        UpdateSummary([]);
+        _totalRecords = 0;
+        UpdateSummary(new(), 0);
         UpdateCommands();
         _table.ItemsSource = null; _charts.Children.Clear();
         try
         {
             var batch = BatchMeasurementStore.NormalizeBatchNumber(_batch.Text);
             _status.Text = $"正在读取批次 {batch}…";
-            var rows = await Task.Run(() => _store.ReadBatch(batch));
+            var result = await Task.Run(() => _store.ReadBatchPage(batch, Math.Max(0, pageIndex), PageSize));
             if (version != _queryVersion) return;
+            var rows = result.Rows;
             _records = rows; _queriedBatch = batch;
-            UpdateSummary(rows);
+            _pageIndex = result.PageIndex; _totalRecords = result.Statistics.Count;
+            UpdateSummary(result.Statistics, result.Products);
             _table.ItemsSource = rows;
-            foreach (var group in rows.GroupBy(row => (row.StationNumber, row.Instrument, row.MeasurementMode, row.Unit))
-                         .OrderBy(group => group.Key.StationNumber))
+            foreach (var group in result.Statistics.Groups.OrderBy(group => group.Key.Station))
             {
                 var chart = new MeasurementDistributionChart { Margin = new Thickness(4, 0, 4, 0), MinWidth = 360, UseQueryStyle = true,
                     QueryAccent = group.Key.Instrument == "SM7110" ? Color.FromRgb(91, 214, 188) : Color.FromRgb(103, 185, 255) };
-                var quantity = group.Key.MeasurementMode == "C" ? "电容分布" : group.Key.MeasurementMode == "R" ? "电阻分布" : group.Key.MeasurementMode + " 分布";
-                chart.SetData($"{quantity}   /   工位 {group.Key.StationNumber} · {group.Key.Instrument}", group.Key.Unit, group);
+                var quantity = group.Key.Mode == "C" ? "电容分布" : group.Key.Mode == "R" ? "电阻分布" : group.Key.Mode + " 分布";
+                chart.SetSummary($"{quantity}   /   工位 {group.Key.Station} · {group.Key.Instrument}", group.Value.Unit, group.Value);
                 _charts.Children.Add(chart);
             }
-            _status.Text = rows.Count == 0 ? $"批次 {batch} 暂无采集记录" : $"已更新 {DateTime.Now:HH:mm:ss}  ·  {batch}  ·  导出包含本次查询的全部记录";
+            _status.Text = rows.Count == 0 ? $"批次 {batch} 暂无采集记录" : $"已更新 {DateTime.Now:HH:mm:ss}  ·  {batch}  ·  每页 {PageSize} 条，统计和导出包含整个批次";
             if (rows.Count == 0) ShowEmptyCharts();
         }
         catch (Exception exception)
         {
-            _records = []; _queriedBatch = ""; UpdateSummary([]); ShowEmptyCharts(); _status.Text = $"查询失败：{exception.Message}";
+            _records = []; _queriedBatch = ""; _totalRecords = 0; UpdateSummary(new(), 0); ShowEmptyCharts(); _status.Text = $"查询失败：{exception.Message}";
             AlarmHistory.Record("数据查询", "DATA-QUERY", _status.Text);
         }
         finally { _busy = false; UpdateCommands(); }
@@ -103,6 +113,9 @@ public sealed partial class BatchQueryPage : UserControl
         _clear.IsEnabled = !_busy;
         _query.IsEnabled = !_busy && !string.IsNullOrWhiteSpace(_batch.Text); _batch.IsEnabled = !_busy;
         _export.IsEnabled = !_busy && !string.IsNullOrWhiteSpace(_batch.Text);
+        var sameBatch = _batch.Text.Trim() == _queriedBatch;
+        _previous.IsEnabled = !_busy && sameBatch && _pageIndex > 0;
+        _next.IsEnabled = !_busy && sameBatch && (_pageIndex + 1) * PageSize < _totalRecords;
     }
 
     private void OnDataCleared(string path)
@@ -114,8 +127,8 @@ public sealed partial class BatchQueryPage : UserControl
     private void ResetClearedResults()
     {
         ++_queryVersion;
-        _records = []; _queriedBatch = ""; _table.ItemsSource = null;
-        _charts.Children.Clear(); ShowEmptyCharts(); UpdateSummary([]);
+        _records = []; _queriedBatch = ""; _totalRecords = 0; _pageIndex = 0; _table.ItemsSource = null;
+        _charts.Children.Clear(); ShowEmptyCharts(); UpdateSummary(new(), 0); UpdateCommands();
         _status.Text = "库内全部批次和测量记录已清空。";
     }
 
@@ -147,10 +160,9 @@ public sealed partial class BatchQueryPage : UserControl
         _busy = true; UpdateCommands();
         try
         {
-            _status.Text = $"正在读取批次 {batch} 的全部数据…";
-            var rows = await ReadExportRowsAsync(batch);
+            var hasRows = await Task.Run(() => _store.EnumerateBatch(batch).Any());
             if (version != _queryVersion) throw new InvalidOperationException("数据已清空，请重新查询后导出。");
-            if (rows.Count == 0)
+            if (!hasRows)
             {
                 _status.Text = $"批次 {batch} 暂无可导出的采集记录";
                 return;
@@ -163,8 +175,9 @@ public sealed partial class BatchQueryPage : UserControl
                 return;
             }
             if (version != _queryVersion) throw new InvalidOperationException("数据已清空，请重新查询后导出。");
-            await Task.Run(() => BatchMeasurementCsvExporter.Export(dialog.FileName, rows));
-            _status.Text = $"批次 {batch} · 已导出全部 {rows.Count} 条记录\n{dialog.FileName}";
+            _status.Text = $"正在导出批次 {batch} 的全部数据…";
+            var count = await ExportBatchAsync(batch, dialog.FileName);
+            _status.Text = $"批次 {batch} · 已导出全部 {count} 条记录\n{dialog.FileName}";
         }
         catch (Exception exception)
         {
@@ -174,6 +187,6 @@ public sealed partial class BatchQueryPage : UserControl
         finally { _busy = false; UpdateCommands(); }
     }
 
-    private Task<IReadOnlyList<BatchMeasurement>> ReadExportRowsAsync(string batch) =>
-        Task.Run(() => _store.ReadBatch(batch));
+    private Task<int> ExportBatchAsync(string batch, string path) =>
+        Task.Run(() => BatchMeasurementCsvExporter.Export(path, _store.EnumerateBatch(batch)));
 }

@@ -167,11 +167,67 @@ public sealed class BatchMeasurementStore
         return result;
     }
 
-    public IReadOnlyList<BatchMeasurement> ReadBatch(string batch)
+    public IReadOnlyList<BatchMeasurement> ReadBatch(string batch) => EnumerateBatch(batch).ToList();
+
+    public BatchMeasurementStatistics ReadBatchStatistics(string batch)
     {
         batch = NormalizeBatchNumber(batch);
         using var connection = OpenConnection(readOnly: true);
+        return ReadStatistics(connection, null, batch);
+    }
+
+    public BatchMeasurementPage ReadBatchPage(string batch, int pageIndex, int pageSize = 500)
+    {
+        batch = NormalizeBatchNumber(batch);
+        if (pageIndex < 0 || pageSize is < 1 or > 500) throw new ArgumentOutOfRangeException(nameof(pageIndex));
+        using var connection = OpenConnection(readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        var statistics = ReadStatistics(connection, transaction, batch);
+        pageIndex = Math.Min(pageIndex, Math.Max(0, (statistics.Count - 1) / pageSize));
+        var rows = ReadRows(connection, transaction, batch, pageIndex * pageSize, pageSize).ToList();
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT COUNT(DISTINCT product_id) FROM measurements WHERE batch_number=$batch;";
+        command.Parameters.AddWithValue("$batch", batch);
+        var products = Convert.ToInt32(command.ExecuteScalar());
+        return new(rows, statistics, products, pageIndex);
+    }
+
+    public IEnumerable<BatchMeasurement> EnumerateBatch(string batch)
+    {
+        batch = NormalizeBatchNumber(batch);
+        using var connection = OpenConnection(readOnly: true);
+        foreach (var row in ReadRows(connection, null, batch)) yield return row;
+    }
+
+    private static BatchMeasurementStatistics ReadStatistics(SqliteConnection connection, SqliteTransaction? transaction, string batch)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        // Load only classification/statistic fields, one row at a time. Descriptions,
+        // raw responses and identities are needed only by paged details/export.
+        command.CommandText = """
+            SELECT station_number, instrument, measurement_mode, unit, value,
+                   dissipation_factor, valid_reading, station_passed, instrument_status
+            FROM measurements WHERE batch_number=$batch ORDER BY measured_at_utc_ticks, id;
+            """;
+        command.Parameters.AddWithValue("$batch", batch);
+        using var reader = command.ExecuteReader();
+        var statistics = new BatchMeasurementStatistics();
+        while (reader.Read()) statistics.Add(new BatchMeasurement
+        {
+            StationNumber = reader.GetInt32(0), Instrument = reader.GetString(1), MeasurementMode = reader.GetString(2),
+            Unit = reader.GetString(3), Value = NullableDouble(reader, 4), DissipationFactor = NullableDouble(reader, 5),
+            ValidReading = reader.GetInt32(6) != 0, StationPassed = reader.GetInt32(7) != 0, InstrumentStatus = reader.GetInt32(8)
+        });
+        return statistics;
+    }
+
+    private static IEnumerable<BatchMeasurement> ReadRows(SqliteConnection connection, SqliteTransaction? transaction,
+        string batch, int offset = 0, int limit = -1)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT id, batch_number, product_id, measured_at_utc_ticks, measured_at_offset_minutes,
                    station_number, instrument, measurement_mode, value, unit, dissipation_factor,
@@ -179,13 +235,13 @@ public sealed class BatchMeasurementStore
                    description, raw_response, elapsed_seconds, timed_out, attempts,
                    lower_limit, upper_limit, maximum_test_seconds
             FROM measurements WHERE batch_number = $batch
-            ORDER BY measured_at_utc_ticks, id;
+            ORDER BY measured_at_utc_ticks, id LIMIT $limit OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$batch", batch);
+        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$offset", offset);
         using var reader = command.ExecuteReader();
-        var result = new List<BatchMeasurement>();
-        while (reader.Read()) result.Add(ReadMeasurement(reader));
-        return result;
+        while (reader.Read()) yield return ReadMeasurement(reader);
     }
 
     private void InitializeDatabase()
@@ -392,3 +448,6 @@ public sealed class BatchMeasurementStore
     private static double? NullableDouble(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
     private static Guid ParseGuid(string value) => Guid.TryParseExact(value, "N", out var guid) || Guid.TryParse(value, out guid) ? guid : Guid.Empty;
 }
+
+public sealed record BatchMeasurementPage(IReadOnlyList<BatchMeasurement> Rows,
+    BatchMeasurementStatistics Statistics, int Products, int PageIndex);

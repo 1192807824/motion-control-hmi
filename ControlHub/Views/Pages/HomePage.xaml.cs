@@ -2210,7 +2210,7 @@ public partial class HomePage : UserControl
             // 标记连续生产已进入运行状态。
             _startSequenceRunning = true;
             _productionDiagnostics = new ProductionDiagnosticSession(Dispatcher, () =>
-                $"paused={_productionPauseRequested};stop={_productionStopRequested};" +
+                $"paused={_productionPauseRequested};stop={_productionStopRequested};batch_records={_batchStatistics.Count};" +
                 (_motionController?.CaptureProductionDiagnosticState() ?? "no motion controller"));
             ResetUphTracking();
 

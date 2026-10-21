@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using ControlHub.Services.Vision;
 using ControlHub.Services.Motion;
+using ControlHub.Services.Diagnostics;
 
 internal static class Program
 {
@@ -30,6 +31,8 @@ internal static class Program
             {
                 await CheckAsync();
                 await CheckDiagnosticsAsync();
+                await CheckLogRotationAsync();
+                await CheckLogBufferAsync();
                 Console.WriteLine("PASS: blocked vision process does not block dispatcher continuations; duplicate layouts suppressed; latest parent size applied; failed posts retried. No camera or motion card opened.");
             }
             catch (Exception exception)
@@ -223,7 +226,57 @@ internal static class Program
             .Any(match => long.Parse(match.Groups[1].Value) >= 700), "Records blocked dispatcher from independent timer");
         Require(lines.Contains("axis=3,pos=50,target=100") && lines.Contains("build_mvid="),
             "Records cached axis feedback and exact build identity");
+        Require(lines.Contains("[MEMORY]") && lines.Contains("private_bytes=") && lines.Contains("managed_bytes=") &&
+            lines.Contains("handles=") && lines.Contains("gdi=") && lines.Contains("process_bits="),
+            "Records process memory, GC heap and native handles without forcing GC");
         Console.WriteLine("PASS: diagnostic log identifies dispatcher stalls and hidden task failures while camera is pending: " + session.LogPath);
+    }
+
+    private static async Task CheckLogRotationAsync()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "production-rotation-" + Guid.NewGuid().ToString("N"));
+        var session = new ProductionDiagnosticSession(Dispatcher.CurrentDispatcher, () => "idle", directory, 1024);
+        // Stay below queue capacity while forcing multiple file rotations.
+        for (var i = 0; i < 100; i++) session.Write("TEST", $"entry={i} " + new string('x', 100));
+        session.Write("TEST", "last-entry-after-many-rotations");
+        session.Dispose();
+        await session.Completion;
+        Require(session.WriteError is null, "Rotation must keep writer alive");
+        var last = File.ReadAllText(session.LogPath);
+        Require(last.Contains("last-entry-after-many-rotations") && last.Contains("build_mvid="),
+            "Long runs retain latest events and build identity instead of stopping at first file limit");
+        Require(Directory.GetFiles(directory).Length == 3, "Log rotation retains exactly three segments");
+        Console.WriteLine("PASS: production diagnostics rotate and continue after multiple log limits.");
+    }
+
+    private static async Task CheckLogBufferAsync()
+    {
+        var received = new List<string>();
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var posts = 0;
+        DispatcherHookEventHandler posted = (_, _) => posts++;
+        dispatcher.Hooks.OperationPosted += posted;
+        using var buffer = new DispatcherLogBuffer(dispatcher, received.Add, 300);
+        try
+        {
+            // No dispatcher pumping: emulate a blocked production UI receiving a burst.
+            for (var i = 0; i < 30_000; i++) buffer.Post(i.ToString(CultureInfo.InvariantCulture));
+            Require(posts == 1 && received.Count == 0, "A receive burst schedules only one pending UI operation");
+        }
+        finally { dispatcher.Hooks.OperationPosted -= posted; }
+        await dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        Require(received.Count == 301 && received[0].Contains("29700") && received[1] == "29700" && received[^1] == "29999",
+            "Bounded queue reports omitted previews and delivers the newest 300 in order");
+        buffer.Post(new string('x', 100_000));
+        await dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        Require(received[^1].Length < 2100 && received[^1].Contains("显示已截断"), "Bound individual preview length");
+        var before = received.Count;
+        buffer.Post("pending-at-close");
+        buffer.Dispose();
+        buffer.Post("after-close");
+        await dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        Require(received.Count == before, "Closing releases queued previews and suppresses later delivery");
+        Console.WriteLine("PASS: 30,000 receive previews use one pending dispatcher callback; bounded rows/length; shutdown cleanup.");
     }
 
     private static (int, int) Size(IntPtr window)

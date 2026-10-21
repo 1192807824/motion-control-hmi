@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ControlHub.Services.Devices;
+using ControlHub.Services.Diagnostics;
 using ControlHub.Services.Persistence;
 using ControlHub.ViewModels;
 
@@ -68,6 +69,7 @@ public partial class ConnectionConfigPage : UserControl
     private readonly SemaphoreSlim _protocolWriteLock = new(1, 1);
     private readonly DispatcherTimer _brightnessSendTimer;
     private readonly HashSet<ListBox> _pendingLogScrolls = [];
+    private readonly DispatcherLogBuffer _feederReceiveLog, _serialReceiveLog;
     private bool _closed;
     private bool _feederClosing;
     private int? _lastHopperVibrationFrequency;
@@ -103,6 +105,8 @@ public partial class ConnectionConfigPage : UserControl
         };
         _brightnessSendTimer.Tick += BrightnessSendTimer_Tick;
         InitializeComponent();
+        _feederReceiveLog = new(Dispatcher, message => { if (!_closed) AddLog(message); });
+        _serialReceiveLog = new(Dispatcher, message => { if (!_closed) AddSerialLog(message); });
         _tcpClient.DataReceived += TcpClient_DataReceived;
         _tcpClient.ConnectionClosed += TcpClient_ConnectionClosed;
         _generalTcpClient.ConnectionClosed += GeneralTcpClient_ConnectionClosed;
@@ -319,6 +323,8 @@ public partial class ConnectionConfigPage : UserControl
         _tcpClient.ConnectionClosed -= TcpClient_ConnectionClosed;
         _generalTcpClient.ConnectionClosed -= GeneralTcpClient_ConnectionClosed;
         _serialClient.ResponseReceived -= SerialClient_ResponseReceived;
+        _feederReceiveLog.Dispose();
+        _serialReceiveLog.Dispose();
         _serialClient.ConnectionClosed -= SerialClient_ConnectionClosed;
         _tcpClient.Dispose();
         _generalTcpClient.Dispose();
@@ -2193,15 +2199,10 @@ public partial class ConnectionConfigPage : UserControl
 
     private void TcpClient_DataReceived(byte[] payload)
     {
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (Settings is not { } settings)
-            {
-                return;
-            }
-
-            AddLog($"RX [ASCII]  {FormatPayload(payload)}");
-        }));
+        // Only the on-screen preview is bounded; protocol processing keeps the original payload.
+        var text = Encoding.ASCII.GetString(payload, 0, Math.Min(payload.Length, 2048))
+            .Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+        _feederReceiveLog.Post($"RX [ASCII]  {text}" + (payload.Length > 2048 ? "…（显示已截断）" : ""));
     }
 
     private void TcpClient_ConnectionClosed(Exception? exception)
@@ -2236,8 +2237,7 @@ public partial class ConnectionConfigPage : UserControl
 
     private void SerialClient_ResponseReceived(string response)
     {
-        Dispatcher.BeginInvoke(new Action(() =>
-            AddSerialLog($"RX [SCPI]  {response}")));
+        _serialReceiveLog.Post($"RX [SCPI]  {(response.Length > 2048 ? response[..2048] + "…（显示已截断）" : response)}");
     }
 
     private void SerialClient_ConnectionClosed(Exception? exception)

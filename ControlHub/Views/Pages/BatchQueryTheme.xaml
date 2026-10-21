@@ -113,18 +113,18 @@
             <TextBlock x:Name="Label" Text="OK" Foreground="#65D8AE" FontWeight="SemiBold" FontSize="11" />
         </Border>
         <DataTemplate.Triggers>
-            <DataTrigger Binding="{Binding StationPassed}" Value="False"><Setter TargetName="Pill" Property="Background" Value="#482E39" />
+            <DataTrigger Binding="{Binding StationPassed, Mode=OneTime}" Value="False"><Setter TargetName="Pill" Property="Background" Value="#482E39" />
                 <Setter TargetName="Label" Property="Foreground" Value="#FF939E" /><Setter TargetName="Label" Property="Text" Value="NG" /></DataTrigger>
-            <DataTrigger Binding="{Binding IsUnmeasured}" Value="True"><Setter TargetName="Pill" Property="Background" Value="#453C25" />
+            <DataTrigger Binding="{Binding IsUnmeasured, Mode=OneTime}" Value="True"><Setter TargetName="Pill" Property="Background" Value="#453C25" />
                 <Setter TargetName="Label" Property="Foreground" Value="#F2B544" /><Setter TargetName="Label" Property="Text" Value="未测到" /></DataTrigger>
         </DataTemplate.Triggers>
     </DataTemplate>
     <DataTemplate x:Key="QueryProductBadge">
         <TextBlock x:Name="Result" Text="截至本站 OK" Foreground="#72CDB2" FontSize="12" />
-        <DataTemplate.Triggers><DataTrigger Binding="{Binding ProductPassedSoFar}" Value="False">
+        <DataTemplate.Triggers><DataTrigger Binding="{Binding ProductPassedSoFar, Mode=OneTime}" Value="False">
             <Setter TargetName="Result" Property="Text" Value="产品 NG" /><Setter TargetName="Result" Property="Foreground" Value="#FF939E" />
         </DataTrigger>
-        <DataTrigger Binding="{Binding IsUnmeasured}" Value="True">
+        <DataTrigger Binding="{Binding IsUnmeasured, Mode=OneTime}" Value="True">
             <Setter TargetName="Result" Property="Text" Value="未测到" /><Setter TargetName="Result" Property="Foreground" Value="#F2B544" />
         </DataTrigger></DataTemplate.Triggers>
     </DataTemplate>

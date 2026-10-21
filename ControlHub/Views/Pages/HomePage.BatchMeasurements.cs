@@ -11,7 +11,7 @@ namespace ControlHub.Views.Pages;
 public partial class HomePage
 {
     private readonly BatchMeasurementStore _batchStore = new();
-    private readonly List<BatchMeasurement> _batchMeasurements = [];
+    private BatchMeasurementStatistics _batchStatistics = new();
     private string _activeBatchNumber = "";
     private int _batchLoadVersion;
 
@@ -20,7 +20,7 @@ public partial class HomePage
         if (!string.Equals(path, _batchStore.DatabasePath, StringComparison.OrdinalIgnoreCase)) return;
         if (_startSequenceRunning) return; // A new collection started after the clear already loaded fresh data.
         ++_batchLoadVersion;
-        _batchMeasurements.Clear();
+        _batchStatistics.Clear();
         BatchCollectionStatusText.Text = "全部测量记录已清空";
         RefreshDistributionCharts();
     }
@@ -30,7 +30,7 @@ public partial class HomePage
         if (BatchCollectionStatusText is null || _startSequenceRunning || BatchNumberTextBox.Text.Trim() == _activeBatchNumber) return;
         ++_batchLoadVersion;
         _activeBatchNumber = "";
-        _batchMeasurements.Clear();
+        _batchStatistics.Clear();
         BatchCollectionStatusText.Text = "输入批次号后离开输入框，即可加载该批次数据";
         RefreshDistributionCharts();
     }
@@ -47,10 +47,9 @@ public partial class HomePage
         try
         {
             var batch = BatchMeasurementStore.NormalizeBatchNumber(BatchNumberTextBox.Text);
-            var records = await Task.Run(() => _batchStore.ReadBatch(batch));
+            var records = await Task.Run(() => _batchStore.ReadBatchStatistics(batch));
             if (version != _batchLoadVersion) return;
-            _batchMeasurements.Clear();
-            _batchMeasurements.AddRange(records);
+            _batchStatistics = records;
             _activeBatchNumber = batch;
             BatchCollectionStatusText.Text = $"批次 {batch} · 已保存 {records.Count} 条";
             RefreshDistributionCharts();
@@ -67,11 +66,10 @@ public partial class HomePage
         var batch = BatchMeasurementStore.NormalizeBatchNumber(BatchNumberTextBox.Text);
         ++_batchLoadVersion; // Discard any preview query still completing.
         _batchStore.PrepareBatch(batch); // Fail before motion if the data directory cannot be written.
-        var records = _batchStore.ReadBatch(batch);
+        var records = _batchStore.ReadBatchStatistics(batch);
         BatchNumberTextBox.Text = batch;
         _activeBatchNumber = batch;
-        _batchMeasurements.Clear();
-        _batchMeasurements.AddRange(records);
+        _batchStatistics = records;
         BatchCollectionStatusText.Text = $"批次 {batch} · 已保存 {records.Count} 条";
         RefreshDistributionCharts();
     }
@@ -108,9 +106,9 @@ public partial class HomePage
         {
             throw new InvalidOperationException($"批次 {record.BatchNumber} / 工位{station} 数据保存失败，停止生产：{exception.Message}", exception);
         }
-        _batchMeasurements.Add(record);
+        _batchStatistics.Add(record);
         state.SetMeasurement(result);
-        BatchCollectionStatusText.Text = $"批次 {_activeBatchNumber} · 已保存 {_batchMeasurements.Count} 条";
+        BatchCollectionStatusText.Text = $"批次 {_activeBatchNumber} · 已保存 {_batchStatistics.Count} 条";
         RefreshDistributionCharts();
         SetTestStationRuntimeDisplay(
             station,
@@ -136,11 +134,11 @@ public partial class HomePage
             if (controls.EnabledToggle.IsChecked != true || instrument == TestStationInstrument.None) continue;
             var name = FormatTestStationInstrument(instrument);
             var mode = instrument == TestStationInstrument.E4981A ? "C" : SM7110LimitModeComboBox.SelectedValue as string ?? "R";
-            var records = _batchMeasurements.Where(row => row.StationNumber == station && row.Instrument == name && row.MeasurementMode == mode);
             var unit = instrument == TestStationInstrument.E4981A ? "nF" : new SM7110MeasurementResult(0, 0, mode, "").DisplayUnit;
+            var summary = _batchStatistics.Find(station, name, mode, unit);
             if (!existingCharts.TryGetValue(station, out var chart))
                 chart = new MeasurementDistributionChart { Tag = station, Margin = new Thickness(0, 3, 0, 3), MinHeight = 170 };
-            chart.SetData($"工位 {station} · {name} · {(mode == "C" ? "电容" : mode == "R" ? "最终电阻" : mode)}", unit, records);
+            chart.SetSummary($"工位 {station} · {name} · {(mode == "C" ? "电容" : mode == "R" ? "最终电阻" : mode)}", unit, summary);
             activeCharts.Add(chart);
         }
         if (activeCharts.Count == 0)

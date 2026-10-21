@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Runtime.InteropServices;
 using System.Windows.Threading;
 
 namespace ControlHub.Services.Motion;
@@ -20,21 +21,27 @@ internal sealed class ProductionDiagnosticSession : IDisposable
     private int _uiBeatPending;
     private int _disposed;
     private string _uiState = "not sampled yet";
+    private long _nextMemorySample;
+    private int _heartbeatRunning;
+    private readonly long _maxLogCharacters;
 
     public string LogPath { get; }
     public string? WriteError { get; private set; }
 
-    public ProductionDiagnosticSession(Dispatcher dispatcher, Func<string> captureUiState, string? directory = null)
+    public ProductionDiagnosticSession(Dispatcher dispatcher, Func<string> captureUiState, string? directory = null,
+        long maxLogCharacters = 8_000_000)
     {
         _dispatcher = dispatcher;
         _captureUiState = captureUiState;
+        _maxLogCharacters = Math.Max(1024, maxLogCharacters);
         LogPath = Path.Combine(directory ?? Path.Combine(AppContext.BaseDirectory, "logs", "production"),
             $"production-{DateTime.Now:yyyyMMdd-HHmmss-fff}-{Environment.ProcessId}.log");
         // One background writer: production never opens, flushes or waits for a log file.
         _writer = Task.Factory.StartNew(WriteLines, CancellationToken.None,
             TaskCreationOptions.LongRunning, TaskScheduler.Default);
         Write("SESSION", $"START assembly={typeof(ProductionDiagnosticSession).Assembly.Location} " +
-            $"build_mvid={typeof(ProductionDiagnosticSession).Module.ModuleVersionId}");
+            $"build_mvid={typeof(ProductionDiagnosticSession).Module.ModuleVersionId} " +
+            $"process_bits={IntPtr.Size * 8} runtime={Environment.Version}");
         _timer = new System.Threading.Timer(Heartbeat, null, 0, 500);
     }
 
@@ -70,6 +77,18 @@ internal sealed class ProductionDiagnosticSession : IDisposable
     private void Heartbeat(object? state)
     {
         if (Volatile.Read(ref _disposed) != 0) return;
+        if (Interlocked.Exchange(ref _heartbeatRunning, 1) != 0) return;
+        try { SampleHeartbeat(); }
+        finally { Volatile.Write(ref _heartbeatRunning, 0); }
+    }
+
+    private void SampleHeartbeat()
+    {
+        if (_elapsed.ElapsedMilliseconds >= _nextMemorySample)
+        {
+            _nextMemorySample = _elapsed.ElapsedMilliseconds + 10_000;
+            SampleMemory();
+        }
         var gap = _elapsed.ElapsedMilliseconds - Interlocked.Read(ref _lastUiBeat);
         Write("HEARTBEAT", $"ui_gap_ms={gap} phases={string.Join(" | ", _phases.Select(p => p.Key + ":" + p.Value))} " +
             $"cached_ui={Volatile.Read(ref _uiState)}");
@@ -93,23 +112,61 @@ internal sealed class ProductionDiagnosticSession : IDisposable
         catch (InvalidOperationException) { Interlocked.Exchange(ref _uiBeatPending, 0); }
     }
 
+    private void SampleMemory()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var gc = GC.GetGCMemoryInfo();
+            Write("MEMORY", $"private_bytes={process.PrivateMemorySize64} virtual_bytes={process.VirtualMemorySize64} " +
+                $"working_set_bytes={process.WorkingSet64} managed_bytes={GC.GetTotalMemory(false)} " +
+                $"heap_bytes={gc.HeapSizeBytes} fragmented_bytes={gc.FragmentedBytes} " +
+                $"allocated_bytes={GC.GetTotalAllocatedBytes()} gen2={GC.CollectionCount(2)} " +
+                $"handles={process.HandleCount} gdi={GetGuiResources(process.Handle, 0)} user={GetGuiResources(process.Handle, 1)} " +
+                $"cached_ui={Volatile.Read(ref _uiState)}");
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { Write("MEMORY-ERROR", error.Message); }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetGuiResources(IntPtr process, uint flags);
+
     private void WriteLines()
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            using var writer = new StreamWriter(LogPath, false, new UTF8Encoding(false)) { AutoFlush = true };
+            StreamWriter? writer = null;
             long characters = 0;
-            foreach (var line in _lines.GetConsumingEnumerable())
+            try
             {
-                writer.WriteLine(line);
-                characters += line.Length;
-                if (characters < 8_000_000) continue;
-                writer.WriteLine("LOG LIMIT reached; stop recording this session.");
-                break;
+                writer = OpenWriter();
+                foreach (var line in _lines.GetConsumingEnumerable())
+                {
+                    if (characters >= _maxLogCharacters)
+                    {
+                        writer.Dispose();
+                        // Keep the latest three segments; long production runs must continue recording.
+                        if (File.Exists(LogPath + ".1")) File.Move(LogPath + ".1", LogPath + ".2", true);
+                        File.Move(LogPath, LogPath + ".1", true);
+                        writer = OpenWriter();
+                        characters = 0;
+                    }
+                    writer.WriteLine(line);
+                    characters += line.Length + Environment.NewLine.Length;
+                }
             }
+            finally { writer?.Dispose(); }
         }
         catch (Exception error) { WriteError = error.Message; }
+    }
+
+    private StreamWriter OpenWriter()
+    {
+        var writer = new StreamWriter(LogPath, false, new UTF8Encoding(false)) { AutoFlush = true };
+        writer.WriteLine($"{DateTime.Now:O} [SEGMENT] pid={Environment.ProcessId} " +
+            $"build_mvid={typeof(ProductionDiagnosticSession).Module.ModuleVersionId} process_bits={IntPtr.Size * 8}");
+        return writer;
     }
 
     public void Dispose()
