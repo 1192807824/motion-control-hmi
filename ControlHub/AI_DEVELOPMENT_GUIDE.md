@@ -89,6 +89,20 @@ been established.
 
 The application stores JSON files beside the executable.
 
+### `io-point-names.json`
+
+Stores machine-local I/O names and remarks independently from motion defaults
+and product recipes. The first load migrates existing `IoPointNames` from
+`motion-settings.json`; later loads prefer this file, including an intentionally
+empty dictionary. It uses atomic replacement and a `.bak` backup and is ignored
+by Git. Recipe switching must not restore old I/O names.
+Recipe JSON must not contain I/O fields, even empty ones. Legacy I/O fields are
+ignored when reading old recipes and disappear when those recipes are saved again.
+
+Build and publish seed `motion-settings.json` only when the destination is absent.
+Never copy repository defaults over an existing operator configuration based on
+file timestamps. Keep these local JSON files when deploying application updates.
+
 ### `axis-settings.json`
 
 Stores axis UI settings by axis number:
@@ -141,6 +155,45 @@ When adding real device/runtime data:
 
 ## Motion layer notes
 
+- Test-station returns (including mechanical retests) must satisfy the DD
+  interlock's live upper bound, feedback <= wait + 100 pulses, before reporting
+  completion. The general ±150 production tolerance or a wider axis profile
+  must not override this upper bound. Retain the existing safe coordinate
+  direction; do not impose a new lower safety bound or relax the DD interlock.
+- XY timeout/stability errors must include the actual tolerance, feedback error
+  and moving flags, so an old limit or a moving axis is distinguishable from
+  stopped feedback just outside the current tolerance.
+- Completion tolerance does not authorize skipping a changed command target.
+  A new absolute target must reach the card even if current feedback is within
+  the arrival window. Diagnostics must label requested target, command position
+  and encoder feedback separately; they are different quantities.
+- Command acknowledgement must allow integer pulse readback within half a pulse
+  of a fractional requested target. A repeated target such as 511302.99 can read
+  back as 511303 without any observable movement or counter change. Still send
+  changed targets, require stopped feedback within its configured tolerance,
+  and retain delayed-command checks for larger changes and DD safety bounds.
+
+- Y29 red, Y30 green and Y31 yellow lamps use active-high outputs. The Y00
+  buzzer is ACTIVE-LOW: 0 sounds, 1 is silent, as confirmed on the machine.
+  Running/collecting is green; standby, pause, reset and stopping
+  are yellow; an alarm or emergency stop is red. The buzzer is temporarily
+  disabled by operator request: Y00 must always be written 1, including manual
+  output commands. Do not restore automatic buzzing without an explicit request.
+- `MachineSignalController` owns only those four bits. Indicator updates must
+  run after hardware emergency-stop commands, including when the home's
+  pre-stop notification changes its state. Do not route these indicators
+  through the process-vacuum IO lock: red indication and buzzer muting must
+  remain available during emergency/safety-lock states.
+- The motion page's Reset Device Alarms button forces the buzzer off even
+  when motion prevents a device reset. Persistent hardware faults stay red.
+  Resetting does not erase history.
+- Normal application shutdown uses the same hardware safe stop but must not
+  enqueue an emergency alarm. Before disconnecting, write Y00=1 (silent) and
+  Y29/Y30/Y31=0 (lamps off)
+  and read back their output state for diagnostics. Indicator write/readback
+  failures are logged without blocking exit or reactivating indicators. Only
+  the existing motion-stop and configuration-save checks may block closing.
+
 - Use `IMotionCard` from `Services/Motion`.
 - The current implementation is `LeisaiMotionCard`.
 - `LeisaiMotionCard` wraps `LTDMC.dll` native calls.
@@ -184,6 +237,30 @@ When adding real device/runtime data:
   data first.
 
 ## Build and verification
+
+### Long-running batch memory
+
+- Production records are committed to SQLite before updating displayed totals.
+  Do not cache complete batches or all numeric samples in `HomePage`.
+- `BatchMeasurementStatistics` keeps counts, Welford sample statistics, and 16
+  histogram counters per station/instrument/mode/unit. Expanded ranges merge adjacent
+  bins at twice the width; the original individual readings remain in SQLite.
+  Memory for the live chart must not grow with the number of measurements.
+- Restore batch statistics with a streaming reader only on batch load/restart.
+  Per-result updates must be incremental; never copy or rescan the entire batch.
+- Query details are paged (at most 500 records); metrics and charts cover the
+  entire batch. Export streams every database record directly to an atomic CSV
+  temporary file, independent of the currently displayed page.
+- Only raw receive-log previews may be coalesced/dropped under UI backpressure.
+  Never apply the lossy preview buffer to instrument commands, parsed responses,
+  stored measurements, disconnect handling or alarms.
+- Production diagnostics rotate three log segments and record process/GC memory,
+  native GUI handles and batch counts. An OOM throw site alone does not identify
+  the retaining object or prove that a particular allocation caused the leak.
+- Hardware-free checks: `BatchMeasurementChecks` (including `--memory-soak 30000`
+  and `--storage-soak 30000`), `TestStationFlowChecks`, and
+  `VisionWindowResponsivenessChecks`. Soaks do not validate vendor native DLLs
+  or the deployed machine's rendering/driver behavior.
 
 Normal solution build:
 

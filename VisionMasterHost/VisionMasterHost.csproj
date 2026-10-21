@@ -58,6 +58,61 @@
       <HintPath>$(VisionMasterAssemblyDirectory)\IMVSBlobFindModuCs.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="IMVSRectFindModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSRectFindModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSCircleFitModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSCircleFitModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSCircleFindModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSCircleFindModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSLineFindModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSLineFindModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSL2LMeasureModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSL2LMeasureModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSRotateCalculateModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSRotateCalculateModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="CalculatorModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\CalculatorModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="GlobalVariableModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\GlobalVariableModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="GeometryCreateCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\GeometryCreateCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="ShellModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\ShellModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="IMVSHPFeatureMatchModuCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\IMVSHPFeatureMatchModuCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="ImageSourceModuleCs">
+      <HintPath>$(VisionMasterAssemblyDirectory)\ImageSourceModuleCs.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ControlHub\Services\Vision\EmbeddedVisionWindowLayout.cs"
+             Link="EmbeddedVisionWindowLayout.cs" />
+    <Compile Include="..\ControlHub\Services\Vision\NozzleTeachingProtocol.cs"
+             Link="NozzleTeachingProtocol.cs" />
   </ItemGroup>
 
   <ItemGroup>
