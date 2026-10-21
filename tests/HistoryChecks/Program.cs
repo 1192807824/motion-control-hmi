@@ -121,11 +121,16 @@ internal static class Program
         Call(connection, "UpdateSerialMeterResult", new SM7110MeasurementResult(0, 2, "R", "invalid"));
         var home = new HomePage();
         Call(home, "SetStartProductionStatus", "测试生产故障", Color.FromRgb(242, 122, 128));
+        Call(home, "SetFirstSetPositionStatus", "测试先Y后X定位进行中", false, false);
+        Call(home, "SetFirstSetPositionStatus", "测试定位失败", false, true);
         var vision = new VisualCalibrationPage();
         var error = Enum.Parse(typeof(VisualCalibrationPage).GetNestedType("WorkflowStatus", BindingFlags.NonPublic)!, "Error");
         Call(vision, "SetWorkflowStatus", "测试视觉故障", error);
         await AlarmHistory.FlushAsync();
         var integrated = store.Query(null, null).Records;
+        Require(!integrated.Any(a => a.Message == "测试先Y后X定位进行中") &&
+                integrated.Any(a => a.Code == "POSITION" && a.Message == "测试定位失败"),
+            "Normal positioning progress must not be recorded as an alarm; real positioning failures must remain");
         foreach (var code in new[] { "MOTION-TEST", "FEEDER-COMM", "E4981A-COMM", "SM7110-COMM", "PRODUCTION", "VISION-WORKFLOW" })
             Require(integrated.Any(a => a.Code == code), $"Missing actual alarm source: {code}");
         Require(integrated.Count(a => a.Code == "MOTION-TEST") == 1 && integrated.Count(a => a.Code == "SM7110-STATUS-2") == 1,

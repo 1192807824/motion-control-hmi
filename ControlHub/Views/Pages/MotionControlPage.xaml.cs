@@ -1793,7 +1793,7 @@ public partial class MotionControlPage : UserControl
                     snapshots.Add(snapshot);
                     var axisNo = move.Axis.HardwareAxisNo;
                     var commandAccepted = !commandStartPositions.TryGetValue(axisNo, out var startPosition) ||
-                                          startPosition == move.Target;
+                                          MatchesCommandTarget(startPosition, move.Target);
                     if (snapshot.IsMoving || (commandStartPositions.ContainsKey(axisNo) && snapshot.CommandPosition != startPosition))
                         commandProgressObserved.Add(axisNo);
                     commandAccepted |= commandProgressObserved.Contains(axisNo);
@@ -1815,8 +1815,12 @@ public partial class MotionControlPage : UserControl
                     throw new TimeoutException(
                         $"同步绝对位置移动在 {moveTimeoutMilliseconds} ms 内未全部到位。" +
                         string.Join("；", moves.Zip(snapshots).Where(pair => pair.Second.IsMoving ||
+                                (commandStartPositions.TryGetValue(pair.First.Axis.HardwareAxisNo, out var start) &&
+                                 !MatchesCommandTarget(start, pair.First.Target) &&
+                                 !commandProgressObserved.Contains(pair.First.Axis.HardwareAxisNo)) ||
                                 !IsWithinCompletion(pair.First.Axis.HardwareAxisNo, pair.Second.FeedbackPosition, pair.First.Target, pair.First.Tolerance))
-                            .Select(pair => $"轴{pair.First.Axis.HardwareAxisNo}：目标{pair.First.Target:0.###}，" +
+                            .Select(pair => $"轴{pair.First.Axis.HardwareAxisNo}：请求目标{pair.First.Target:0.###}，" +
+                                $"指令位置{pair.Second.CommandPosition:0.###}，" +
                                 $"反馈{pair.Second.FeedbackPosition:0.###}，" +
                                 $"偏差{pair.Second.FeedbackPosition - pair.First.Target:0.###} pulse，" +
                                 $"容差±{pair.First.Tolerance:0.###}，{(pair.Second.IsMoving ? "仍在运动" : "已停止")}" +
@@ -2415,6 +2419,15 @@ public partial class MotionControlPage : UserControl
         return snapshot;
     }
 
+    private static bool MatchesCommandTarget(double commandPosition, double target)
+    {
+        // Pulse counters can report an integer for a fractional requested target.
+        // This is only command acknowledgement, not permission to skip sending a
+        // changed target or to relax feedback tolerance / stopped-state checks.
+        return commandPosition == target ||
+               (commandPosition == Math.Truncate(commandPosition) && Math.Abs(commandPosition - target) <= 0.5);
+    }
+
     private async Task<(double X, double Y)> MoveCalibrationAxesAsync(
         AxisStatus xAxis,
         AxisStatus yAxis,
@@ -2464,8 +2477,8 @@ public partial class MotionControlPage : UserControl
 
         xAxis.Target = targetX;
         yAxis.Target = targetY;
-        var xCommandProgressObserved = !xNeedsMove || beforeX.CommandPosition == targetX;
-        var yCommandProgressObserved = !yNeedsMove || beforeY.CommandPosition == targetY;
+        var xCommandProgressObserved = !xNeedsMove || MatchesCommandTarget(beforeX.CommandPosition, targetX);
+        var yCommandProgressObserved = !yNeedsMove || MatchesCommandTarget(beforeY.CommandPosition, targetY);
         var deadline = DateTime.UtcNow.AddMilliseconds(moveTimeoutMilliseconds);
 
         while (true)
@@ -2495,8 +2508,8 @@ public partial class MotionControlPage : UserControl
             {
                 throw new TimeoutException(
                     $"视觉坐标运动超时（允许误差±{positionTolerance:0.###} pulse）。" +
-                    $"X轴{currentX.HardwareAxisNo}：请求目标{targetX:0.###}，指令位置{currentX.CommandPosition:0.###}，反馈{currentX.FeedbackPosition:0.###}，偏差{currentX.FeedbackPosition - targetX:0.###}，运动={currentX.IsMoving}；" +
-                    $"Y轴{currentY.HardwareAxisNo}：请求目标{targetY:0.###}，指令位置{currentY.CommandPosition:0.###}，反馈{currentY.FeedbackPosition:0.###}，偏差{currentY.FeedbackPosition - targetY:0.###}，运动={currentY.IsMoving}。");
+                    $"X轴{currentX.HardwareAxisNo}：请求目标{targetX:0.###}，指令位置{currentX.CommandPosition:0.###}，反馈{currentX.FeedbackPosition:0.###}，偏差{currentX.FeedbackPosition - targetX:0.###}，运动={currentX.IsMoving}，起始指令{beforeX.CommandPosition:0.###}，命令已确认={xCommandProgressObserved}；" +
+                    $"Y轴{currentY.HardwareAxisNo}：请求目标{targetY:0.###}，指令位置{currentY.CommandPosition:0.###}，反馈{currentY.FeedbackPosition:0.###}，偏差{currentY.FeedbackPosition - targetY:0.###}，运动={currentY.IsMoving}，起始指令{beforeY.CommandPosition:0.###}，命令已确认={yCommandProgressObserved}。");
             }
 
             await Task.Delay(_motionOptions.PollIntervalMilliseconds, cancellationToken);

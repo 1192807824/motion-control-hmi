@@ -3310,7 +3310,7 @@ public partial class HomePage : UserControl
             Color.FromRgb(242, 181, 68));
         SetFirstSetPositionStatus(
             $"正在先走Y到位置2：当前X={current.ActualX:0.###}，目标Y={targetY:0.###} pulse。",
-            false);
+            false, recordAlarm: false);
         var yTimeoutMilliseconds = CalculateStartMoveTimeout(
             current.ActualX,
             current.ActualY,
@@ -3341,7 +3341,7 @@ public partial class HomePage : UserControl
             Color.FromRgb(242, 181, 68));
         SetFirstSetPositionStatus(
             $"Y已到位({afterY.ActualY:0.###})，正在走X到位置2：目标X={targetX:0.###} pulse。",
-            false);
+            false, recordAlarm: false);
         var xTimeoutMilliseconds = CalculateStartMoveTimeout(
             afterY.ActualX,
             afterY.ActualY,
@@ -8720,9 +8720,9 @@ public partial class HomePage : UserControl
         return (int)Math.Clamp(Math.Ceiling(estimatedMilliseconds), 10_000d, 120_000d);
     }
 
-    private void SetFirstSetPositionStatus(string message, bool success)
+    private void SetFirstSetPositionStatus(string message, bool success, bool recordAlarm = true)
     {
-        if (!success) AlarmHistory.Record("生产操作", "POSITION", message);
+        if (!success && recordAlarm) AlarmHistory.Record("生产操作", "POSITION", message);
         PresetPositionStatusText.Text = message;
         PresetPositionStatusText.Foreground = new SolidColorBrush(success
             ? Color.FromRgb(73, 209, 125)

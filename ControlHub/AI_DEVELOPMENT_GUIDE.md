@@ -167,6 +167,11 @@ When adding real device/runtime data:
   A new absolute target must reach the card even if current feedback is within
   the arrival window. Diagnostics must label requested target, command position
   and encoder feedback separately; they are different quantities.
+- Command acknowledgement must allow integer pulse readback within half a pulse
+  of a fractional requested target. A repeated target such as 511302.99 can read
+  back as 511303 without any observable movement or counter change. Still send
+  changed targets, require stopped feedback within its configured tolerance,
+  and retain delayed-command checks for larger changes and DD safety bounds.
 
 - Y29 red, Y30 green and Y31 yellow lamps use active-high outputs. The Y00
   buzzer is ACTIVE-LOW: 0 sounds, 1 is silent, as confirmed on the machine.

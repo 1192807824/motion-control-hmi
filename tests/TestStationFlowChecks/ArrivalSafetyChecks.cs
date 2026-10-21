@@ -80,6 +80,29 @@ internal static partial class Program
         delayedRecorder.DelayCommandAcceptance = false;
         Require(Finish(delayedGroup).Single().CommandPosition == 0, "Group returns the observed new command position");
 
+        var (quantized, _, quantizedRecorder, _) = Create();
+        quantizedRecorder.QuantizeCommandPositions = true;
+        quantizedRecorder.Positions[1] = 1526371;
+        quantizedRecorder.Positions[2] = 511303;
+        quantizedRecorder.MoveFeedbackOffsets[2] = -1;
+        var quantizedResult = Finish(quantized.MoveCalibrationAxesToAsync(1, 2, 1526371, 511302.99,
+            10000, 150, 100, CancellationToken.None));
+        Require(quantizedResult.ActualX == 1526371 && quantizedResult.ActualY == 511302 &&
+                quantizedRecorder.Moves.Contains((2, 511302.99)),
+            "Reported XY sample must complete after sending the fractional target even when the command stays at its rounded pulse");
+        quantizedRecorder.HoldMoves = true;
+        var stillMoving = quantized.MoveCalibrationAxesToAsync(1, 2, 1526371, 511302.99,
+            10000, 150, 1000, CancellationToken.None);
+        Require(!stillMoving.IsCompleted, "Quantized targets within tolerance must still wait for the moving flag to clear");
+        quantizedRecorder.HoldMoves = false;
+        Require(Finish(stillMoving).ActualY == 511302, "Quantized target completes only after stopping");
+        quantizedRecorder.Positions[13] = -4000;
+        Require(Finish(quantized.MoveAxesAbsoluteAsync(new Dictionary<int, double> { [13] = -4000.01 },
+                CancellationToken.None, minimumCompletionTolerance: 150)).Single().CommandPosition == -4000 &&
+                quantizedRecorder.Moves.Contains((13, -4000.01)),
+            "Grouped fractional targets must also complete without requiring an unobservable command change");
+        Console.WriteLine("PASS: reported 1526371/511302.99 XY target and negative grouped target with integer command readback.");
+
         var (xy, _, xyRecorder, vm) = Create();
         xyRecorder.Positions[1] = 1655998;
         xyRecorder.Positions[2] = 946155;

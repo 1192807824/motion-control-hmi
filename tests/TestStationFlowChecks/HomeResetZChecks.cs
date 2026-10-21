@@ -118,12 +118,14 @@ public class ResetRecordingCard : DispatchProxy
     public double MoveFeedbackOffset;
     public readonly Dictionary<int, double> MoveFeedbackOffsets = [];
     public bool DelayCommandAcceptance;
+    public bool QuantizeCommandPositions;
     private readonly Dictionary<int, double> _pendingTargets = [];
 
     private void AcceptMove(int axis, double target)
     {
-        CommandPositions[axis] = target;
-        Positions[axis] = target + MoveFeedbackOffsets.GetValueOrDefault(axis, MoveFeedbackOffset);
+        var commandTarget = QuantizeCommandPositions ? Math.Round(target, MidpointRounding.AwayFromZero) : target;
+        CommandPositions[axis] = commandTarget;
+        Positions[axis] = commandTarget + MoveFeedbackOffsets.GetValueOrDefault(axis, MoveFeedbackOffset);
         _moving.Add(axis);
     }
 
