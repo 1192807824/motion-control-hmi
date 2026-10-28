@@ -159,8 +159,11 @@ When adding real device/runtime data:
   name, defaulting to `找芯片流程_011_测试` for old recipes. Save Names and
   Save Current persist the editor; applying/restarting passes the configured
   name to VisionMasterHost via `--recognized-center-procedure`. Resolve the
-  same 107 source and 110 script modules in that named procedure; preserve
-  result validation, transforms, nozzle offsets and movement checks.
+  `图像源1` and `脚本1` by name in that procedure, never by fixed IDs such as
+  107/110, since copying/importing renumbers modules. Verify both modules belong
+  to the selected procedure. Preview also uses this procedure's named render or
+  unique match module, falling back to its current source image. Preserve result
+  validation, transforms, nozzle offsets and movement checks.
 - Parameter Settings' "门禁启用" switch persists `DoorInterlockEnabled` in
   machine-local motion settings, defaults off for existing files, and is not
   part of product recipes. Module 1001 port 0 bit 6 (X06) is ACTIVE-HIGH for

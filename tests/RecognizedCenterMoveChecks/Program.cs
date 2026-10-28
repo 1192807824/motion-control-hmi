@@ -15,15 +15,15 @@ internal static class Program
 
     private static async Task Main()
     {
-        // 最终有效性由110脚本结果决定，不再依赖108匹配框数量。
+        // 最终有效性由脚本结果决定，不依赖匹配框数量或复制流程后的模块编号。
         Require(RecognizedCenterValidation.GetScriptError(1, 1) is null, "One valid script row is accepted");
         var invalidMatches = new[] { (0, 1), (1, 0), (1, 2), (1, -1) };
         var errors = invalidMatches.Select(value => RecognizedCenterValidation.GetScriptError(value.Item1, value.Item2)).ToArray();
         Require(errors.All(error => !string.IsNullOrWhiteSpace(error)) && errors.Distinct().Count() == 4,
             "NG, zero targets, multiple targets and missing rectangles have distinct errors");
         var sdkFailure = new Exception("SDK parameter error");
-        var stagedFailure = new RecognizedCenterStageException("读取107本次图像尺寸", "错误码 0xE0000001", sdkFailure);
-        Require(stagedFailure.Message.Contains("读取107本次图像尺寸") && stagedFailure.Message.Contains("0xE0000001") &&
+        var stagedFailure = new RecognizedCenterStageException("读取图像源1本次图像尺寸", "错误码 0xE0000001", sdkFailure);
+        Require(stagedFailure.Message.Contains("读取图像源1本次图像尺寸") && stagedFailure.Message.Contains("0xE0000001") &&
                 ReferenceEquals(stagedFailure.InnerException, sdkFailure), "Stage, SDK code and original exception are retained");
         var originalCulture = CultureInfo.CurrentCulture;
         try

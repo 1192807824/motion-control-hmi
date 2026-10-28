@@ -27,7 +27,8 @@ excluded from recipe numeric validation.
 Recognized-center procedure coverage includes separate A/B/A names, missing-field
 and legacy defaults, Save Names, invalid drafts, actual host startup arguments,
 and an eight-row parameter-page render at 1280 and 1680 pixels. Recognition still
-uses the existing module IDs and coordinate/movement validation.
+resolves source/script modules by name within the selected procedure and retains
+the existing coordinate/movement validation.
 
 Parameter position checks exercise all 16 Move/Record buttons with an injected
 confirmation response and an instant fake motion card. Cancel must leave saved
