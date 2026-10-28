@@ -155,6 +155,18 @@ When adding real device/runtime data:
 
 ## Motion layer notes
 
+- Parameter Settings' "门禁启用" switch persists `DoorInterlockEnabled` in
+  machine-local motion settings, defaults off for existing files, and is not
+  part of product recipes. Module 1001 port 0 bit 6 (X06) is ACTIVE-HIGH for
+  an open door: red/0 means all doors closed, green/1 means open.
+  When enabled, opening a door or failing to read this input issues the existing
+  global emergency stop from the independent safety-input monitor without
+  waiting for UI dispatch. Enabling while already open also trips immediately.
+  Gate motion starts and process IO while active; preserve vacuum outputs and
+  require an explicit restart after closing. Disabling bypasses only the door,
+  never the external emergency-stop input or an existing motion safety lock.
+  Simulation does not monitor physical safety inputs. Hardware-free coverage:
+  `dotnet run --project tests/MachineSignalChecks/MachineSignalChecks.csproj`.
 - Test-station returns (including mechanical retests) must satisfy the DD
   interlock's live upper bound, feedback <= wait + 100 pulses, before reporting
   completion. The general ±150 production tolerance or a wider axis profile

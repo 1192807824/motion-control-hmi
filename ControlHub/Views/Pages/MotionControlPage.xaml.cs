@@ -5129,7 +5129,7 @@ public partial class MotionControlPage : UserControl
 
     private void StartExternalEmergencyStopMonitor()
     {
-        if (!ExternalEmergencyStopMonitoringEnabled ||
+        if (_motionOptions.SimulationMode || !_motionCard.IsOpen ||
             _externalEmergencyStopMonitorCancellation is not null ||
             _closed)
         {
@@ -5142,7 +5142,7 @@ public partial class MotionControlPage : UserControl
             () => MonitorExternalEmergencyStopInput(cancellation.Token))
         {
             IsBackground = true,
-            Name = "ExternalEmergencyStopMonitor",
+            Name = "MachineSafetyInputMonitor",
             Priority = ThreadPriority.AboveNormal
         };
         _externalEmergencyStopMonitorThread.Start();
@@ -5161,56 +5161,60 @@ public partial class MotionControlPage : UserControl
         var lastActive = false;
         while (!cancellationToken.IsCancellationRequested)
         {
-            try
+            if (ExternalEmergencyStopMonitoringEnabled)
             {
-                var active = ReadExternalEmergencyStopInputActive();
-                _externalEmergencyStopInputActive = active;
-                if (active)
+                try
                 {
+                    var active = ReadExternalEmergencyStopInputActive();
+                    _externalEmergencyStopInputActive = active;
+                    if (active)
+                    {
+                        if (Interlocked.CompareExchange(
+                                ref _externalEmergencyStopTriggerLatched,
+                                1,
+                                0) == 0)
+                        {
+                            IssueSafetyInputEmergencyStop(
+                                "外部IO急停按钮触发",
+                                "EXTERNAL-EMERGENCY-STOP",
+                                $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位" +
+                                $"{_motionOptions.ExternalEmergencyStopInputBit}触发");
+                        }
+                    }
+                    else
+                    {
+                        Interlocked.Exchange(ref _externalEmergencyStopTriggerLatched, 0);
+                        if (lastActive)
+                        {
+                            PostExternalEmergencyStopReleasedToUi();
+                        }
+                    }
+
+                    lastActive = active;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    // 急停输入失去可靠监控时采用失效安全策略：不等待UI，立即停止全部轴。
+                    _externalEmergencyStopInputActive = true;
                     if (Interlocked.CompareExchange(
                             ref _externalEmergencyStopTriggerLatched,
                             1,
                             0) == 0)
                     {
-                        IssueExternalEmergencyStopFromMonitor(
-                            "外部IO急停按钮触发",
-                            "EXTERNAL-EMERGENCY-STOP",
-                            $"模块1001输入端口{_motionOptions.ExternalEmergencyStopInputPort}位" +
-                            $"{_motionOptions.ExternalEmergencyStopInputBit}触发");
+                        IssueSafetyInputEmergencyStop(
+                            "外部急停输入读取失败",
+                            "EXTERNAL-EMERGENCY-STOP-READ",
+                            "无法可靠读取外部急停输入",
+                            exception);
                     }
-                }
-                else
-                {
-                    Interlocked.Exchange(ref _externalEmergencyStopTriggerLatched, 0);
-                    if (lastActive)
-                    {
-                        PostExternalEmergencyStopReleasedToUi();
-                    }
-                }
-
-                lastActive = active;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                // 急停输入失去可靠监控时采用失效安全策略：不等待UI，立即停止全部轴。
-                _externalEmergencyStopInputActive = true;
-                if (Interlocked.CompareExchange(
-                        ref _externalEmergencyStopTriggerLatched,
-                        1,
-                        0) == 0)
-                {
-                    IssueExternalEmergencyStopFromMonitor(
-                        "外部急停输入读取失败",
-                        "EXTERNAL-EMERGENCY-STOP-READ",
-                        "无法可靠读取外部急停输入",
-                        exception);
                 }
             }
 
+            RefreshDoorInterlock();
             if (cancellationToken.WaitHandle.WaitOne(
                     _motionOptions.PollIntervalMilliseconds))
             {
@@ -5219,7 +5223,7 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private void IssueExternalEmergencyStopFromMonitor(
+    private void IssueSafetyInputEmergencyStop(
         string reason,
         string alarmCode,
         string details,
@@ -5228,7 +5232,7 @@ public partial class MotionControlPage : UserControl
         Exception? stopException = null;
         try
         {
-            // 这条调用运行在独立监控线程：先冻结生产IO，再直接调用控制卡急停。
+            // 后台监控或启动前检查均先冻结生产IO，再直接调用控制卡急停。
             IssueEmergencyStopAndNotify();
         }
         catch (Exception exception)
@@ -5238,7 +5242,7 @@ public partial class MotionControlPage : UserControl
 
         _ = Dispatcher.BeginInvoke(
             DispatcherPriority.Send,
-            new Action(() => CompleteExternalEmergencyStopOnUiThread(
+            new Action(() => CompleteSafetyInputEmergencyStopOnUiThread(
                 reason,
                 alarmCode,
                 details,
@@ -5246,7 +5250,7 @@ public partial class MotionControlPage : UserControl
                 stopException)));
     }
 
-    private void CompleteExternalEmergencyStopOnUiThread(
+    private void CompleteSafetyInputEmergencyStopOnUiThread(
         string reason,
         string alarmCode,
         string details,
@@ -5268,14 +5272,16 @@ public partial class MotionControlPage : UserControl
         var monitoringDetails = monitoringException is null
             ? details
             : $"{details}：{FormatException(monitoringException)}";
+        var alarmSource = alarmCode.StartsWith("DOOR-", StringComparison.Ordinal)
+            ? "door-interlock" : "external-emergency-stop";
         RecordAlarmOnce(
-            $"external-emergency-stop:{alarmCode}",
+            $"{alarmSource}:{alarmCode}",
             alarmCode,
-            $"{monitoringDetails}；已由独立20ms监控直接下发控制卡全局急停及全部EtherCAT轴逐轴立即停止。");
+            $"{monitoringDetails}；已直接下发控制卡全局急停及全部EtherCAT轴逐轴立即停止。");
         SetConnectionText(
             monitoringException is null
-                ? "运动控制：外部急停已立即下发，正在确认全部轴停止"
-                : "运动控制：外部急停监控异常，已失效安全停止全部轴");
+                ? $"运动控制：{reason}，已立即下发急停，正在确认全部轴停止"
+                : $"运动控制：{reason}，已失效安全停止全部轴");
     }
 
     private void PostExternalEmergencyStopReleasedToUi()
@@ -5299,6 +5305,7 @@ public partial class MotionControlPage : UserControl
 
     private void ThrowIfExternalEmergencyStopActive()
     {
+        ThrowIfDoorInterlockActive();
         if (!ExternalEmergencyStopMonitoringEnabled || !_motionCard.IsOpen)
         {
             return;
@@ -6104,6 +6111,13 @@ public partial class MotionControlPage : UserControl
 
     private bool EnsureProcessIoWriteReady()
     {
+        RefreshDoorInterlock();
+        if (_doorInterlockInputActive)
+        {
+            RecordAlarmOnce("process-io-blocked-by-door", "PROCESS-IO-DOOR-OPEN",
+                "门禁已启用且门未关闭或输入读取失败，生产IO写入已冻结。");
+            return false;
+        }
         if (_externalEmergencyStopInputActive)
         {
             RecordAlarmOnce(
@@ -6228,6 +6242,7 @@ public partial class MotionControlPage : UserControl
             ViewModel?.MotionControlsEnabled == true &&
             !_motionSafetyLock &&
             !_externalEmergencyStopInputActive &&
+            !_doorInterlockInputActive &&
             !IsAnyMotionWorkflowActive() &&
             SelectedAxis is { IsAvailable: true, StatusReadHealthy: true, IsMoving: false };
         UpdateHomeActionState();
@@ -6242,6 +6257,7 @@ public partial class MotionControlPage : UserControl
             workflowIdle &&
             !_motionSafetyLock &&
             !_externalEmergencyStopInputActive &&
+            !_doorInterlockInputActive &&
             SelectedAxis?.CanHome == true);
         HomeAllButton?.SetCurrentValue(
             IsEnabledProperty,
@@ -6257,6 +6273,7 @@ public partial class MotionControlPage : UserControl
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
                !_externalEmergencyStopInputActive &&
+               !_doorInterlockInputActive &&
                !IsAnyMotionWorkflowActive() &&
                CreateTestOneKeyResetStages()
                    .SelectMany(stage => stage.Groups)
@@ -6278,6 +6295,7 @@ public partial class MotionControlPage : UserControl
         return ViewModel?.MotionControlsEnabled == true &&
                !_motionSafetyLock &&
                !_externalEmergencyStopInputActive &&
+               !_doorInterlockInputActive &&
                !IsAnyMotionWorkflowActive() &&
                sequence.Count > 0 &&
                sequence.All(hardwareAxisNo =>

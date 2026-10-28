@@ -78,6 +78,16 @@
                 <StackPanel Grid.Column="1"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
+                    <CheckBox x:Name="DoorInterlockEnabledCheckBox"
+                              Content="门禁启用"
+                              IsEnabled="False"
+                              VerticalAlignment="Center"
+                              Margin="0,0,18,0"
+                              Foreground="{StaticResource TextPrimary}"
+                              FontSize="14"
+                              Checked="DoorInterlockEnabled_Changed"
+                              Unchecked="DoorInterlockEnabled_Changed"
+                              ToolTip="启用后，X06变绿（开门）立即全轴急停；门关闭后需手动重新启动。设置自动保存。" />
                     <Border Background="#143B35"
                             BorderBrush="#28725C"
                             BorderThickness="1"

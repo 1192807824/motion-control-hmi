@@ -12,6 +12,7 @@
   "ExternalEmergencyStopInputPort": 0,
   "ExternalEmergencyStopInputBit": 1,
   "ExternalEmergencyStopActiveLow": true,
+  "DoorInterlockEnabled": false,
   "SimulationDigitalInputCount": 32,
   "SimulationDigitalOutputCount": 32,
   "SimulationAnalogInputCount": 8,

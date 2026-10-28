@@ -43,6 +43,8 @@ public sealed class MotionCardOptions
 
     public bool ExternalEmergencyStopActiveLow { get; init; } = true;
 
+    public bool DoorInterlockEnabled { get; set; }
+
     public int SimulationDigitalInputCount { get; init; } = 32;
 
     public int SimulationDigitalOutputCount { get; init; } = 32;

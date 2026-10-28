@@ -49,6 +49,7 @@ public partial class MotionControlPage
     {
         if (_motionSafetyLock) yield return "motion-safety-lock";
         if (_externalEmergencyStopInputActive) yield return "external-emergency-stop";
+        if (_doorInterlockInputActive) yield return "door-interlock";
         foreach (var key in _activeAlarmKeys)
         {
             if (key.StartsWith("axis-fault:", StringComparison.Ordinal) ||

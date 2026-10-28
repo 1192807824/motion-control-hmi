@@ -6,7 +6,7 @@ using ControlHub.Services.Motion;
 using ControlHub.ViewModels;
 using ControlHub.Views.Pages;
 
-internal static class Program
+internal static partial class Program
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
 
@@ -18,6 +18,7 @@ internal static class Program
         CheckPageIntegration();
         CheckNormalShutdown();
         CheckFullShutdown();
+        CheckDoorInterlock();
         Console.WriteLine("PASS: active-low lamp levels and switching order, state colors, buzzer disabled for all states and manual commands, reset, emergency ordering, shutdown verification, write retries and process IO isolation. Simulated hardware only.");
     }
 

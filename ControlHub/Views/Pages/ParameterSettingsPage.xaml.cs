@@ -20,6 +20,7 @@ public partial class ParameterSettingsPage : UserControl
     private VisualCalibrationPage? _visualCalibrationPage;
     private MainWindowViewModel? _viewModel;
     private bool _recipeBusy;
+    private bool _loadingDoorInterlock;
 
     public event EventHandler<string?>? ActiveRecipeChanged;
 
@@ -38,6 +39,7 @@ public partial class ParameterSettingsPage : UserControl
     {
         _homePage = homePage ?? throw new ArgumentNullException(nameof(homePage));
         _motionPage = motionPage ?? throw new ArgumentNullException(nameof(motionPage));
+        RefreshDoorInterlockSetting();
         _visualCalibrationPage = visualCalibrationPage
                                  ?? throw new ArgumentNullException(nameof(visualCalibrationPage));
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
@@ -56,6 +58,35 @@ public partial class ParameterSettingsPage : UserControl
     }
 
     private ProductRecipe? SelectedRecipe => RecipeListBox.SelectedItem as ProductRecipe;
+
+    private void RefreshDoorInterlockSetting()
+    {
+        _loadingDoorInterlock = true;
+        try
+        {
+            DoorInterlockEnabledCheckBox.IsChecked = _motionPage?.DoorInterlockEnabled == true;
+            DoorInterlockEnabledCheckBox.IsEnabled = _motionPage is not null;
+        }
+        finally { _loadingDoorInterlock = false; }
+    }
+
+    private void DoorInterlockEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingDoorInterlock || _motionPage is null) return;
+        try
+        {
+            _motionPage.SaveDoorInterlockEnabled(DoorInterlockEnabledCheckBox.IsChecked == true);
+            SetRecipeStatus(_motionPage.DoorInterlockEnabled
+                ? "门禁已启用并保存：X06变绿（开门）立即急停，关门后需手动重新启动。"
+                : "门禁已关闭并保存：开门信号不参与急停判断。", success: true);
+        }
+        catch (Exception exception)
+        {
+            RefreshDoorInterlockSetting();
+            SetRecipeStatus($"门禁设置保存失败：{exception.Message}", success: false);
+            AlarmHistory.Record("参数配置", "DOOR-INTERLOCK-SETTING", exception.Message);
+        }
+    }
 
     private void RecipeListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

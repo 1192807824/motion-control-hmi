@@ -66,6 +66,12 @@ updates; hardware mode never falls back silently to simulation.
 Live DO/AO values are read from hardware and are not replayed automatically after restart. This is intentional: restoring
 an output command at startup could energize equipment unexpectedly.
 
+## 门禁开门急停
+
+参数设置页顶部新增“门禁启用”开关，默认关闭，切换后自动保存到本机 `motion-settings.json`，重启保留，切换产品配方不改变。输入固定读取模块1001第一组输入X06（端口0、位6）：红色/0表示门全关，绿色/1表示开门。
+
+启用后，开门或门禁输入读取失败会由独立后台监控直接下发全轴急停，冻结生产IO并记录报警；启用时门已经打开也立即触发。开门期间禁止启动运动，关门后必须手动重新启动。关闭门禁开关后忽略门信号，外部急停和其他保护照常生效。该功能复用软件监控和现有急停接口，尚需现场验证实际输入与停止效果。
+
 ## Vibration feeder TCP connection
 
 The vibration feeder connection is a raw TCP client. Existing ASCII/HEX device commands are sent unchanged over the
