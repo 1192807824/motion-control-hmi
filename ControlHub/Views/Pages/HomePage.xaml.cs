@@ -1116,7 +1116,7 @@ public partial class HomePage : UserControl
             1,
             cancellationToken);
 
-        // 破真空完成即放行XY；Z1沿-Z回安全位的动作继续在后台执行。
+        // 放料释料完成即放行XY；Z1沿-Z回安全位的动作继续在后台执行。
         var safePositionTask = MoveNozzleZToAsync(
             VisionCalibrationAxisSet.First,
             1,
@@ -1124,7 +1124,7 @@ public partial class HomePage : UserControl
             "安全位",
             cancellationToken);
         SetFirstSetPositionStatus(
-            "Z1破真空已完成，XY立即放行前往位置2；Z1继续沿-Z回安全位。",
+            "Z1放料释料已完成，XY立即放行前往位置2；Z1继续沿-Z回安全位。",
             true);
         return safePositionTask;
     }
@@ -1708,7 +1708,7 @@ public partial class HomePage : UserControl
         var breakPulseMilliseconds = dwellTimes.BreakVacuumMilliseconds;
         var valveSwitchDelayMilliseconds = dwellTimes.ValveSwitchDelayMilliseconds;
 
-        // 放料必须先完全停止真空吸，再给破真空阀一个短脉冲；两阀禁止重叠开启。
+        // 先完全停止真空吸；启用破真空时再按配置给短脉冲，两阀禁止重叠开启。
         if (!SetNozzleVacuumOutputs(
                 axisSet,
                 nozzleNumber,
@@ -1716,6 +1716,13 @@ public partial class HomePage : UserControl
                 breakVacuumEnabled: false))
         {
             throw new InvalidOperationException($"Z{nozzleNumber}停止真空吸失败。");
+        }
+
+        if (axisSet == VisionCalibrationAxisSet.First && !dwellTimes.FirstSetBreakVacuumEnabled)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetFirstSetPositionStatus($"Z{nozzleNumber}真空吸已关闭；第一套破真空未启用，跳过破真空及阀切换等待。", true);
+            return;
         }
 
         SetFirstSetPositionStatus(
@@ -2788,7 +2795,7 @@ public partial class HomePage : UserControl
                     };
                     SetStartProductionStatus(
                         (nozzle1HasPart
-                            ? $"第{cycleNumber}轮：Z1已破真空并开始沿-Z回安全位，"
+                            ? $"第{cycleNumber}轮：Z1已完成放料释料并开始沿-Z回安全位，"
                             : $"第{cycleNumber}轮：缺料收尾，") +
                         $"正在按{position2TargetDescription}前往2工位(X={position2Target.X:0.###}, Y={position2Target.Y:0.###}" +
                         $"{(nozzle2OriginalR.HasValue ? $", R={position2Target.R:0.###}" : string.Empty)})…",
@@ -6295,6 +6302,7 @@ public partial class HomePage : UserControl
         VacuumValveSwitchDelayTextBox.Text = (
             _homeSettings.VacuumValveSwitchDelayMilliseconds
             ?? DefaultVacuumValveSwitchDelayMilliseconds).ToString(CultureInfo.CurrentCulture);
+        FirstSetBreakVacuumEnabledCheckBox.IsChecked = _homeSettings.FirstSetBreakVacuumEnabled;
         FirstSetNozzle1XyReleaseLiftTextBox.Text = (
             _homeSettings.FirstSetNozzle1XyReleaseLiftPulses
             ?? DefaultFirstSetNozzle1XyReleaseLiftPulses).ToString(CultureInfo.CurrentCulture);
@@ -6856,7 +6864,8 @@ public partial class HomePage : UserControl
             releaseLiftPulses,
             nozzle2PreDropPulses,
             nozzle2PlacePreDropPulses,
-            secondSetNozzle1PreDropPulses);
+            secondSetNozzle1PreDropPulses,
+            FirstSetBreakVacuumEnabledCheckBox.IsChecked == true);
     }
 
     private static void ValidateFirstSetNozzle1XyReleaseLift(
@@ -7466,6 +7475,7 @@ public partial class HomePage : UserControl
         _homeSettings.VacuumPickupDwellMilliseconds = pickupDwell;
         _homeSettings.VacuumBreakPulseMilliseconds = breakPulse;
         _homeSettings.VacuumValveSwitchDelayMilliseconds = valveSwitchDelay;
+        _homeSettings.FirstSetBreakVacuumEnabled = FirstSetBreakVacuumEnabledCheckBox.IsChecked == true;
         _homeSettings.FirstSetNozzle1XyReleaseLiftPulses = releaseLiftPulses;
         _homeSettings.FirstSetNozzle2PreDropPulses = nozzle2PreDropPulses;
         _homeSettings.FirstSetNozzle2PlacePreDropPulses = nozzle2PlacePreDropPulses;
@@ -8209,6 +8219,7 @@ public partial class HomePage : UserControl
         VacuumPickupDwellTextBox.IsEnabled = parametersEditable;
         VacuumBreakPulseTextBox.IsEnabled = parametersEditable;
         VacuumValveSwitchDelayTextBox.IsEnabled = parametersEditable;
+        FirstSetBreakVacuumEnabledCheckBox.IsEnabled = parametersEditable;
         FirstSetNozzle1XyReleaseLiftTextBox.IsEnabled = parametersEditable;
         FirstSetNozzle2PreDropTextBox.IsEnabled = parametersEditable;
         FirstSetNozzle2PlacePreDropTextBox.IsEnabled = parametersEditable;
@@ -8903,7 +8914,8 @@ public partial class HomePage : UserControl
         double FirstSetNozzle1XyReleaseLiftPulses,
         double FirstSetNozzle2PreDropPulses,
         double FirstSetNozzle2PlacePreDropPulses,
-        double SecondSetNozzle1PreDropPulses);
+        double SecondSetNozzle1PreDropPulses,
+        bool FirstSetBreakVacuumEnabled);
 
     private readonly record struct SecondSetNozzle2PickupOverlapTasks(
         Task Nozzle2SafeTask,

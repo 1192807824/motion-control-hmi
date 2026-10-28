@@ -2503,11 +2503,18 @@
                                         <RowDefinition Height="24" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
-                                    <TextBlock Text="Z轴高度与停留时间"
-                                               Foreground="#EAF2F7"
-                                               FontSize="12"
-                                               FontWeight="Bold"
-                                               VerticalAlignment="Center" />
+                                    <DockPanel LastChildFill="True">
+                                        <CheckBox x:Name="FirstSetBreakVacuumEnabledCheckBox"
+                                                  DockPanel.Dock="Right" Content="第一套破真空启用"
+                                                  IsChecked="True" Foreground="#EAF2F7"
+                                                  VerticalAlignment="Center" Margin="12,0,0,0"
+                                                  ToolTip="取消后第一套两个吸嘴放料只关闭真空吸，跳过破真空脉冲和阀切换等待；第二套保持原逻辑"
+                                                  Checked="FirstSetBreakVacuumEnabled_Changed"
+                                                  Unchecked="FirstSetBreakVacuumEnabled_Changed" />
+                                        <TextBlock Text="Z轴高度与停留时间"
+                                                   Foreground="#EAF2F7" FontSize="12" FontWeight="Bold"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
                                     <UniformGrid Grid.Row="1" Rows="7" Columns="4">
                                         <StackPanel Margin="0,2,8,2">
                                             <TextBlock Text="上料 · 吸嘴1 · 取料Z" Foreground="#9FB1BF" FontSize="9" />

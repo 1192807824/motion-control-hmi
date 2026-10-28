@@ -155,6 +155,13 @@ When adding real device/runtime data:
 
 ## Motion layer notes
 
+- `HomePageSettings.FirstSetBreakVacuumEnabled` is the checkbox in the existing
+  Z-height/dwell parameter card. Default/old recipes use true; auto-save it and
+  include it in `ProductionZDwellTimes` so production and paused-resume use the
+  same parameter snapshot. When false, both first-set nozzles close suction and
+  keep break valves off, then return immediately without valve-switch delay or
+  break pulse delay. Retain Z arrival checks, Z return/XY-release ordering,
+  pickup dwell, second-set release, cancellation and emergency IO freeze.
 - `HomePageSettings.ProductionPhotoSettleMilliseconds` controls the upper-camera
   photo delay after hopper zero-amplitude and final stop commands. Default/old
   recipes use 200ms; the parameter accepts integer 0–60000ms and auto-saves.

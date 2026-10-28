@@ -16,7 +16,7 @@ out-of-range, fractional, nonnumeric and overflowing drafts. Both New and Save C
 must report the validation error without creating or overwriting a recipe.
 
 Also covers all 176 active numeric recipe controls (including the 16 axes' motion parameters),
-9 switches, 3 station instrument selections, SM7110 mode/limits, optional cleared
+10 switches, 3 station instrument selections, SM7110 mode/limits, optional cleared
 positions and eight vision procedure names. High precision values must survive
 save, disk reload, recipe application and another save without rounding. Invalid
 drafts and out-of-range values must fail explicitly. The actual Save Current handler
@@ -34,6 +34,11 @@ Photo-settle checks cover the compatible 200ms default, auto-save, integer
 0–60000ms bounds, invalid drafts, independent A/B/A recipes, locking during
 production and the parameter-page layout. TCP timing is covered separately by
 HopperVibrationChecks.
+
+First-set break-vacuum checks verify default-on and recipe persistence, both
+nozzles' exact off-only IO writes, synchronous completion even with 60000ms
+configured waits, the captured switch value, normal enabled timing, unchanged
+second-set pulses and the checkbox fitting the existing Z-parameter card.
 
 Parameter position checks exercise all 16 Move/Record buttons with an injected
 confirmation response and an instant fake motion card. Cancel must leave saved

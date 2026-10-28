@@ -66,6 +66,10 @@ updates; hardware mode never falls back silently to simulation.
 Live DO/AO values are read from hardware and are not replayed automatically after restart. This is intentional: restoring
 an output command at startup could energize equipment unexpectedly.
 
+## 第一套破真空开关
+
+参数设置原有“Z轴高度与停留时间”中增加“第一套破真空启用”勾选项，自动保存并随配方切换；旧配方默认启用。取消勾选后，第一套吸嘴1、吸嘴2到放料Z高度后只关闭真空吸，保持破真空阀关闭，跳过阀切换间隔和破真空脉冲等待，然后按原顺序回安全位/放行XY。第二套破真空、取料吸附停留、Z轴到位和急停保护维持原逻辑。生产采用已读取的参数快照，暂停编辑后在继续运行时更新。
+
 ## 配方视觉流程名称
 
 参数设置的“所选配方视觉流程”支持八个流程名，包含“识别中心移动”。选择配方后填入该视觉流程名称，点击“保存名称”或“保存当前”，再点击“应用”使其生效；不同产品可使用不同名称。旧配方缺少此项时沿用 `找芯片流程_011_测试`。只需配置流程名，内部按模块名称“图像源1”“脚本1”读取现有结果，复制流程后模块编号变化不影响使用。沿用原有标定转换、吸嘴偏移及移动校验，不读取其他流程的同名模块。
