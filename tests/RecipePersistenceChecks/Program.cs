@@ -89,6 +89,7 @@ internal static partial class Program
         CheckAllParameterControls(home, defaults, store);
         CheckParameterPositionActions(directory);
         CheckRecognizedCenterRecipeNames(directory);
+        CheckPhotoSettleParameters(home, directory);
     }
 
     private static void Require(bool condition, string message)

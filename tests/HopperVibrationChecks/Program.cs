@@ -220,7 +220,7 @@ internal static class Program
         }
         Console.WriteLine("PASS: finishing pickup stays at three stages, restores four stages when disabled, and stops on cancellation.");
 
-        // Production has a fixed recipe, independent of the manual controls and their production interlock.
+        // Production feeding pulse is independent of manual controls; the photo settle time is configurable.
         long productionStartAt = 0, productionZeroAt = 0, productionStopAt = 0;
         void TrackProductionTiming(object? sender, NotifyCollectionChangedEventArgs args)
         {
@@ -276,9 +276,34 @@ internal static class Program
         }
         await Task.Delay(50);
         Require(Snapshot().Length == 0, "Already-cancelled photo preparation emits no commands.");
+        foreach (var settleMilliseconds in new[] { 0, 350 })
+        {
+            Clear();
+            productionStartAt = productionZeroAt = productionStopAt = 0;
+            var gate = page.FeedHopperBeforeProductionPhotoAsync(CancellationToken.None, settleMilliseconds);
+            await WaitFor(() => productionStopAt > 0);
+            if (settleMilliseconds > 0)
+                Require(!gate.IsCompleted, "Custom settle wait must keep the photo gate closed after stop");
+            Require(await gate, "Configured photo preparation must complete");
+            Require(Stopwatch.GetElapsedTime(productionStopAt).TotalMilliseconds >= settleMilliseconds - 5,
+                "Photo gate must use the configured wait, not a hardcoded 200ms");
+            Require(Snapshot().SequenceEqual(new[] { "&05,00$", "&13,50,100$", "&13,00,100$", "&04$" }),
+                "Changing photo wait must preserve feed/zero/stop commands");
+        }
+        Clear();
+        foreach (var invalid in new[] { -1, 60001 })
+        {
+            try
+            {
+                await page.FeedHopperBeforeProductionPhotoAsync(CancellationToken.None, invalid);
+                throw new Exception("Invalid photo settle time accepted");
+            }
+            catch (ArgumentOutOfRangeException) { }
+        }
+        Require(Snapshot().Length == 0, "Invalid photo wait must be rejected before sending commands");
         vm.FeederConnectionLogs.CollectionChanged -= TrackProductionTiming;
         page.AttachHopperManualControlInterlock(() => false);
-        Console.WriteLine("PASS: every production photo feeds once at 100/50/100 ms, waits 200 ms after stop, and cancellation prevents photo.");
+        Console.WriteLine("PASS: every photo feeds at 100/50/100 ms, defaults to 200ms settling, supports 0/350ms waits, rejects invalid times before IO, and cancellation prevents photo.");
 
         Inputs("7", "9", "30000");
         var running = Run();
@@ -321,7 +346,13 @@ internal static class Program
         await WaitFor(() => Snapshot().Any(IsHopperStart));
         Click("DisconnectFeeder_Click");
         await running.WaitAsync(TimeSpan.FromSeconds(3));
-        await reading.WaitAsync(TimeSpan.FromSeconds(3));
+        try { await reading.WaitAsync(TimeSpan.FromSeconds(3)); }
+        catch (IOException exception) when (!client.IsConnected &&
+            exception.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionReset })
+        {
+            // Windows may reset the loopback peer while the test explicitly closes the client.
+            // Stop-command and amplitude assertions below still verify the disconnect sequence.
+        }
         Require(Snapshot().Contains("&13,00,007$") && Snapshot().Contains("&04$") && HopperStopped() && !client.IsConnected,
             "Disconnect clears hopper amplitude and sends &04$ before closing socket.");
         Require(!await Run(), "Disconnected startup is blocked.");

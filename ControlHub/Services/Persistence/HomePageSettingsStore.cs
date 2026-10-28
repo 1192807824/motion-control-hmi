@@ -55,6 +55,11 @@ public sealed class HomePageSettingsStore
 
 public sealed class HomePageSettings
 {
+    public const int DefaultProductionPhotoSettleMilliseconds = 200;
+
+    // 料仓归零停振后、上相机拍照前的等待；旧配置保持原来的200 ms。
+    public int ProductionPhotoSettleMilliseconds { get; set; } = DefaultProductionPhotoSettleMilliseconds;
+
     // 单次上相机识别后最多缓存并抓取的芯片数；空值兼容旧配置并使用当前默认值。
     public int? VisionPickupCount { get; set; }
 

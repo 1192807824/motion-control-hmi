@@ -26,7 +26,6 @@ public partial class ConnectionConfigPage : UserControl
     private const int MaxConnectionLogCount = 300;
     private const int BrightnessSendDebounceMs = 150;
     private const int VibrationStopSettleMilliseconds = 50;
-    private const int ProductionPhotoSettleMilliseconds = 200;
     private const int ProductionHopperVibrationFrequency = 100;
     private const int ProductionHopperVibrationAmplitude = 50;
     private const int ProductionHopperVibrationDurationMilliseconds = 100;
@@ -1358,11 +1357,14 @@ public partial class ConnectionConfigPage : UserControl
 
     /// <summary>
     /// 每次生产上相机取料拍照前：料仓以频率100、振幅50%运行100 ms，
-    /// 振幅归零并停止振动盘，再等待200 ms。整个序列占用振动互斥状态。
+    /// 振幅归零并停止振动盘，再等待配方指定的毫秒数。整个序列占用振动互斥状态。
     /// </summary>
     public async Task<bool> FeedHopperBeforeProductionPhotoAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int settleMilliseconds = HomePageSettings.DefaultProductionPhotoSettleMilliseconds)
     {
+        if (settleMilliseconds is < 0 or > 60000)
+            throw new ArgumentOutOfRangeException(nameof(settleMilliseconds), "震动后拍照等待必须是0–60000之间的整数毫秒。");
         if (_closed || _feederClosing || !_tcpClient.IsConnected)
         {
             AddLog("拍照前料仓补料失败：请先建立 TCP 连接", isAlarm: true);
@@ -1397,10 +1399,10 @@ public partial class ConnectionConfigPage : UserControl
                 ProductionHopperVibrationDurationMilliseconds,
                 "生产拍照前料仓补料",
                 operationCancellation.Token,
-                settleMilliseconds: ProductionPhotoSettleMilliseconds);
+                settleMilliseconds: settleMilliseconds);
             if (completed)
             {
-                AddLog($"生产拍照前料仓归零和停振指令已发送，已等待 {ProductionPhotoSettleMilliseconds} ms，可进入拍照");
+                AddLog($"生产拍照前料仓归零和停振指令已发送，已等待 {settleMilliseconds} ms，可进入拍照");
             }
             return completed;
         }

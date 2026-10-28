@@ -15,7 +15,7 @@ disk reloads, boundary values, legacy defaults, and rejection of odd, empty,
 out-of-range, fractional, nonnumeric and overflowing drafts. Both New and Save Current
 must report the validation error without creating or overwriting a recipe.
 
-Also covers all 175 active numeric recipe controls (including the 16 axes' motion parameters),
+Also covers all 176 active numeric recipe controls (including the 16 axes' motion parameters),
 9 switches, 3 station instrument selections, SM7110 mode/limits, optional cleared
 positions and eight vision procedure names. High precision values must survive
 save, disk reload, recipe application and another save without rounding. Invalid
@@ -29,6 +29,11 @@ and legacy defaults, Save Names, invalid drafts, actual host startup arguments,
 and an eight-row parameter-page render at 1280 and 1680 pixels. Recognition still
 resolves source/script modules by name within the selected procedure and retains
 the existing coordinate/movement validation.
+
+Photo-settle checks cover the compatible 200ms default, auto-save, integer
+0–60000ms bounds, invalid drafts, independent A/B/A recipes, locking during
+production and the parameter-page layout. TCP timing is covered separately by
+HopperVibrationChecks.
 
 Parameter position checks exercise all 16 Move/Record buttons with an injected
 confirmation response and an instant fake motion card. Cancel must leave saved

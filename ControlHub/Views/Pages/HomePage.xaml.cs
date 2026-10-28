@@ -419,6 +419,7 @@ public partial class HomePage : UserControl
     {
         SaveE4981ARetryRangeFromInputs(throwOnInvalid: true);
         SaveVisionPickupCountFromInput(throwOnInvalid: true);
+        SaveProductionPhotoSettleFromInput(throwOnInvalid: true);
         SaveSM7110RangeFromInputs(throwOnInvalid: true);
         SaveObservationCompensationFromInputs(throwOnInvalid: true);
         SaveFirstSetTeachingPositionsFromInputs(throwOnInvalid: true);
@@ -2103,6 +2104,7 @@ public partial class HomePage : UserControl
                 _productionAxisMotionSettings);
             _testStationSettings = ReadTestStationSettings();
             _testStationDwellMilliseconds = ReadTestStationDwellMilliseconds();
+            _productionPhotoSettleMilliseconds = ReadProductionPhotoSettleMilliseconds();
             _testRetryCount = ReadTestRetryCount();
             _e4981ARetryRange = ReadE4981ARetryRange();
             _sm7110AcceptanceRange = IsSM7110TestEnabled() ? ReadSM7110AcceptanceRange() : null;
@@ -2359,7 +2361,7 @@ public partial class HomePage : UserControl
 
                 if (pendingPickupBatches.Count == 0)
                 {
-                    // 把“等待振动盘结束、料仓补料100 ms、停稳200 ms、开灯及相机返回”整体作为独立任务启动。
+                    // 把“等待振动盘结束、料仓补料100 ms、按配方停稳等待、开灯及相机返回”整体作为独立任务启动。
                     // 主流程等待结果；上一批已启动的DD、测试和第二套下料任务继续完成。
                     var inspectionTask = RunProductionUpperCameraInspectionAsync(
                         visualCalibrationController,
@@ -3130,10 +3132,11 @@ public partial class HomePage : UserControl
 
         var connectionController = _connectionConfigController
             ?? throw new InvalidOperationException("振动盘控制组件未连接，无法执行拍照前料仓补料。");
+        var photoSettleMilliseconds = _productionPhotoSettleMilliseconds;
         SetStartProductionStatus(
-            $"第{cycleNumber}轮：料仓以频率100、振幅50%补料100 ms，停止后等待200 ms再拍照；下方流水线继续运行…",
+            $"第{cycleNumber}轮：料仓以频率100、振幅50%补料100 ms，停止后等待{photoSettleMilliseconds} ms再拍照；下方流水线继续运行…",
             Color.FromRgb(242, 181, 68));
-        if (!await connectionController.FeedHopperBeforeProductionPhotoAsync(cancellationToken))
+        if (!await connectionController.FeedHopperBeforeProductionPhotoAsync(cancellationToken, photoSettleMilliseconds))
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException("拍照前料仓补料或停振等待未完成，已取消本次拍照。");
@@ -6202,6 +6205,7 @@ public partial class HomePage : UserControl
         var visionPickupCount = _homeSettings.VisionPickupCount ?? DefaultVisionPickupCount;
         _homeSettings.VisionPickupCount = visionPickupCount;
         VisionPickupCountTextBox.Text = visionPickupCount.ToString(CultureInfo.CurrentCulture);
+        ProductionPhotoSettleTextBox.Text = _homeSettings.ProductionPhotoSettleMilliseconds.ToString(CultureInfo.CurrentCulture);
         FirstSetTeachingCenterXTextBox.Text = FormatPresetCoordinate(
             _homeSettings.FirstSetTeachingCenterX);
         FirstSetTeachingCenterYTextBox.Text = FormatPresetCoordinate(
@@ -7948,6 +7952,7 @@ public partial class HomePage : UserControl
             LowerCameraNozzle2RotationCenterXTextBox is null ||
             LowerCameraNozzle2RotationCenterYTextBox is null ||
             VisionPickupCountTextBox is null ||
+            ProductionPhotoSettleTextBox is null ||
             RecordLowerCameraPhotoPosition1Button is null ||
             RecordLowerCameraPhotoPosition2Button is null ||
             MoveLowerCameraPhotoPosition1Button is null ||
@@ -8013,7 +8018,8 @@ public partial class HomePage : UserControl
         var ddAxisParametersValid = ProductionAxisParametersValid(0);
         var allTestStationParametersValid = AllTestStationParametersValid();
         var visionPickupCountValid =
-            TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out _);
+            TryParseVisionPickupCount(VisionPickupCountTextBox.Text, out _) &&
+            TryParseMilliseconds(ProductionPhotoSettleTextBox.Text, out _);
         var allZPositionsValid =
             TryParseCoordinate(FirstSetNozzle1PickupZPositionTextBox.Text, out var firstSetNozzle1Pickup) &&
             TryParseCoordinate(FirstSetNozzle1DropZPositionTextBox.Text, out _) &&
@@ -8155,6 +8161,7 @@ public partial class HomePage : UserControl
         LowerCameraRotationDelayCheckBox.IsEnabled = commandsIdle;
         XyLinearInterpolationCheckBox.IsEnabled = commandsIdle;
         VisionPickupCountTextBox.IsEnabled = commandsIdle;
+        ProductionPhotoSettleTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1XTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition1YTextBox.IsEnabled = commandsIdle;
         LowerCameraPhotoPosition2XTextBox.IsEnabled = commandsIdle;

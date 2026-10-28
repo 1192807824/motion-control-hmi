@@ -35,7 +35,7 @@ internal static partial class Program
                 "TestRetryCountTextBox" => 2,
                 "E4981ARetryLowerTextBox" => 400.123456789,
                 "E4981ARetryUpperTextBox" => 500.123456789,
-                "VacuumPickupDwellTextBox" or "VacuumBreakPulseTextBox" or "VacuumValveSwitchDelayTextBox" or "TestStationDwellTextBox" => 123,
+                "VacuumPickupDwellTextBox" or "VacuumBreakPulseTextBox" or "VacuumValveSwitchDelayTextBox" or "TestStationDwellTextBox" or "ProductionPhotoSettleTextBox" => 123,
                 "SM7110LowerLimitTextBox" => 2.5,
                 "SM7110MaximumTimeTextBox" => 1.75,
                 _ when name.Contains("PickupZPosition") => 30000.123456789,

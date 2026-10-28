@@ -155,6 +155,13 @@ When adding real device/runtime data:
 
 ## Motion layer notes
 
+- `HomePageSettings.ProductionPhotoSettleMilliseconds` controls the upper-camera
+  photo delay after hopper zero-amplitude and final stop commands. Default/old
+  recipes use 200ms; the parameter accepts integer 0–60000ms and auto-saves.
+  Capture it at production start, keep the editor locked during production,
+  and pass that snapshot to `FeedHopperBeforeProductionPhotoAsync` for every
+  real photo, including retakes. Keep the 100/50/100ms hopper pulse, stop-command
+  order, vibration mutual exclusion, cancellation and cached-pick behavior.
 - `VisionProcedureNames.RecognizedCenter` is the eighth per-recipe procedure
   name, defaulting to `找芯片流程_011_测试` for old recipes. Save Names and
   Save Current persist the editor; applying/restarting passes the configured
