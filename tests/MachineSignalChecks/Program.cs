@@ -18,7 +18,7 @@ internal static class Program
         CheckPageIntegration();
         CheckNormalShutdown();
         CheckFullShutdown();
-        Console.WriteLine("PASS: state colors, buzzer disabled for all states and manual commands, reset, emergency ordering, shutdown verification, write retries and process IO isolation. Simulated hardware only.");
+        Console.WriteLine("PASS: active-low lamp levels and switching order, state colors, buzzer disabled for all states and manual commands, reset, emergency ordering, shutdown verification, write retries and process IO isolation. Simulated hardware only.");
     }
 
     private static void CheckController()
@@ -32,9 +32,15 @@ internal static class Program
         var count = raw.Calls.Count;
         signals.Apply(card);
         Require(raw.Calls.Count == count, "Stable states must not write outputs on every 5ms poll");
+        raw.Writes.Clear();
         signals.SetOperatingState(MachineOperatingState.Running);
         signals.Apply(card);
         CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
+        Require((raw.Inner.ReadDigitalOutputs(0) & 0xe0000001u) == 0xa0000001u,
+            "Running must write Y29=1, Y30=0, Y31=1: only the active-low green lamp lights");
+        Require(raw.Writes.SequenceEqual(new[] { (31, true), (30, false) }),
+            "Standby to running must turn yellow off before lighting green");
+        raw.Writes.Clear();
         foreach (var state in new[] { MachineOperatingState.Standby, MachineOperatingState.Paused,
                      MachineOperatingState.Resetting, MachineOperatingState.Stopping })
         {
@@ -42,6 +48,8 @@ internal static class Program
             signals.Apply(card);
             CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
         }
+        Require(raw.Writes.SequenceEqual(new[] { (30, true), (31, false) }),
+            "Running to standby must turn green off before lighting yellow; stable yellow states need no writes");
 
         signals.UpdateActiveFaults(["axis:1"]);
         signals.ReportAlarm("AXIS-1");
@@ -76,7 +84,7 @@ internal static class Program
         Require(raw.High(0), "A failed lamp output must not open the buzzer");
         raw.FailBit = null;
         signals.Apply(card);
-        Require(raw.High(29), "Failed output must retry rather than be cached as successful");
+        Require(!raw.High(29), "Failed output must retry rather than be cached as successful");
         signals.Shutdown(card);
         CheckOutputs(raw, red: false, green: false, yellow: false, buzzerHigh: true);
         Require(raw.Writes.All(write => write.Bit is 0 or 29 or 30 or 31), "Signal controller must never write process IO");
@@ -172,7 +180,7 @@ internal static class Program
         Require(raw.Calls.SequenceEqual(new[] { "EmergencyStop" }), "Hardware emergency stop must precede indicator IO");
         Require((bool)Get(home, "_preserveIoOnEmergencyStop")!, "Emergency notification must still freeze process IO");
         Pump();
-        Require(raw.High(29) && raw.High(0), "Emergency stop must indicate red without opening the disabled buzzer");
+        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
         Require(!raw.Writes.Any(write => write.Bit == 0 && !write.High), "Program must never write Y00=0 (active-low buzzer on)");
         Require((raw.Inner.ReadDigitalOutputs(0) & 0x1ffffffe) == processBefore,
             "Startup/state changes, reset/mute and emergency signaling must preserve every process output");
@@ -215,9 +223,20 @@ internal static class Program
         raw.IgnoreBuzzerOff = false;
         failed.ReportAlarm("REAL-SHUTDOWN-FAILURE");
         failed.Apply(card);
-        Require(!raw.High(29) && raw.High(0), "Indicator shutdown must stay off after a diagnostic failure");
+        CheckOutputs(raw, red: false, green: false, yellow: false, buzzerHigh: true);
         failed.Shutdown(card);
         Require(raw.High(0), "Retry can close buzzer after failed shutdown");
+
+        raw.IgnoreLampOffBit = 30;
+        raw.Inner.WriteDigitalOutput(30, false);
+        try { failed.Shutdown(card); throw new Exception("Lit lamp accepted as shut down"); }
+        catch (InvalidOperationException exception)
+        {
+            Require(exception.Message.Contains("回读不符"), "Shutdown must verify active-low lamps are actually high/off");
+        }
+        raw.IgnoreLampOffBit = null;
+        failed.Shutdown(card);
+        CheckOutputs(raw, red: false, green: false, yellow: false, buzzerHigh: true);
     }
 
     private static void CheckFullShutdown()
@@ -235,7 +254,7 @@ internal static class Program
         raw.Writes.Clear();
         Require(motion.TryShutdown(out var error), $"Normal complete shutdown failed: {error}");
         Pump();
-        Require(raw.SignalsAtClose == 1 && !card.IsOpen, "All signal outputs must be off before disconnect");
+        Require(raw.SignalsAtClose == 0xe0000001u && !card.IsOpen, "All active-low signal outputs must be high/off before disconnect");
         Require(!raw.Writes.Any(write => write.Bit == 0 && !write.High), "Start then close must never write buzzer on");
         Require(motion.TryShutdown(out _), "Repeated close must be harmless");
 
@@ -273,7 +292,7 @@ internal static class Program
     }
 
     private static void CheckOutputs(RecordingCard raw, bool red, bool green, bool yellow, bool buzzerHigh) =>
-        Require(raw.High(29) == red && raw.High(30) == green && raw.High(31) == yellow && raw.High(0) == buzzerHigh,
+        Require(raw.High(29) == !red && raw.High(30) == !green && raw.High(31) == !yellow && raw.High(0) == buzzerHigh,
             $"Wrong signals: expected red={red}, green={green}, yellow={yellow}, buzzerHigh={buzzerHigh}; actual port={raw.Inner.ReadDigitalOutputs(0):X8}");
     private static object? Get(object target, string field) => target.GetType().GetField(field, Private)!.GetValue(target);
     private static void Set(object target, string field, object value) => target.GetType().GetField(field, Private)!.SetValue(target, value);
@@ -296,6 +315,7 @@ public class RecordingCard : DispatchProxy
     public bool AxisAlarm { get; set; }
     public int ClearCount { get; private set; }
     public bool IgnoreBuzzerOff { get; set; }
+    public int? IgnoreLampOffBit { get; set; }
     public bool FailEmergencyStop { get; set; }
     public bool SetBuzzerLowOnEmergencyStop { get; set; }
     public uint? SignalsAtClose { get; private set; }
@@ -311,6 +331,7 @@ public class RecordingCard : DispatchProxy
             Writes.Add((bit, high));
             if (bit == FailBit) throw new MotionCardException("Injected signal output failure");
             if (IgnoreBuzzerOff && bit == 0 && high) return null;
+            if (bit == IgnoreLampOffBit && high) return null;
         }
         if (method.Name == nameof(IMotionCard.EmergencyStop))
         {

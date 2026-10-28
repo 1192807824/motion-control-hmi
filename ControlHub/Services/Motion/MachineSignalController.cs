@@ -9,7 +9,7 @@ public enum MachineOperatingState
     Stopping
 }
 
-/// <summary>Y29红/Y30绿/Y31黄为高电平亮；Y00蜂鸣器为低电平响、高电平关闭。</summary>
+/// <summary>Y29红/Y30绿/Y31黄为低电平亮、高电平关闭；Y00蜂鸣器同为低电平有效。</summary>
 public sealed class MachineSignalController
 {
     public const int BuzzerBit = 0;
@@ -62,10 +62,10 @@ public sealed class MachineSignalController
         _writtenOutputs.Clear();
         WriteOutputs(card, new Dictionary<int, bool>
         {
-            [BuzzerBit] = BuzzerOffLevel, [RedBit] = false, [GreenBit] = false, [YellowBit] = false
+            [BuzzerBit] = BuzzerOffLevel, [RedBit] = true, [GreenBit] = true, [YellowBit] = true
         });
         const uint signalMask = (1u << BuzzerBit) | (1u << RedBit) | (1u << GreenBit) | (1u << YellowBit);
-        const uint shutdownLevels = 1u << BuzzerBit;
+        const uint shutdownLevels = signalMask;
         if (card.IsOpen && (card.ReadDigitalOutputs(0) & signalMask) != shutdownLevels)
         {
             _writtenOutputs.Clear();
@@ -82,9 +82,10 @@ public sealed class MachineSignalController
             {
                 // 现场暂时禁用蜂鸣器，始终保持Y00=1（关闭）。
                 [BuzzerBit] = BuzzerOffLevel,
-                [RedBit] = !_shutdown && fault,
-                [GreenBit] = !_shutdown && !fault && _operatingState == MachineOperatingState.Running,
-                [YellowBit] = !_shutdown && !fault && _operatingState != MachineOperatingState.Running
+                // 三色灯低电平有效，字典值为实际输出电平（false亮、true灭）。
+                [RedBit] = _shutdown || !fault,
+                [GreenBit] = _shutdown || fault || _operatingState != MachineOperatingState.Running,
+                [YellowBit] = _shutdown || fault || _operatingState == MachineOperatingState.Running
             };
         }
     }
@@ -104,7 +105,7 @@ public sealed class MachineSignalController
 
         List<Exception> failures = [];
         // 先关闭蜂鸣器，再熄灭旧灯，最后点亮目标灯。
-        foreach (var (bit, high) in desired.OrderBy(item => item.Key == BuzzerBit ? 0 : item.Value ? 2 : 1))
+        foreach (var (bit, high) in desired.OrderBy(item => item.Key == BuzzerBit ? 0 : item.Value ? 1 : 2))
         {
             if (_writtenOutputs.TryGetValue(bit, out var previous) && previous == high) continue;
             try
