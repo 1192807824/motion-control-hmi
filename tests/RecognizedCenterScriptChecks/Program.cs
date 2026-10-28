@@ -23,6 +23,16 @@ internal static class Program
         object[] Parse(string text) => ((IEnumerable)Invoke("ReadScriptResultShowRows", text)).Cast<object>().ToArray();
         float Field(object row, string name) => (float)row.GetType().GetProperty(name).GetValue(row);
         void Require(bool valid, string message) { if (!valid) throw new Exception(message); }
+        var app = host.GetType("VisionMasterHost.App", true);
+        var parseArgument = app.GetMethod("ParseArgumentValue", BindingFlags.NonPublic | BindingFlags.Static);
+        var configured = (string)parseArgument.Invoke(null, new object[]
+        {
+            new[] { "--recognized-center-procedure", " 产品 A 中心识别 " }, "--recognized-center-procedure"
+        });
+        Require(configured == "产品 A 中心识别" &&
+                (string)Invoke("ResolveProcedureName", configured, "找芯片流程_011_测试") == configured &&
+                (string)Invoke("ResolveProcedureName", null, "找芯片流程_011_测试") == "找芯片流程_011_测试",
+            "Host must parse configured center procedure names including spaces, with the old default for missing arguments");
         var originalCulture = CultureInfo.CurrentCulture;
         try
         {
@@ -57,7 +67,7 @@ internal static class Program
                 "Float outputs and displayed text yield identical coordinates");
             try { Invoke("GetMatchingScriptResultCount", x, Array(new[] { 1f, 2f }), r); throw new Exception("Mismatched counts accepted"); }
             catch (TargetInvocationException e) when (e.InnerException is InvalidOperationException) { }
-            Console.WriteLine("PASS: actual host script readers parse screenshot text and float outputs; empty, multiple, negative and mismatched results validated. No hardware accessed.");
+            Console.WriteLine("PASS: host center procedure argument/default, actual script readers parse screenshot text and float outputs; empty, multiple, negative and mismatched results validated. No hardware accessed.");
             return 0;
         }
         finally { CultureInfo.CurrentCulture = originalCulture; }

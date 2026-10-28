@@ -15,7 +15,9 @@ internal static partial class Program
         var inputs = fields.Where(field => field.FieldType == typeof(TextBox))
             // Upper limit is not used or saved in resistance mode; it is checked separately in current mode.
             // Batch numbers are free text and are not numeric recipe parameters.
-            .Where(field => field.Name is not ("SM7110UpperLimitTextBox" or "BatchNumberTextBox"))
+            // Manual 0x5018 writes and the machine-level pressure threshold are not product recipe fields.
+            .Where(field => field.Name is not ("SM7110UpperLimitTextBox" or "BatchNumberTextBox" or
+                "Drive5018ValueTextBox" or "ZPressureThresholdTextBox"))
             .ToDictionary(field => field.Name, field => (TextBox)field.GetValue(home)!);
         var axisEditors = (IDictionary)typeof(HomePage).GetField("_productionAxisMotionEditors", PrivateInstance)!.GetValue(home)!;
         foreach (DictionaryEntry axis in axisEditors)
@@ -149,7 +151,8 @@ internal static partial class Program
             ["LowerCalibrationProcedureNameTextBox"] = "产品A下标定",
             ["RotationPointProcedureNameTextBox"] = "产品A三点",
             ["RotationCenterProcedureNameTextBox"] = "产品A旋转中心",
-            ["LowerCorrectionProcedureNameTextBox"] = "产品A纠偏"
+            ["LowerCorrectionProcedureNameTextBox"] = "产品A纠偏",
+            ["RecognizedCenterProcedureNameTextBox"] = "产品A中心识别"
         };
         foreach (var (name, value) in edits) ((TextBox)parameters.FindName(name)).Text = value;
         var expectedProduction = ProductRecipeStore.Clone(home.CaptureRecipeSettings());
@@ -162,15 +165,21 @@ internal static partial class Program
         Require(System.Text.Json.JsonSerializer.Serialize(saved.Production) == System.Text.Json.JsonSerializer.Serialize(expectedProduction),
             "Save Current must persist the complete production snapshot.");
         Require(saved.VisionProcedureNames.Inspection == edits["InspectionProcedureNameTextBox"] &&
-                visionHost.ProcedureNames.Inspection != saved.VisionProcedureNames.Inspection,
+                visionHost.ProcedureNames.Inspection != saved.VisionProcedureNames.Inspection &&
+                saved.VisionProcedureNames.RecognizedCenter == edits["RecognizedCenterProcedureNameTextBox"] &&
+                visionHost.ProcedureNames.RecognizedCenter != saved.VisionProcedureNames.RecognizedCenter,
             "Saved vision names must come from the recipe editor, independently of the active runtime names.");
         var before = store.Serialize(saved);
-        ((TextBox)parameters.FindName("InspectionProcedureNameTextBox")).Text = "";
-        typeof(ParameterSettingsPage).GetMethod("SaveCurrentRecipe_Click", PrivateInstance)!
-            .Invoke(parameters, [parameters, new System.Windows.RoutedEventArgs()]);
-        Require(!((TextBlock)parameters.FindName("RecipeStatusText")).Text.Contains("已保存到") &&
-                store.Serialize(store.LoadAll().Single(item => item.Id == recipe.Id)) == before,
-            "Invalid vision names must reject Save Current without overwriting the recipe.");
-        Console.WriteLine("PASS: actual Save Current button saves all production values and seven edited vision names; invalid names preserve the previous file.");
+        foreach (var field in new[] { "InspectionProcedureNameTextBox", "RecognizedCenterProcedureNameTextBox" })
+        {
+            ((TextBox)parameters.FindName(field)).Text = "";
+            typeof(ParameterSettingsPage).GetMethod("SaveCurrentRecipe_Click", PrivateInstance)!
+                .Invoke(parameters, [parameters, new System.Windows.RoutedEventArgs()]);
+            Require(!((TextBlock)parameters.FindName("RecipeStatusText")).Text.Contains("已保存到") &&
+                    store.Serialize(store.LoadAll().Single(item => item.Id == recipe.Id)) == before,
+                "Invalid vision names must reject Save Current without overwriting the recipe.");
+            ((TextBox)parameters.FindName(field)).Text = edits[field];
+        }
+        Console.WriteLine("PASS: actual Save Current button saves all production values and eight edited vision names; invalid names preserve the previous file.");
     }
 }

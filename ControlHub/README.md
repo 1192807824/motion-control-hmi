@@ -66,6 +66,10 @@ updates; hardware mode never falls back silently to simulation.
 Live DO/AO values are read from hardware and are not replayed automatically after restart. This is intentional: restoring
 an output command at startup could energize equipment unexpectedly.
 
+## 配方视觉流程名称
+
+参数设置的“所选配方视觉流程”支持八个流程名，包含“识别中心移动”。选择配方后填入该视觉流程名称，点击“保存名称”或“保存当前”，再点击“应用”使其生效；不同产品可使用不同名称。旧配方缺少此项时沿用 `找芯片流程_011_测试`。仅流程名可配置，仍从该流程的107图像源、110脚本1读取现有结果，沿用原有标定转换、吸嘴偏移及移动校验。
+
 ## 门禁开门急停
 
 参数设置页顶部新增“门禁启用”开关，默认关闭，切换后自动保存到本机 `motion-settings.json`，重启保留，切换产品配方不改变。输入固定读取模块1001第一组输入X06（端口0、位6）：红色/0表示门全关，绿色/1表示开门。

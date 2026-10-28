@@ -41,7 +41,8 @@ public partial class App : Application
                 ParseArgumentValue(e.Args, "--lower-calibration-procedure"),
                 ParseArgumentValue(e.Args, "--rotation-point-procedure"),
                 ParseArgumentValue(e.Args, "--rotation-center-procedure"),
-                ParseArgumentValue(e.Args, "--lower-correction-procedure"));
+                ParseArgumentValue(e.Args, "--lower-correction-procedure"),
+                ParseArgumentValue(e.Args, "--recognized-center-procedure"));
             MainWindow = window;
             window.Show();
 

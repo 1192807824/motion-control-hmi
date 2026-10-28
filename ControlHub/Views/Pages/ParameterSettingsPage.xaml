@@ -48,7 +48,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="76" />
             <RowDefinition Height="14" />
-            <RowDefinition Height="276" />
+            <RowDefinition Height="306" />
             <RowDefinition Height="14" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
@@ -232,6 +232,7 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="*" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <TextBlock Text="找芯片" Style="{StaticResource VisionProcedureNameLabel}" />
                         <TextBox x:Name="InspectionProcedureNameTextBox"
@@ -267,6 +268,12 @@
                                  Grid.Row="6"
                                  Grid.Column="1"
                                  Style="{StaticResource VisionProcedureNameInput}" />
+                        <TextBlock Grid.Row="7" Text="识别中心移动" Style="{StaticResource VisionProcedureNameLabel}" />
+                        <TextBox x:Name="RecognizedCenterProcedureNameTextBox"
+                                 Grid.Row="7"
+                                 Grid.Column="1"
+                                 Style="{StaticResource VisionProcedureNameInput}"
+                                 ToolTip="识别中心点移动使用的视觉流程名称，保存并应用配方后生效" />
                     </Grid>
                 </Grid>
             </Grid>

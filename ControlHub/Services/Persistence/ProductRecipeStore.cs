@@ -376,6 +376,8 @@ public sealed class VisionProcedureNames
 
     public string LowerCameraCorrection { get; set; } = "下相机纠偏";
 
+    public string RecognizedCenter { get; set; } = "找芯片流程_011_测试";
+
     public void Validate()
     {
         foreach (var (label, value) in new[]
@@ -386,7 +388,8 @@ public sealed class VisionProcedureNames
                      ("下相机标定流程", LowerCameraCalibration),
                      ("获取三点流程", RotationPoint),
                      ("计算旋转中心", RotationCenter),
-                     ("下相机纠偏", LowerCameraCorrection)
+                     ("下相机纠偏", LowerCameraCorrection),
+                     ("识别中心移动", RecognizedCenter)
                  })
         {
             if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 100)

@@ -31,8 +31,6 @@ public sealed record RecognizedCenterResult(double PixelX, double PixelY, double
 
 public static class RecognizedCenterMove
 {
-    public const string ProcedureName = "找芯片流程_011_测试";
-
     public static async Task<VisionMotionTarget> ExecuteAsync(VisionCalibrationSnapshot calibration, VisionTargetTool nozzle,
         Func<CalibrationCenterPosition> capture, Func<CancellationToken, Task<RecognizedCenterResult>> recognize,
         Func<VisionMotionTarget, CancellationToken, Task> move, CancellationToken cancellationToken)

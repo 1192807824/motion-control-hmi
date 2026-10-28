@@ -10,7 +10,7 @@ public partial class MainWindow
 {
     private string RunRecognizedCenter(IReadOnlyList<string> parts)
     {
-        const string procedureName = "找芯片流程_011_测试";
+        var procedureName = _recognizedCenterProcedureName;
         if (parts.Count != 2) throw new InvalidDataException("识别中心点移动参数无效。");
         var calibrationPath = DecodeAndValidateCalibrationFilePath(parts[1]);
         if (_busy || _calibrationSession is not null || _clickMoveEnabled)
@@ -33,7 +33,7 @@ public partial class MainWindow
             var script = ResolveModuleById<ShellModuleTool>(procedure, procedureName, 110);
             var source = ResolveModuleById<ImageSourceModuleTool>(procedure, procedureName, 107);
             if (script.Root?.ID != procedure.ID || source.Root?.ID != procedure.ID)
-                throw new InvalidOperationException("107图像源和110脚本1必须属于找芯片流程_011_测试。");
+                throw new InvalidOperationException($"107图像源和110脚本1必须属于{procedureName}。");
             stage = "停止连续采集";
             StopAllContinuousExecutionNoThrow();
             PrepareLiveRendererForCameraAcquisition();
@@ -41,7 +41,7 @@ public partial class MainWindow
             LiveRenderTitleText.Text = "识别中心点 · 110脚本1坐标 / 108匹配预览";
             _clickCenterPixelReady = false;
             SetBusy(true);
-            stage = "执行找芯片流程_011_测试";
+            stage = $"执行{procedureName}";
             procedure.Run(true);
             EnsureProcedureRunSucceeded(procedure, procedureName);
             stage = "读取110脚本1的X/Y/R结果";

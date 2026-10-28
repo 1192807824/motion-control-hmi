@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private const string DefaultRotationCenterProcedureName = "计算旋转中心";
     private const string RotationCenterCircleModuleName = "圆拟合1";
     private const string DefaultLowerCameraCorrectionProcedureName = "下相机纠偏";
+    private const string DefaultRecognizedCenterProcedureName = "找芯片流程_011_测试";
     private const string LowerCameraCorrectionImageSourceName = "图像源1";
     private const string LowerCameraCorrectionRotationModuleName = "旋转计算2";
     private const string LowerCameraCorrectionTransformModuleName = "标定转换3";
@@ -118,6 +119,7 @@ public partial class MainWindow : Window
     private readonly string _rotationPointProcedureName;
     private readonly string _rotationCenterProcedureName;
     private readonly string _lowerCameraCorrectionProcedureName;
+    private readonly string _recognizedCenterProcedureName;
 
     public MainWindow(
         bool embedded,
@@ -130,7 +132,8 @@ public partial class MainWindow : Window
         string? lowerCameraCalibrationProcedureName = null,
         string? rotationPointProcedureName = null,
         string? rotationCenterProcedureName = null,
-        string? lowerCameraCorrectionProcedureName = null)
+        string? lowerCameraCorrectionProcedureName = null,
+        string? recognizedCenterProcedureName = null)
     {
         InitializeComponent();
         _embedded = embedded;
@@ -160,6 +163,9 @@ public partial class MainWindow : Window
         _lowerCameraCorrectionProcedureName = ResolveProcedureName(
             lowerCameraCorrectionProcedureName,
             DefaultLowerCameraCorrectionProcedureName);
+        _recognizedCenterProcedureName = ResolveProcedureName(
+            recognizedCenterProcedureName,
+            DefaultRecognizedCenterProcedureName);
         _activeCalibrationProcedureName = _calibrationProcedureName;
         if (embedded)
         {

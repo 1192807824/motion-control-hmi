@@ -101,7 +101,7 @@ public partial class ParameterSettingsPage : UserControl
         ShowVisionProcedureNames(recipe.VisionProcedureNames);
         SetRecipeStatus(
             $"已选择“{recipe.Name}”；包含生产参数、{recipe.Axes.Count}根轴、视觉标定、" +
-            $"7个视觉流程名称及仪表参数。",
+            $"8个视觉流程名称及仪表参数。",
             success: true);
     }
 
@@ -228,7 +228,8 @@ public partial class ParameterSettingsPage : UserControl
             LowerCameraCalibration = "",
             RotationPoint = "",
             RotationCenter = "",
-            LowerCameraCorrection = ""
+            LowerCameraCorrection = "",
+            RecognizedCenter = ""
         };
 
         InspectionProcedureNameTextBox.Text = names.Inspection;
@@ -238,6 +239,7 @@ public partial class ParameterSettingsPage : UserControl
         RotationPointProcedureNameTextBox.Text = names.RotationPoint;
         RotationCenterProcedureNameTextBox.Text = names.RotationCenter;
         LowerCorrectionProcedureNameTextBox.Text = names.LowerCameraCorrection;
+        RecognizedCenterProcedureNameTextBox.Text = names.RecognizedCenter;
 
         InspectionProcedureNameTextBox.IsEnabled = enabled;
         NozzleTeachingProcedureNameTextBox.IsEnabled = enabled;
@@ -246,6 +248,7 @@ public partial class ParameterSettingsPage : UserControl
         RotationPointProcedureNameTextBox.IsEnabled = enabled;
         RotationCenterProcedureNameTextBox.IsEnabled = enabled;
         LowerCorrectionProcedureNameTextBox.IsEnabled = enabled;
+        RecognizedCenterProcedureNameTextBox.IsEnabled = enabled;
         SaveVisionProcedureNamesButton.IsEnabled = enabled;
     }
 
@@ -259,7 +262,8 @@ public partial class ParameterSettingsPage : UserControl
             LowerCameraCalibration = LowerCalibrationProcedureNameTextBox.Text.Trim(),
             RotationPoint = RotationPointProcedureNameTextBox.Text.Trim(),
             RotationCenter = RotationCenterProcedureNameTextBox.Text.Trim(),
-            LowerCameraCorrection = LowerCorrectionProcedureNameTextBox.Text.Trim()
+            LowerCameraCorrection = LowerCorrectionProcedureNameTextBox.Text.Trim(),
+            RecognizedCenter = RecognizedCenterProcedureNameTextBox.Text.Trim()
         };
         names.Validate();
         return names;

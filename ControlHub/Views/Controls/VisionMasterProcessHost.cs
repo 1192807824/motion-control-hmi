@@ -178,13 +178,7 @@ public sealed class VisionMasterProcessHost : HwndHost
                 startInfo.ArgumentList.Add("--solution-path");
                 startInfo.ArgumentList.Add(_solutionPath);
             }
-            AddProcedureNameArgument(startInfo, "--inspection-procedure", _procedureNames.Inspection);
-            AddProcedureNameArgument(startInfo, "--nozzle-teaching-procedure", _procedureNames.NozzleTeaching);
-            AddProcedureNameArgument(startInfo, "--calibration-procedure", _procedureNames.Calibration);
-            AddProcedureNameArgument(startInfo, "--lower-calibration-procedure", _procedureNames.LowerCameraCalibration);
-            AddProcedureNameArgument(startInfo, "--rotation-point-procedure", _procedureNames.RotationPoint);
-            AddProcedureNameArgument(startInfo, "--rotation-center-procedure", _procedureNames.RotationCenter);
-            AddProcedureNameArgument(startInfo, "--lower-correction-procedure", _procedureNames.LowerCameraCorrection);
+            AddProcedureNameArguments(startInfo);
 
             process = new Process
             {
@@ -240,6 +234,18 @@ public sealed class VisionMasterProcessHost : HwndHost
                 RaiseFailed(exception.Message);
             }
         }
+    }
+
+    private void AddProcedureNameArguments(ProcessStartInfo startInfo)
+    {
+        AddProcedureNameArgument(startInfo, "--inspection-procedure", _procedureNames.Inspection);
+        AddProcedureNameArgument(startInfo, "--nozzle-teaching-procedure", _procedureNames.NozzleTeaching);
+        AddProcedureNameArgument(startInfo, "--calibration-procedure", _procedureNames.Calibration);
+        AddProcedureNameArgument(startInfo, "--lower-calibration-procedure", _procedureNames.LowerCameraCalibration);
+        AddProcedureNameArgument(startInfo, "--rotation-point-procedure", _procedureNames.RotationPoint);
+        AddProcedureNameArgument(startInfo, "--rotation-center-procedure", _procedureNames.RotationCenter);
+        AddProcedureNameArgument(startInfo, "--lower-correction-procedure", _procedureNames.LowerCameraCorrection);
+        AddProcedureNameArgument(startInfo, "--recognized-center-procedure", _procedureNames.RecognizedCenter);
     }
 
     private static void AddProcedureNameArgument(

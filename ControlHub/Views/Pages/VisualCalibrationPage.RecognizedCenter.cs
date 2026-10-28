@@ -145,7 +145,7 @@ public partial class VisualCalibrationPage
             var path = GetCalibrationFilePath(CalibrationFilePathTextBox.Text);
             var velocity = ParsePositiveDouble(VelocityTextBox.Text, "识别移动速度");
             CalibrationCenterPosition? actual = null;
-            SetClickMoveStatus($"正在执行{RecognizedCenterMove.ProcedureName}，读取110脚本1的XY坐标…", WorkflowStatus.Running);
+            SetClickMoveStatus($"正在执行{VisionHost.ProcedureNames.RecognizedCenter}，读取110脚本1的XY坐标…", WorkflowStatus.Running);
             var target = await RecognizedCenterMove.ExecuteAsync(calibration, nozzle,
                 () => controller.CaptureCalibrationCenter(1, 2),
                 cancellation => VisionHost.RunRecognizedCenterAsync(path, cancellation),
