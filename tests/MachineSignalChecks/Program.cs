@@ -19,7 +19,7 @@ internal static partial class Program
         CheckNormalShutdown();
         CheckFullShutdown();
         CheckDoorInterlock();
-        Console.WriteLine("PASS: active-low lamp levels and switching order, state colors, buzzer disabled for all states and manual commands, reset, emergency ordering, shutdown verification, write retries and process IO isolation. Simulated hardware only.");
+        Console.WriteLine("PASS: run green -> stop red -> alarm reset yellow -> restart green, alarm history/old stop reasons/bus warnings do not force red, stale emergency callbacks ignored, output readback correction, active-low levels, buzzer disabled, emergency ordering, shutdown verification, retries and process IO isolation. Simulated hardware only.");
     }
 
     private static void CheckController()
@@ -41,42 +41,70 @@ internal static partial class Program
             "Running must write Y29=1, Y30=0, Y31=1: only the active-low green lamp lights");
         Require(raw.Writes.SequenceEqual(new[] { (31, true), (30, false) }),
             "Standby to running must turn yellow off before lighting green");
+        raw.Inner.WriteDigitalOutput(29, false);
+        raw.Inner.WriteDigitalOutput(30, true);
+        Set(signals, "_verifyOutputsAfterUtc", DateTime.MinValue);
+        signals.Apply(card);
+        CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
         raw.Writes.Clear();
-        foreach (var state in new[] { MachineOperatingState.Standby, MachineOperatingState.Paused,
-                     MachineOperatingState.Resetting, MachineOperatingState.Stopping })
+        signals.SetOperatingState(MachineOperatingState.Stopping);
+        signals.Apply(card);
+        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
+        signals.SetOperatingState(MachineOperatingState.Standby);
+        signals.Apply(card);
+        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
+        signals.ResetLatchedAlarms();
+        signals.Apply(card);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
+        signals.SetOperatingState(MachineOperatingState.Stopping);
+        signals.SetOperatingState(MachineOperatingState.Standby);
+        signals.Apply(card);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
+        signals.SetOperatingState(MachineOperatingState.Running);
+        signals.Apply(card);
+        signals.SetOperatingState(MachineOperatingState.Paused);
+        signals.Apply(card);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
+        foreach (var state in new[] { MachineOperatingState.Resetting, MachineOperatingState.Standby })
         {
             signals.SetOperatingState(state);
             signals.Apply(card);
             CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
         }
-        Require(raw.Writes.SequenceEqual(new[] { (30, true), (31, false) }),
-            "Running to standby must turn green off before lighting yellow; stable yellow states need no writes");
-
-        signals.UpdateActiveFaults(["axis:1"]);
         signals.ReportAlarm("AXIS-1");
         signals.Apply(card);
         CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
         signals.SilenceBuzzer();
         signals.Apply(card);
         signals.ResetLatchedAlarms();
-        signals.UpdateActiveFaults(["axis:1"]);
         signals.Apply(card);
-        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
-        signals.UpdateActiveFaults(["axis:1", "axis:2"]);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
+        signals.ReportAlarm("AXIS-2");
         signals.Apply(card);
         Require(raw.High(0), "A different new fault must keep the disabled buzzer off");
         signals.SilenceBuzzer();
-        signals.UpdateActiveFaults([]);
-        signals.UpdateActiveFaults(["axis:1"]);
+        signals.ReportAlarm("AXIS-1");
         signals.Apply(card);
         Require(raw.High(0), "A recurring fault must keep the disabled buzzer off");
-        signals.UpdateActiveFaults([]);
+        signals.ResetLatchedAlarms();
         signals.SilenceBuzzer();
         signals.Apply(card);
         raw.Inner.WriteDigitalOutput(0, false);
         signals.SilenceBuzzer();
         signals.Apply(card);
         Require(raw.High(0), "Silence must close a buzzer manually opened through the IO page");
+
+        // A stale write cache must not leave the physical lamps red when starting again.
+        raw.Inner.WriteDigitalOutput(29, false);
+        raw.Inner.WriteDigitalOutput(30, true);
+        raw.Inner.WriteDigitalOutput(31, true);
+        signals.SetOperatingState(MachineOperatingState.Running);
+        signals.Apply(card);
+        CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
+        signals.SetOperatingState(MachineOperatingState.Standby);
+        signals.Apply(card);
+        signals.ResetLatchedAlarms();
+        signals.Apply(card);
 
         signals.ReportAlarm("WRITE-FAILURE-TEST");
         raw.FailBit = 29;
@@ -121,6 +149,17 @@ internal static partial class Program
         Call(home, "UpdateHomeCommandState");
         Pump();
         CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
+        raw.BusError = 0x0228;
+        raw.AxisStopReason = 1;
+        Call(motion, "PollMotionState");
+        Call(motion, "RecordAlarm", "HISTORY-ONLY", "普通报警记录不应把运行绿灯锁成红灯");
+        Pump();
+        CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
+        Require(((HashSet<string>)Get(motion, "_activeAlarmKeys")!).Any(key => key.StartsWith("axis-stop:")),
+            "Regression fixture must retain a historical stop reason while running");
+        raw.BusError = 0;
+        raw.AxisStopReason = 0;
+        Call(motion, "PollMotionState");
         Set(home, "_productionPauseRequested", true);
         Call(home, "UpdateHomeCommandState");
         Pump();
@@ -132,11 +171,15 @@ internal static partial class Program
         Set(motion, "_calibrationOperationActive", true);
         Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
         Pump();
-        CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
         Set(motion, "_calibrationOperationActive", false);
+        Call(home, "UpdateHomeCommandState");
+        Pump();
+        CheckOutputs(raw, red: false, green: true, yellow: false, buzzerHigh: true);
         Set(home, "_startSequenceRunning", false);
         Call(home, "UpdateHomeCommandState");
         Pump();
+        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
 
         var before = raw.Writes.Count;
         motion.ReportMachineSignalAlarm("TEST-ALARM");
@@ -146,7 +189,7 @@ internal static partial class Program
         Set(motion, "_motionSafetyLock", true);
         Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
         Pump();
-        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
         Require((bool)Get(motion, "_motionSafetyLock")!, "Silence must not release the motion safety lock");
         motion.ReportMachineSignalAlarm("NEW-FAULT");
         Pump();
@@ -163,7 +206,7 @@ internal static partial class Program
         Call(motion, "PollMotionState");
         Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
         Pump();
-        CheckOutputs(raw, red: true, green: false, yellow: false, buzzerHigh: true);
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
         raw.AxisAlarm = false;
         Call(motion, "PollMotionState");
         CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
@@ -185,6 +228,12 @@ internal static partial class Program
         Require(!raw.Writes.Any(write => write.Bit == 0 && !write.High), "Program must never write Y00=0 (active-low buzzer on)");
         Require((raw.Inner.ReadDigitalOutputs(0) & 0x1ffffffe) == processBefore,
             "Startup/state changes, reset/mute and emergency signaling must preserve every process output");
+        Call(motion, "IssueEmergencyStopAndNotify");
+        Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
+        Pump();
+        CheckOutputs(raw, red: false, green: false, yellow: true, buzzerHigh: true);
+        Require((bool)Get(home, "_preserveIoOnEmergencyStop")!,
+            "Lamp acknowledgement must not unfreeze production IO or restart motion");
     }
 
     private static void CheckNormalShutdown()
@@ -314,6 +363,8 @@ public class RecordingCard : DispatchProxy
     public List<(int Bit, bool High)> Writes { get; } = [];
     public int? FailBit { get; set; }
     public bool AxisAlarm { get; set; }
+    public int AxisStopReason { get; set; }
+    public ushort BusError { get; set; }
     public int ClearCount { get; private set; }
     public bool IgnoreBuzzerOff { get; set; }
     public int? IgnoreLampOffBit { get; set; }
@@ -342,8 +393,10 @@ public class RecordingCard : DispatchProxy
         }
         if (method.Name == nameof(IMotionCard.ClearAlarms)) ClearCount++;
         if (method.Name == nameof(IMotionCard.Close)) SignalsAtClose = Inner.ReadDigitalOutputs(0) & 0xe0000001;
-        if (method.Name == nameof(IMotionCard.ReadAxis) && AxisAlarm)
-            return Inner.ReadAxis((int)args![0]!) with { Alarm = true, AxisErrorCode = 42 };
+        if (method.Name == nameof(IMotionCard.ReadBusErrorCode)) return BusError;
+        if (method.Name == nameof(IMotionCard.ReadAxis) && (AxisAlarm || AxisStopReason != 0))
+            return Inner.ReadAxis((int)args![0]!) with { Alarm = AxisAlarm, AxisErrorCode = AxisAlarm ? (ushort)42 : (ushort)0,
+                StopReason = AxisStopReason };
         try { return method.Invoke(Inner, args); }
         catch (TargetInvocationException exception) { throw exception.InnerException!; }
     }

@@ -10,9 +10,11 @@ public partial class MotionControlPage
     private bool _signalWriteFailureReported;
     private bool _alarmResetInProgress;
     private bool _signalRefreshQueued;
+    private int _machineSignalRevision;
 
     public void SetMachineOperatingState(MachineOperatingState state)
     {
+        if (state == MachineOperatingState.Running) Interlocked.Increment(ref _machineSignalRevision);
         _machineSignals.SetOperatingState(state);
         QueueMachineSignalRefresh();
     }
@@ -45,27 +47,9 @@ public partial class MotionControlPage
         }));
     }
 
-    private IEnumerable<string> GetActiveMachineSignalFaults()
-    {
-        if (_motionSafetyLock) yield return "motion-safety-lock";
-        if (_externalEmergencyStopInputActive) yield return "external-emergency-stop";
-        if (_doorInterlockInputActive) yield return "door-interlock";
-        foreach (var key in _activeAlarmKeys)
-        {
-            if (key.StartsWith("axis-fault:", StringComparison.Ordinal) ||
-                key.StartsWith("axis-emg:", StringComparison.Ordinal) ||
-                key.StartsWith("axis-stop:", StringComparison.Ordinal) ||
-                key.StartsWith("bus:", StringComparison.Ordinal) ||
-                key.StartsWith("poll:", StringComparison.Ordinal) ||
-                key is "poll-general" or "io-read" or "external-emergency-stop-read")
-                yield return key;
-        }
-    }
-
     private void RefreshMachineSignals(bool retryImmediately = false)
     {
         if (_closed) return;
-        _machineSignals.UpdateActiveFaults(GetActiveMachineSignalFaults());
         if (!retryImmediately && DateTime.UtcNow < _signalRetryAfterUtc) return;
         try
         {
@@ -80,14 +64,13 @@ public partial class MotionControlPage
             if (!_signalWriteFailureReported)
             {
                 _signalWriteFailureReported = true;
-                RecordAlarm("MACHINE-SIGNAL-IO", FormatException(exception), signal: false);
+                RecordAlarm("MACHINE-SIGNAL-IO", FormatException(exception));
             }
         }
     }
 
     private void SilenceMachineBuzzer()
     {
-        _machineSignals.UpdateActiveFaults(GetActiveMachineSignalFaults());
         _machineSignals.SilenceBuzzer();
         RefreshMachineSignals(retryImmediately: true);
     }
@@ -101,8 +84,7 @@ public partial class MotionControlPage
         catch (Exception exception)
         {
             RecordAlarm("SHUTDOWN-SIGNAL-IO",
-                $"退出时关闭蜂鸣器/三色灯的写入或回读异常，运动轴已确认停止，继续退出：{FormatException(exception)}",
-                signal: false);
+                $"退出时关闭蜂鸣器/三色灯的写入或回读异常，运动轴已确认停止，继续退出：{FormatException(exception)}");
         }
     }
 }

@@ -8269,7 +8269,6 @@ public partial class HomePage : UserControl
         if (color == Color.FromRgb(242, 122, 128))
         {
             AlarmHistory.Record("生产流程", "PRODUCTION", message);
-            _motionController?.ReportMachineSignalAlarm("PRODUCTION");
         }
         StartProductionHintText.ToolTip = message;
         StartProductionHintText.Foreground = new SolidColorBrush(color);
@@ -8280,7 +8279,6 @@ public partial class HomePage : UserControl
         if (color == Color.FromRgb(242, 122, 128))
         {
             AlarmHistory.Record("生产收料", "COLLECT", message);
-            _motionController?.ReportMachineSignalAlarm("COLLECT");
         }
         OneKeyCollectHintText.Text = message;
         OneKeyCollectHintText.ToolTip = message;
@@ -8443,7 +8441,6 @@ public partial class HomePage : UserControl
         if (color == Color.FromRgb(242, 122, 128))
         {
             AlarmHistory.Record("一键复位", "RESET", message);
-            _motionController?.ReportMachineSignalAlarm("RESET");
         }
         OneKeyResetHintText.Text = message;
         OneKeyResetHintText.ToolTip = message;

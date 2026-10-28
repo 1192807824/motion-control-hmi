@@ -195,8 +195,14 @@ When adding real device/runtime data:
   1 turns off, as confirmed by the operator's on-machine running indication.
   Turn the old lamp off (write 1) before lighting the new lamp (write 0). The Y00
   buzzer is ACTIVE-LOW: 0 sounds, 1 is silent, as confirmed on the machine.
-  Running/collecting is green; standby, pause, reset and stopping
-  are yellow; an alarm or emergency stop is red. The buzzer is temporarily
+  Lamps follow the operator's state sequence, independently of alarm records:
+  running/collecting is green; leaving running for stop/standby latches red;
+  the Reset Device Alarms button acknowledges the lamp to yellow; restarting
+  clears the stop indication and shows green. Initial standby and pause are
+  yellow. A real emergency-stop command also latches red. Historical axis stop
+  reasons, bus warnings and ordinary recorded errors must not hold red during
+  running. Verify indicator output readback on state changes and every 250ms,
+  correcting changed bits without rewriting process IO. The buzzer is temporarily
   disabled by operator request: Y00 must always be written 1, including manual
   output commands. Do not restore automatic buzzing without an explicit request.
 - `MachineSignalController` owns only those four bits. Indicator updates must
@@ -204,9 +210,11 @@ When adding real device/runtime data:
   pre-stop notification changes its state. Do not route these indicators
   through the process-vacuum IO lock: red indication and buzzer muting must
   remain available during emergency/safety-lock states.
-- The motion page's Reset Device Alarms button forces the buzzer off even
-  when motion prevents a device reset. Persistent hardware faults stay red.
-  Resetting does not erase history.
+- The motion page's Reset Device Alarms button acknowledges the lamp to yellow
+  and forces the buzzer off even when motion prevents a device reset. It does
+  not unlock a safety lock, bypass door/emergency motion guards, resume motion
+  or erase history. Late notifications from an earlier stop must not overwrite
+  a newer reset or restart indication.
 - Normal application shutdown uses the same hardware safe stop but must not
   enqueue an emergency alarm. Before disconnecting, write Y00=1 (silent) and
   Y29/Y30/Y31=1 (lamps off)

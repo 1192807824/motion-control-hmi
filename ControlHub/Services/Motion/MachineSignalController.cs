@@ -18,11 +18,11 @@ public sealed class MachineSignalController
     public const int GreenBit = 30;
     public const int YellowBit = 31;
 
-    private readonly HashSet<string> _latchedAlarms = [];
-    private HashSet<string> _activeFaults = [];
+    private bool _stoppedIndication;
     private readonly Dictionary<int, bool> _writtenOutputs = [];
     private MachineOperatingState _operatingState;
     private bool _shutdown;
+    private DateTime _verifyOutputsAfterUtc;
 
     // 蜂鸣器按现场要求保持禁用，所有入口统一使用实际的关闭电平。
     public static bool NormalizeOutputLevel(int bit, bool requestedLevel) =>
@@ -30,18 +30,22 @@ public sealed class MachineSignalController
 
     public void SetOperatingState(MachineOperatingState state)
     {
-        // 明确开始新流程/继续运行时清除上一轮的软件故障；实际设备故障仍优先显示红灯。
-        if (state == MachineOperatingState.Running && _operatingState != state)
-            ResetLatchedAlarms();
+        // 灯只表达运行状态，不把报警列表/历史停止原因当作持续红灯条件。
+        var wasStopped = _stoppedIndication;
+        if (state == MachineOperatingState.Running)
+            _stoppedIndication = false;
+        else if ((state is MachineOperatingState.Stopping or MachineOperatingState.Standby) &&
+                 (_operatingState is MachineOperatingState.Running or MachineOperatingState.Paused))
+            _stoppedIndication = true;
+        if (_operatingState != state || wasStopped != _stoppedIndication) _verifyOutputsAfterUtc = default;
         _operatingState = state;
     }
 
-    public void ReportAlarm(string code) => _latchedAlarms.Add("alarm:" + code);
-
-    public void UpdateActiveFaults(IEnumerable<string> faults)
+    public void ReportAlarm(string code)
     {
-        var next = faults.Select(fault => "active:" + fault).ToHashSet(StringComparer.Ordinal);
-        _activeFaults = next;
+        // 仅由实际急停入口调用；普通报警记录不驱动灯。
+        _stoppedIndication = true;
+        _verifyOutputsAfterUtc = default;
     }
 
     public void SilenceBuzzer()
@@ -52,7 +56,9 @@ public sealed class MachineSignalController
 
     public void ResetLatchedAlarms()
     {
-        _latchedAlarms.Clear();
+        _stoppedIndication = false;
+        _operatingState = MachineOperatingState.Standby;
+        _verifyOutputsAfterUtc = default;
     }
 
     public void Shutdown(IMotionCard card)
@@ -77,21 +83,30 @@ public sealed class MachineSignalController
     {
         get
         {
-            var fault = _latchedAlarms.Count > 0 || _activeFaults.Count > 0;
+            var stopped = _stoppedIndication;
             return new Dictionary<int, bool>
             {
                 // 现场暂时禁用蜂鸣器，始终保持Y00=1（关闭）。
                 [BuzzerBit] = BuzzerOffLevel,
                 // 三色灯低电平有效，字典值为实际输出电平（false亮、true灭）。
-                [RedBit] = _shutdown || !fault,
-                [GreenBit] = _shutdown || fault || _operatingState != MachineOperatingState.Running,
-                [YellowBit] = _shutdown || fault || _operatingState == MachineOperatingState.Running
+                [RedBit] = _shutdown || !stopped,
+                [GreenBit] = _shutdown || stopped || _operatingState != MachineOperatingState.Running,
+                [YellowBit] = _shutdown || stopped || _operatingState == MachineOperatingState.Running
             };
         }
     }
 
     public void Apply(IMotionCard card)
     {
+        if (card.IsOpen && DateTime.UtcNow >= _verifyOutputsAfterUtc)
+        {
+            // 急停或手动IO可能改写输出，不能一直相信之前的写入缓存。
+            var actual = card.ReadDigitalOutputs(0);
+            foreach (var bit in new[] { BuzzerBit, RedBit, GreenBit, YellowBit })
+                _writtenOutputs[bit] = (actual & (1u << bit)) != 0;
+            _verifyOutputsAfterUtc = DateTime.UtcNow.AddMilliseconds(250);
+        }
+        if (!card.IsOpen) _verifyOutputsAfterUtc = default;
         WriteOutputs(card, DesiredOutputs);
     }
 

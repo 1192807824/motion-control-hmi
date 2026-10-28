@@ -3504,6 +3504,7 @@ public partial class MotionControlPage : UserControl
 
     private void IssueHardwareEmergencyStopAndNotify(bool signalAlarm)
     {
+        var signalRevision = Volatile.Read(ref _machineSignalRevision);
         // 必须在控制卡急停和各运动任务取消之前通知生产流程冻结IO。
         // 否则运动任务可能先进入catch/finally并改写真空输出。
         NotifyEmergencyStopIssuedNoThrow();
@@ -3516,7 +3517,12 @@ public partial class MotionControlPage : UserControl
             // 不让灯/蜂鸣器的通讯延迟抢在真正的硬件急停之前。
             if (signalAlarm)
                 _ = Dispatcher.BeginInvoke(DispatcherPriority.Send,
-                    new Action(() => ReportMachineSignalAlarm("EMERGENCY-STOP")));
+                    new Action(() =>
+                    {
+                        // 旧急停的延迟通知不能覆盖之后的运行/报警复位操作。
+                        if (signalRevision == Volatile.Read(ref _machineSignalRevision))
+                            ReportMachineSignalAlarm("EMERGENCY-STOP");
+                    }));
         }
     }
 
@@ -4453,13 +4459,15 @@ public partial class MotionControlPage : UserControl
         try
         {
             // 消音不依赖运动是否空闲，也不解除安全锁或改写任何工艺IO。
+            // 复位报警先确认灯的停止提示，显示待机黄灯；硬件复位仍走原安全检查。
+            Interlocked.Increment(ref _machineSignalRevision);
+            _machineSignals.ResetLatchedAlarms();
             SilenceMachineBuzzer();
             if (IsAnyMotionWorkflowActive())
             {
                 RecordAlarm(
                     "CLEAR-ALARM-BUSY",
-                    "蜂鸣已消音；运动、回零或停止确认期间不能复位设备报警。请先确认所有轴已停止。",
-                    signal: false);
+                    "指示灯已复位为黄灯，蜂鸣已消音；运动、回零或停止确认期间不能复位设备报警。请先确认所有轴已停止。");
                 return;
             }
 
@@ -6382,10 +6390,9 @@ public partial class MotionControlPage : UserControl
         }
     }
 
-    private void RecordAlarm(string code, string message, bool signal = true)
+    private void RecordAlarm(string code, string message)
     {
         AlarmHistory.Record("运动控制", code, message);
-        if (signal) ReportMachineSignalAlarm(code);
         if (ViewModel is not { } viewModel)
         {
             return;

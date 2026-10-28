@@ -61,6 +61,12 @@ internal static partial class Program
                 "Open door must block process IO");
             Pump();
             CheckDoorLamp(raw, redOn: true);
+            Call(motion, "ClearAlarm_Click", motion, new RoutedEventArgs());
+            Pump();
+            Require((raw.Inner.ReadDigitalOutputs(0) & 0xe0000001u) == 0x60000001u,
+                "Alarm reset must acknowledge yellow even with the door held open");
+            ExpectDoorBlocked(motion);
+            Require(raw.MoveCount == 0, "Acknowledging the lamp must never bypass the door motion guard");
             Call(motion, "RefreshDoorInterlock");
             Require(raw.EmergencyCount == 1, "A held-open door must not repeatedly issue stops");
 
