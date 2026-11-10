@@ -44,18 +44,34 @@ public sealed class SM7110Session
         }
     }
 
+    public const int ResponseSyncAttempts = 3;
+
     public async Task<string?> SynchronizeResponseAsync(
         Func<CancellationToken, Task<string>> queryIdentity,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int, TimeoutException>? onRetry = null)
     {
         if (!NeedsResponseSync)
             return null;
 
-        // The caller uses an identity filter to discard late measurement replies.
-        var identity = await queryIdentity(cancellationToken);
-        if (!SM7110Protocol.IsSupportedIdentity(identity))
-            throw new InvalidOperationException($"SM7110/SM7120响应同步失败：{identity}");
-        NeedsResponseSync = false;
-        return identity;
+        for (var attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // The caller uses an identity filter to discard late measurement replies.
+                // An interrupted measurement may still be running, so a timeout re-sends the barrier;
+                // surplus identity replies are discarded by SM7110Protocol.ResponseFilterFor.
+                var identity = await queryIdentity(cancellationToken);
+                if (!SM7110Protocol.IsSupportedIdentity(identity))
+                    throw new InvalidOperationException($"SM7110/SM7120响应同步失败：{identity}");
+                NeedsResponseSync = false;
+                return identity;
+            }
+            catch (TimeoutException exception) when (attempt < ResponseSyncAttempts)
+            {
+                onRetry?.Invoke(attempt, exception);
+            }
+        }
     }
 }

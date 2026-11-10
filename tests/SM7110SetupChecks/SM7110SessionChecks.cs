@@ -79,13 +79,56 @@ internal static class SM7110SessionChecks
             catch (OperationCanceledException) { }
         }
         wire.Clear();
+        var timeoutAttempts = 0;
+        var retryReports = new List<int>();
         try
         {
-            await session.SynchronizeResponseAsync(_ => Task.FromException<string>(new TimeoutException()), CancellationToken.None);
+            await session.SynchronizeResponseAsync(_ =>
+            {
+                timeoutAttempts++;
+                return Task.FromException<string>(new TimeoutException());
+            }, CancellationToken.None, (attempt, _) => retryReports.Add(attempt));
             throw new Exception("Failed synchronization must not continue.");
         }
         catch (TimeoutException) { }
+        Check(timeoutAttempts == SM7110Session.ResponseSyncAttempts &&
+              retryReports.SequenceEqual(Enumerable.Range(1, SM7110Session.ResponseSyncAttempts - 1)),
+            "Synchronization must retry the identity barrier a bounded number of times.");
         Check(session.NeedsResponseSync, "Failed synchronization must remain pending.");
+
+        // A slow instrument (still finishing the interrupted measurement) recovers on a retry.
+        var slowAttempts = 0;
+        var slowIdentity = await session.SynchronizeResponseAsync(_ => ++slowAttempts < 2
+            ? Task.FromException<string>(new TimeoutException())
+            : Task.FromResult("HIOKI,SM7110,123,V2.13"), CancellationToken.None);
+        Check(slowIdentity == "HIOKI,SM7110,123,V2.13" && slowAttempts == 2 && !session.NeedsResponseSync,
+            "A late identity reply on retry must complete synchronization.");
+
+        // Non-timeout failures are not retried.
+        await session.QueryMeasurementAsync("x", (_, _) => Task.FromException<string>(new TimeoutException()), CancellationToken.None)
+            .ContinueWith(_ => { });
+        var ioAttempts = 0;
+        try
+        {
+            await session.SynchronizeResponseAsync(_ =>
+            {
+                ioAttempts++;
+                return Task.FromException<string>(new IOException());
+            }, CancellationToken.None);
+            throw new Exception("I/O failure must not continue.");
+        }
+        catch (IOException) { }
+        Check(ioAttempts == 1 && session.NeedsResponseSync, "Only timeouts may retry synchronization.");
+
+        // Surplus identity replies from retries must never satisfy other queries.
+        var measurementFilter = SM7110Protocol.ResponseFilterFor("*TRG;*WAI;:MEASure:RESult? 3")!;
+        var esrFilter = SM7110Protocol.ResponseFilterFor("*ESR?")!;
+        Check(!measurementFilter("HIOKI,SM7110,123,V2.13") && measurementFilter("0,6E+8") &&
+              !esrFilter("HIOKI,SM7120,123,V2.13") && esrFilter("0") &&
+              SM7110Protocol.ResponseFilterFor(" *idn? ") is null,
+            "Non-identity queries must skip identity lines; identity queries must stay unfiltered.");
+
+        wire.Clear();
         await Prepare();
         Check(wire.SequenceEqual(new[] { "*IDN?" }), "Recovery after operator stop must not re-send setup.");
 
@@ -105,7 +148,7 @@ internal static class SM7110SessionChecks
         }
         catch (InvalidOperationException) { }
         Check(await Apply(), "A failed setup must never be cached as successfully applied.");
-        Console.WriteLine("PASS: repeated starts, deadline/stop recovery without parameter re-send, failed sync, changed settings, reconnect and explicit apply.");
+        Console.WriteLine("PASS: repeated starts, deadline/stop recovery without parameter re-send, bounded sync retries, stale identity filtering, changed settings, reconnect and explicit apply.");
     }
 
     private static void Check(bool condition, string message)

@@ -228,9 +228,15 @@ public partial class ConnectionConfigPage : UserControl
                 // 上次总时限/停止可能中断了查询；用有筛选条件的IDN屏障排空旧响应，避免旧值判定新产品。
                 AddSerialLog("同步上次中断的测量响应，保留已下发参数");
                 var identity = await _sm7110Session.SynchronizeResponseAsync(
-                    token => _serialClient.QueryAsync("*IDN?", SM7110Protocol.DecodeNewLine(settings.NewLine),
-                        settings.CommandTimeoutMilliseconds, token, SM7110Protocol.IsSupportedIdentity),
-                    cancellationToken);
+                    token =>
+                    {
+                        AddSerialLog("TX [SCPI]  *IDN?（响应同步）");
+                        return _serialClient.QueryAsync("*IDN?", SM7110Protocol.DecodeNewLine(settings.NewLine),
+                            settings.CommandTimeoutMilliseconds, token, SM7110Protocol.IsSupportedIdentity);
+                    },
+                    cancellationToken,
+                    (attempt, _) => AddSerialLog(
+                        $"响应同步第{attempt}次未在{settings.CommandTimeoutMilliseconds}ms内收到身份应答（仪表可能仍在完成被中断的测量），重发*IDN?（最多{SM7110Session.ResponseSyncAttempts}次）"));
                 if (identity is not null) UpdateSerialMeterIdentity(identity);
             }
             await EnsureSM7110SettingsAppliedAsync(cancellationToken);
@@ -2117,7 +2123,8 @@ public partial class ConnectionConfigPage : UserControl
             command,
             terminator,
             settings.CommandTimeoutMilliseconds,
-            linkedCancellation.Token);
+            linkedCancellation.Token,
+            SM7110Protocol.ResponseFilterFor(command));
     }
 
     private void UpdateSerialMeterIdentity(string identity)

@@ -188,6 +188,17 @@ public static class SM7110Protocol
                identity.Contains("SM7120", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Response-sync retries may leave surplus *IDN? replies on the line; every other query
+    /// must skip them so an identity string is never taken as a measurement or *ESR? value.
+    /// </summary>
+    public static Func<string, bool>? ResponseFilterFor(string command)
+    {
+        return string.Equals(command.Trim(), "*IDN?", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : line => !IsSupportedIdentity(line);
+    }
+
     public static void ValidateSettings(SerialConnectionSettings settings)
     {
         if (!AllowedModes.Contains(settings.MeasurementMode?.Trim(), StringComparer.OrdinalIgnoreCase))
