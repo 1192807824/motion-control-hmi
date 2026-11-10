@@ -21,7 +21,9 @@ public sealed class IoPoint : INotifyPropertyChanged
 
     public int Channel { get; init; }
 
-    public int BitNo => Channel;
+    public int HardwareBitNo { get; init; } = -1;
+
+    public int BitNo => HardwareBitNo >= 0 ? HardwareBitNo : Channel;
 
     public string DefaultName { get; init; } = "";
 

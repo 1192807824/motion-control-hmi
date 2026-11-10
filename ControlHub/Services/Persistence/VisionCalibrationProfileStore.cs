@@ -10,7 +10,7 @@ public sealed class VisionCalibrationProfileStore
         WriteIndented = true
     };
 
-    public void Save(string filePath, VisionCalibrationProfile profile)
+    public string? Save(string filePath, VisionCalibrationProfile profile)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(profile);
@@ -21,7 +21,9 @@ public sealed class VisionCalibrationProfileStore
             Directory.CreateDirectory(directory);
         }
 
+        var backupPath = CalibrationBackupService.BackupBeforeOverwrite(fullPath);
         File.WriteAllText(fullPath, JsonSerializer.Serialize(profile, JsonOptions));
+        return backupPath;
     }
 
     public VisionCalibrationProfile Load(string filePath)
@@ -45,8 +47,7 @@ public sealed class VisionCalibrationProfileStore
         }
 
         if (profile.Version != 1 ||
-            profile.XHardwareAxisNo != 1 ||
-            profile.YHardwareAxisNo != 2 ||
+            !IsSupportedAxisPair(profile.XHardwareAxisNo, profile.YHardwareAxisNo) ||
             Math.Abs(profile.PulsesPerVisionUnit - 10_000d) > 0.000001d ||
             !double.IsFinite(profile.StepXPulses) ||
             profile.StepXPulses <= 0 ||
@@ -57,8 +58,9 @@ public sealed class VisionCalibrationProfileStore
             profile.SettleMilliseconds < 0 ||
             (!string.Equals(profile.MovePriority, "X", StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(profile.MovePriority, "Y", StringComparison.OrdinalIgnoreCase)) ||
-            !profile.Nozzle1Calibrated ||
-            !profile.Nozzle2Calibrated ||
+            (profile.NozzleDotPositionRecorded &&
+             !AreFinite(profile.NozzleDotPositionXPulses, profile.NozzleDotPositionYPulses)) ||
+            (!profile.Nozzle1Calibrated && !profile.Nozzle2Calibrated) ||
             !AreFinite(
                 profile.Nozzle1OffsetXPulses,
                 profile.Nozzle1OffsetYPulses,
@@ -94,6 +96,12 @@ public sealed class VisionCalibrationProfileStore
     {
         return values.All(double.IsFinite);
     }
+
+    private static bool IsSupportedAxisPair(int xHardwareAxisNo, int yHardwareAxisNo)
+    {
+        return (xHardwareAxisNo == 1 && yHardwareAxisNo == 2) ||
+               (xHardwareAxisNo == 3 && yHardwareAxisNo == 4);
+    }
 }
 
 public sealed class VisionCalibrationProfile
@@ -114,11 +122,17 @@ public sealed class VisionCalibrationProfile
 
     public double StepYPulses { get; set; } = 100_000d;
 
-    public double VelocityPulsesPerSecond { get; set; } = 100_000d;
+    public double VelocityPulsesPerSecond { get; set; } = 200_000d;
 
     public int SettleMilliseconds { get; set; } = 300;
 
     public string MovePriority { get; set; } = "X";
+
+    public bool NozzleDotPositionRecorded { get; set; }
+
+    public double NozzleDotPositionXPulses { get; set; }
+
+    public double NozzleDotPositionYPulses { get; set; }
 
     public bool Nozzle1Calibrated { get; set; }
 

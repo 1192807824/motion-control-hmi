@@ -7,7 +7,8 @@ public sealed class SimulatedMotionCard : IMotionCard
     private readonly List<SimulatedAxis> _axes;
     private readonly double[] _analogInputs;
     private readonly double[] _analogOutputs;
-    private uint _digitalOutputs;
+    private readonly Dictionary<int, uint> _digitalOutputPorts = [];
+    private readonly Dictionary<int, int[]> _linearAxesByCoordinateSystem = [];
 
     public SimulatedMotionCard(MotionCardOptions options)
     {
@@ -105,7 +106,7 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
-            return _digitalOutputs;
+            return _digitalOutputPorts.GetValueOrDefault(portNo);
         }
     }
 
@@ -114,19 +115,25 @@ public sealed class SimulatedMotionCard : IMotionCard
         lock (_sync)
         {
             EnsureOpen();
-            if (bitNo < 0 || bitNo >= Math.Min(DigitalOutputCount, 32))
+            var maximumBitNo = Math.Max(DigitalOutputCount, _options.DigitalOutputStartBit + DigitalOutputCount);
+            if (bitNo < 0 || bitNo >= maximumBitNo)
             {
                 throw new ArgumentOutOfRangeException(nameof(bitNo));
             }
 
+            var portNo = bitNo / 32;
+            var portBitNo = bitNo % 32;
+            var portState = _digitalOutputPorts.GetValueOrDefault(portNo);
             if (enabled)
             {
-                _digitalOutputs |= 1u << bitNo;
+                portState |= 1u << portBitNo;
             }
             else
             {
-                _digitalOutputs &= ~(1u << bitNo);
+                portState &= ~(1u << portBitNo);
             }
+
+            _digitalOutputPorts[portNo] = portState;
         }
     }
 
@@ -253,6 +260,182 @@ public sealed class SimulatedMotionCard : IMotionCard
             }
 
             axis.StartMove(axis.Position + distance, velocity, runMode: 1, markHomedOnCompletion: false);
+        }
+    }
+
+    public void MoveRelativeSynchronized(
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> distances,
+        IReadOnlyList<double> velocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(distances);
+        ArgumentNullException.ThrowIfNull(velocities);
+
+        if (hardwareAxisNos.Count == 0 ||
+            hardwareAxisNos.Count != distances.Count ||
+            hardwareAxisNos.Count != velocities.Count)
+        {
+            throw new ArgumentException("同步相对移动的轴号、脉冲和速度数量必须一致且不能为空。");
+        }
+
+        lock (_sync)
+        {
+            var moves = new List<(SimulatedAxis Axis, double Distance, double Velocity)>(hardwareAxisNos.Count);
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var axis = GetReadyAxis(hardwareAxisNos[index]);
+                EnsureAxisStopped(axis, hardwareAxisNos[index]);
+                var distance = distances[index];
+                var velocity = velocities[index];
+                if (!double.IsFinite(distance) || distance == 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(distances));
+                }
+
+                if (!double.IsFinite(velocity) || velocity <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(velocities));
+                }
+
+                if (distance > 0 && axis.PositiveLimit)
+                {
+                    throw new MotionCardException("仿真轴正限位已触发，禁止继续正向运动。");
+                }
+
+                if (distance < 0 && axis.NegativeLimit)
+                {
+                    throw new MotionCardException("仿真轴负限位已触发，禁止继续负向运动。");
+                }
+
+                moves.Add((axis, distance, velocity));
+            }
+
+            foreach (var move in moves)
+            {
+                move.Axis.StartMove(
+                    move.Axis.Position + move.Distance,
+                    move.Velocity,
+                    runMode: 1,
+                    markHomedOnCompletion: false);
+            }
+        }
+    }
+
+    public void MoveLinearAbsolute(
+        int coordinateSystemNo,
+        IReadOnlyList<int> hardwareAxisNos,
+        IReadOnlyList<double> targetPositions,
+        IReadOnlyList<double> maximumAxisVelocities)
+    {
+        ArgumentNullException.ThrowIfNull(hardwareAxisNos);
+        ArgumentNullException.ThrowIfNull(targetPositions);
+        ArgumentNullException.ThrowIfNull(maximumAxisVelocities);
+
+        if (coordinateSystemNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
+        }
+
+        if (hardwareAxisNos.Count != 2 ||
+            hardwareAxisNos.Count != targetPositions.Count ||
+            hardwareAxisNos.Count != maximumAxisVelocities.Count ||
+            hardwareAxisNos.Distinct().Count() != hardwareAxisNos.Count)
+        {
+            throw new ArgumentException("XY直线插补必须提供两根不同轴及对应的目标位置和最大速度。");
+        }
+
+        lock (_sync)
+        {
+            if (_linearAxesByCoordinateSystem.TryGetValue(coordinateSystemNo, out var activeAxisNos))
+            {
+                var coordinateMoving = activeAxisNos.Any(axisNo =>
+                {
+                    var activeAxis = GetAxis(axisNo);
+                    activeAxis.Update();
+                    return activeAxis.IsMoving;
+                });
+                if (coordinateMoving)
+                {
+                    throw new MotionCardException($"仿真插补坐标系 {coordinateSystemNo} 正在运动。");
+                }
+            }
+
+            var axes = new SimulatedAxis[hardwareAxisNos.Count];
+            var distances = new double[hardwareAxisNos.Count];
+            for (var index = 0; index < hardwareAxisNos.Count; index++)
+            {
+                var target = targetPositions[index];
+                var axisVelocity = maximumAxisVelocities[index];
+                if (!double.IsFinite(target))
+                {
+                    throw new ArgumentOutOfRangeException(nameof(targetPositions));
+                }
+
+                if (!double.IsFinite(axisVelocity) || axisVelocity <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(maximumAxisVelocities));
+                }
+
+                var axis = GetReadyAxis(hardwareAxisNos[index]);
+                EnsureAxisStopped(axis, hardwareAxisNos[index]);
+                var distance = target - axis.Position;
+                if (distance > 0 && axis.PositiveLimit)
+                {
+                    throw new MotionCardException("仿真轴正限位已触发，禁止继续正向运动。");
+                }
+
+                if (distance < 0 && axis.NegativeLimit)
+                {
+                    throw new MotionCardException("仿真轴负限位已触发，禁止继续负向运动。");
+                }
+
+                axes[index] = axis;
+                distances[index] = distance;
+            }
+
+            var pathLength = Math.Sqrt(distances.Sum(distance => distance * distance));
+            if (!double.IsFinite(pathLength) || pathLength <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetPositions), "插补路径长度必须大于0。");
+            }
+
+            var maximumVectorVelocity = Enumerable.Range(0, distances.Length)
+                .Where(index => Math.Abs(distances[index]) > 0)
+                .Min(index => maximumAxisVelocities[index] /
+                              (Math.Abs(distances[index]) / pathLength));
+            var durationSeconds = Math.Max(pathLength / maximumVectorVelocity, 0.05);
+            for (var index = 0; index < axes.Length; index++)
+            {
+                axes[index].StartMoveWithDuration(
+                    targetPositions[index],
+                    durationSeconds,
+                    runMode: 4);
+            }
+
+            _linearAxesByCoordinateSystem[coordinateSystemNo] = hardwareAxisNos.ToArray();
+        }
+    }
+
+    public void StopLinearInterpolation(int coordinateSystemNo, bool emergency = false)
+    {
+        if (coordinateSystemNo < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(coordinateSystemNo));
+        }
+
+        lock (_sync)
+        {
+            EnsureOpen();
+            if (!_linearAxesByCoordinateSystem.Remove(coordinateSystemNo, out var axisNos))
+            {
+                return;
+            }
+
+            foreach (var axisNo in axisNos)
+            {
+                GetAxis(axisNo).Stop(emergency ? 1 : 0);
+            }
         }
     }
 
@@ -428,6 +611,22 @@ public sealed class SimulatedMotionCard : IMotionCard
             {
                 Homed = true;
             }
+        }
+
+        public void StartMoveWithDuration(double target, double durationSeconds, ushort runMode)
+        {
+            Update();
+            _continuous = false;
+            _moveStartPosition = Position;
+            Target = target;
+            _moveStarted = DateTime.UtcNow;
+            _moveEnds = _moveStarted.Value.AddSeconds(Math.Max(durationSeconds, 0.05));
+            _markHomedOnCompletion = false;
+            Speed = Math.Sign(Target - Position) *
+                    Math.Abs(Target - Position) / Math.Max(durationSeconds, 0.05);
+            IsMoving = Math.Abs(Target - Position) > 0.000001;
+            RunMode = IsMoving ? runMode : (ushort)0;
+            StopReason = 0;
         }
 
         public void StartContinuous(double velocity)

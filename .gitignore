@@ -3,3 +3,6 @@
 **/obj/
 *.user
 *.suo
+**/io-point-names.json
+**/io-point-names.json.bak
+**/io-point-names.json.*.tmp
