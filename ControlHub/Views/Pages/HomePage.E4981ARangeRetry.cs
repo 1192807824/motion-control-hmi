@@ -9,7 +9,7 @@ public partial class HomePage
 {
     private E4981ARetryRange? _e4981ARetryRange;
 
-    private sealed record E4981ARetryRange(double? LowerNf, double? UpperNf)
+    private sealed record E4981ARetryRange(double? LowerNf, double? UpperNf, bool OverloadEnabled, int OverloadRetryCount)
     {
         public bool Accepts(E4981AMeasurementResult reading) =>
             reading.IsSuccessful && (LowerNf is null && UpperNf is null ||
@@ -28,11 +28,17 @@ public partial class HomePage
             throw new ArgumentException("E4981A免重试上下限必须为有限数值，且下限不能大于上限（nF）。");
         if (lower.HasValue != upper.HasValue)
             throw new ArgumentException("请同时填写E4981A免重试下限和上限（nF），或同时留空。");
-        return new E4981ARetryRange(lower, upper);
+        if (!int.TryParse(E4981AOverloadRetryCountTextBox.Text, out var overloadCount) ||
+            overloadCount is < 0 or > TestMeasurementRetry.MaximumRetryCount)
+            throw new ArgumentException("E4981A过载重测次数必须为0～10的整数。");
+        return new E4981ARetryRange(lower, upper,
+            E4981AOverloadRetryCheckBox.IsChecked == true, overloadCount);
     }
 
     private void LoadE4981ARetryRangeEditors()
     {
+        E4981AOverloadRetryCheckBox.IsChecked = _homeSettings.E4981AOverloadRetryEnabled;
+        E4981AOverloadRetryCountTextBox.Text = _homeSettings.E4981AOverloadRetryCount.ToString(CultureInfo.CurrentCulture);
         E4981ARetryLowerTextBox.Text = _homeSettings.E4981ARetryLowerNf?.ToString("R", CultureInfo.CurrentCulture) ?? "";
         E4981ARetryUpperTextBox.Text = _homeSettings.E4981ARetryUpperNf?.ToString("R", CultureInfo.CurrentCulture) ?? "";
         try { ShowE4981ARetryRangeStatus(ReadE4981ARetryRange()); }
@@ -49,6 +55,8 @@ public partial class HomePage
             _homeSettings.E4981ARetryLowerNf = range.LowerNf;
             _homeSettings.E4981ARetryUpperNf = range.UpperNf;
             _homeSettings.TestRetryCount = ReadTestRetryCount();
+            _homeSettings.E4981AOverloadRetryEnabled = range.OverloadEnabled;
+            _homeSettings.E4981AOverloadRetryCount = range.OverloadRetryCount;
             _homeSettingsStore.Save(_homeSettings);
             ShowE4981ARetryRangeStatus(range);
         }
@@ -66,14 +74,24 @@ public partial class HomePage
         UpdateHomeCommandState();
     }
 
+    private void E4981AOverloadRetryCheckBox_Changed(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_loadingPresetPositions || E4981ARetryRangeStatusText is null) return;
+        SaveE4981ARetryRangeFromInputs();
+        UpdateHomeCommandState();
+    }
+
     private void ShowE4981ARetryRangeStatus(E4981ARetryRange range)
     {
         var count = ReadTestRetryCount();
         E4981ARetryRangeStatusText.Text = count == 0
-            ? "所有测试重试已关闭；按首次测量结果处理。"
+            ? "普通重试已关闭。"
             : range.LowerNf is null
                 ? $"未设置电容区间，仅按仪表失败条件重试；每站最多追加{count}次。"
                 : $"电容不在 [{range.LowerNf:G9}, {range.UpperNf:G9}] nF（含边界）内才触发区间复测；与仪表失败共用{count}次额度，按末次结果分料。";
+        E4981ARetryRangeStatusText.Text += range.OverloadEnabled
+            ? $" 过载独立追加{range.OverloadRetryCount}次，耗尽按末次结果分料。"
+            : " 过载重测已关闭。";
         E4981ARetryRangeStatusText.Foreground = new SolidColorBrush(Color.FromRgb(159, 177, 191));
     }
 

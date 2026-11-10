@@ -2835,8 +2835,8 @@
                             <Border x:Name="E4981ARetryRangeCard" Background="#10263A" BorderBrush="#29485D"
                                     BorderThickness="1" CornerRadius="6" Padding="14,12" Margin="0,12,0,0">
                                 <StackPanel>
-                                    <TextBlock Text="仪表测试重试 · E4981A 电容区间" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
-                                    <TextBlock Text="E4981A电容超出区间才复测，含上下边界。区间外、仪表失败与通讯异常共用同一重试上限；每站独立计数，首次不计，0次关闭。"
+                                    <TextBlock Text="仪表测试重试 · E4981A 电容区间 / 过载" Foreground="#EAF2F7" FontSize="15" FontWeight="Bold" />
+                                    <TextBlock Text="E4981A电容超出区间才复测，含上下边界。区间外、非过载仪表失败与通讯异常共用普通重试上限；每站独立计数，首次不计，0次关闭。"
                                                Foreground="#9FB1BF" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8" />
                                     <UniformGrid Columns="3">
                                         <StackPanel Margin="0,0,8,0">
@@ -2854,13 +2854,23 @@
                                                      TextChanged="E4981ARetryRangeTextBox_TextChanged" />
                                         </StackPanel>
                                         <StackPanel>
-                                            <TextBlock Text="统一重试次数（0～10）" Foreground="#9FB1BF" FontSize="12" />
+                                            <TextBlock Text="普通重试次数（0～10）" Foreground="#9FB1BF" FontSize="12" />
                                             <TextBox x:Name="TestRetryCountTextBox" Text="1" Height="30"
                                                      Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
                                                      ToolTip="E4981A和SM7110共用此次数配置，各站单独计数。区间外、测量失败和通讯异常不叠加额度。复测先回等待位、再下压并稳定等待。自动保存，下次启动生产生效。"
                                                      TextChanged="E4981ARetryRangeTextBox_TextChanged" />
                                         </StackPanel>
                                     </UniformGrid>
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <CheckBox x:Name="E4981AOverloadRetryCheckBox" Content="启用电容过载（overload）重测"
+                                                  Foreground="#EAF2F7" VerticalAlignment="Center" Margin="0,0,16,0"
+                                                  Checked="E4981AOverloadRetryCheckBox_Changed" Unchecked="E4981AOverloadRetryCheckBox_Changed" />
+                                        <TextBlock Text="追加次数（0～10）" Foreground="#9FB1BF" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <TextBox x:Name="E4981AOverloadRetryCountTextBox" Text="1" Width="70" Height="30"
+                                                 Foreground="#10263A" Background="#F7FAFC" VerticalContentAlignment="Center"
+                                                 ToolTip="过载独立计数，首次不计；0次关闭。包含OVLD、BIN11和过载哨兵读数。"
+                                                 TextChanged="E4981ARetryRangeTextBox_TextChanged" />
+                                    </StackPanel>
                                     <TextBlock x:Name="E4981ARetryRangeStatusText" Foreground="#9FB1BF" FontSize="11"
                                                TextWrapping="Wrap" Margin="0,8,0,0" />
                                 </StackPanel>

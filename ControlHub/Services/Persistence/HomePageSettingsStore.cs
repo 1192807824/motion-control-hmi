@@ -220,6 +220,10 @@ public sealed class HomePageSettings
     // 两个仪表共用的追加测试次数；0表示不重试，旧配置默认重试1次。
     public int TestRetryCount { get; set; } = 1;
 
+    public bool E4981AOverloadRetryEnabled { get; set; }
+
+    public int E4981AOverloadRetryCount { get; set; } = 1;
+
     // 电容不在此闭区间时复测，与仪表失败共用TestRetryCount；单位nF。
     // 两端均留空兼容旧配方，仅按原仪表失败条件重试。
     public double? E4981ARetryLowerNf { get; set; }

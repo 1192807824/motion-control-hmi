@@ -4307,7 +4307,7 @@ public partial class HomePage : UserControl
                 Color.FromRgb(98, 181, 255));
             var attempts = 0;
             var range = settings.Instrument == TestStationInstrument.E4981A ? _e4981ARetryRange : null;
-            var finalResult = await TestMeasurementRetry.ExecuteAsync(
+            var finalResult = await TestMeasurementRetry.ExecuteWithOverloadAsync(
                 MeasureOnceAsync,
                 result => IsTestStationMeasurementComplete(result, range),
                 _testRetryCount,
@@ -4343,14 +4343,16 @@ public partial class HomePage : UserControl
                             },
                             (milliseconds, delayToken) => Task.Delay(_testStationDwellMilliseconds, delayToken),
                             phase => SetTestStationRuntimeDisplay(stationNumber,
-                                $"重试 {retryNumber}/{_testRetryCount} · {phase}", "机械复测",
+                                $"重试 {retryNumber} · {phase}", "机械复测",
                                 $"{instrumentName} · 轴{axisNo} · {phase}", Color.FromRgb(242, 181, 68)), token);
                         await WaitIfProductionPausedAsync(token);
                     }
                     finally { _testStationRetryMotionLock.Release(); }
                 },
                 cancellationToken,
-                canRetryException: exception => !SM7110TimedTest.HasStopFailure(exception));
+                canRetryException: exception => !SM7110TimedTest.HasStopFailure(exception),
+                isOverload: result => result.E4981AReading?.IsOverload == true,
+                overloadRetryCount: range?.OverloadEnabled == true ? range.OverloadRetryCount : 0);
 
             // 保存位于重测循环之外；写盘失败不能触发再次测量。另一站失败也不会丢失本站结果。
             await SaveStationMeasurementAsync(stationNumber, stationState, finalResult, attempts);
@@ -8190,6 +8192,8 @@ public partial class HomePage : UserControl
         TestRetryCountTextBox.IsEnabled = parametersEditable;
         E4981ARetryLowerTextBox.IsEnabled = parametersEditable;
         E4981ARetryUpperTextBox.IsEnabled = parametersEditable;
+        E4981AOverloadRetryCheckBox.IsEnabled = parametersEditable;
+        E4981AOverloadRetryCountTextBox.IsEnabled = parametersEditable && E4981AOverloadRetryCheckBox.IsChecked == true;
         SM7110LowerLimitTextBox.IsEnabled = parametersEditable;
         SM7110UpperLimitTextBox.IsEnabled = parametersEditable;
         SM7110MaximumTimeTextBox.IsEnabled = parametersEditable;

@@ -17,6 +17,10 @@ public sealed record E4981AMeasurementResult(
     // 比较器也会通过BIN11报告过载/无接触，不能仅凭状态码为0认定测量成功。
     public static bool IsUsableValue(double value) => double.IsFinite(value) && Math.Abs(value) < 9e37;
 
+    // BIN11无法区分过载/无接触；有限但极大的哨兵值也表示OVLD。
+    public bool IsOverload => Status == 1 || Bin == 11 ||
+        Math.Abs(CapacitanceFarads) >= 9e37 || Math.Abs(DissipationFactor) >= 9e37;
+
     public bool IsSuccessful => Status == 0 && Bin != 11 &&
         IsUsableValue(CapacitanceFarads) && IsUsableValue(DissipationFactor);
 

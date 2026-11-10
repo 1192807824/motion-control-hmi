@@ -32,7 +32,7 @@ internal static partial class Program
             var value = name switch
             {
                 "VisionPickupCountTextBox" => 30,
-                "TestRetryCountTextBox" => 2,
+                "TestRetryCountTextBox" or "E4981AOverloadRetryCountTextBox" => 2,
                 "E4981ARetryLowerTextBox" => 400.123456789,
                 "E4981ARetryUpperTextBox" => 500.123456789,
                 "VacuumPickupDwellTextBox" or "VacuumBreakPulseTextBox" or "VacuumValveSwitchDelayTextBox" or "TestStationDwellTextBox" or "ProductionPhotoSettleTextBox" => 123,

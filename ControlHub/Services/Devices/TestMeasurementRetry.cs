@@ -12,11 +12,25 @@ internal static class TestMeasurementRetry
         Func<int, CancellationToken, Task> beforeRetry,
         CancellationToken cancellationToken,
         Func<Exception, bool>? canRetryException = null)
+        => await ExecuteWithOverloadAsync(measure, isSuccessful, retryCount, beforeRetry,
+            cancellationToken, canRetryException, _ => false, 0);
+
+    public static async Task<T> ExecuteWithOverloadAsync<T>(
+        Func<CancellationToken, Task<T>> measure,
+        Func<T, bool> isSuccessful,
+        int retryCount,
+        Func<int, CancellationToken, Task> beforeRetry,
+        CancellationToken cancellationToken,
+        Func<Exception, bool>? canRetryException,
+        Func<T, bool> isOverload,
+        int overloadRetryCount)
     {
         if (retryCount is < 0 or > MaximumRetryCount)
             throw new ArgumentOutOfRangeException(nameof(retryCount));
-
-        // 区间外、仪表失败和通讯异常共用此额度，不叠加次数。
+        if (overloadRetryCount is < 0 or > MaximumRetryCount)
+            throw new ArgumentOutOfRangeException(nameof(overloadRetryCount));
+        var normalRetries = 0;
+        var overloadRetries = 0;
         for (var attempt = 0; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -24,15 +38,26 @@ internal static class TestMeasurementRetry
             {
                 var result = await measure(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                if (isSuccessful(result) || attempt == retryCount)
+                if (isSuccessful(result))
                     return result;
+                // 过载独立计数，关闭或耗尽后不借用普通重试额度。
+                if (isOverload(result))
+                {
+                    if (overloadRetries >= overloadRetryCount) return result;
+                    overloadRetries++;
+                }
+                else
+                {
+                    if (normalRetries >= retryCount) return result;
+                    normalRetries++;
+                }
             }
             catch (Exception exception) when (
                 exception is not OperationCanceledException &&
-                !cancellationToken.IsCancellationRequested && attempt < retryCount &&
+                !cancellationToken.IsCancellationRequested && normalRetries < retryCount &&
                 (canRetryException?.Invoke(exception) ?? true))
             {
-                // Preserve the final exception for the station's existing safe-return/stop path.
+                normalRetries++;
             }
 
             cancellationToken.ThrowIfCancellationRequested();

@@ -31,7 +31,21 @@ internal static partial class Program
         lower.Text = "1";
         upper.Text = "1000";
         count.Text = "3";
+        var overload = (CheckBox)home.FindName("E4981AOverloadRetryCheckBox");
+        var overloadCount = (TextBox)home.FindName("E4981AOverloadRetryCountTextBox");
+        Require(overload.IsChecked == false, "Legacy recipe should default overload retry off.");
+        overload.IsChecked = true;
+        overloadCount.Text = "2";
         var saved = store.Load();
+        Require(saved.E4981AOverloadRetryEnabled && saved.E4981AOverloadRetryCount == 2,
+            "Overload controls did not auto-save.");
+        foreach (var invalid in new[] { "", "-1", "11", "1.5", "abc" })
+        {
+            overloadCount.Text = invalid;
+            ExpectFailure<ArgumentException>(() => Invoke(home, "ReadE4981ARetryRange"));
+            Require(store.Load().E4981AOverloadRetryCount == 2, "Invalid overload count was saved.");
+        }
+        overloadCount.Text = "2";
         Require(saved.E4981ARetryLowerNf == 1 && saved.E4981ARetryUpperNf == 1000 && saved.TestRetryCount == 3,
             "Actual range input events must persist all three parameters.");
         var snapshot = Invoke(home, "ReadE4981ARetryRange")!;
@@ -60,11 +74,13 @@ internal static partial class Program
         home.ApplyRecipeSettings(legacy);
         home.ApplyRecipeSettings(new ProductRecipeStore(Path.Combine(directory, "e4981a-recipes"))
             .LoadAll().Single(r => r.Id == product.Id).Production);
+        Require(overload.IsChecked == true && overloadCount.Text == "2", "Recipe lost overload settings.");
         Require(lower.Text == "1" && upper.Text == "1000" && count.Text == "3",
             "Recipe switch/reload must restore all range fields.");
         Set(home, "_startSequenceRunning", true);
         Invoke(home, "UpdateHomeCommandState");
         Require(!lower.IsEnabled && !upper.IsEnabled && !count.IsEnabled, "Production must lock the range editors.");
+        Require(!overload.IsEnabled && !overloadCount.IsEnabled, "Production must lock overload editors.");
         Set(home, "_startSequenceRunning", false);
         Invoke(home, "UpdateHomeCommandState");
         upper.Text = "2000";
@@ -77,6 +93,7 @@ internal static partial class Program
             "Parameter configuration must expose only one retry count.");
         RenderCard(lower, Path.Combine(directory, "e4981a-range-retry.png"));
         Require(lower.ActualWidth > 150 && lower.ActualHeight >= 30, "Range input is clipped or too small.");
+        CheckOverloadBudgetAsync().GetAwaiter().GetResult();
         CheckE4981ARangeRetryFlowAsync(snapshot).GetAwaiter().GetResult();
         Console.WriteLine("PASS: E4981A outside-range retries, one shared budget, boundaries, final routing, cancellation, single-count UI, validation, auto-save, recipe disk reload and frozen configuration.");
     }
@@ -146,6 +163,41 @@ internal static partial class Program
         }
         catch (OperationCanceledException) { }
         Require(canceledCalls == 1, "Cancellation triggered another measurement.");
+    }
+
+    private static async Task CheckOverloadBudgetAsync()
+    {
+        var overload = E4981AProtocol.ParseMeasurement("1,+9.9E37,+9.9E37,11");
+        var good = E4981AProtocol.ParseMeasurement("0,+1E-7,+0.01,2");
+        var outside = good with { CapacitanceFarads = 1e-12 };
+        foreach (var raw in new[] { "1,+1E-7,+0.01,2", "0,+9.9E37,+0.01,2", "0,+1E-7,+0.01,11" })
+            Require(E4981AProtocol.ParseMeasurement(raw).IsOverload, "Overload form was not recognized.");
+        Require(!(good with { Status = 2 }).IsOverload, "Low C status must retain normal retries.");
+        async Task<int> Run(E4981AMeasurementResult[] readings, int normal, int extra, bool cancel = false)
+        {
+            var calls = 0;
+            var motions = 0;
+            using var cts = new CancellationTokenSource();
+            Func<CancellationToken, Task<E4981AMeasurementResult>> measure = _ => Task.FromResult(readings[Math.Min(calls++, readings.Length - 1)]);
+            Func<E4981AMeasurementResult, bool> complete = r => r.IsSuccessful && r.CapacitanceFarads >= 1e-9;
+            Func<E4981AMeasurementResult, bool> fault = r => r.IsOverload;
+            Func<int, CancellationToken, Task> before = (_, _) => { motions++; if (cancel) cts.Cancel(); return Task.CompletedTask; };
+            var task = (Task<E4981AMeasurementResult>)typeof(HomePage).Assembly
+                .GetType("ControlHub.Services.Devices.TestMeasurementRetry")!
+                .GetMethod("ExecuteWithOverloadAsync")!.MakeGenericMethod(typeof(E4981AMeasurementResult))
+                .Invoke(null, [measure, complete, normal, before, cts.Token, null, fault, extra])!;
+            try { await task; Require(!cancel, "Cancellation ignored."); }
+            catch (OperationCanceledException) when (cancel) { }
+            Require(motions == (cancel ? 1 : calls - 1), "Wrong mechanical retry count.");
+            return calls;
+        }
+        Require(await Run([overload], 10, 0) == 1, "Disabled overload borrowed ordinary retries.");
+        foreach (var limit in new[] { 1, 3, 10 })
+            Require(await Run([overload], 0, limit) == limit + 1, "Overload count not honored independently.");
+        Require(await Run([overload, good], 0, 3) == 2, "Recovery did not stop early.");
+        Require(await Run([overload, outside, overload, outside, good], 1, 2) == 4, "Mixed budgets were not bounded independently.");
+        Require(await Run([overload], 0, 3, true) == 1, "Canceled overload started another measurement.");
+        Console.WriteLine("PASS: overload recognition, independent limits, disabled switch, early recovery, mixed failures and cancellation.");
     }
 
     private static Task<E4981AMeasurementResult> RangeRetry(
